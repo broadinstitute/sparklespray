@@ -4,6 +4,7 @@ import re
 import subprocess
 import requests
 import json
+import datetime
 
 from boto.s3.connection import S3Connection
 from boto.s3.key import Key
@@ -27,11 +28,14 @@ def parse_remote(path):
 
     return bucket, path
 
+def timestamp():
+    return datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+
 class Remote:
     def __init__(self, remote_url):
         self.remote_url = remote_url
         self.bucket, self.remote_path = parse_remote(remote_url)
-        self.job_id = remote_url.split("/")[-1]
+        self.job_id = remote_url.split("/")[-1]+"-"+timestamp()
 
     def download_dir(self, remote, local):
         remote_path = self.remote_path + "/" + remote
@@ -108,6 +112,7 @@ def run_scatter(scatter_func_name, remote):
     remote.download_file(FUNC_DEFS, FUNC_DEFS)
 
     cmd = ["Rscript", r_exec_script, "scatter", scatter_func_name, FUNC_DEFS]
+    print("cmd={}".format(cmd))
     retcode = subprocess.call(cmd)
     if retcode != 0:
         remote.upload_str(completion_path, json.dumps(dict(state="failed", retcode=retcode)))
@@ -128,7 +133,9 @@ def run_mapper(mapper_func_name, task_index, remote):
     remote.download_file(input_file, input_file)
 
     cmd = ["Rscript", r_exec_script, "map", str(task_index), mapper_func_name, FUNC_DEFS]
+    print("cmd={}".format(cmd))
     retcode = subprocess.call(cmd)
+    print("retcode={}".format(retcode))
     if retcode != 0:
         remote.upload_str(completion_path, json.dumps(dict(state="failed", retcode=retcode)))
     else:
@@ -148,6 +155,7 @@ def run_gather(gather_func_name, remote):
         fd.write("".join(["map-outputs/"+x+"\n" for x in output_list]))
 
     cmd = ["Rscript", r_exec_script, "gather", "mapper-outputs.txt", gather_func_name, FUNC_DEFS]
+    print("cmd={}".format(cmd))
     retcode = subprocess.call(cmd)
     if retcode != 0:
         remote.upload_str(completion_path, json.dumps(dict(state="failed", retcode=retcode)))
@@ -158,9 +166,11 @@ def run_gather(gather_func_name, remote):
 #########################
 
 def run_job(job_json):
+    #print("submitting:{}".format(json.dumps(job_json, indent=2)))
     job_id = job_json["Job"]["ID"]
+    print("submitting: {}".format(job_id))
     r = requests.post(nomad_url+"/v1/job/"+job_id, json=job_json)
-    assert r.status_code == 200
+    assert r.status_code == 200, "Got status {}".format(r.status_code)
 
     index = None
     while True:
@@ -171,7 +181,7 @@ def run_job(job_json):
         assert r.status_code == 200
         index=r.headers["X-Nomad-Index"]
         job = r.json()
-        print("Got job state: {}".format(json.dumps(job, indent=2)))
+        #print("Got job state: {}".format(json.dumps(job, indent=2)))
         status = job['Status']
         if status == 'dead':
             break
@@ -183,11 +193,21 @@ def make_job_submission(job_id, cmds):
     AWS_ACCESS_KEY_ID=os.getenv("AWS_ACCESS_KEY_ID")
     AWS_SECRET_ACCESS_KEY=os.getenv("AWS_SECRET_ACCESS_KEY")
 
-    tasks = []
+    task_groups = []
     for cmd in cmds:
         name = cmd["name"]
         args = cmd["args"]
-        tasks.append(
+        task_groups.append( {
+            "Name": name,
+            "Count": 1,
+            "Constraints": None,
+            "RestartPolicy": {
+                "Attempts": 15,
+                "Interval": 604800000000000,
+                "Delay": 15000000000,
+                "Mode": "delay"
+            },
+            "Tasks": [
                     {
                         "Name": name,
                         "Driver": "raw_exec",
@@ -197,7 +217,7 @@ def make_job_submission(job_id, cmds):
                         },
                         "Env": {
                             "AWS_ACCESS_KEY_ID": AWS_ACCESS_KEY_ID,
-                            "AWS_SECRET_ACCESS_KEY": AWS_SECRET_ACCESS_KEY 
+                            "AWS_SECRET_ACCESS_KEY": AWS_SECRET_ACCESS_KEY
                         },
                         "Services": [],
                         "Constraints": None,
@@ -216,7 +236,9 @@ def make_job_submission(job_id, cmds):
                         },
                         "Artifacts": []
                     }
-                )
+            ],
+            "Meta": None
+        })
 
     # cmd_args is a list of {name:..., args:...}.  One task per cmd will be generated
     job = {"Job":{
@@ -231,21 +253,7 @@ def make_job_submission(job_id, cmds):
         datacenter
     ],
     "Constraints": None,
-    "TaskGroups": [
-        {
-            "Name": "scatter",
-            "Count": 1,
-            "Constraints": None,
-            "RestartPolicy": {
-                "Attempts": 15,
-                "Interval": 604800000000000,
-                "Delay": 15000000000,
-                "Mode": "delay"
-            },
-            "Tasks": tasks,
-            "Meta": None
-        }
-    ],
+    "TaskGroups": task_groups,
     "Update": {
         "Stagger": 0,
         "MaxParallel": 0
@@ -267,7 +275,7 @@ def submit_scatter(scatter_fn, remote):
     run_job(job)
 
 def is_task_complete(remote, name):
-    text = remote.download_as_str("task_completions/"+name)
+    text = remote.download_as_str("task-completions/"+name)
     if text != None:
         state = json.loads(text)
         if state["state"] == "success":
@@ -281,6 +289,8 @@ def do_scatter(scatter_fn, remote):
 
     submit_scatter(scatter_fn, remote)
 
+    assert is_task_complete(remote, "scatter")
+
 def submit_map(map_fn, indices, remote):
     job_id=remote.job_id+"-map"
 
@@ -292,22 +302,34 @@ def submit_map(map_fn, indices, remote):
 
     run_job(job)
 
-def do_map(map_fn, remote):
+def find_map_indices_not_run(remote):
     indices = set()
 
     input_prefix = remote.remote_path+"/map-inputs"
     for key in remote.bucket.list(prefix=input_prefix):
-        m = re.match("(\\d+)\\.rds", drop_prefix(input_prefix, key))
+        fn = drop_prefix(input_prefix+"/", key.key)
+        m = re.match("(\\d+)\\.rds", fn)
         if m != None:
             indices.add(m.group(1))
 
     output_prefix = remote.remote_path+"/map-outputs"
     for key in remote.bucket.list(prefix=output_prefix):
-        m = re.match("(\\d+)\\.rds", drop_prefix(output_prefix, key))
+        fn = drop_prefix(output_prefix+"/", key.key)
+        m = re.match("(\\d+)\\.rds", fn)
         if m != None:
             indices.remove(m.group(1))
 
+    return indices
+
+def do_map(map_fn, remote):
+    indices = find_map_indices_not_run(remote)
+    if len(indices) == 0:
+        return
+
     submit_map(map_fn, indices, remote)
+
+    indices = find_map_indices_not_run(remote)
+    assert len(indices) == 0
 
 def submit_gather(gather_fn, remote):
     job_id=remote.job_id+"-gather"
@@ -325,6 +347,8 @@ def do_gather(gather_fn, remote):
         return
 
     submit_gather(gather_fn, remote)
+
+    assert is_task_complete(remote, "gather")
 
 def submit(scatter_fn, map_fn, gather_fn, remote, filename):
     remote.upload_file(filename, FUNC_DEFS)
