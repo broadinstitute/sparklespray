@@ -9,8 +9,11 @@ import datetime
 from boto.s3.connection import S3Connection
 from boto.s3.key import Key
 
-r_exec_script = os.path.join(os.path.dirname(__file__), "execute-r-fn.R")
 nomad_url = "http://127.0.0.1:4646"
+datacenter="dc1"
+phlock2_path="/Users/pmontgom/miniconda3/envs/phlock2/bin/phlock2"
+
+r_exec_script = os.path.join(os.path.dirname(__file__), "execute-r-fn.R")
 
 FUNC_DEFS = "func_defs.R"
 
@@ -37,15 +40,47 @@ class Remote:
         self.bucket, self.remote_path = parse_remote(remote_url)
         self.job_id = remote_url.split("/")[-1]+"-"+timestamp()
 
-    def download_dir(self, remote, local):
+    def download(self, remote, local):
         remote_path = self.remote_path + "/" + remote
 
-        if not os.path.exists(local):
-            os.makedirs(local)
+        key = self.bucket.get_key(remote_path)
+        if key != None:
+            # if it's a file, download it
+            key.get_contents_to_filename(os.path.join(local, remote))
+        else:
+            # download everything with the prefix
+            for key in self.bucket.list(prefix=remote_path):
+                rest = drop_prefix(remote_path+"/", key.key)
+                if not os.path.exists(local):
+                    os.makedirs(local)
+                key.get_contents_to_filename(os.path.join(local, rest))
+
+    def upload(self, local, remote):
+        remote_path = self.remote_path + "/" + remote
+        local_path = os.path.join(local, remote)
+
+        if os.path.exist(local_path):
+            # if it's a file, upload it
+            key = Key(self.bucket)
+            key.name = remote_path
+            key.set_contents_from_filename(local_path)
+        else:
+            # upload everything in the dir
+            for fn in os.listdir(local):
+                full_fn = os.path.join(local, fn)
+                if os.path.isfile(full_fn):
+                    k = Key(self.bucket)
+                    k.key = os.path.join(remote_path, fn)
+                    k.set_contents_from_filename(full_fn)
+
+    def download_dir(self, remote, local):
+        remote_path = self.remote_path + "/" + remote
 
         for key in self.bucket.list(prefix=remote_path):
             rest = drop_prefix(remote_path+"/", key.key)
             #print("local={}, rest={}, filename={}".format(local, rest, os.path.join(local, rest)))
+            if not os.path.exists(local):
+                os.makedirs(local)
             key.get_contents_to_filename(os.path.join(local, rest))
 
     def download_file(self, remote, local):
@@ -53,7 +88,6 @@ class Remote:
 
         local_dir = os.path.dirname(local)
         if local_dir != "" and not os.path.exists(local_dir):
-            print("making dir", local_dir)
             os.makedirs(local_dir)
 
         k = Key(self.bucket)
@@ -62,7 +96,6 @@ class Remote:
 
     def download_as_str(self, remote):
         remote_path = self.remote_path+"/"+remote
-        print("downloading {}".format(remote))
         key = self.bucket.get_key(remote_path)
         if key == None:
             return None
@@ -185,9 +218,6 @@ def run_job(job_json):
         status = job['Status']
         if status == 'dead':
             break
-
-datacenter="dc1"
-phlock2_path="/Users/pmontgom/miniconda3/envs/phlock2/bin/phlock2"
 
 def make_job_submission(job_id, cmds):
     AWS_ACCESS_KEY_ID=os.getenv("AWS_ACCESS_KEY_ID")
@@ -362,23 +392,68 @@ def submit_main():
     remote = Remote(remote_url)
     submit(scatter_fn, map_fn, gather_fn, remote, filename)
     
+import argparse
+
+def do_execute(args):
+    if args.remote == None:
+        remote = None
+        print args.download
+        assert args.download == None
+        assert args.upload == None
+    else:
+        remote = Remote(args.remote)
+        for download in args.download:
+            remote.download(download)
+
+    start_time = timestamp()
+    retcode = subprocess.call(args.args)
+    end_time = timestamp()
+
+    with open(args.output, "wt") as fd:
+        json.dump(dict(retcode=retcode, start=start_time, end=end_time), fd)
+
+    if remote != None:
+        for upload in args.upload:
+            remote.upload(upload)
+
+def add_execute(subparsers):
+    parser = subparsers.add_parser("execute")
+    parser.set_defaults(func=do_execute)
+    parser.add_argument('-u', '--upload', action='append')
+    parser.add_argument('-d', '--download', action='append')
+    parser.add_argument('-r', '--remote')
+    parser.add_argument('output')
+    parser.add_argument('args', nargs=argparse.REMAINDER)
+
+def add_scatter(subparsers):
+    parser = subparsers.add_parser("scatter")
+    parser.set_defaults(func=do_scatter)
+    parser.add_argument('fn_name')
+    parser.add_argument('remote_url')
+
+def add_map(subparsers):
+    parser = subparsers.add_parser("scatter")
+    parser.set_defaults(func=do_map)
+    parser.add_argument('fn_name')
+    parser.add_argument('task_index')
+    parser.add_argument('remote_url')
+
+def add_gather(subparsers):
+    parser = subparsers.add_parser("scatter")
+    parser.set_defaults(func=do_gather)
+    parser.add_argument('fn_name')
+    parser.add_argument('remote_url')
 
 def main(args=None):
-    if args == None:
-        args = sys.argv[1:]
+    parse = argparse.ArgumentParser()
+    subparsers = parse.add_subparsers()
+    add_execute(subparsers)
+    add_scatter(subparsers)
+    add_map(subparsers)
+    add_gather(subparsers)
 
-    cmd = args[0]
-    remote = Remote(args[1])
-    fn_name = args[2]
-
-    if cmd == "scatter":
-        run_scatter(fn_name, remote)
-    elif cmd == "map":
-        run_mapper(fn_name, args[3], remote)
-    elif cmd == "gather":
-        run_gather(fn_name, remote)
-    else:
-        raise Exception("invalid {}".format(args))
+    args = parse.parse_args()
+    args.func(args)
 
 if __name__ == "__main__":
     main(sys.argv[1:])
