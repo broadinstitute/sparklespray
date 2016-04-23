@@ -1,3 +1,10 @@
+steps:
+    1. support submission of single proc locally w/o docker
+    2. support submission of single proc locally w docker
+    3. support submission of single proc over nomad w docker
+    4. restore submission of scatter/gather
+    5. make cromwell submission layer?
+
 tree:
     code
     state
