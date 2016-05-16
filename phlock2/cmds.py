@@ -9,10 +9,15 @@ import argparse
 
 import logging
 
+try:
+    from configparser import ConfigParser
+except:
+    from ConfigParser import ConfigParser
+
+
 log = logging.getLogger(__name__)
 
-#phlock2_path="/Users/pmontgom/miniconda3/envs/phlock2/bin/phlock2"
-phlock2_path="/usr/local/bin/phlock2"
+phlock2_path=["python", "/Users/pmontgom/dev/conseq/conseq/helper.py"]
 
 r_exec_script = os.path.join(os.path.dirname(__file__), "execute-r-fn.R")
 
@@ -20,8 +25,6 @@ FUNC_DEFS = "func_defs.R"
 
 def execute_cmd(args):
     subprocess.check_call(args)
-
-
 
 def get_output_files(output_dir):
     l = []
@@ -194,7 +197,7 @@ def submit_main():
 def do_execute(args):
     if args.remote == None:
         remote = None
-        print args.download
+        print(args.download)
         assert args.download == None
         assert args.upload == None
     else:
@@ -289,7 +292,6 @@ def do_local_submit(image, working_dir, download, upload, remote_url, output_pat
     if ret != 0:
         log.warn("Return code from {} was {}".format(cmd, ret))
 
-from ConfigParser import ConfigParser
 
 def load_config(path):
     full_path = os.path.expanduser(path)

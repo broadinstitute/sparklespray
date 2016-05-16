@@ -3,6 +3,8 @@ from boto.s3.connection import S3Connection
 from boto.s3.key import Key
 import datetime
 import logging
+import time
+import os
 
 log = logging.getLogger(__name__)
 
@@ -88,9 +90,14 @@ class Remote:
         k.key = remote_path
         k.get_contents_to_filename(local)
 
-    def download_as_str(self, remote):
+    def download_as_str(self, remote, timeout=5):
         remote_path = self.remote_path+"/"+remote
-        key = self.bucket.get_key(remote_path)
+        for i in range(timeout):
+            key = self.bucket.get_key(remote_path)
+            if key != None:
+                break
+            print("Could not find {}, sleeping 1 sec".format(remote_path))
+            time.sleep(1)
         if key == None:
             return None
         return key.get_contents_as_string()

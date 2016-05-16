@@ -7,7 +7,8 @@ setup(name="phlock2",
     entry_points={
         'console_scripts': [
             'phlock2=phlock2.cmds:main',
-            'phlock2-submit=phlock2.cmds:submit_main'
+            'phlock2-submit=phlock2.cmds:submit_main',
+            'phlock2-bake=phlock2.push_image:bake'
         ],
     }
 )
