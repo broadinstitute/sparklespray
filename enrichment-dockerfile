@@ -1,0 +1,16 @@
+FROM r-base
+
+RUN apt-get update && apt-get install -y python-boto
+
+!ADD /install_r_modules EOF
+options(repos = c(
+	"https://iwww.broadinstitute.org/~datasci/R-packages",
+	"https://cran.cnr.berkeley.edu"))
+install.packages(c('ksplus','rjson'))
+EOF
+
+RUN Rscript /install_r_modules
+
+!COPY helper.py /helper.py
+
+RUN mkdir /work
