@@ -79,6 +79,10 @@ class Remote:
                 os.makedirs(local)
             key.get_contents_to_filename(os.path.join(local, rest))
 
+    def exists(self, remote):
+        remote_path = self.remote_path + "/" + remote
+        return self.bucket.get_key(remote_path) != None
+
     def download_file(self, remote, local):
         remote_path = self.remote_path + "/" + remote
 
@@ -90,17 +94,12 @@ class Remote:
         k.key = remote_path
         k.get_contents_to_filename(local)
 
-    def download_as_str(self, remote, timeout=5):
+    def download_as_str(self, remote):
         remote_path = self.remote_path+"/"+remote
-        for i in range(timeout):
-            key = self.bucket.get_key(remote_path)
-            if key != None:
-                break
-            print("Could not find {}, sleeping 1 sec".format(remote_path))
-            time.sleep(1)
+        key = self.bucket.get_key(remote_path)
         if key == None:
             return None
-        return key.get_contents_as_string()
+        return key.get_contents_as_string().decode("utf-8")
 
     def upload_str(self, remote, text):
         remote_path = self.remote_path+"/"+remote

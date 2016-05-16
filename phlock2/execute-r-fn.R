@@ -1,10 +1,5 @@
-#!/usr/bin/env Rscript
-
-execute.function.from.files.foreach.arg <- function(files.to.source, func.name, args, env) {
-  for(f in files.to.source) {
-    source(f, local=env)
-  }
-
+execute.function.foreach.arg <- function(func.name, args) {
+  env <- parent.env(environment())
   func.to.call <- env[[func.name]]
   if(is.null(func.to.call)) {
     stop(sprintf("could not find function named '%s'", func.name))
@@ -12,61 +7,47 @@ execute.function.from.files.foreach.arg <- function(files.to.source, func.name, 
   if(!is.function(func.to.call)) {
     stop(sprintf("'%s' was not a function", func.to.call))
   }
-  return ( lapply(args, function(arg) { do.call(func.to.call, arg, envir=env) } ) )
+  return ( lapply(args, function(arg) { do.call(func.to.call, arg) } ) )
 }
 
-vargs <- commandArgs(trailingOnly=T)
-operation <- vargs[1]
-if(operation == "scatter") {
-  func.name <- vargs[2]
-  files.to.source <- vargs[3:length(vargs)]
+phlock.exec.scatter <- function(func.name) {
+  scatter.params <- rjson::fromJSON(file="scatter-in/params.json")
 
-  env <- new.env(parent=parent.frame())
-  results <- execute.function.from.files.foreach.arg(files.to.source, func.name, list(list()), env)
+  results <- execute.function.foreach.arg(func.name, list(scatter.params))
+
   stopifnot(length(results) == 1)
-  task.list <- results[[1]]
+  results <- results[[1]]
+  stopifnot(length(results) == 2)
+  stopifnot(length(intersect(names(results), c("shared", "inputs")))==2)
 
-  dir.create("shared", showWarnings=F)
-  saveRDS(task.list$shared, file="shared/state.rds")
-  dir.create("map-inputs")
-
-  inputs <- task.list$inputs
-  stopifnot(!is.null(inputs))
-
-  for(i in seq_along(inputs)) {
-    out.fn <- sprintf("map-inputs/%d.rds", as.integer(i))
-    task.input <- inputs[[i]]
-    saveRDS(task.input, file=out.fn)
+  saveRDS(results$shared, "shared/state.rds")
+  id.fmt.str <- sprintf("%%0%.0f.0f", ceiling(log(length(results$inputs)+1)/log(10)));
+#  filenames = c()
+  for( i in seq_along(results$inputs) ) {
+    fn <- sprintf(id.fmt.str, i)
+    saveRDS(results$inputs[[i]], paste0("map-in/", fn))
+#    filenames <- c(filenames, fn)
   }
-} else if(operation == "map") {
-  task.index <- as.integer(vargs[2])
-  input.fn <- sprintf("map-inputs/%d.rds", task.index)
-  func.name <- vargs[3]
-  files.to.source <- vargs[4:length(vargs)]
-
-  shared.state <- readRDS("shared/state.rds")
-  task.input <- readRDS(input.fn)
-  args <- list(task.input, shared.state)
-
-  env <- new.env(parent=parent.frame())
-  results <- execute.function.from.files.foreach.arg(files.to.source, func.name, list(args), env)
-  stopifnot(length(results) == 1)
-  output <- results[[1]]
-  dir.create("map-outputs")
-  saveRDS(output, sprintf("map-outputs/%d.rds", task.index))
-
-} else if(operation == "gather") {
-  output.filenames.file <- vargs[2]
-  func.name <- vargs[3]
-  files.to.source <- vargs[4:length(vargs)]
-
-  output.filenames <- readLines(output.filenames.file)
-
-  shared.state <- readRDS("shared/state.rds")
-  args <- list(lapply(output.filenames, readRDS), shared.state)
-
-  env <- new.env(parent=parent.frame())
-  execute.function.from.files.foreach.arg(files.to.source, func.name, list(args), env)  
-} else {
-  stop(sprintf("unknown operation: %s", operation))
+#  writeLines(filenames, "map-in/input-names.txt")
 }
+
+phlock.exec.map <- function(func.name) {
+  shared <- readRDS("shared/state.rds")
+  fns <- list.files("map-in", pattern='^[0-9]+$')
+
+  args <- lapply(fns, function(fn) {
+    list(input=readRDS(paste0("map-in/", fn)), shared=shared)
+  })
+
+  outputs <- execute.function.foreach.arg(func.name, args)
+  for( i in seq_along(fns) ) {
+    saveRDS(outputs[[i]], paste0("map-out/", fns[[i]]))
+  }
+}
+
+phlock.exec.gather <- function(func.name) {
+  shared <- readRDS("shared/state.rds")
+  fns <- paste0("map-out/", sort(list.files("map-out", pattern='^[0-9]+$')))
+  execute.function.foreach.arg(func.name, list(list(files=fns, shared=shared)))
+}
+

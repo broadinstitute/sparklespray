@@ -4,6 +4,9 @@ import re
 import subprocess
 import json
 import datetime
+from phlock2 import job_state
+from phlock2 import nomad_job
+
 
 import argparse
 
@@ -13,7 +16,6 @@ try:
     from configparser import ConfigParser
 except:
     from ConfigParser import ConfigParser
-
 
 log = logging.getLogger(__name__)
 
@@ -36,77 +38,14 @@ def get_output_files(output_dir):
     l.sort()
     return [fn for _, fn in l]
 
-def run_scatter(scatter_func_name, remote):
-    completion_path = "task-completions/scatter"
-
-    remote.download_file(FUNC_DEFS, FUNC_DEFS)
-
-    cmd = ["Rscript", r_exec_script, "scatter", scatter_func_name, FUNC_DEFS]
-    retcode = subprocess.call(cmd)
-    if retcode != 0:
-        remote.upload_str(completion_path, json.dumps(dict(state="failed", retcode=retcode)))
-    else:
-        remote.upload_dir("shared", "shared")
-        remote.upload_dir("map-inputs", "map-inputs")
-        remote.upload_dir("results", "results")
-        remote.upload_str(completion_path, json.dumps(dict(state="success")))
-
-def run_mapper(mapper_func_name, task_index, remote):
-    completion_path = "task-completions/map-{}".format(task_index)
-
-    input_file = "map-inputs/"+str(task_index)+".rds"
-    #output_file = "map-outputs/"+str(task_index)+".rds"
-
-    remote.download_file(FUNC_DEFS, FUNC_DEFS)
-    remote.download_dir("shared", "shared")
-    remote.download_file(input_file, input_file)
-
-    cmd = ["Rscript", r_exec_script, "map", str(task_index), mapper_func_name, FUNC_DEFS]
-    retcode = subprocess.call(cmd)
-    if retcode != 0:
-        remote.upload_str(completion_path, json.dumps(dict(state="failed", retcode=retcode)))
-    else:
-        remote.upload_dir("map-outputs", "map-outputs")
-        remote.upload_dir("results", "results")
-        remote.upload_str(completion_path, json.dumps(dict(state="success")))
-
-def run_gather(gather_func_name, remote):
-    completion_path = "task-completions/gather"
-
-    remote.download_file(FUNC_DEFS, FUNC_DEFS)
-    remote.download_dir("shared", "shared")
-    remote.download_dir("map-outputs", "map-outputs")
-
-    output_list = get_output_files("map-outputs")
-    with open("mapper-outputs.txt", "w") as fd:
-        fd.write("".join(["map-outputs/"+x+"\n" for x in output_list]))
-
-    cmd = ["Rscript", r_exec_script, "gather", "mapper-outputs.txt", gather_func_name, FUNC_DEFS]
-    retcode = subprocess.call(cmd)
-    if retcode != 0:
-        remote.upload_str(completion_path, json.dumps(dict(state="failed", retcode=retcode)))
-    else:
-        remote.upload_dir("results", "results")
-        remote.upload_str("task-completions/gather", json.dumps(dict(state="success")))
 
 #########################
 
 
 
 
-def submit_scatter(scatter_fn, remote):
-    job_id=remote.job_id+"-scatter"
-
-    job = make_job_submission(job_id, [ {
-        "name":"scatter",
-        "args":["scatter", remote.remote_url, scatter_fn]
-        }
-        ] )
-
-    run_job(job)
-
 def is_task_complete(remote, name):
-    text = remote.download_as_str("task-completions/"+name)
+    text = remote.download_as_str("completed/"+name)
     if text != None:
         state = json.loads(text)
         if state["state"] == "success":
@@ -114,85 +53,190 @@ def is_task_complete(remote, name):
 
     return False
 
-def do_scatter(scatter_fn, remote):
+def do_scatter(scatter_fn, remote, rcode, args={}):
     if is_task_complete(remote, "scatter"):
         return
 
-    submit_scatter(scatter_fn, remote)
+    submit_scatter(scatter_fn, remote, rcode, args)
 
     assert is_task_complete(remote, "scatter")
 
-def submit_map(map_fn, indices, remote):
-    job_id=remote.job_id+"-map"
+def do_map(map_fn, remote, rcode):
+    indices = find_map_indices_not_run(remote)
+    if len(indices) == 0:
+        return
 
-    job = make_job_submission(job_id, [
-        {
-            "name":"map-{}".format(i),
-            "args":["map", remote.remote_url, map_fn, str(i)]
-        } for i in indices ] )
+    submit_map(map_fn, indices, remote, rcode)
 
-    run_job(job)
+    indices = find_map_indices_not_run(remote)
+    assert len(indices) == 0
+
+def do_gather(gather_fn, remote, rcode):
+    if is_task_complete(remote, "gather"):
+        return
+
+    submit_gather(gather_fn, remote, rcode)
+
+    assert is_task_complete(remote, "gather")
+
+def generate_r_script(rcode, rest):
+    execute_fn_r = open(os.path.join(os.path.dirname(__file__), "execute-r-fn.R"), "rt").read()
+    return "{}\n{}\n{}\n".format(rcode, execute_fn_r, rest)
+
+
+########################################
+
+def drop_prefix(prefix, value):
+    assert value[:len(prefix)] == prefix, "Expected {} to be prefixed with {}".format(repr(value), repr(prefix))
+    return value[len(prefix):]
+
+
+def calc_hash(filename):
+    h = hashlib.sha256()
+    with open(filename, "rb") as fd:
+        for chunk in iter(lambda: fd.read(10000), b''):
+            h.update(chunk)
+    return h.hexdigest()
+
+def push_str_to_cas(remote, content, filename="<unknown>"):
+    h = hashlib.sha256(content.encode("utf-8"))
+    hash = h.hexdigest()
+
+    remote_name = "CAS/{}".format(hash)
+    if remote.exists(remote_name):
+        log.info("Skipping upload of %s because %s already exists", filename, remote_name)
+    else:
+        remote.upload_str(remote_name, content)
+    return remote_name
+
+def push_to_cas(remote, filenames):
+    name_mapping = {}
+
+    for filename in filenames:
+        local_filename = os.path.normpath(os.path.join(remote.local_dir, filename))
+        hash = calc_hash(local_filename)
+        remote_name = "CAS/{}".format(hash)
+        if remote.exists(remote_name):
+            log.info("Skipping upload of %s because %s already exists", filename, remote_name)
+        else:
+            remote.upload(filename, remote_name)
+        name_mapping[filename] = remote_name
+
+    return name_mapping
+
+###########################################
+import hashlib
 
 def find_map_indices_not_run(remote):
     indices = set()
 
-    input_prefix = remote.remote_path+"/map-inputs"
+    input_prefix = remote.remote_path+"/map-in"
     for key in remote.bucket.list(prefix=input_prefix):
         fn = drop_prefix(input_prefix+"/", key.key)
-        m = re.match("(\\d+)\\.rds", fn)
+        m = re.match("(\\d+)", fn)
         if m != None:
             indices.add(m.group(1))
 
-    output_prefix = remote.remote_path+"/map-outputs"
+    output_prefix = remote.remote_path+"/map-out"
     for key in remote.bucket.list(prefix=output_prefix):
         fn = drop_prefix(output_prefix+"/", key.key)
-        m = re.match("(\\d+)\\.rds", fn)
+        m = re.match("(\\d+)", fn)
         if m != None:
             indices.remove(m.group(1))
 
     return indices
 
-def do_map(map_fn, remote):
-    indices = find_map_indices_not_run(remote)
-    if len(indices) == 0:
-        return
+def submit_config(url):
+    import tempfile
+    t = tempfile.mkdtemp()
+    print("Exec in ", t)
+    subprocess.check_call(phlock2_path + ["exec-config", url], cwd=t)
 
-    submit_map(map_fn, indices, remote)
+def submit_scatter(scatter_fn, remote, rcode, args):
+    args_url = push_str_to_cas(remote, json.dumps(args))
+    r_script = generate_r_script(rcode, "phlock.exec.scatter(\"{}\")".format(scatter_fn))
+    script_url = push_str_to_cas(remote, r_script)
 
-    indices = find_map_indices_not_run(remote)
-    assert len(indices) == 0
+    config = dict(
+        remote_url = remote.remote_url,
+         pull=[{"src": args_url, "dest": "scatter-in/params.json", "isDir": False},
+               {"src": script_url, "dest": "script.R", "isDir": False},],
+         mkdir=["shared", "map-in", "results"],
+         command=["Rscript", "script.R"],
+         exec_summary="retcode.json",
+         stdout="stdout.txt",
+         stderr="stderr.txt",
+         push=[{"src": "shared", "dest": "shared", "isDir": True},
+               {"src": "map-in", "dest": "map-in", "isDir": True},
+               {"src": "results", "dest": "results", "isDir": True},
+               {"src": "retcode.json", "dest": "completed/scatter", "isDir": False},
+               {"src": "stdout.txt", "dest": "logs/scatter/stdout.txt", "isDir": False},
+               {"src": "stderr.txt", "dest": "logs/scatter/stderr.txt", "isDir": False},])
 
-def submit_gather(gather_fn, remote):
-    job_id=remote.job_id+"-gather"
+    config_url = push_str_to_cas(remote, json.dumps(config))
+    submit_config(remote.remote_url+"/"+config_url)
 
-    job = make_job_submission(job_id, [
-        {
-            "name":"gather",
-            "args":["gather", remote.remote_url, gather_fn]
-        } ] )
+def submit_map(map_fn, indices, remote, rcode):
+    r_script = generate_r_script(rcode, "phlock.exec.map(\"{}\")".format(map_fn))
+    script_url = push_str_to_cas(remote, r_script)
 
-    run_job(job)
+    for index in indices:
+        config = dict(
+            remote_url = remote.remote_url,
+             pull=[{"src": "shared", "dest": "shared", "isDir": True},
+                   {"src": "map-in/"+index, "dest": "map-in/"+index, "isDir": False},
+                   {"src": script_url, "dest": "script.R", "isDir": False},],
+             mkdir=["map-out", "results"],
+             command=["Rscript", "script.R"],
+             exec_summary="retcode.json",
+             stdout="stdout.txt",
+             stderr="stderr.txt",
+             push=[{"src": "map-out", "dest": "map-out", "isDir": True},
+                   {"src": "results", "dest": "results", "isDir": True},
+                   {"src": "stdout.txt", "dest": "logs/"+index+"/stdout.txt", "isDir": False},
+                   {"src": "stderr.txt", "dest": "logs/"+index+"/stderr.txt", "isDir": False},])
 
-def do_gather(gather_fn, remote):
-    if is_task_complete(remote, "gather"):
-        return
+        config_url = push_str_to_cas(remote, json.dumps(config))
+        submit_config(remote.remote_url+"/"+config_url)
 
-    submit_gather(gather_fn, remote)
 
-    assert is_task_complete(remote, "gather")
+def submit_gather(gather_fn, remote, rcode):
+    r_script = generate_r_script(rcode, "phlock.exec.gather(\"{}\")".format(gather_fn))
+    script_url = push_str_to_cas(remote, r_script)
 
-def submit(scatter_fn, map_fn, gather_fn, remote, filename):
-    remote.upload_file(filename, FUNC_DEFS)
+    config = dict(
+        remote_url = remote.remote_url,
+         pull=[{"src": "shared", "dest": "shared", "isDir": True},
+               {"src": "map-out", "dest": "map-out", "isDir": True},
+               {"src": script_url, "dest": "script.R", "isDir": False},],
+         mkdir=["results"],
+         command=["Rscript", "script.R"],
+         exec_summary="retcode.json",
+         stdout="stdout.txt",
+         stderr="stderr.txt",
+         push=[{"src": "results", "dest": "results", "isDir": True},
+               {"src": "retcode.json", "dest": "completed/gather", "isDir": False},
+               {"src": "stdout.txt", "dest": "logs/gather/stdout.txt", "isDir": False},
+               {"src": "stderr.txt", "dest": "logs/gather/stderr.txt", "isDir": False},])
 
-    do_scatter(scatter_fn, remote)
-    do_map(map_fn, remote)
-    do_gather(gather_fn, remote)
+    config_url = push_str_to_cas(remote, json.dumps(config))
+    submit_config(remote.remote_url+"/"+config_url)
 
-def submit_main():
-    scatter_fn, map_fn, gather_fn, remote_url, filename = sys.argv[1:]
+def submit_scatter_gather(args):
+    fn_prefix = args.func_prefix
+    remote_url = args.remote_url
+    filename = args.filename
+
+    scatter_fn = fn_prefix + ".scatter"
+    map_fn = fn_prefix +".map"
+    gather_fn = fn_prefix +".gather"
+
     remote = Remote(remote_url)
-    submit(scatter_fn, map_fn, gather_fn, remote, filename)
-    
+    rcode = open(filename, "rt").read()
+
+    do_scatter(scatter_fn, remote, rcode)
+    do_map(map_fn, remote, rcode)
+    do_gather(gather_fn, remote, rcode)
 
 def do_execute(args):
     if args.remote == None:
@@ -232,9 +276,6 @@ def make_phlock_exec_cmd(download, upload, remote_url, output_path, args):
     remote_cmd.extend(args)
 
     return remote_cmd
-
-from phlock2 import job_state
-from phlock2 import nomad_job
 
 
 class JobQueue:
@@ -372,24 +413,12 @@ def add_stat(subparsers):
     parser.add_argument('job_id', type=int)
     parser.add_argument('--config', '-c', help="path to settings to use", default="~/.phlock2")
 
-def add_scatter(subparsers):
-    parser = subparsers.add_parser("scatter")
-    parser.set_defaults(func=do_scatter)
-    parser.add_argument('fn_name')
-    parser.add_argument('remote_url')
-
-def add_map(subparsers):
-    parser = subparsers.add_parser("map")
-    parser.set_defaults(func=do_map)
-    parser.add_argument('fn_name')
-    parser.add_argument('task_index')
-    parser.add_argument('remote_url')
-
-def add_gather(subparsers):
-    parser = subparsers.add_parser("gather")
-    parser.set_defaults(func=do_gather)
-    parser.add_argument('fn_name')
-    parser.add_argument('remote_url')
+def add_sub_sg(subparser):
+    parser = subparser.add_parser("subsg")
+    parser.set_defaults(func=submit_scatter_gather)
+    parser.add_argument("func_prefix")
+    parser.add_argument("remote_url")
+    parser.add_argument("filename")
 
 def main(args=None):
     logging.basicConfig(level=logging.INFO)
@@ -398,10 +427,8 @@ def main(args=None):
     subparsers = parse.add_subparsers()
     add_execute(subparsers)
     add_submit(subparsers)
-    add_scatter(subparsers)
-    add_map(subparsers)
-    add_gather(subparsers)
     add_stat(subparsers)
+    add_sub_sg(subparsers)
 
     args = parse.parse_args()
     args.func(args)
