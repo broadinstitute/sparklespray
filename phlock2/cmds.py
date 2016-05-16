@@ -146,11 +146,19 @@ def find_map_indices_not_run(remote):
 
     return indices
 
+#def submit_config(url):
+#    import tempfile
+#    t = tempfile.mkdtemp()
+#    print("Exec in ", t)
+#    subprocess.check_call(phlock2_path + ["exec-config", url], cwd=t)
+
 def submit_config(url):
-    import tempfile
-    t = tempfile.mkdtemp()
-    print("Exec in ", t)
-    subprocess.check_call(phlock2_path + ["exec-config", url], cwd=t)
+    subprocess.check_call(["docker",
+                           "run",
+                           "-e", 'AWS_ACCESS_KEY_ID='+ os.getenv('AWS_ACCESS_KEY_ID'),
+                           "-e", 'AWS_SECRET_ACCESS_KEY=' + os.getenv('AWS_SECRET_ACCESS_KEY'),
+                           "-w", "/work", "-t", "-i",
+                           "enrichment", "python", "/helper.py", "exec-config", url])
 
 def submit_scatter(scatter_fn, remote, rcode, args):
     args_url = push_str_to_cas(remote, json.dumps(args))
