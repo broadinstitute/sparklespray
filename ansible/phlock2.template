@@ -1,0 +1,23 @@
+{
+  "_comment": "Ubuntu Server 14.04 LTS (HVM), SSD Volume Type",
+  "builders": [
+    {
+      "type": "amazon-ebs",
+      "region": "us-east-1",
+      "source_ami": "ami-fce3c696",
+      "instance_type": "t2.micro",
+      "ssh_username": "ubuntu",
+      "ami_name": "phlock2 {{timestamp}}"
+    }
+  ],
+
+  "provisioners": [
+    {
+      "type": "ansible",
+      "playbook_file": "./phlock2.yml",
+      "host_alias": "launched",
+      "extra_arguments": [ "-vvvv" ]
+    }
+  ]
+}
+

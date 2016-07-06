@@ -1,0 +1,42 @@
+- name: Install nomad
+  hosts: launched
+  gather_facts: True
+  become: True
+  vars:
+    nomad_archive: bin/nomad_0.3.1_linux_amd64.zip
+    consul_archive: bin/consul_0.6.4_linux_amd64.zip
+  tasks:
+    - apt_key: keyserver=hkp://p80.pool.sks-keyservers.net:80 id=58118E89F3A912897C070ADBF76221572C52609D
+    - copy: src="docker.list" dest="/etc/apt/sources.list.d/docker.list"
+    - apt: update_cache=yes
+    - apt: name="{{item}}" state=present
+      with_items:
+        - apt-transport-https
+        - ca-certificates
+        - unzip
+        - joe
+    - apt: name=lxc-docker state=absent
+
+    - name: upload nomad archive
+      unarchive: src="{{nomad_archive}}" dest=/usr/bin mode=0755
+    - name: install nomad server config script
+      copy: src="sniff-config-and-start-nomad" dest="/usr/bin/sniff-config-and-start-nomad" mode=0755
+    - file: path=/etc/nomad state=directory mode=0755
+    - name: upload nomad server upstart config
+      copy: src="upstart/nomad-server.conf" dest="/etc/init/nomad-server.conf" mode=0444
+    - name: upload nomad client upstart config
+      copy: src="upstart/nomad-client.conf" dest="/etc/init/nomad-client.conf" mode=0444
+
+    - name: upload consul archive
+      unarchive: src="{{consul_archive}}" dest=/usr/bin mode=0755
+    - name: install consul server config script
+      copy: src="sniff-config-and-start-consul" dest="/usr/bin/sniff-config-and-start-consul" mode=0755
+    - file: path=/etc/consul state=directory mode=0755
+    - name: upload consul server upstart config
+      copy: src="upstart/consul-server.conf" dest="/etc/init/consul-server.conf" mode=0444
+    - name: upload nomad client upstart config
+      copy: src="upstart/consul-client.conf" dest="/etc/init/consul-client.conf" mode=0444
+
+    - apt: name=docker-engine state=present
+    - user: name=ubuntu groups=docker append=yes
+     
