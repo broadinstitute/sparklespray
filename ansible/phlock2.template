@@ -7,7 +7,9 @@
       "source_ami": "ami-fce3c696",
       "instance_type": "t2.micro",
       "ssh_username": "ubuntu",
-      "ami_name": "phlock2 {{timestamp}}"
+      "ami_name": "phlock2 {{timestamp}}",
+      "vpc_id": "vpc-679a0703",
+      "subnet_id": "subnet-a0d1549d"
     }
   ],
 
