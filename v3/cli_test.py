@@ -1,14 +1,19 @@
 import config
 from cli import connect_ec2
+import logging
+
+TEST_AMI='ami-fce3c696'
+TEST_KEY='pliant-key'
 
 def test_post_notification():
-    config = ""
-    ec2 = EC2(config)
-    ec2.post_notification(TEST_TOPIC_ID, "test message")
+    c = config.CONFIG_READER.read("flock.conf")
+    ec2 = connect_ec2(c)
+    ec2.post_notification("test message")
 
 import time
 
 def test_ec2_api(tmpdir):
+    logging.basicConfig(level=logging.DEBUG)
     fn = str(tmpdir)+"/conf"
     with open(fn, "wt") as fd:
         fd.write("""
@@ -25,7 +30,7 @@ def test_ec2_api(tmpdir):
 
     assert len(ec2.get_instances_within_security_group(sg_id)) == 0
     
-    instance_id = ec2.run_instance("test-instance", TEST_AMI, TEST_KEY, "t2.micro", sg_id, "")
+    instance_id = ec2.run_instance("test-instance", "t2.micro", sg_id, "")
 
     instances = ec2.get_instances_within_security_group(sg_id)
     assert len(instances) == 1

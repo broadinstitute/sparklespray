@@ -43,6 +43,9 @@ CONFIG_READER = ConfigReader([
     ("aws_access_key_id", NO_DEFAULT),
     ("ami_id", NO_DEFAULT),
     ("key_name", NO_DEFAULT),
-    ("master_instance_type", "NO_DEFAULT"),
-    ("region", "us-east")
+    ("master_instance_type", NO_DEFAULT),
+    ("region", "us-east"),
+    ("subnet_id", NO_DEFAULT),
+    ("vpc_id", NO_DEFAULT),
+    ("notification_topic", NO_DEFAULT)
 ])
