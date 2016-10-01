@@ -7,11 +7,14 @@ import re
 import sys
 import hashlib
 
+from ph2.kubesub import submit_job
+
 from contextlib import contextmanager
 
 from boto.s3.connection import S3Connection, OrdinaryCallingFormat
 from boto.s3.key import Key
 
+log = logging.getLogger(__name__)
 
 try:
     from configparser import ConfigParser
@@ -61,6 +64,7 @@ class IO:
         return bucket, path
 
     def get(self, src_url, dst_filename, must=True):
+        log.info("get %s -> %s", src_url, dst_filename)
         bucket, path = self._get_bucket_and_path(src_url)
         key = bucket.get_key(path)
         if key is not None:
@@ -74,6 +78,7 @@ class IO:
         return key.get_contents_as_string().decode("utf8")
 
     def put(self, src_filename, dst_url, must=True):
+        log.info("put %s -> %s", src_filename, dst_url)
         if must:
             assert os.path.exists(src_filename)
 
@@ -89,12 +94,12 @@ class IO:
             return "fakes3://{}/".format(self.fake_s3_port)
 
     def write_file_to_cas(self, filename):
-        m = hashlib.md5()
+        m = hashlib.sha256()
         with open(filename, "rb") as fd:
             for chunk in iter(lambda: fd.read(10000), b""):
                 m.update(chunk)
         hash = m.hexdigest()
-        dst_url = self.cas_url_prefix+"/"+hash
+        dst_url = self.cas_url_prefix+hash
         bucket, path = self._get_bucket_and_path(dst_url)
         key = Key(bucket)
         key.key = path
@@ -103,7 +108,7 @@ class IO:
 
     def write_str_to_cas(self, text):
         text = text.encode("utf8")
-        hash = hashlib.md5(text).hexdigest()
+        hash = hashlib.sha256(text).hexdigest()
         dst_url = self.cas_url_prefix+"/"+hash
         bucket, path = self._get_bucket_and_path(dst_url)
         key = Key(bucket)
@@ -172,6 +177,17 @@ class JobQueue:
         for task in tasks:
             counts[task.status] += 1
         return counts
+
+    def reset(self, job_id):
+        tasks = self.Task.scan(job_id__eq = job_id)
+        now = time.time()
+        for task in tasks:
+            original_version = task.version
+            task.version = original_version + 1
+            task.owner = None
+            task.status = "pending"
+            task.history.append( dict(timestamp=now, status="reset") )
+            updated = task.save(version__eq = original_version)
 
     def submit(self, job_id, args):
         tasks = []
@@ -275,7 +291,22 @@ def expand_task_spec(common, task):
     task_spec['downloads'].extend(task.get('downloads', []))
     return task_spec
 
-def rewrite_downloads(io, downloads):
+
+def rewrite_url_in_dict(d, prop_name, default_url_prefix):
+    if not (prop_name in d):
+        return d
+
+    d = dict(d)
+    url = d[prop_name]
+    # look to see if we have a rooted url, or a relative path
+    if not (":" in url):
+        d[prop_name] = default_url_prefix + url
+    return d
+
+def rewrite_uploads(uploads, default_url_prefix):
+    return [ rewrite_url_in_dict(x, 'dst_url', default_url_prefix) for x in uploads ]
+
+def rewrite_downloads(io, downloads, default_url_prefix):
     def rewrite_download(url):
         if "src" in url:
             # upload to CAS if the source isn't a url
@@ -285,7 +316,9 @@ def rewrite_downloads(io, downloads):
 
         return dict(src_url=src_url, dst=url['dst'])
 
-    return [ rewrite_download(x) for x in downloads ]
+    src_expanded = [ rewrite_download(x) for x in downloads ]
+
+    return [rewrite_url_in_dict(x, "src_url", default_url_prefix) for x in src_expanded]
 
 def upload_config_for_consume(io, config):
     consume_config = {}
@@ -296,25 +329,33 @@ def upload_config_for_consume(io, config):
     return config_url
 
 def submit(jq, io, job_id, spec, dry_run, config):
+    default_url_prefix = config.get("default_url_prefix")
+    default_job_url_prefix = default_url_prefix+job_id+"/"
 
+    image = spec['image']
     common = spec['common']
-    common['downloads'] = rewrite_downloads(io, common['downloads'])
+    common['downloads'] = rewrite_downloads(io, common['downloads'], default_url_prefix)
+    common['uploads'] = rewrite_uploads(common['uploads'], default_job_url_prefix)
 
     task_spec_urls = []
     for task in spec['tasks']:
         task = expand_task_spec(common, task)
-        task['downloads'] = rewrite_downloads(io, task['downloads'])
+        task = rewrite_url_in_dict(task, "command_result_url", default_job_url_prefix)
+        task['downloads'] = rewrite_downloads(io, task['downloads'], default_url_prefix)
+        task['uploads'] = rewrite_uploads(task['uploads'], default_url_prefix)
 
         if not dry_run:
             url = io.write_json_to_cas(task)
             task_spec_urls.append(url)
         else:
-            print("task:", task)
+            print("task:", json.dumps(task, indent=2))
 
     if not dry_run:
         jq.submit(job_id, task_spec_urls)
         config_url = upload_config_for_consume(io, config)
-        print("submit to kubernettes goes here: consume", config_url, job_id, "owner" )
+        # owner might need to be changed to generate UUID at startup.  Kubernettes isn't really going to have a way
+        # of finding which owners are stale.  May need to use heartbeats after all?  
+        submit_job(job_id, 1, image, ["kubeque", "consume", config_url, job_id, "owner"])
         return config_url
 
 @contextmanager
@@ -358,7 +399,7 @@ def load_config(config_file):
 def load_config_from_dict(config):
 
     fake_s3_port = None
-    if "fake_s3_port" in config:
+    if "fake_s3_port" in config and config["fake_s3_port"] is not None:
         fake_s3_port = int(config["fake_s3_port"])
         aws_access_key_id = "fake"
         aws_secret_access_key = "fake"
@@ -368,9 +409,13 @@ def load_config_from_dict(config):
 
     io = IO(aws_access_key_id, aws_secret_access_key, config['cas_url_prefix'], fake_s3_port)
     
-    jq = JobQueue(config['dynamodb_prefix'], config['dynamodb_region'], config['dynamodb_host'])
+    jq = JobQueue(config['dynamodb_prefix'], config['dynamodb_region'], config.get('dynamodb_host'))
 
     return jq, io
+
+def new_id():
+    import uuid
+    return uuid.uuid4().hex
 
 def submit_cmd(jq, io, args):
     spec = json.load(open(args.spec_file, "rt"))
@@ -381,6 +426,9 @@ def submit_cmd(jq, io, args):
 
 def delete_cmd(jq, io, args):
     jq.delete(args.jobid)
+
+def reset_cmd(jq, io, args):
+    jq.reset(args.jobid)
 
 def status_cmd(jq, io, args):
     counts = jq.get_status_counts(args.jobid)
@@ -439,7 +487,7 @@ def consume_cmd(args):
 
 import argparse
 
-def main(argv):
+def main(argv=None):
     logging.basicConfig(level=logging.INFO)
 
     parse = argparse.ArgumentParser()
@@ -454,6 +502,10 @@ def main(argv):
 
     parser = subparser.add_parser("del")
     parser.set_defaults(func=delete_cmd)
+    parser.add_argument("jobid")
+
+    parser = subparser.add_parser("reset")
+    parser.set_defaults(func=reset_cmd)
     parser.add_argument("jobid")
 
     parser = subparser.add_parser("status")
@@ -472,7 +524,10 @@ def main(argv):
     parser.add_argument("dest")
 
     args = parse.parse_args(argv)
-
+    
+    if not hasattr(args, 'func'):
+        parse.print_help()
+        sys.exit(1)
     if args.func != consume_cmd:
         config , jq, io = load_config(args.config)
         args.config_obj = config
