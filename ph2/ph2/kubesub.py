@@ -3,7 +3,6 @@ import json
 import tempfile
 
 
-
 def submit_job(name, parallelism, image, command):
     assert isinstance(command, list)
     config = {"apiVersion": "batch/v1",
@@ -21,6 +20,11 @@ def submit_job(name, parallelism, image, command):
           "containers": [{
              "name": name,
              "image": image,
+             "env": [
+               {"name": "AWS_ACCESS_KEY_ID",
+                "valueFrom": { "secretKeyRef": {"name": "kubeque-aws", "key": "keyid"}}},
+               {"name": "AWS_SECRET_ACCESS_KEY",
+               "valueFrom": { "secretKeyRef": {"name": "kubeque-aws", "key": "secretkey"}}}],
              "command": command
             }],
           "restartPolicy": "OnFailure"

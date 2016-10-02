@@ -3,6 +3,5 @@ FROM ubuntu
 RUN apt-get update
 RUN apt-get install -y python-pip && pip install boto
 RUN mkdir /install
-ADD setup.py /install/
-ADD ph2/ /install/ph2/
-RUN cd /install && python /install/setup.py install
+ADD dist/ph2-0.1.tar.gz /install/
+RUN cd /install/ph2-0.1 && python setup.py install
