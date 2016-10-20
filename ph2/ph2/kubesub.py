@@ -2,7 +2,6 @@ import os
 import json
 import tempfile
 
-
 def submit_job(name, parallelism, image, command):
     assert isinstance(command, list)
     config = {"apiVersion": "batch/v1",

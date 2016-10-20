@@ -332,18 +332,8 @@ def submit(jq, io, job_id, spec, dry_run, config):
     default_url_prefix = config.get("default_url_prefix")
     default_job_url_prefix = default_url_prefix+job_id+"/"
 
-    image = spec['image']
-    common = spec['common']
-    common['downloads'] = rewrite_downloads(io, common['downloads'], default_url_prefix)
-    common['uploads'] = rewrite_uploads(common['uploads'], default_job_url_prefix)
-
-    task_spec_urls = []
-    for task in spec['tasks']:
-        task = expand_task_spec(common, task)
-        task = rewrite_url_in_dict(task, "command_result_url", default_job_url_prefix)
-        task['downloads'] = rewrite_downloads(io, task['downloads'], default_url_prefix)
-        task['uploads'] = rewrite_uploads(task['uploads'], default_url_prefix)
-
+    tasks = spec.expand_spec(default_url_prefix, default_job_url_prefix)
+    for task in tasks:    
         if not dry_run:
             url = io.write_json_to_cas(task)
             task_spec_urls.append(url)
@@ -417,11 +407,19 @@ def new_id():
     import uuid
     return uuid.uuid4().hex
 
+
 def submit_cmd(jq, io, args):
-    spec = json.load(open(args.spec_file, "rt"))
+    if args.file:
+        assert len(args.command) == 0
+        spec = json.load(open(args.file, "rt"))
+    else:
+        assert len(args.command) != 0
+        spec = make_spec_from_command(args.command)
+
     job_id = args.name
     if job_id is None:
         job_id = new_id()
+
     submit(jq, io, job_id, spec, args.dryrun, args.config_obj)
 
 def delete_cmd(jq, io, args):
@@ -458,6 +456,7 @@ def resolve_uploads(uploads):
     return resolved
 
 def consume_cmd(args):
+    "This is what is executed by a worker"
     aws_access_key_id = os.environ.get('AWS_ACCESS_KEY_ID')
     aws_secret_access_key = os.environ.get('AWS_SECRET_ACCESS_KEY')
 
@@ -494,11 +493,12 @@ def main(argv=None):
     parse.add_argument("--config", default="~/.phlock2")
     subparser = parse.add_subparsers()
 
-    parser = subparser.add_parser("submit")
+    parser = subparser.add_parser("sub")
     parser.set_defaults(func=submit_cmd)
-    parser.add_argument("spec_file")
+    parser.add_argument("--file", "-f")
     parser.add_argument("--name", "-n")
     parser.add_argument("--dryrun", action="store_true")
+    parser.add_argument("command", nargs=argparse.REMAINDER)
 
     parser = subparser.add_parser("del")
     parser.set_defaults(func=delete_cmd)
