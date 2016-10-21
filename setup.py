@@ -1,14 +1,15 @@
+#!/usr/bin/env python
+
 from setuptools import setup, find_packages
 
-setup(name="phlock2",
-    packages=find_packages(exclude=['tests']),
-    install_requires=['boto'],
-    package_data={'phlock2': ['*.R']},
-    entry_points={
-        'console_scripts': [
-            'phlock2=phlock2.cmds:main',
-            'phlock2-submit=phlock2.cmds:submit_main',
-            'phlock2-bake=phlock2.push_image:bake'
-        ],
-    }
-)
+setup(name='kubeque',
+      version='0.1',
+      description='batch job submission front to kubernettes',
+      author='Philip Montgomery',
+      author_email='pmontgom@broadinstitute.org',
+      install_requires=['boto', 'pynamodb'],
+      packages=find_packages(),
+      entry_points={'console_scripts': [
+        "kubeque = kubeque.main:main"
+        ]}
+     )

@@ -1,4 +1,4 @@
-from ph import main, submit
+from kubeque import main, submit
 import ph
 import pytest
 import subprocess

@@ -7,7 +7,7 @@ import re
 import sys
 import hashlib
 
-from ph2.kubesub import submit_job
+from kubeque.kubesub import submit_job
 
 from contextlib import contextmanager
 
