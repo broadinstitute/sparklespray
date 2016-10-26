@@ -1,5 +1,5 @@
-from kubeque import main, submit
-import ph
+from kubeque.main import submit, main
+from kubeque.aws import IO, JobQueue
 import pytest
 import subprocess
 import json
@@ -99,9 +99,9 @@ def test_submit(tmpdir, config_file, fakedynamo, fakes3):
 
     config = ["--config", config_file]    
 
-    jq = ph.JobQueue(env_config['dynamodb_prefix'], env_config['dynamodb_region'], env_config['dynamodb_host'])
-    io = ph.IO("fake", "fake", env_config['cas_url_prefix'], env_config['fake_s3_port'])
-    consume_config_url = submit(jq, io, "jobname", spec, False, env_config)
+    jq = JobQueue(env_config['dynamodb_prefix'], env_config['dynamodb_region'], env_config['dynamodb_host'])
+    io = IO("fake", "fake", env_config['cas_url_prefix'], env_config['fake_s3_port'])
+    consume_config_url = submit(jq, io, "jobname", spec, False, env_config, skip_kube_submit=True)
     assert consume_config_url is not None
 
     main(config + ["consume", consume_config_url, "jobname", "testowner"])

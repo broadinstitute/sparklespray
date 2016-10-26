@@ -87,6 +87,7 @@ class Download:
         return d
 DownloadsAndCommand = collections.namedtuple("DownloadsAndCommand", "downloads command")
 def rewrite_argvs_files_to_upload(list_of_argvs, cas_url, hash_function, is_executable_function):
+    assert cas_url is not None
     l = []
     upload_map = {}
     for argv in list_of_argvs:

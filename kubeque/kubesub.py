@@ -1,3 +1,5 @@
+# functions for doing generating kubernetes datastructures and submissions.
+
 import os
 import json
 import tempfile
