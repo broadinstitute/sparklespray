@@ -1,8 +1,8 @@
 # Authorize server-to-server interactions from Google Compute Engine.
-from google.cloud import datastore
-from google.cloud.datastore.query import Query
-from google.cloud.datastore.query import Iterator
-import google.cloud.exceptions
+from gcloud import datastore
+from gcloud.datastore.query import Query
+from gcloud.datastore.query import Iterator
+import gcloud.exceptions
 
 from contextlib import contextmanager
 import collections
@@ -170,7 +170,7 @@ class JobQueue:
             task.owner = None
             task.status = "pending"
             task.history.append( dict(timestamp=now, status="reset") )
-            self._update_task(task)
+            self.storage.update_task(task)
 
     def submit(self, job_id, args):
         tasks = []
@@ -253,6 +253,82 @@ def create_gcs_job_queue(project_id):
     client = datastore.Client(project_id)
     storage = JobStorage(client)
     return JobQueue(storage)
+
+from gcloud.storage.client import Client as GSClient
+import os
+import re
+import hashlib
+import json
+
+class IO:
+    def __init__(self, project, cas_url_prefix):
+        self.buckets = {}
+        self.client = GSClient(project)
+        self.cas_url_prefix = cas_url_prefix
+
+    def _get_bucket_and_path(self, path):
+        m = re.match("^gs://([^/]+)/(.*)$", path)
+        assert m != None, "invalid remote path: {}".format(path)
+        bucket_name = m.group(1)
+        path = m.group(2)
+
+        if bucket_name in self.buckets:
+            bucket = self.buckets[bucket_name]
+        else:
+            bucket = self.client.bucket(bucket_name)
+        return bucket, path
+
+    def get(self, src_url, dst_filename, must=True):
+        log.info("get %s -> %s", src_url, dst_filename)
+        bucket, path = self._get_bucket_and_path(src_url)
+        blob = bucket.blob(path)
+        if blob.exists():
+            blob.download_to_filename(dst_filename)
+        else:
+            assert not must, "Could not find {}".format(path)
+
+    def get_as_str(self, src_url):
+        bucket, path = self._get_bucket_and_path(src_url)
+        blob = bucket.blob(path)
+        return blob.download_as_string().decode("utf8")
+
+    def put(self, src_filename, dst_url, must=True):
+        log.info("put %s -> %s", src_filename, dst_url)
+        if must:
+            assert os.path.exists(src_filename)
+
+        bucket, path = self._get_bucket_and_path(dst_url)
+        blob = bucket.blob(path)
+        blob.upload_from_filename(src_filename)
+
+    def _get_url_prefix(self):
+        return "gs://"
+
+    def write_file_to_cas(self, filename):
+        m = hashlib.sha256()
+        with open(filename, "rb") as fd:
+            for chunk in iter(lambda: fd.read(10000), b""):
+                m.update(chunk)
+        hash = m.hexdigest()
+        dst_url = self.cas_url_prefix+hash
+        bucket, path = self._get_bucket_and_path(dst_url)
+        blob = bucket.blob(path)
+        blob.upload_from_filename(filename)
+        return self._get_url_prefix()+bucket.name+"/"+path         
+
+    def write_str_to_cas(self, text):
+        text = text.encode("utf8")
+        hash = hashlib.sha256(text).hexdigest()
+        dst_url = self.cas_url_prefix+"/"+hash
+        print("self.cas_url_prefix", self.cas_url_prefix)
+        bucket, path = self._get_bucket_and_path(dst_url)
+        blob = bucket.blob(path)
+        blob.upload_from_string(text)
+        return self._get_url_prefix()+bucket.name+"/"+path
+        
+    def write_json_to_cas(self, obj):
+        obj_str = json.dumps(obj)
+        return self.write_str_to_cas(obj_str)
 
 
 

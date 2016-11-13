@@ -88,6 +88,9 @@ class Download:
 DownloadsAndCommand = collections.namedtuple("DownloadsAndCommand", "downloads command")
 def rewrite_argvs_files_to_upload(list_of_argvs, cas_url, hash_function, is_executable_function):
     assert cas_url is not None
+    if not cas_url.endswith("/"):
+        cas_url += "/"
+
     l = []
     upload_map = {}
     for argv in list_of_argvs:
@@ -102,7 +105,7 @@ def rewrite_argvs_files_to_upload(list_of_argvs, cas_url, hash_function, is_exec
                     url = upload_map[filename]
                 else:
                     h = hash_function(filename)
-                    url = cas_url + "/" + h
+                    url = cas_url + h
                     upload_map[filename] = url
 
                 files_to_dl.append( Download(url, filename, is_executable_function(filename)) )
@@ -141,10 +144,12 @@ def make_spec_from_command(argv,
     spec = {
             "image": docker_image,
             "common": {
+                "command_result_url": dest_url+"/result.json",
+                "stdout_url": dest_url+"/stdout.txt",
                 "uploads": [
                     {
                         "src_wildcard": "*",
-                        "dst_url": "s3://bucket/dest"
+                        "dst_url": dest_url
                     }
                 ]
             },

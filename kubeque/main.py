@@ -8,19 +8,20 @@ import sys
 import hashlib
 import tempfile
 import subprocess
+from glob import glob
 
 from kubeque.kubesub import submit_job
-from kubeque.aws import JobQueue, IO
+from kubeque.gcp import create_gcs_job_queue, IO
 
 from contextlib import contextmanager
 
 
 log = logging.getLogger(__name__)
 
-#try:
-from configparser import ConfigParser
-#except:
-#    from ConfigParser import ConfigParser
+try:
+    from configparser import ConfigParser
+except:
+    from ConfigParser import ConfigParser
 
 # spec should have three rough components:
 #   common: keys shared by everything
@@ -77,7 +78,7 @@ def rewrite_downloads(io, downloads, default_url_prefix):
 
 def upload_config_for_consume(io, config):
     consume_config = {}
-    for key in ['cas_url_prefix', 'fake_s3_port', 'dynamodb_prefix', 'dynamodb_region', 'dynamodb_host']:
+    for key in ['cas_url_prefix', 'project']:
         consume_config[key] = config.get(key)
 
     config_url = io.write_str_to_cas(json.dumps(consume_config))
@@ -98,7 +99,10 @@ def expand_tasks(spec, io, default_url_prefix, default_job_url_prefix):
         tasks.append(task)
     return tasks
 
-def submit(jq, io, job_id, spec, dry_run, config, skip_kube_submit=False):
+def submit(jq, io, job_id, spec, dry_run, config, skip_kube_submit):
+    if dry_run:
+        skip_kube_submit = True
+
     default_url_prefix = config.get("default_url_prefix", "")
     default_job_url_prefix = default_url_prefix+job_id+"/"
 
@@ -111,14 +115,18 @@ def submit(jq, io, job_id, spec, dry_run, config, skip_kube_submit=False):
         else:
             print("task:", json.dumps(task, indent=2))
 
+    log.info("job_id: %s", job_id)
     if not dry_run:
         jq.submit(job_id, task_spec_urls)
         config_url = upload_config_for_consume(io, config)
         # owner might need to be changed to generate UUID at startup.  Kubernettes isn't really going to have a way
         # of finding which owners are stale.  May need to use heartbeats after all?
+        kubeque_command = ["kubeque", "consume", config_url, job_id, "owner"]
         if not skip_kube_submit:
             image = spec['image']
-            submit_job(job_id, 1, image, ["kubeque", "consume", config_url, job_id, "owner"])
+            submit_job(job_id, 1, image, kubeque_command)
+        else:
+            log.info("Skipping submission: %s", " ".join(kubeque_command))
         return config_url
 
 @contextmanager
@@ -151,28 +159,11 @@ def load_config(config_file):
     config.read(config_file)
     config = dict(config.items('config'))
 
-    print("config", config)
-
-    if 'aws_access_key_id' in config:
-        os.environ['AWS_ACCESS_KEY_ID'] = config['aws_access_key_id']
-        os.environ['AWS_SECRET_ACCESS_KEY'] = config['aws_secret_access_key']
-
     return [config] + list(load_config_from_dict(config))
 
 def load_config_from_dict(config):
-
-    fake_s3_port = None
-    if "fake_s3_port" in config and config["fake_s3_port"] is not None:
-        fake_s3_port = int(config["fake_s3_port"])
-        aws_access_key_id = "fake"
-        aws_secret_access_key = "fake"
-    else:
-        aws_access_key_id = os.environ['AWS_ACCESS_KEY_ID']
-        aws_secret_access_key = os.environ['AWS_SECRET_ACCESS_KEY']
-
-    io = IO(aws_access_key_id, aws_secret_access_key, config['cas_url_prefix'], fake_s3_port)
-    
-    jq = JobQueue(config['dynamodb_prefix'], config['dynamodb_region'], config.get('dynamodb_host'))
+    io = IO(config['project'], config['cas_url_prefix'])
+    jq = create_gcs_job_queue(config['project'])
 
     return jq, io
 
@@ -184,22 +175,27 @@ from kubeque.spec import make_spec_from_command
 
 def submit_cmd(jq, io, args):
     config = args.config_obj
+
+    job_id = args.name
+    if job_id is None:
+        job_id = new_id()
+
     cas_url_prefix = config['cas_url_prefix']
     default_url_prefix = config['default_url_prefix']
+
     if args.file:
         assert len(args.command) == 0
         spec = json.load(open(args.file, "rt"))
     else:
         assert len(args.command) != 0
         upload_map, spec = make_spec_from_command(args.command, args.image,
-            dest_url=default_url_prefix, cas_url=cas_url_prefix)
-
-    job_id = args.name
-    if job_id is None:
-        job_id = new_id()
+            dest_url=default_url_prefix+job_id, cas_url=cas_url_prefix)
+        log.info("upload_map = %s", upload_map)
+        for filename, dest in upload_map.items():
+            io.put(filename, dest)
 
     print("spec", json.dumps(spec, indent=2))
-    submit(jq, io, job_id, spec, args.dryrun, args.config_obj)
+    submit(jq, io, job_id, spec, args.dryrun, args.config_obj, args.skip_kube_submit)
 
 def delete_cmd(jq, io, args):
     jq.delete(args.jobid)
@@ -209,14 +205,18 @@ def reset_cmd(jq, io, args):
 
 def status_cmd(jq, io, args):
     counts = jq.get_status_counts(args.jobid)
-    print(counts)
+    for status, count in counts.items():
+        print("%s: %d"%(status, count))
 
 def fetch_cmd(jq, io, args):
     tasks = jq.get_tasks(args.jobid)
     for task in tasks:
         spec = json.loads(io.get_as_str(task.args))
         command_result = json.loads(io.get_as_str(spec['command_result_url']))
+        log.info("command_result=%s", json.dumps(command_result))
         for ul in command_result['files']:
+            assert not (ul['src'].startswith("/")), "Source must be a relative path"
+            assert not (ul['src'].startswith("../")), "Source must not refer to parent dir"
             localpath = os.path.join(args.dest, ul['src'])
             log.info("Downloading to %s", localpath)
             io.get(ul['dst_url'], localpath)
@@ -230,35 +230,34 @@ def exec_command_(command, workdir, stdout):
         os.close(stdoutfd)
     return retcode
 
-def write_result_file(command_result_path, retcode, local_to_url_mapping):
+def write_result_file(command_result_path, retcode, workdir, local_to_url_mapping):
+    relative_local_to_url_mapping = [dict(src=os.path.relpath(x['src'], workdir), dst_url=x['dst_url']) for x in local_to_url_mapping]
     with open(command_result_path, "wt") as fd:
-        fd.write(json.dumps({"return_code": retcode, "files": local_to_url_mapping}))
+        fd.write(json.dumps({"return_code": retcode, "files": relative_local_to_url_mapping}))
 
 def resolve_uploads(dir, uploads):
     resolved = []
     for ul in uploads:
-        src = os.path.join(dir, ul['src'])
-        if os.path.exists(src):
-            resolved.append(dict(src=ul['src'], dst_url=ul['dst_url']))
+        if "src_wildcard" in ul:
+            src_filenames = glob(os.path.join(dir, ul['src_wildcard']))
+            for src_filename in src_filenames:
+                resolved.append(dict(src=src_filename, dst_url=ul['dst_url']))
+        elif "src" in ul:
+            src = os.path.join(dir, ul['src'])
+            if os.path.exists(src):
+                resolved.append(dict(src=ul['src'], dst_url=ul['dst_url']))
+        else:
+            raise Exception("Malformed {}".format(ul))
+
     return resolved
-
-def get_fake_s3_port_from_url(url):
-    m = re.match("fakes3://(\\d+)/.*", url)
-    if m is None:
-        return None
-    return int(m.group(1))
-
 
 def consume_cmd(args):
     "This is what is executed by a worker"
-    aws_access_key_id = os.environ.get('AWS_ACCESS_KEY_ID')
-    aws_secret_access_key = os.environ.get('AWS_SECRET_ACCESS_KEY')
 
     # create an incomplete IO object that at least can do a fetch to get the full config
     # maybe just make the config public in the CAS and then there's no problem.   In theory the hash 
     # should not be guessable, so just as private as anything else.  (Although, use sha256 instead of md5)
-    fake_s3_port = get_fake_s3_port_from_url(args.config_url)
-    io = IO(aws_access_key_id, aws_secret_access_key, None, fake_s3_port)
+    io = IO(None, None)
     config = json.loads(io.get_as_str(args.config_url))
     jq, io = load_config_from_dict(config)
 
@@ -274,18 +273,19 @@ def consume_cmd(args):
         result_path = os.path.join(logdir, "result.json")
 
         spec = json.loads(io.get_as_str(json_url))
-        with redirect_output_to_file(stdout_path):
-            for dl in spec['downloads']:
-                io.get(dl['src_url'], os.path.join(workdir, dl['dst']))
+        log.info("Job spec of claimed task: %s", json.dumps(spec, indent=2))
+        for dl in spec['downloads']:
+            io.get(dl['src_url'], os.path.join(workdir, dl['dst']))
 
-            retcode = exec_command_(spec['command'], workdir, stdout_path)
+        retcode = exec_command_(spec['command'], workdir, stdout_path)
 
-            local_to_url_mapping = resolve_uploads(workdir, spec['uploads'])
-            for ul in local_to_url_mapping:
-                io.put(os.path.join(workdir, ul['src']), ul['dst_url'])
+        local_to_url_mapping = resolve_uploads(workdir, spec['uploads'])
+        for ul in local_to_url_mapping:
+            io.put(os.path.join(workdir, ul['src']), ul['dst_url'])
 
-            write_result_file(result_path, retcode, local_to_url_mapping)
-            io.put(result_path, spec['command_result_url'])
+        write_result_file(result_path, retcode, workdir, local_to_url_mapping)
+        io.put(result_path, spec['command_result_url'])
+        io.put(stdout_path, spec['stdout_url'])
 
     consumer_run_loop(jq, args.jobid, args.name, exec_task)
 
@@ -315,6 +315,7 @@ def main(argv=None):
     parser.add_argument("--image", "-i")
     parser.add_argument("--name", "-n")
     parser.add_argument("--dryrun", action="store_true")
+    parser.add_argument("--skipkube", action="store_true", dest="skip_kube_submit")
     parser.add_argument("command", nargs=argparse.REMAINDER)
 
     parser = subparser.add_parser("del")

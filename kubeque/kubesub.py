@@ -5,6 +5,7 @@ import json
 import tempfile
 
 def submit_job(name, parallelism, image, command):
+    print("submit_job")
     assert isinstance(command, list)
     config = {"apiVersion": "batch/v1",
      "kind": "Job",
@@ -21,11 +22,6 @@ def submit_job(name, parallelism, image, command):
           "containers": [{
              "name": name,
              "image": image,
-             "env": [
-               {"name": "AWS_ACCESS_KEY_ID",
-                "valueFrom": { "secretKeyRef": {"name": "kubeque-aws", "key": "keyid"}}},
-               {"name": "AWS_SECRET_ACCESS_KEY",
-               "valueFrom": { "secretKeyRef": {"name": "kubeque-aws", "key": "secretkey"}}}],
              "command": command
             }],
           "restartPolicy": "OnFailure"
@@ -35,5 +31,7 @@ def submit_job(name, parallelism, image, command):
     with tempfile.NamedTemporaryFile("wt") as t:
       json.dump(config, t)
       t.flush()
-      ret = os.system("kubectl create -f {}".format(t.name))
+      cmd = "kubectl create -f {}".format(t.name)
+      print("executing", cmd)
+      ret = os.system(cmd)
     assert ret == 0
