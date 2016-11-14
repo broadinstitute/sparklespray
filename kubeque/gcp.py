@@ -17,7 +17,7 @@ import logging
 log = logging.getLogger(__name__)
 
 @attr.s
-class Task:
+class Task(object):
     # will be of the form: job_id + task_index
     task_id = attr.ib()
 
@@ -30,7 +30,7 @@ class Task:
     version = attr.ib(default=1)
 
 @attr.s
-class Job:
+class Job(object):
     job_id = attr.ib()
     tasks = attr.ib()
 
@@ -262,6 +262,8 @@ import json
 
 class IO:
     def __init__(self, project, cas_url_prefix):
+        assert project is not None
+
         self.buckets = {}
         self.client = GSClient(project)
         self.cas_url_prefix = cas_url_prefix

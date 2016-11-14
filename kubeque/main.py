@@ -79,8 +79,9 @@ def rewrite_downloads(io, downloads, default_url_prefix):
 def upload_config_for_consume(io, config):
     consume_config = {}
     for key in ['cas_url_prefix', 'project']:
-        consume_config[key] = config.get(key)
+        consume_config[key] = config[key]
 
+    print("consume_config", consume_config)
     config_url = io.write_str_to_cas(json.dumps(consume_config))
     return config_url
 
@@ -121,7 +122,9 @@ def submit(jq, io, job_id, spec, dry_run, config, skip_kube_submit):
         config_url = upload_config_for_consume(io, config)
         # owner might need to be changed to generate UUID at startup.  Kubernettes isn't really going to have a way
         # of finding which owners are stale.  May need to use heartbeats after all?
-        kubeque_command = ["kubeque", "consume", config_url, job_id, "owner"]
+        cas_url_prefix = config['cas_url_prefix']
+        project = config['project']
+        kubeque_command = ["kubeque", "consume", config_url, job_id, "owner", "--project", project, "--cas_url_prefix", cas_url_prefix]
         if not skip_kube_submit:
             image = spec['image']
             submit_job(job_id, 1, image, kubeque_command)
@@ -257,7 +260,7 @@ def consume_cmd(args):
     # create an incomplete IO object that at least can do a fetch to get the full config
     # maybe just make the config public in the CAS and then there's no problem.   In theory the hash 
     # should not be guessable, so just as private as anything else.  (Although, use sha256 instead of md5)
-    io = IO(None, None)
+    io = IO(args.project, args.cas_url_prefix)
     config = json.loads(io.get_as_str(args.config_url))
     jq, io = load_config_from_dict(config)
 
@@ -335,6 +338,8 @@ def main(argv=None):
     parser.add_argument("config_url")
     parser.add_argument("jobid")
     parser.add_argument("name")
+    parser.add_argument("--project")
+    parser.add_argument("--cas_url_prefix")
 
     parser = subparser.add_parser("fetch")
     parser.set_defaults(func=fetch_cmd)
