@@ -101,6 +101,8 @@ def expand_tasks(spec, io, default_url_prefix, default_job_url_prefix):
     return tasks
 
 def submit(jq, io, job_id, spec, dry_run, config, skip_kube_submit):
+    # where to take this from? arg with a default of 1?
+    parallelism = 3
     if dry_run:
         skip_kube_submit = True
 
@@ -127,7 +129,8 @@ def submit(jq, io, job_id, spec, dry_run, config, skip_kube_submit):
         kubeque_command = ["kubeque", "consume", config_url, job_id, "owner", "--project", project, "--cas_url_prefix", cas_url_prefix]
         if not skip_kube_submit:
             image = spec['image']
-            submit_job(job_id, 1, image, kubeque_command)
+            #[("GOOGLE_APPLICATION_CREDENTIALS", "/google_creds/cred")], [("kube")]
+            submit_job(job_id, parallelism, image, kubeque_command)
         else:
             log.info("Skipping submission: %s", " ".join(kubeque_command))
         return config_url
@@ -175,6 +178,11 @@ def new_id():
     return uuid.uuid4().hex
 
 from kubeque.spec import make_spec_from_command
+import csv
+
+def read_parameters_from_csv(filename):
+    with open(filename, "rt") as fd:
+        return list(csv.DictReader(fd))
 
 def submit_cmd(jq, io, args):
     config = args.config_obj
@@ -190,9 +198,19 @@ def submit_cmd(jq, io, args):
         assert len(args.command) == 0
         spec = json.load(open(args.file, "rt"))
     else:
+        if args.seq is not None:
+            parameters = [{"i": str(i)} for i in range(args.seq)]
+        elif args.params is not None:
+            parameters = read_parameters_from_csv(args.params)
+        else:
+            parameters = [{}]
+
         assert len(args.command) != 0
-        upload_map, spec = make_spec_from_command(args.command, args.image,
-            dest_url=default_url_prefix+job_id, cas_url=cas_url_prefix)
+        upload_map, spec = make_spec_from_command(args.command, 
+            args.image,
+            dest_url=default_url_prefix+job_id, 
+            cas_url=cas_url_prefix,
+            parameters=parameters)
         log.info("upload_map = %s", upload_map)
         for filename, dest in upload_map.items():
             io.put(filename, dest)
@@ -213,14 +231,31 @@ def status_cmd(jq, io, args):
 
 def fetch_cmd(jq, io, args):
     tasks = jq.get_tasks(args.jobid)
-    for task in tasks:
+
+    if not os.path.exists(args.dest):
+        os.mkdir(args.dest)
+
+    include_index = len(tasks) > 1
+
+    for i, task in enumerate(tasks):
         spec = json.loads(io.get_as_str(task.args))
+        log.info("spec=%s", spec)
+
+        if include_index:
+            dest = os.path.join(args.dest, str(i))
+            if not os.path.exists(dest):
+                os.mkdir(dest)
+        else:
+            dest = args.dest
+
+        io.get(spec['stdout_url'], os.path.join(dest, "stdout.txt"))
+
         command_result = json.loads(io.get_as_str(spec['command_result_url']))
         log.info("command_result=%s", json.dumps(command_result))
         for ul in command_result['files']:
             assert not (ul['src'].startswith("/")), "Source must be a relative path"
             assert not (ul['src'].startswith("../")), "Source must not refer to parent dir"
-            localpath = os.path.join(args.dest, ul['src'])
+            localpath = os.path.join(dest, ul['src'])
             log.info("Downloading to %s", localpath)
             io.get(ul['dst_url'], localpath)
 
@@ -317,6 +352,8 @@ def main(argv=None):
     parser.add_argument("--file", "-f")
     parser.add_argument("--image", "-i")
     parser.add_argument("--name", "-n")
+    parser.add_argument("--seq", type=int)
+    parser.add_argument("--params")
     parser.add_argument("--dryrun", action="store_true")
     parser.add_argument("--skipkube", action="store_true", dest="skip_kube_submit")
     parser.add_argument("command", nargs=argparse.REMAINDER)
