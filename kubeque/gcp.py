@@ -157,6 +157,9 @@ class JobQueue:
     def __init__(self, storage):
         self.storage = storage 
 
+    def get_tasks(self, job_id):
+        return self.storage.get_tasks(job_id)
+
     def get_status_counts(self, job_id):
         counts = collections.defaultdict(lambda: 0)
         for task in self.storage.get_tasks(job_id):
