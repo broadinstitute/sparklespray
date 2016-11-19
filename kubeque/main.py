@@ -206,7 +206,7 @@ def submit_cmd(jq, io, args, config):
         watch(jq, job_id)
 
 def reset_cmd(jq, io, args):
-    jq.reset(args.jobid)
+    jq.reset(args.jobid_pattern, args.owner)
 
 def status_cmd(jq, io, args):
     jobid_pattern = args.jobid_pattern
@@ -324,6 +324,7 @@ def main(argv=None):
     parser = subparser.add_parser("reset")
     parser.set_defaults(func=reset_cmd)
     parser.add_argument("jobid_pattern")
+    parser.add_argument("--owner")
 
     parser = subparser.add_parser("status")
     parser.set_defaults(func=status_cmd)

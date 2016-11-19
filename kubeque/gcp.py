@@ -182,14 +182,18 @@ class JobQueue:
             counts[task.status] += 1
         return dict(counts)
 
-    def reset(self, job_id):
-        tasks = self.storage.get_tasks(job_id)
-        now = time.time()
-        for task in tasks:
-            task.owner = None
-            task.status = "pending"
-            task.history.append( dict(timestamp=now, status="reset") )
-            self.storage.update_task(task)
+    def reset(self, jobid_wildcard, owner):
+        jobids = self.get_jobids(jobid_wildcard)
+        for jobid in jobids:
+            tasks = self.storage.get_tasks(jobid)
+            now = time.time()
+            for task in tasks:
+                if owner is not None and owner != task.owner:
+                    continue
+                task.owner = None
+                task.status = "pending"
+                task.history.append( dict(timestamp=now, status="reset") )
+                self.storage.update_task(task)
 
     def submit(self, job_id, args):
         tasks = []
