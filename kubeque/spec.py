@@ -70,8 +70,6 @@ def rewrite_argv_with_parameters(argv, parameters):
                 return m.group(1)+task_params[m.group(2)]+m.group(3)
         
         l.append([expand_parameters(x) for x in argv])
-    print("before", argv)
-    print("after", l)
     return l
 
 class Download:
@@ -79,7 +77,7 @@ class Download:
         self.src_url = src_url
         self.dst = dst
         self.executable = executable
-        print("src_url", self.src_url, self.executable)
+        #log.debug("src_url", self.src_url, self.executable)
     def _asdict(self):
         d = dict(src_url=self.src_url, dst=self.dst)
         if self.executable:
@@ -125,13 +123,26 @@ def hash_from_file(filename):
 def is_executable(filename):
     return os.access(filename, os.X_OK)
 
+def parse_resources(resources_str):
+    # not robust parsing at all
+    spec = {}
+    pairs = resources_str.split(",")
+    for pair in pairs:
+        name, value = pair.split("=")
+        assert name in ["memory", "cpu"]
+        spec[name] = value
+    return spec
+
 def make_spec_from_command(argv,
     docker_image,
     dest_url=None,
     cas_url=None,
     parameters=[{}],
     hash_function=hash_from_file,
-    is_executable_function=is_executable):
+    is_executable_function=is_executable,
+    resources=None):
+
+    resource_spec = parse_resources(resources)
 
     list_of_argvs = rewrite_argv_with_parameters(argv, parameters)
     #todo: this is wrong.  need upload map per task.  Or at least download map per task
@@ -143,6 +154,7 @@ def make_spec_from_command(argv,
 
     spec = {
             "image": docker_image,
+            "resources": resource_spec,
             "common": {
                 "command_result_url": dest_url+"/result.json",
                 "stdout_url": dest_url+"/stdout.txt",

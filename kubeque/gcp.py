@@ -4,6 +4,8 @@ from gcloud.datastore.query import Query
 from gcloud.datastore.query import Iterator
 import gcloud.exceptions
 
+from fnmatch import fnmatch
+
 from contextlib import contextmanager
 import collections
 
@@ -51,7 +53,6 @@ class BatchAdapter:
             entity = datastore.Entity(key=entity_key)
             entity['tasks'] = o.tasks
 
-        print("entity", entity)
         self.batch.put(entity)
     
     def commit(self):
@@ -63,6 +64,7 @@ def task_to_entity(client, o):
     entity['task_index'] = o.task_index
     entity['job_id'] = o.job_id
     entity['status'] = o.status
+    assert isinstance(o.status, str) 
     entity['owner'] = o.owner
     entity['args'] = o.args
     # can't save a list of dicts?
@@ -71,6 +73,7 @@ def task_to_entity(client, o):
     return entity
 
 def entity_to_task(entity):
+    assert isinstance(entity['status'], str) 
     return Task(
         task_id = entity.key.name,
         task_index = entity['task_index'],
@@ -90,15 +93,21 @@ class JobStorage:
         task_key = self.client.key("Task", task_id)
         return entity_to_task(self.client.get(task_key))
 
-    def get_tasks(self, job_id, status = None, max_fetch=None):
-#        job = self.client.get(self.client.key("Job", job_id))
-#        assert job is not None
-#        tasks = []
-#        for task_id in job["tasks"]:
-#            task_key = self.client.key("Task", task_id)
-#            tasks.append(entity_to_task(self.client.get(task_key)))
-#        return tasks
+    def get_jobids(self):
+        query = self.client.query(kind="Job")
+        jobs_it = query.fetch()
+        jobids = []
+        for entity_job in jobs_it:
+            jobids.append(entity_job.key.name)
+        return jobids
 
+    def delete_job(self, jobid):
+        job_key = self.client.key("Job", jobid)
+        entity_job = self.client.get(job_key)
+        task_keys = [self.client.key("Task", taskid) for taskid in entity_job["tasks"]]
+        self.client.delete_multi(task_keys + [job_key])
+
+    def get_tasks(self, job_id, status = None, max_fetch=None):
         query = self.client.query(kind="Task")
         query.add_filter("job_id", "=", job_id)
         if status is not None:
@@ -110,22 +119,22 @@ class JobStorage:
         for entity_task in tasks_it:
             if status is not None:
                 if entity_task["status"] != status:
-                    print("Query returned something that did not match query", entity_task)
+                    log.warn("Query returned something that did not match query: %s", entity_task)
                     continue
             tasks.append(entity_to_task(entity_task))
             if max_fetch is not None and len(tasks) >= max_fetch:
                 break
         end_time = time.time()
-        print("get_tasks took ", end_time-start_time)
+        log.debug("get_tasks took %s seconds", end_time-start_time)
         return tasks
 
     def atomic_task_update(self, task_id, expected_version, mutate_task_callback):
         try:
             with self.client.transaction():
-                print("atomic update of task", task_id, "start, version:", expected_version)
+#                log.info("atomic update of task %s start version: %s", task_id, expected_version)
                 task_key = self.client.key("Task", task_id)
                 entity_task = self.client.get(task_key)
-                print("atomic update of task", task_id, "start, version:", expected_version, "status:", entity_task["status"])
+#                print("atomic update of task", task_id, "start, version:", expected_version, "status:", entity_task["status"])
                 if entity_task['version'] != expected_version:
                     return False
 
@@ -134,10 +143,10 @@ class JobStorage:
                 task.version = task.version + 1
                 self.client.put(task_to_entity(self.client, task))
                 
-                print("atomic update of task", task_id, "success, version:", task.version, "status", task.status)
+#                print("atomic update of task", task_id, "success, version:", task.version, "status", task.status)
                 return True
         except google.cloud.exceptions.Conflict:
-            print("Caught exception: Conflict")
+            log.warn("Caught exception: Conflict")
             return False            
 
     def update_task(self, task):
@@ -160,11 +169,18 @@ class JobQueue:
     def get_tasks(self, job_id):
         return self.storage.get_tasks(job_id)
 
+    def get_jobids(self, jobid_wildcard="*"):
+        jobids = self.storage.get_jobids()
+        return [jobid for jobid in jobids if fnmatch(jobid, jobid_wildcard)]
+
+    def delete_job(self, job_id):
+        self.storage.delete_job(job_id)
+
     def get_status_counts(self, job_id):
         counts = collections.defaultdict(lambda: 0)
         for task in self.storage.get_tasks(job_id):
             counts[task.status] += 1
-        return counts
+        return dict(counts)
 
     def reset(self, job_id):
         tasks = self.storage.get_tasks(job_id)
@@ -189,8 +205,8 @@ class JobQueue:
                     history=[dict(timestamp=now, status="pending")],
                     owner=None)
                 tasks.append(task)
-                print("status", batch.batch._status)
-                print("task", task)
+#                print("status", batch.batch._status)
+#                print("task", task)
                 batch.save(task)
 
             job = Job(job_id = job_id, tasks=[t.task_id for t in tasks])
@@ -269,6 +285,8 @@ class IO:
 
         self.buckets = {}
         self.client = GSClient(project)
+        if cas_url_prefix[-1] == "/":
+            cas_url_prefix = cas_url_prefix[:-1]
         self.cas_url_prefix = cas_url_prefix
 
     def _get_bucket_and_path(self, path):
@@ -325,7 +343,7 @@ class IO:
         text = text.encode("utf8")
         hash = hashlib.sha256(text).hexdigest()
         dst_url = self.cas_url_prefix+"/"+hash
-        print("self.cas_url_prefix", self.cas_url_prefix)
+#        print("self.cas_url_prefix", self.cas_url_prefix)
         bucket, path = self._get_bucket_and_path(dst_url)
         blob = bucket.blob(path)
         blob.upload_from_string(text)

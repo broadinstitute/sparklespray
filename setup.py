@@ -1,5 +1,9 @@
 #!/usr/bin/env python
 
+# need python3 or gcloud stores bad values into datastore
+import sys
+assert sys.version_info >= (3,)
+
 from setuptools import setup, find_packages
 
 setup(name='kubeque',
@@ -10,6 +14,7 @@ setup(name='kubeque',
       install_requires=['gcloud'],
       packages=find_packages(),
       entry_points={'console_scripts': [
-        "kubeque = kubeque.main:main"
+        "kubeque = kubeque.main:main",
+        "kubeque-consume = kubeque.consume:main"
         ]}
      )

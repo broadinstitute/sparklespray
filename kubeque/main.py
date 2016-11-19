@@ -10,10 +10,14 @@ import tempfile
 import subprocess
 from glob import glob
 
+from kubeque import kubesub as kube
 from kubeque.kubesub import submit_job
 from kubeque.gcp import create_gcs_job_queue, IO
 
 from contextlib import contextmanager
+
+from kubeque.spec import make_spec_from_command
+import csv
 
 
 log = logging.getLogger(__name__)
@@ -81,7 +85,7 @@ def upload_config_for_consume(io, config):
     for key in ['cas_url_prefix', 'project']:
         consume_config[key] = config[key]
 
-    print("consume_config", consume_config)
+    log.debug("consume_config: %s", consume_config)
     config_url = io.write_str_to_cas(json.dumps(consume_config))
     return config_url
 
@@ -102,7 +106,6 @@ def expand_tasks(spec, io, default_url_prefix, default_job_url_prefix):
 
 def submit(jq, io, job_id, spec, dry_run, config, skip_kube_submit):
     # where to take this from? arg with a default of 1?
-    parallelism = 3
     if dry_run:
         skip_kube_submit = True
 
@@ -122,41 +125,18 @@ def submit(jq, io, job_id, spec, dry_run, config, skip_kube_submit):
     if not dry_run:
         jq.submit(job_id, task_spec_urls)
         config_url = upload_config_for_consume(io, config)
-        # owner might need to be changed to generate UUID at startup.  Kubernettes isn't really going to have a way
-        # of finding which owners are stale.  May need to use heartbeats after all?
         cas_url_prefix = config['cas_url_prefix']
         project = config['project']
-        kubeque_command = ["kubeque", "consume", config_url, job_id, "owner", "--project", project, "--cas_url_prefix", cas_url_prefix]
+        kubeque_command = ["kubeque-consume", config_url, job_id, "--project", project, "--cas_url_prefix", cas_url_prefix]
         if not skip_kube_submit:
             image = spec['image']
             #[("GOOGLE_APPLICATION_CREDENTIALS", "/google_creds/cred")], [("kube")]
-            submit_job(job_id, parallelism, image, kubeque_command)
+            parallelism = len(tasks)
+            resources = spec["resources"]
+            submit_job(job_id, parallelism, image, kubeque_command, cpu_request=resources.get("cpu",config['default_resource_cpu']), mem_limit=resources.get("memory",config["default_resource_memory"]))
         else:
             log.info("Skipping submission: %s", " ".join(kubeque_command))
         return config_url
-
-@contextmanager
-def redirect_output_to_file(filename):
-    yield
-    # sys.stdout.flush()
-    # sys.stderr.flush()
-
-    # saved_stdout = os.dup(sys.stdout.fileno())
-    # saved_stderr = os.dup(sys.stderr.fileno())
-
-    # log_file = open(filename, "w")
-    # os.dup2(log_file.fileno(), sys.stdout.fileno())
-    # os.dup2(log_file.fileno(), sys.stderr.fileno())
-    # yield None
-    # sys.stdout.flush()
-    # sys.stderr.flush()
-    
-    # os.dup2(saved_stdout, sys.stdout.fileno())
-    # os.dup2(saved_stderr, sys.stderr.fileno())
-
-############################################
-
-# Commands
 
 def load_config(config_file):
     config_file = os.path.expanduser(config_file)
@@ -173,23 +153,25 @@ def load_config_from_dict(config):
 
     return jq, io
 
-def new_id():
+def new_job_id():
     import uuid
-    return uuid.uuid4().hex
-
-from kubeque.spec import make_spec_from_command
-import csv
+    import datetime
+    d = datetime.datetime.now()
+    return d.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:4]
 
 def read_parameters_from_csv(filename):
     with open(filename, "rt") as fd:
         return list(csv.DictReader(fd))
 
-def submit_cmd(jq, io, args):
-    config = args.config_obj
+def submit_cmd(jq, io, args, config):
+    if args.image:
+        image = args.image
+    else:
+        image = config['default_image']
 
     job_id = args.name
     if job_id is None:
-        job_id = new_id()
+        job_id = new_job_id()
 
     cas_url_prefix = config['cas_url_prefix']
     default_url_prefix = config['default_url_prefix']
@@ -207,27 +189,33 @@ def submit_cmd(jq, io, args):
 
         assert len(args.command) != 0
         upload_map, spec = make_spec_from_command(args.command, 
-            args.image,
+            image,
             dest_url=default_url_prefix+job_id, 
             cas_url=cas_url_prefix,
-            parameters=parameters)
-        log.info("upload_map = %s", upload_map)
+            parameters=parameters, 
+            resources=args.resources)
+        log.debug("upload_map = %s", upload_map)
         for filename, dest in upload_map.items():
             io.put(filename, dest)
 
-    print("spec", json.dumps(spec, indent=2))
-    submit(jq, io, job_id, spec, args.dryrun, args.config_obj, args.skip_kube_submit)
+    log.debug("spec: %s", json.dumps(spec, indent=2))
+    submit(jq, io, job_id, spec, args.dryrun, config, args.skip_kube_submit)
 
-def delete_cmd(jq, io, args):
-    jq.delete(args.jobid)
+    if args.wait_for_completion:
+        log.info("Waiting for job to terminate")
+        watch(jq, job_id)
 
 def reset_cmd(jq, io, args):
     jq.reset(args.jobid)
 
 def status_cmd(jq, io, args):
-    counts = jq.get_status_counts(args.jobid)
-    for status, count in counts.items():
-        print("%s: %d"%(status, count))
+    jobid_pattern = args.jobid_pattern
+    if not jobid_pattern:
+        jobid_pattern = "*"
+    for jobid in jq.get_jobids(jobid_pattern):
+        counts = jq.get_status_counts(jobid)
+        status_str = ", ".join([ "{}: {}".format(status, count) for status, count in counts.items()])
+        log.info("%s: %s", jobid, status_str)
 
 def fetch_cmd(jq, io, args):
     tasks = jq.get_tasks(args.jobid)
@@ -239,7 +227,7 @@ def fetch_cmd(jq, io, args):
 
     for i, task in enumerate(tasks):
         spec = json.loads(io.get_as_str(task.args))
-        log.info("spec=%s", spec)
+        log.debug("task %d spec: %s", i, spec)
 
         if include_index:
             dest = os.path.join(args.dest, str(i))
@@ -251,7 +239,7 @@ def fetch_cmd(jq, io, args):
         io.get(spec['stdout_url'], os.path.join(dest, "stdout.txt"))
 
         command_result = json.loads(io.get_as_str(spec['command_result_url']))
-        log.info("command_result=%s", json.dumps(command_result))
+        log.debug("command_result: %s", json.dumps(command_result))
         for ul in command_result['files']:
             assert not (ul['src'].startswith("/")), "Source must be a relative path"
             assert not (ul['src'].startswith("../")), "Source must not refer to parent dir"
@@ -259,86 +247,59 @@ def fetch_cmd(jq, io, args):
             log.info("Downloading to %s", localpath)
             io.get(ul['dst_url'], localpath)
 
-def exec_command_(command, workdir, stdout):
-    log.info("(workingdir: %s) Executing: %s", workdir, command)
-    stdoutfd = os.open(stdout, os.O_WRONLY | os.O_APPEND | os.O_CREAT)
-    try:
-        retcode = subprocess.call(command, stderr=subprocess.STDOUT, stdout=stdoutfd, shell=True, cwd=workdir)
-    finally:
-        os.close(stdoutfd)
-    return retcode
 
-def write_result_file(command_result_path, retcode, workdir, local_to_url_mapping):
-    relative_local_to_url_mapping = [dict(src=os.path.relpath(x['src'], workdir), dst_url=x['dst_url']) for x in local_to_url_mapping]
-    with open(command_result_path, "wt") as fd:
-        fd.write(json.dumps({"return_code": retcode, "files": relative_local_to_url_mapping}))
+def is_terminal_status(status):
+    return status in ["failed", "success"]
 
-def resolve_uploads(dir, uploads):
-    resolved = []
-    for ul in uploads:
-        if "src_wildcard" in ul:
-            src_filenames = glob(os.path.join(dir, ul['src_wildcard']))
-            for src_filename in src_filenames:
-                resolved.append(dict(src=src_filename, dst_url=ul['dst_url']))
-        elif "src" in ul:
-            src = os.path.join(dir, ul['src'])
-            if os.path.exists(src):
-                resolved.append(dict(src=ul['src'], dst_url=ul['dst_url']))
-        else:
-            raise Exception("Malformed {}".format(ul))
+def is_complete(counts):
+    complete = True
+    for status in counts.keys():
+        if not is_terminal_status(status):
+            complete = False
+    return complete
 
-    return resolved
-
-def consume_cmd(args):
-    "This is what is executed by a worker"
-
-    # create an incomplete IO object that at least can do a fetch to get the full config
-    # maybe just make the config public in the CAS and then there's no problem.   In theory the hash 
-    # should not be guessable, so just as private as anything else.  (Although, use sha256 instead of md5)
-    io = IO(args.project, args.cas_url_prefix)
-    config = json.loads(io.get_as_str(args.config_url))
-    jq, io = load_config_from_dict(config)
-
-    def exec_task(task_id, json_url):
-        # make working directory.  A directory for the task with two subdirs ("log" where stdout/stderr is written and return code, "work" the working directory the task will be run in)
-        taskdir = tempfile.mkdtemp(prefix="task-")
-        logdir = os.path.join(taskdir, "log")
-        workdir = os.path.join(taskdir, "work")
-        os.mkdir(logdir)
-        os.mkdir(workdir)
-
-        stdout_path = os.path.join(logdir, "stdout.txt")
-        result_path = os.path.join(logdir, "result.json")
-
-        spec = json.loads(io.get_as_str(json_url))
-        log.info("Job spec of claimed task: %s", json.dumps(spec, indent=2))
-        for dl in spec['downloads']:
-            io.get(dl['src_url'], os.path.join(workdir, dl['dst']))
-
-        retcode = exec_command_(spec['command'], workdir, stdout_path)
-
-        local_to_url_mapping = resolve_uploads(workdir, spec['uploads'])
-        for ul in local_to_url_mapping:
-            io.put(os.path.join(workdir, ul['src']), ul['dst_url'])
-
-        write_result_file(result_path, retcode, workdir, local_to_url_mapping)
-        io.put(result_path, spec['command_result_url'])
-        io.put(stdout_path, spec['stdout_url'])
-
-    consumer_run_loop(jq, args.jobid, args.name, exec_task)
-
-def consumer_run_loop(jq, job_id, owner_name, execute_callback):
+def watch(jq, jobid, refresh_delay=5):
+    prev_counts = None
     while True:
-        claimed = jq.claim_task(job_id, owner_name)
-        log.info("claimed: %s", claimed)
-        if claimed is None:
+        counts = jq.get_status_counts(jobid)
+        complete = is_complete(counts)
+        if counts != prev_counts:
+            log.info("status: %s", counts)
+        if complete:
             break
-        task_id, args = claimed
-        log.info("task_id: %s, args: %s", task_id, args)
-        execute_callback(task_id, args)
-        jq.task_completed(task_id, True)
+        prev_counts = counts
+        time.sleep(refresh_delay)
+
+def remove_cmd(jq, args):
+    jobids = jq.get_jobids(args.jobid_pattern)
+    for jobid in jobids:
+        status_counts = jq.get_status_counts(jobid)
+        if not is_complete(status_counts) and not ("pending" in status_counts and len(status_counts) == 1):
+            log.warn("job %s is still running (%s), cannot remove", jobid, status_counts)
+        else:
+            log.info("deleting %s", jobid)
+            kube.delete_job(jobid)
+            jq.delete_job(jobid)
+
+def start_cmd(config):
+    kube.start_cluster(config['cluster_name'], config['machine_type'], 1)
+
+def stop_cmd():
+    kube.stop_job(cluster_name)
+
+def kill_cmd(jq, args):
+    jobids = jq.get_jobids(args.jobid_pattern)
+    for jobid in jobids:
+        kube.stop_job(jobid)
+        # TODO: stop just marks the job as it shouldn't run any more.  tasks will still be claimed.
+        # do we let the re-claimer transition these to pending?  Or do we cancel pending and mark claimed as failed?
+        # probably we should
 
 import argparse
+
+def get_func_parameters(func):
+    import inspect
+    return inspect.getargspec(func)[0]
 
 def main(argv=None):
     logging.basicConfig(level=logging.INFO)
@@ -349,6 +310,7 @@ def main(argv=None):
 
     parser = subparser.add_parser("sub")
     parser.set_defaults(func=submit_cmd)
+    parser.add_argument("--resources", "-r")
     parser.add_argument("--file", "-f")
     parser.add_argument("--image", "-i")
     parser.add_argument("--name", "-n")
@@ -356,27 +318,30 @@ def main(argv=None):
     parser.add_argument("--params")
     parser.add_argument("--dryrun", action="store_true")
     parser.add_argument("--skipkube", action="store_true", dest="skip_kube_submit")
+    parser.add_argument("--no-wait", action="store_false", dest="wait_for_completion")
     parser.add_argument("command", nargs=argparse.REMAINDER)
-
-    parser = subparser.add_parser("del")
-    parser.set_defaults(func=delete_cmd)
-    parser.add_argument("jobid")
 
     parser = subparser.add_parser("reset")
     parser.set_defaults(func=reset_cmd)
-    parser.add_argument("jobid")
+    parser.add_argument("jobid_pattern")
 
     parser = subparser.add_parser("status")
     parser.set_defaults(func=status_cmd)
-    parser.add_argument("jobid")
+    parser.add_argument("jobid_pattern", nargs="?")
 
-    parser = subparser.add_parser("consume")
-    parser.set_defaults(func=consume_cmd)
-    parser.add_argument("config_url")
-    parser.add_argument("jobid")
-    parser.add_argument("name")
-    parser.add_argument("--project")
-    parser.add_argument("--cas_url_prefix")
+    parser = subparser.add_parser("remove")
+    parser.set_defaults(func=remove_cmd)
+    parser.add_argument("jobid_pattern")
+
+    parser = subparser.add_parser("kill")
+    parser.set_defaults(func=kill_cmd)
+    parser.add_argument("jobid_pattern")
+
+    parser = subparser.add_parser("start")
+    parser.set_defaults(func=start_cmd)
+
+    parser = subparser.add_parser("stop")
+    parser.set_defaults(func=stop_cmd)
 
     parser = subparser.add_parser("fetch")
     parser.set_defaults(func=fetch_cmd)
@@ -388,13 +353,25 @@ def main(argv=None):
     if not hasattr(args, 'func'):
         parse.print_help()
         sys.exit(1)
-    if args.func != consume_cmd:
-        config , jq, io = load_config(args.config)
-        args.config_obj = config
-        args.func(jq, io, args)
-    else:
-        args.func(args)
+    
+    func_param_names = get_func_parameters(args.func)
+    if len(set(["config", "jq", "io"]).intersection(func_param_names)) > 0:
+        config, jq, io = load_config(args.config)
+    func_params = {}
+    if "args" in func_param_names:
+        func_params["args"] = args
+    if "config" in func_param_names:
+        func_params["config"] = config
+    if "io" in func_param_names:
+        func_params["io"] = io
+    if "jq" in func_param_names:
+        func_params["jq"] = jq
 
+    # if args.func != consume_cmd:
+    #     args.config_obj = config
+    #     args.func(jq, io, args)
+    # else:
+    args.func(**func_params)
 
 NOTES = """
 Assume process has all necessary with tokens in environment.

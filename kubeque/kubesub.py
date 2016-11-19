@@ -3,6 +3,10 @@
 import os
 import json
 import tempfile
+import subprocess
+
+def execute_command(cmd):
+    subprocess.check_call(cmd)
 
 def add_secret_mount(config, secret_name, mount_path):
   if "volumes" not in config['spec']:
@@ -23,15 +27,14 @@ def add_secret_mount(config, secret_name, mount_path):
       "mountPath": mount_path        
     })
 
-def submit_job(name, parallelism, image, command, environment_vars=[], secrets=[]):
-    print("submit_job")
+def submit_job(name, parallelism, image, command, environment_vars=[], secrets=[], cpu_request="1.0", mem_limit="100M"):
     assert isinstance(command, list)
     config = {"apiVersion": "batch/v1",
      "kind": "Job",
      "metadata": {"name": name},
      "spec": {
-      #"completions": 1,
       "parallelism": parallelism,
+#      "completions": 1,
       "template": {
         "metadata": {
           "name": name
@@ -41,7 +44,11 @@ def submit_job(name, parallelism, image, command, environment_vars=[], secrets=[
           "containers": [{
              "name": name,
              "image": image,
-             "command": command
+             "command": command,
+             "resources": {
+               "requests": { "cpu": cpu_request, "memory": mem_limit },
+               "limits": { "memory": mem_limit },
+             }
             }],
           "restartPolicy": "OnFailure"
         }
@@ -56,7 +63,28 @@ def submit_job(name, parallelism, image, command, environment_vars=[], secrets=[
     with tempfile.NamedTemporaryFile("wt") as t:
       json.dump(config, t)
       t.flush()
-      cmd = "kubectl create -f {}".format(t.name)
-      print("executing", cmd)
-      ret = os.system(cmd)
-    assert ret == 0
+      cmd = ["kubectl", "create", "-f", t.name]
+      execute_command(cmd)
+
+def start_cluster(cluster_name, machine_type, num_nodes):
+  cmd = ["gcloud", "container", "clusters", "create", 
+    cluster_name,
+    "--machine-type", machine_type,
+    "--num-nodes", str(num_nodes),
+    "--scopes", "datastore,storage-full"
+  ]
+  execute_command(cmd)
+
+def stop_cluster(cluster_name):
+  cmd = ["gcloud", "container", "clusters", "delete", 
+    cluster_name]
+  execute_command(cmd)
+
+def delete_job(jobid):
+  cmd = ["kubectl", "delete", "jobs/{}".format(jobid)]
+  execute_command(cmd)
+
+def stop_job(jobid):
+  cmd = ["kubectl", "scale", "--replicas=0", "jobs/{}".format(jobid)]
+  execute_command(cmd)
+    
