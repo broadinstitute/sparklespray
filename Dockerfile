@@ -1,7 +1,7 @@
 FROM ubuntu
 
 RUN apt-get update
-RUN apt-get install -y python-pip && pip install gcloud attrs
+RUN apt-get install -y python3-pip && pip3 install gcloud attrs
 RUN mkdir /install
 ADD dist/kubeque-0.1.tar.gz /install/
-RUN cd /install/kubeque-0.1 && python setup.py install
+RUN cd /install/kubeque-0.1 && python3 setup.py install
