@@ -50,3 +50,13 @@ currently scales to 0
 Currently manually enabled and handled out of band.  Also, autoscaling didn't appear to shrink cluster.  (perhaps due to the tiny VMs being used?)
 Need to learn more about the default policy used to autoscale.
 
+* Add export to timeline
+y-axis by owner or by jobid
+plotly?
+
+* Use "downward" api to get pod name
+
+Write service which watches pods.  On change, reconcile with tasks.
+* handle OOM case
+* handle FS exhausted case
+(write test script to exercise these)
