@@ -1,3 +1,5 @@
+# script which generates ascii rendering of mandelbrot set
+# based on code copied from http://forthescience.org/blog/2010/07/12/the-mandelbrot-set-in-python/
 import argparse
 
 def main(x_center, y_center, scale, max_iteration = 1000, x_size = 100, y_size = 50):
