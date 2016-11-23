@@ -11,10 +11,11 @@ setup(name='kubeque',
       description='batch job submission front to kubernettes',
       author='Philip Montgomery',
       author_email='pmontgom@broadinstitute.org',
-      install_requires=['gcloud'],
+      install_requires=['gcloud', 'pykube'],
       packages=find_packages(),
       entry_points={'console_scripts': [
         "kubeque = kubeque.main:main",
-        "kubeque-consume = kubeque.consume:main"
+        "kubeque-consume = kubeque.consume:main",
+        "kubeque-reaper = kubeque.reaper:main"
         ]}
      )

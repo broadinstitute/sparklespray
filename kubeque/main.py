@@ -201,9 +201,10 @@ def submit_cmd(jq, io, args, config):
     log.debug("spec: %s", json.dumps(spec, indent=2))
     submit(jq, io, job_id, spec, args.dryrun, config, args.skip_kube_submit)
 
-    if args.wait_for_completion:
+    if not args.dryrun and args.wait_for_completion:
         log.info("Waiting for job to terminate")
         watch(jq, job_id)
+        log.info("Job completed.  You can download results by executing: kubeque fetch %s DEST_DIR", job_id)
 
 def reset_cmd(jq, io, args):
     jq.reset(args.jobid_pattern, args.owner)
@@ -284,8 +285,8 @@ def remove_cmd(jq, args):
 def start_cmd(config):
     kube.start_cluster(config['cluster_name'], config['machine_type'], 1)
 
-def stop_cmd():
-    kube.stop_job(cluster_name)
+def stop_cmd(config):
+    kube.stop_cluster(config['cluster_name'])
 
 def kill_cmd(jq, args):
     jobids = jq.get_jobids(args.jobid_pattern)

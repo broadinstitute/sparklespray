@@ -48,7 +48,11 @@ def submit_job(name, parallelism, image, command, environment_vars=[], secrets=[
              "resources": {
                "requests": { "cpu": cpu_request, "memory": mem_limit },
                "limits": { "memory": mem_limit },
-             }
+             },
+             "env": [
+               {"name": "KUBE_POD_NAME",
+                "valueFrom": {"fieldRef": {"fieldPath": "metadata.name"}}}
+             ]
             }],
           "restartPolicy": "OnFailure"
         }

@@ -126,9 +126,14 @@ def is_executable(filename):
 def parse_resources(resources_str):
     # not robust parsing at all
     spec = {}
+    if resources_str is None:
+        return spec
     pairs = resources_str.split(",")
     for pair in pairs:
-        name, value = pair.split("=")
+        m = re.match("([^=]+)=(.*)", pair)
+        if m is None:
+            raise Exception("resource constraint malformed: {}".format(pair))
+        name, value = m.groups()
         assert name in ["memory", "cpu"]
         spec[name] = value
     return spec
@@ -149,21 +154,22 @@ def make_spec_from_command(argv,
     upload_map, list_of_dl_and_commands = rewrite_argvs_files_to_upload(list_of_argvs, cas_url, hash_function, is_executable_function)
 
     tasks = []
-    for dl_and_command in list_of_dl_and_commands:
-        tasks.append(dict(downloads=[dict(d._asdict()) for d in dl_and_command.downloads], command=dl_and_command.command))
+    for task_i, dl_and_command in enumerate(list_of_dl_and_commands):
+        tasks.append(dict(
+            downloads=[dict(d._asdict()) for d in dl_and_command.downloads], 
+            command=dl_and_command.command,
+            uploads=[
+                dict(src_wildcard="*",
+                    dst_url="".format(dest_url, task_i))
+                ]
+        ))
 
     spec = {
             "image": docker_image,
             "resources": resource_spec,
             "common": {
                 "command_result_url": dest_url+"/result.json",
-                "stdout_url": dest_url+"/stdout.txt",
-                "uploads": [
-                    {
-                        "src_wildcard": "*",
-                        "dst_url": dest_url
-                    }
-                ]
+                "stdout_url": dest_url+"/stdout.txt"
             },
             "tasks": tasks
         }

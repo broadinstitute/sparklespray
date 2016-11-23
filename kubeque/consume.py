@@ -11,9 +11,9 @@ import subprocess
 log = logging.getLogger(__name__)
 
 def consume_cmd(args):
-    "This is what is executed by a worker"
+    "This is what is executed by a worker running within a container"
 
-    node_name = socket.gethostname()
+    node_name = os.environ["KUBE_POD_NAME"]
 
     # create an incomplete IO object that at least can do a fetch to get the full config
     # maybe just make the config public in the CAS and then there's no problem.   In theory the hash 
