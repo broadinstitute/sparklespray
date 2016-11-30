@@ -35,6 +35,9 @@ cd examples/docker
 
 ## Running jobs
 
+recorded a session as:
+https://asciinema.org/a/7rl131knip6g8pkh81yewb9il
+
 Create the cluster:
 ```
 kubeque start 
@@ -54,6 +57,13 @@ kubeque fetch sample-job results-from-job
 Submit multiple parameterized by csv file
 ```
 kubeque sub --params params.csv python3 '^mandelbrot.py' '{x_scale}' '{y_scale}' '{zoom}'
+kubeque sub --fetch results --params params.csv python3 '^mandelbrot.py' '{x_scale}' '{y_scale}' '{zoom}'
+
+```
+
+Resize cluster
+```
+gcloud container clusters resize kubeque-cluster --size 4
 ```
 
 ## Cleaning up
