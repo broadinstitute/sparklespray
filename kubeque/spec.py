@@ -3,21 +3,21 @@ import hashlib
 import collections
 import os
 
-def expand_specs(spec, default_url_prefix, default_job_url_prefix):
-    image = spec['image']
-    common = spec['common']
-    common['downloads'] = rewrite_downloads(io, common['downloads'], default_url_prefix)
-    common['uploads'] = rewrite_uploads(common['uploads'], default_job_url_prefix)
+# def expand_specs(spec, default_url_prefix, default_job_url_prefix):
+#     image = spec['image']
+#     common = spec['common']
+#     common['downloads'] = rewrite_downloads(io, common['downloads'], default_url_prefix)
+#     common['uploads'] = rewrite_uploads(common['uploads'], default_job_url_prefix)
 
-    tasks = []
-    for task in spec['tasks']:
-        task = expand_task_spec(common, task)
-        task = rewrite_url_in_dict(task, "command_result_url", default_job_url_prefix)
-        task['downloads'] = rewrite_downloads(io, task['downloads'], default_url_prefix)
-        task['uploads'] = rewrite_uploads(task['uploads'], default_url_prefix)
-        tasks.append(task)
+#     tasks = []
+#     for task in spec['tasks']:
+#         task = expand_task_spec(common, task)
+#         task = rewrite_url_in_dict(task, "command_result_url", default_job_url_prefix)
+#         task['downloads'] = rewrite_downloads(io, task['downloads'], default_url_prefix)
+#         task['uploads'] = rewrite_uploads(task['uploads'], default_url_prefix)
+#         tasks.append(task)
 
-    return tasks
+#     return tasks
 
 def check_types(d, prop_types, required=False):
     errors = []
@@ -168,8 +168,8 @@ def make_spec_from_command(argv,
             "image": docker_image,
             "resources": resource_spec,
             "common": {
-                "command_result_url": dest_url+"/result.json",
-                "stdout_url": dest_url+"/stdout.txt"
+                "command_result_url": "result.json",
+                "stdout_url": "stdout.txt"
             },
             "tasks": tasks
         }

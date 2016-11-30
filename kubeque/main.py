@@ -18,6 +18,7 @@ from contextlib import contextmanager
 
 from kubeque.spec import make_spec_from_command
 import csv
+import copy
 
 
 log = logging.getLogger(__name__)
@@ -43,7 +44,7 @@ except:
 def expand_task_spec(common, task):
     "returns a list of task specs"
     # merge the common attrs and the per task attrs
-    task_spec = dict(common)
+    task_spec = copy.deepcopy(common)
     for attr in ['helper_log', 'command']:
         if attr in task:
             task_spec[attr] = task[attr]
@@ -51,16 +52,27 @@ def expand_task_spec(common, task):
     task_spec['downloads'].extend(task.get('downloads', []))
     return task_spec
 
+def rewrite_url_with_prefix(url, default_url_prefix):
+    # look to see if we have a rooted url, or a relative path
+    a = [url, default_url_prefix]
+    if not (":" in url):
+        if not default_url_prefix.endswith("/"):
+            default_url_prefix += "/"
+        if url.startswith("/"):
+            url = url[1:]
+        url = default_url_prefix + url
+        if url.endswith("/"):
+            url = url[:-1]
+    assert not ("//" in url[4:]), "url=%s, default_url_prefix=%s"%(url, a)
+    return url
 
 def rewrite_url_in_dict(d, prop_name, default_url_prefix):
     if not (prop_name in d):
         return d
 
     d = dict(d)
-    url = d[prop_name]
-    # look to see if we have a rooted url, or a relative path
-    if not (":" in url):
-        d[prop_name] = default_url_prefix + url
+    url = d[prop_name] 
+    d[prop_name] = rewrite_url_with_prefix(url, default_url_prefix) 
     return d
 
 def rewrite_uploads(uploads, default_url_prefix):
@@ -96,11 +108,13 @@ def expand_tasks(spec, io, default_url_prefix, default_job_url_prefix):
     common['uploads'] = rewrite_uploads(common.get('uploads', []), default_job_url_prefix)
 
     tasks = []
-    for task in spec['tasks']:
+    for task_i, task in enumerate(spec['tasks']):
+        task_url_prefix = "{}/{}".format(default_job_url_prefix, task_i+1)
         task = expand_task_spec(common, task)
-        task = rewrite_url_in_dict(task, "command_result_url", default_job_url_prefix)
         task['downloads'] = rewrite_downloads(io, task['downloads'], default_url_prefix)
-        task['uploads'] = rewrite_uploads(task['uploads'], default_url_prefix)
+        task['uploads'] = rewrite_uploads(task['uploads'], task_url_prefix)
+        task['stdout_url'] = rewrite_url_with_prefix(task['stdout_url'], task_url_prefix)
+        task['command_result_url'] = rewrite_url_with_prefix(task['command_result_url'], task_url_prefix)
         tasks.append(task)
     return tasks
 
@@ -110,7 +124,9 @@ def submit(jq, io, job_id, spec, dry_run, config, skip_kube_submit):
         skip_kube_submit = True
 
     default_url_prefix = config.get("default_url_prefix", "")
-    default_job_url_prefix = default_url_prefix+job_id+"/"
+    if default_url_prefix.endswith("/"):
+        default_url_prefix = default_url_prefix[:-1]
+    default_job_url_prefix = default_url_prefix+"/"+job_id
 
     tasks = expand_tasks(spec, io, default_url_prefix, default_job_url_prefix)
     task_spec_urls = []
@@ -119,7 +135,7 @@ def submit(jq, io, job_id, spec, dry_run, config, skip_kube_submit):
             url = io.write_json_to_cas(task)
             task_spec_urls.append(url)
         else:
-            print("task:", json.dumps(task, indent=2))
+            print("task post expand:", json.dumps(task, indent=2))
 
     log.info("job_id: %s", job_id)
     if not dry_run:

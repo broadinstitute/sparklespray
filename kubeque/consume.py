@@ -13,7 +13,10 @@ log = logging.getLogger(__name__)
 def consume_cmd(args):
     "This is what is executed by a worker running within a container"
 
-    node_name = os.environ["KUBE_POD_NAME"]
+    if args.nodename:
+        node_name = args.nodename
+    else:
+        node_name = os.environ["KUBE_POD_NAME"]
 
     # create an incomplete IO object that at least can do a fetch to get the full config
     # maybe just make the config public in the CAS and then there's no problem.   In theory the hash 
@@ -34,7 +37,7 @@ def consume_cmd(args):
         result_path = os.path.join(logdir, "result.json")
 
         spec = json.loads(io.get_as_str(json_url))
-        log.info("Job spec of claimed task: %s", json.dumps(spec, indent=2))
+        log.info("Job spec (%s) of claimed task: %s", json_url, json.dumps(spec, indent=2))
         for dl in spec['downloads']:
             io.get(dl['src_url'], os.path.join(workdir, dl['dst']))
 
@@ -100,6 +103,7 @@ def main(argv=None):
     parser.add_argument("jobid")
     parser.add_argument("--project")
     parser.add_argument("--cas_url_prefix")
+    parser.add_argument("--nodename")
 
     args = parser.parse_args(argv)
     consume_cmd(args)

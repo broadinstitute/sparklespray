@@ -1,7 +1,46 @@
-from ph2.spec import make_spec_from_command
+from kubeque.spec import make_spec_from_command
+from kubeque.main import expand_tasks
 
 def dummy_hash(text):
     return str(hash(text))
+
+def test_expand_tasks():
+    spec = {'tasks': 
+            [{
+                'downloads': [{'dst': 'mandelbrot.py', 'src_url': 'gs://source1', 'executable':True}], 
+                'uploads': [{'dst_url': '', 'src_wildcard': '*'}], 
+                'command': 'python3 mandelbrot.py'
+            }, {
+                'downloads': [{'dst': 'mandelbrot.py', 'src_url': 'gs://source1', 'executable':True}], 
+                'uploads': [{'dst_url': '', 'src_wildcard': '*'}], 
+                'command': 'python3 mandelbrot.py'
+            }],
+        'image': 'us.gcr.io/project/tag', 
+        'common': {
+            'command_result_url': 'result.json', 
+            'stdout_url': 'stdout.txt'
+            }
+        }
+    io = None
+    default_url_prefix = "s3://testcas/"
+    default_job_url_prefix = "s3://testjob/"
+    expanded_spec = expand_tasks(spec, io, default_url_prefix, default_job_url_prefix)
+    expected_tasks = [
+        {
+            'downloads': [{'dst': 'mandelbrot.py', 'src_url': 'gs://source1', 'executable':True}], 
+            'uploads': [{'dst_url': 's3://testjob/1', 'src_wildcard': '*'}], 
+            'command': 'python3 mandelbrot.py',
+            'command_result_url': 's3://testjob/1/result.json', 
+            'stdout_url': 's3://testjob/1/stdout.txt'
+        }, {
+            'downloads': [{'dst': 'mandelbrot.py', 'src_url': 'gs://source1', 'executable':True}], 
+            'uploads': [{'dst_url': 's3://testjob/2', 'src_wildcard': '*'}], 
+            'command': 'python3 mandelbrot.py',
+            'command_result_url': 's3://testjob/2/result.json', 
+            'stdout_url': 's3://testjob/2/stdout.txt'
+        }]
+    assert expanded_spec == expected_tasks #['tasks']
+
 
 def test_simple_command():
     upload_mapping, spec = make_spec_from_command(["bash", "-c", "date"], 
