@@ -2,7 +2,7 @@
 
 PROJECT_ID=$1
 
-if ["$PROJECT_ID" == ""]; then
+if [ "$PROJECT_ID" == "" ]; then
     echo "Needs project id"
     exit 1
 fi
