@@ -38,12 +38,15 @@ def consume_cmd(args):
 
         spec = json.loads(io.get_as_str(json_url))
         log.info("Job spec (%s) of claimed task: %s", json_url, json.dumps(spec, indent=2))
+        downloaded = set()
         for dl in spec['downloads']:
-            io.get(dl['src_url'], os.path.join(workdir, dl['dst']))
+            destination = os.path.abspath(os.path.join(workdir, dl['dst']))
+            downloaded.add(destination)
+            io.get(dl['src_url'], destination)
 
         retcode = exec_command_(spec['command'], workdir, stdout_path)
 
-        local_to_url_mapping = resolve_uploads(workdir, spec['uploads'])
+        local_to_url_mapping = resolve_uploads(workdir, spec['uploads'], downloaded)
         for ul in local_to_url_mapping:
             io.put(os.path.join(workdir, ul['src']), ul['dst_url'])
 
@@ -78,12 +81,15 @@ def exec_command_(command, workdir, stdout):
         os.close(stdoutfd)
     return retcode
 
-def resolve_uploads(dir, uploads):
+def resolve_uploads(dir, uploads, paths_to_exclude):
     resolved = []
     for ul in uploads:
         if "src_wildcard" in ul:
             src_filenames = glob(os.path.join(dir, ul['src_wildcard']))
             for src_filename in src_filenames:
+                src_filename = os.path.abspath(src_filename)
+                if src_filename in paths_to_exclude:
+                    continue
                 resolved.append(dict(src=src_filename, dst_url=ul['dst_url']))
         elif "src" in ul:
             src = os.path.join(dir, ul['src'])

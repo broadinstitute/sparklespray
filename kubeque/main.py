@@ -220,7 +220,11 @@ def submit_cmd(jq, io, args, config):
     if not args.dryrun and args.wait_for_completion:
         log.info("Waiting for job to terminate")
         watch(jq, job_id)
-        log.info("Job completed.  You can download results by executing: kubeque fetch %s DEST_DIR", job_id)
+        if args.fetch:
+            log.info("Job completed, downloading results to %s", args.fetch)
+            fetch_cmd_(jq, io, job_id, args.fetch)
+        else:
+            log.info("Job completed.  You can download results by executing: kubeque fetch %s DEST_DIR", job_id)
 
 def reset_cmd(jq, io, args):
     jq.reset(args.jobid_pattern, args.owner)
@@ -235,10 +239,13 @@ def status_cmd(jq, io, args):
         log.info("%s: %s", jobid, status_str)
 
 def fetch_cmd(jq, io, args):
-    tasks = jq.get_tasks(args.jobid)
+    fetch_cmd_(jq, io, args.jobid, args.dest)
 
-    if not os.path.exists(args.dest):
-        os.mkdir(args.dest)
+def fetch_cmd_(jq, io, jobid, dest_root):
+    tasks = jq.get_tasks(jobid)
+
+    if not os.path.exists(dest_root):
+        os.mkdir(dest_root)
 
     include_index = len(tasks) > 1
 
@@ -247,11 +254,11 @@ def fetch_cmd(jq, io, args):
         log.debug("task %d spec: %s", i, spec)
 
         if include_index:
-            dest = os.path.join(args.dest, str(i))
+            dest = os.path.join(dest_root, str(i))
             if not os.path.exists(dest):
                 os.mkdir(dest)
         else:
-            dest = args.dest
+            dest = dest_root
 
         io.get(spec['stdout_url'], os.path.join(dest, "stdout.txt"))
 
@@ -333,6 +340,7 @@ def main(argv=None):
     parser.add_argument("--name", "-n")
     parser.add_argument("--seq", type=int)
     parser.add_argument("--params")
+    parser.add_argument("--fetch")
     parser.add_argument("--dryrun", action="store_true")
     parser.add_argument("--skipkube", action="store_true", dest="skip_kube_submit")
     parser.add_argument("--no-wait", action="store_false", dest="wait_for_completion")
