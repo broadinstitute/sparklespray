@@ -8,7 +8,10 @@ import kubeque.main
 import logging
 import argparse
 import subprocess
+import sys
 log = logging.getLogger(__name__)
+
+KILLED_RET_CODE = -9
 
 def consume_cmd(args):
     "This is what is executed by a worker running within a container"
@@ -27,6 +30,7 @@ def consume_cmd(args):
 
     def exec_task(task_id, json_url):
         # make working directory.  A directory for the task with two subdirs ("log" where stdout/stderr is written and return code, "work" the working directory the task will be run in)
+        # Returns True if child exited normally, or False if child was forcibly killed 
         taskdir = tempfile.mkdtemp(prefix="task-")
         logdir = os.path.join(taskdir, "log")
         workdir = os.path.join(taskdir, "work")
@@ -54,9 +58,18 @@ def consume_cmd(args):
         io.put(result_path, spec['command_result_url'])
         io.put(stdout_path, spec['stdout_url'])
 
-    consumer_run_loop(jq, args.jobid, node_name, exec_task)
+        log.info("retcode = %s", repr(retcode))
+        return retcode != KILLED_RET_CODE
+
+    normal_termination = consumer_run_loop(jq, args.jobid, node_name, exec_task)
+    if not normal_termination:
+        log.warn("Terminating due to forcibly killed child process (OOM?)")
+        sys.exit(1)
+    else:
+        sys.exit(0)
 
 def consumer_run_loop(jq, job_id, owner_name, execute_callback):
+    # returns True if normal termination, or False we're stopping because a child was forcibly killed 
     while True:
         claimed = jq.claim_task(job_id, owner_name)
         log.info("claimed: %s", claimed)
@@ -64,8 +77,13 @@ def consumer_run_loop(jq, job_id, owner_name, execute_callback):
             break
         task_id, args = claimed
         log.info("task_id: %s, args: %s", task_id, args)
-        execute_callback(task_id, args)
-        jq.task_completed(task_id, True)
+        was_normal_termination = execute_callback(task_id, args)
+        if was_normal_termination:
+            jq.task_completed(task_id, True)
+        else:
+            jq.task_completed(task_id, False, "Killed")
+            return False
+    return True
 
 def write_result_file(command_result_path, retcode, workdir, local_to_url_mapping):
     relative_local_to_url_mapping = [dict(src=os.path.relpath(x['src'], workdir), dst_url=x['dst_url']) for x in local_to_url_mapping]
@@ -113,3 +131,4 @@ def main(argv=None):
 
     args = parser.parse_args(argv)
     consume_cmd(args)
+

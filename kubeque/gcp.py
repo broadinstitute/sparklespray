@@ -29,6 +29,7 @@ class Task(object):
     owner = attr.ib()
     args = attr.ib()
     history = attr.ib() # list of records (timestamp, status)  (maybe include owner?)
+    failure_reason = attr.ib(default=None)
     version = attr.ib(default=1)
 
 @attr.s
@@ -67,6 +68,7 @@ def task_to_entity(client, o):
     assert isinstance(o.status, str) 
     entity['owner'] = o.owner
     entity['args'] = o.args
+    entity['failure_reason'] = o.failure_reason
     # can't save a list of dicts?
 #            entity['history'] = o.history
     entity['version'] = o.version
@@ -82,7 +84,8 @@ def entity_to_task(entity):
         owner = entity['owner'],
         args = entity['args'],
         history = [], # entity['history'],
-        version = entity['version']
+        version = entity['version'],
+        failure_reason = entity.get('failure_reason')
     )
 
 class JobStorage:
@@ -107,9 +110,10 @@ class JobStorage:
         task_keys = [self.client.key("Task", taskid) for taskid in entity_job["tasks"]]
         self.client.delete_multi(task_keys + [job_key])
 
-    def get_tasks(self, job_id, status = None, max_fetch=None):
+    def get_tasks(self, job_id = None, status = None, max_fetch=None):
         query = self.client.query(kind="Task")
-        query.add_filter("job_id", "=", job_id)
+        if job_id is not None:
+            query.add_filter("job_id", "=", job_id)
         if status is not None:
             query.add_filter("status", "=", status)
         start_time = time.time()
@@ -166,6 +170,13 @@ class JobQueue:
     def __init__(self, storage):
         self.storage = storage 
 
+    def get_claimed_task_ids(self):
+        tasks = self.storage.get_tasks(status="claimed")
+        tasks = [t for t in tasks if t.status == "claimed"]
+        for t in tasks:
+            assert t.owner is not None
+        return [(t.task_id, t.owner) for t in tasks]
+
     def get_tasks(self, job_id):
         return self.storage.get_tasks(job_id)
 
@@ -182,18 +193,16 @@ class JobQueue:
             counts[task.status] += 1
         return dict(counts)
 
-    def reset(self, jobid_wildcard, owner):
-        jobids = self.get_jobids(jobid_wildcard)
-        for jobid in jobids:
-            tasks = self.storage.get_tasks(jobid)
-            now = time.time()
-            for task in tasks:
-                if owner is not None and owner != task.owner:
-                    continue
-                task.owner = None
-                task.status = "pending"
-                task.history.append( dict(timestamp=now, status="reset") )
-                self.storage.update_task(task)
+    def reset(self, jobid, owner):
+        tasks = self.storage.get_tasks(jobid)
+        now = time.time()
+        for task in tasks:
+            if owner is not None and owner != task.owner:
+                continue
+            task.owner = None
+            task.status = "pending"
+            task.history.append( dict(timestamp=now, status="reset") )
+            self.storage.update_task(task)
 
     def submit(self, job_id, args):
         tasks = []
@@ -249,18 +258,20 @@ class JobQueue:
             log.warn("Update failed")
             time.sleep(random.uniform(0, 1))
 
-    def task_completed(self, task_id, was_successful):
+    def task_completed(self, task_id, was_successful, failure_reason=None):
         if was_successful:
             new_status = "success"
+            assert failure_reason is None
         else:
             new_status = "failed"
-        self._update_task_status(task_id, new_status)
+        self._update_task_status(task_id, new_status, failure_reason)
 
-    def _update_task_status(self, task_id, new_status):
+    def _update_task_status(self, task_id, new_status, failure_reason):
         task = self.storage.get_task(task_id)
         now = time.time()
-        task.history.append( dict(timestamp=now, status=new_status) )
+        task.history.append( dict(timestamp=now, status=new_status, failure_reason=failure_reason) )
         task.status = new_status
+        task.failure_reason = failure_reason
         task.owner = None
         updated = self.storage.update_task(task)
         if not updated:
