@@ -227,7 +227,9 @@ def submit_cmd(jq, io, args, config):
             log.info("Job completed.  You can download results by executing: kubeque fetch %s DEST_DIR", job_id)
 
 def reset_cmd(jq, io, args):
-    jq.reset(args.jobid_pattern, args.owner)
+    for jobid in jq.get_jobids(args.jobid_pattern):
+        log.info("reseting %s", jobid)
+        jq.reset(jobid, args.owner)
 
 def status_cmd(jq, io, args):
     jobid_pattern = args.jobid_pattern

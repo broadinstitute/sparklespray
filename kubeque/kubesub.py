@@ -5,7 +5,10 @@ import json
 import tempfile
 import subprocess
 
-def execute_command(cmd):
+def execute_command(cmd, ignore_error=False):
+  if ignore_error:
+    subprocess.call(cmd)    
+  else:
     subprocess.check_call(cmd)
 
 def add_secret_mount(config, secret_name, mount_path):
@@ -86,7 +89,7 @@ def stop_cluster(cluster_name):
 
 def delete_job(jobid):
   cmd = ["kubectl", "delete", "jobs/{}".format(jobid)]
-  execute_command(cmd)
+  execute_command(cmd, ignore_error=True)
 
 def stop_job(jobid):
   cmd = ["kubectl", "scale", "--replicas=0", "jobs/{}".format(jobid)]
