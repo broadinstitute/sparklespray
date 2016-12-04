@@ -1,5 +1,6 @@
 import argparse
 import time
+import sys
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--allocate", type=int)
@@ -11,7 +12,9 @@ args = parser.parse_args()
 
 allocated = None
 if args.allocate:
-    allocated = bytearray(args.allocate)
+    print("about to allocated memory ...")
+    sys.stdout.flush()
+    allocated = bytearray(args.allocate * 1024*1024)
     print("Allocated", len(allocated))
     for i in range(len(allocated)):
         allocated[i] = 1
