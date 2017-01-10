@@ -44,9 +44,19 @@ def submit_job(name, parallelism, image, command, environment_vars=[], secrets=[
         },
         "spec": {
           "imagePullSecrets": [{"name": "kubeque-registry-key"}],
+          "volumes": [
+              {"name": "host-var-volume",
+               "hostPath": {
+                   "path": "/var"
+               }}
+          ],
           "containers": [{
              "name": name,
              "image": image,
+             "volumeMounts": [{
+               "mountPath": "/host-var",
+               "name": "host-var-volume"
+             }],
              "command": command,
              "resources": {
                "requests": { "cpu": cpu_request, "memory": mem_limit },

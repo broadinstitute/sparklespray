@@ -13,7 +13,7 @@ from glob import glob
 from kubeque import kubesub as kube
 from kubeque.kubesub import submit_job
 from kubeque.gcp import create_gcs_job_queue, IO
-
+from kubeque.hasher import CachingHashFunction
 from contextlib import contextmanager
 
 from kubeque.spec import make_spec_from_command
@@ -143,7 +143,7 @@ def submit(jq, io, job_id, spec, dry_run, config, skip_kube_submit):
         config_url = upload_config_for_consume(io, config)
         cas_url_prefix = config['cas_url_prefix']
         project = config['project']
-        kubeque_command = ["kubeque-consume", config_url, job_id, "--project", project, "--cas_url_prefix", cas_url_prefix]
+        kubeque_command = ["kubeque-consume", config_url, job_id, "--project", project, "--cas_url_prefix", cas_url_prefix, "--cache_dir", "/host-var/kubeque-obj-cache"]
         if not skip_kube_submit:
             image = spec['image']
             #[("GOOGLE_APPLICATION_CREDENTIALS", "/google_creds/cred")], [("kube")]
@@ -179,6 +179,18 @@ def read_parameters_from_csv(filename):
     with open(filename, "rt") as fd:
         return list(csv.DictReader(fd))
 
+def expand_files_to_upload(filenames):
+    # preprocess list of files to handle those that are actual a file containing list of more files
+    expanded = []
+    for filename in filenames:
+        if filename.startswith("@"):
+            with open(filename[1:], "rt") as fd:
+                file_list = [x.strip() for x in fd.readlines() if x.strip() != ""]
+                expanded.extend(file_list)
+        else:
+            expanded.append(filename)
+    return expanded 
+
 def submit_cmd(jq, io, args, config):
     if args.image:
         image = args.image
@@ -204,15 +216,21 @@ def submit_cmd(jq, io, args, config):
             parameters = [{}]
 
         assert len(args.command) != 0
-        upload_map, spec = make_spec_from_command(args.command, 
+
+        hash_db = CachingHashFunction(config.get("cache_db_path", ".kubeque-cached-file-hashes"))
+        upload_map, spec = make_spec_from_command(args.command,
             image,
             dest_url=default_url_prefix+job_id, 
             cas_url=cas_url_prefix,
             parameters=parameters, 
-            resources=args.resources)
-        log.debug("upload_map = %s", upload_map)
+            resources=args.resources,
+            hash_function=hash_db.hash_filename,
+            extra_files=expand_files_to_upload(args.push))
+        hash_db.persist()
+
+        log.info("upload_map = %s", upload_map)
         for filename, dest in upload_map.items():
-            io.put(filename, dest)
+            io.put(filename, dest, skip_if_exists=True)
 
     log.debug("spec: %s", json.dumps(spec, indent=2))
     submit(jq, io, job_id, spec, args.dryrun, config, args.skip_kube_submit)
@@ -331,50 +349,51 @@ def main(argv=None):
     logging.basicConfig(level=logging.INFO)
 
     parse = argparse.ArgumentParser()
-    parse.add_argument("--config", default="~/.kubeque")
+    parse.add_argument("--config", default=None)
     subparser = parse.add_subparsers()
 
-    parser = subparser.add_parser("sub")
+    parser = subparser.add_parser("sub", help="Submit a command (or batch of commands) for execution")
     parser.set_defaults(func=submit_cmd)
     parser.add_argument("--resources", "-r")
-    parser.add_argument("--file", "-f")
-    parser.add_argument("--image", "-i")
-    parser.add_argument("--name", "-n")
-    parser.add_argument("--seq", type=int)
-    parser.add_argument("--params")
-    parser.add_argument("--fetch")
-    parser.add_argument("--dryrun", action="store_true")
-    parser.add_argument("--skipkube", action="store_true", dest="skip_kube_submit")
-    parser.add_argument("--no-wait", action="store_false", dest="wait_for_completion")
+    parser.add_argument("--file", "-f", help="Job specification file (in JSON).  Only needed if command is not specified.")
+    parser.add_argument("--push", "-u", action="append", default=[], help="Path to a local file which should be uploaded to working directory of command before execution starts.  If filename starts with a '@' the file is interpreted as a list of files which need to be uploaded.")
+    parser.add_argument("--image", "-i", help="Name of docker image to run job within.  Defaults to value from kubeque config file.")
+    parser.add_argument("--name", "-n", help="The name to assign to the job")
+    parser.add_argument("--seq", type=int, help="Parameterize the command by index.  Submitting with --seq=10 will submit 10 commands with a parameter index varied from 1 to 10")
+    parser.add_argument("--params", help="Parameterize the command by the rows in the specified CSV file.  If the CSV file has 5 rows, then 5 commands will be submitted.")
+    parser.add_argument("--fetch", help="After run is complete, automatically download the results")
+    parser.add_argument("--dryrun", action="store_true", help="Don't actually submit the job but just print what would have been done")
+    parser.add_argument("--skipkube", action="store_true", dest="skip_kube_submit", help="Do all steps except submitting the job to kubernetes")
+    parser.add_argument("--no-wait", action="store_false", dest="wait_for_completion", help="Exit immediately after submission instead of waiting for job to complete")
     parser.add_argument("command", nargs=argparse.REMAINDER)
 
-    parser = subparser.add_parser("reset")
+    parser = subparser.add_parser("reset", help="Mark any 'claimed' or 'failed' jobs as ready for execution again.  Useful largely only during debugging issues with job submission.")
     parser.set_defaults(func=reset_cmd)
     parser.add_argument("jobid_pattern")
     parser.add_argument("--owner")
 
-    parser = subparser.add_parser("status")
+    parser = subparser.add_parser("status", help="Print the status for the tasks which make up the specified job")
     parser.set_defaults(func=status_cmd)
     parser.add_argument("jobid_pattern", nargs="?")
 
-    parser = subparser.add_parser("remove")
+    parser = subparser.add_parser("remove", help="Remove completed jobs from the database of jobs")
     parser.set_defaults(func=remove_cmd)
     parser.add_argument("jobid_pattern")
 
-    parser = subparser.add_parser("kill")
+    parser = subparser.add_parser("kill", help="Terminate the specified job")
     parser.set_defaults(func=kill_cmd)
     parser.add_argument("jobid_pattern")
 
-    parser = subparser.add_parser("start")
+    parser = subparser.add_parser("start", help="Start kubernetes cluster")
     parser.set_defaults(func=start_cmd)
 
-    parser = subparser.add_parser("stop")
+    parser = subparser.add_parser("stop", help="Shutdown kubernets cluster")
     parser.set_defaults(func=stop_cmd)
 
-    parser = subparser.add_parser("fetch")
+    parser = subparser.add_parser("fetch", help="Download results from a completed job")
     parser.set_defaults(func=fetch_cmd)
     parser.add_argument("jobid")
-    parser.add_argument("dest")
+    parser.add_argument("dest", help="The path to the directory where the results will be downloaded")
 
     args = parse.parse_args(argv)
     
@@ -384,7 +403,8 @@ def main(argv=None):
     
     func_param_names = get_func_parameters(args.func)
     if len(set(["config", "jq", "io"]).intersection(func_param_names)) > 0:
-        config, jq, io = load_config(args.config)
+        config_path = get_config_path(args.config)
+        config, jq, io = load_config(config_path)
     func_params = {}
     if "args" in func_param_names:
         func_params["args"] = args
@@ -395,11 +415,21 @@ def main(argv=None):
     if "jq" in func_param_names:
         func_params["jq"] = jq
 
-    # if args.func != consume_cmd:
-    #     args.config_obj = config
-    #     args.func(jq, io, args)
-    # else:
     args.func(**func_params)
+
+
+def get_config_path(config_path):
+    if config_path is not None:
+        if not os.path.exists(config_path):
+            raise Exception("Could not find config at {}".format(config_path))
+    else:
+        config_path = ".kubeque"
+        if not os.path.exists(config_path):
+            config_path = os.path.expanduser("~/.kubeque")
+            if not os.path.exists(config_path):
+                raise Exception("Could not find config file at neither ./.kubeque nor ~/.kubeque")
+    return config_path
+
 
 NOTES = """
 Assume process has all necessary with tokens in environment.

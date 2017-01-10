@@ -330,14 +330,17 @@ class IO:
         blob = bucket.blob(path)
         return blob.download_as_string().decode("utf8")
 
-    def put(self, src_filename, dst_url, must=True):
-        log.info("put %s -> %s", src_filename, dst_url)
+    def put(self, src_filename, dst_url, must=True, skip_if_exists=False):
         if must:
             assert os.path.exists(src_filename)
 
         bucket, path = self._get_bucket_and_path(dst_url)
         blob = bucket.blob(path)
-        blob.upload_from_filename(src_filename)
+        if skip_if_exists and blob.exists():
+            log.info("skipping put %s -> %s", src_filename, dst_url)
+        else:
+            log.info("put %s -> %s", src_filename, dst_url)
+            blob.upload_from_filename(src_filename)
 
     def _get_url_prefix(self):
         return "gs://"
