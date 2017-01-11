@@ -187,6 +187,9 @@ class JobQueue:
     def delete_job(self, job_id):
         self.storage.delete_job(job_id)
 
+    def get_tasks(self, job_id):
+        return self.storage.get_tasks(job_id)
+
     def get_status_counts(self, job_id):
         counts = collections.defaultdict(lambda: 0)
         for task in self.storage.get_tasks(job_id):
@@ -272,7 +275,7 @@ class JobQueue:
         task.history.append( dict(timestamp=now, status=new_status, failure_reason=failure_reason) )
         task.status = new_status
         task.failure_reason = failure_reason
-        task.owner = None
+#        task.owner = None
         updated = self.storage.update_task(task)
         if not updated:
             # I suppose this is not technically correct. Could be a simultaneous update of "success" or "failed" and "lost"

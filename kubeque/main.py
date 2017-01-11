@@ -254,9 +254,14 @@ def status_cmd(jq, io, args):
     if not jobid_pattern:
         jobid_pattern = "*"
     for jobid in jq.get_jobids(jobid_pattern):
-        counts = jq.get_status_counts(jobid)
-        status_str = ", ".join([ "{}: {}".format(status, count) for status, count in counts.items()])
-        log.info("%s: %s", jobid, status_str)
+        if args.detailed:
+            for task in jq.get_tasks(jobid):
+                log.info("task_id: %s, status: %s, owner: %s, failure_reason: %s, args: %s, history: %s", task.task_id,
+                         task.status, task.owner, task.failure_reason, task.args, task.history)
+        else:
+            counts = jq.get_status_counts(jobid)
+            status_str = ", ".join([ "{}: {}".format(status, count) for status, count in counts.items()])
+            log.info("%s: %s", jobid, status_str)
 
 def fetch_cmd(jq, io, args):
     fetch_cmd_(jq, io, args.jobid, args.dest)
@@ -374,6 +379,7 @@ def main(argv=None):
 
     parser = subparser.add_parser("status", help="Print the status for the tasks which make up the specified job")
     parser.set_defaults(func=status_cmd)
+    parser.add_argument("--detailed", action="store_true", help="List attributes of each task")
     parser.add_argument("jobid_pattern", nargs="?")
 
     parser = subparser.add_parser("remove", help="Remove completed jobs from the database of jobs")
