@@ -1,6 +1,5 @@
 # functions for doing generating kubernetes datastructures and submissions.
 
-import os
 import json
 import tempfile
 import subprocess
@@ -104,4 +103,44 @@ def delete_job(jobid):
 def stop_job(jobid):
   cmd = ["kubectl", "scale", "--replicas=0", "jobs/{}".format(jobid)]
   execute_command(cmd)
-    
+
+def add_node_pool(cluster_name, node_pool_name, machine_type, num_nodes,
+                  min_nodes, max_nodes, is_autoscale, is_preemptable):
+
+    cmd = ["gcloud", "alpha", "container", "node-pools", "create",
+           node_pool_name,
+           "--cluster", cluster_name,
+           "--machine-type", machine_type,
+           "--num-nodes", str(num_nodes),
+           "--scopes", "datastore,storage-full"
+           ]
+    if is_preemptable:
+        cmd += ["--preemptible"]
+    if is_autoscale:
+        assert min_nodes is not None
+        assert max_nodes is not None
+        cmd += ["--enable-autoscaling", "--max-nodes="+str(max_nodes), "--min-nodes="+str(min_nodes)]
+    execute_command(cmd)
+
+def rm_node_pool(cluster_name, node_pool_name):
+    cmd = ["gcloud", "container", "node-pools", "delete",
+           node_pool_name,
+           "--cluster", cluster_name,
+        ]
+    execute_command(cmd)
+
+def peek(pod_name, lines):
+    import pykube
+    import os
+
+    kube_config = os.path.expanduser("~/.kube/config")
+    api = pykube.HTTPClient(pykube.KubeConfig.from_file(kube_config))
+    pods = list(pykube.Pod.objects(api).filter( field_selector={ "metadata.name": pod_name } ))
+    if len(pods) > 1:
+        print("{} pods had the name {}".format(len(pods), pod_name))
+    elif len(pods) == 0:
+        print("Could not find pod named {}".format(pod_name))
+    else:
+        pod = pods[0]
+        print(pod.logs(tail_lines=lines))
+

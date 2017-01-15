@@ -1,20 +1,13 @@
 import time
-import random
 import logging
 import os
 import json
-import re
 import sys
-import hashlib
-import tempfile
-import subprocess
-from glob import glob
 
 from kubeque import kubesub as kube
 from kubeque.kubesub import submit_job
 from kubeque.gcp import create_gcs_job_queue, IO
 from kubeque.hasher import CachingHashFunction
-from contextlib import contextmanager
 
 from kubeque.spec import make_spec_from_command
 import csv
@@ -151,7 +144,8 @@ def submit(jq, io, job_id, spec, dry_run, config, skip_kube_submit):
             resources = spec["resources"]
             submit_job(job_id, parallelism, image, kubeque_command, cpu_request=resources.get("cpu",config['default_resource_cpu']), mem_limit=resources.get("memory",config["default_resource_memory"]))
         else:
-            log.info("Skipping submission: %s", " ".join(kubeque_command))
+            image = spec['image']
+            log.info("Skipping submission.  You can execute tasks locally via %s", " ".join(["docker", "run", "-v", os.path.expanduser("~/.config/gcloud")+":/google-creds", "-e", "GOOGLE_APPLICATION_CREDENTIALS=/google-creds/application_default_credentials.json", image] + kubeque_command + ["--nodename", "local"]))
         return config_url
 
 def load_config(config_file):
@@ -165,7 +159,7 @@ def load_config(config_file):
 
 def load_config_from_dict(config):
     io = IO(config['project'], config['cas_url_prefix'])
-    jq = create_gcs_job_queue(config['project'])
+    jq = create_gcs_job_queue(config['project'], config['cluster_name'])
 
     return jq, io
 
@@ -235,7 +229,7 @@ def submit_cmd(jq, io, args, config):
     log.debug("spec: %s", json.dumps(spec, indent=2))
     submit(jq, io, job_id, spec, args.dryrun, config, args.skip_kube_submit)
 
-    if not args.dryrun and args.wait_for_completion:
+    if not (args.dryrun or args.skip_kube_submit) and args.wait_for_completion:
         log.info("Waiting for job to terminate")
         watch(jq, job_id)
         if args.fetch:
@@ -253,11 +247,15 @@ def status_cmd(jq, io, args):
     jobid_pattern = args.jobid_pattern
     if not jobid_pattern:
         jobid_pattern = "*"
+
     for jobid in jq.get_jobids(jobid_pattern):
         if args.detailed:
             for task in jq.get_tasks(jobid):
-                log.info("task_id: %s, status: %s, owner: %s, failure_reason: %s, args: %s, history: %s", task.task_id,
-                         task.status, task.owner, task.failure_reason, task.args, task.history)
+                log.info("task_id: %s\n"
+                         "  status: %s, failure_reason: %s\n"
+                         "  started on pod: %s\n"
+                         "  args: %s, history: %s", task.task_id,
+                         task.status, task.failure_reason, task.owner, task.args, task.history)
         else:
             counts = jq.get_status_counts(jobid)
             status_str = ", ".join([ "{}: {}".format(status, count) for status, count in counts.items()])
@@ -320,6 +318,7 @@ def watch(jq, jobid, refresh_delay=5):
         time.sleep(refresh_delay)
 
 def remove_cmd(jq, args):
+    # TODO: Maybe rename as "clean" and also remove all pods/jobs which are complete _and_ are not referenced by a job
     jobids = jq.get_jobids(args.jobid_pattern)
     for jobid in jobids:
         status_counts = jq.get_status_counts(jobid)
@@ -336,6 +335,25 @@ def start_cmd(config):
 def stop_cmd(config):
     kube.stop_cluster(config['cluster_name'])
 
+def add_node_pool_cmd(config, args):
+    import uuid
+    if args.name:
+        node_pool_name = args.name
+    else:
+        if args.preemptable:
+            prefix = "preempt"
+        else:
+            prefix = "reserve"
+        node_pool_name = prefix + "-" + uuid.uuid4().hex[:6]
+    kube.add_node_pool(config['cluster_name'], node_pool_name, args.machinetype, args.count, args.min, args.max, args.autoscale, args.preemptable)
+
+def resize_node_pool_cmd(config, args):
+    raise Exception("unimplemented")
+
+def rm_node_pool_cmd(config, args):
+
+    kube.rm_node_pool(config['cluster_name'], args.node_pool_name)
+
 def kill_cmd(jq, args):
     jobids = jq.get_jobids(args.jobid_pattern)
     for jobid in jobids:
@@ -343,6 +361,9 @@ def kill_cmd(jq, args):
         # TODO: stop just marks the job as it shouldn't run any more.  tasks will still be claimed.
         # do we let the re-claimer transition these to pending?  Or do we cancel pending and mark claimed as failed?
         # probably we should
+
+def peek_cmd(args):
+    kube.peek(args.pod_name, args.lines)
 
 import argparse
 
@@ -400,6 +421,34 @@ def main(argv=None):
     parser.set_defaults(func=fetch_cmd)
     parser.add_argument("jobid")
     parser.add_argument("dest", help="The path to the directory where the results will be downloaded")
+
+    parser = subparser.add_parser("add-node-pool")
+    parser.set_defaults(func=add_node_pool_cmd)
+    parser.add_argument("machinetype")
+    parser.add_argument("--name")
+    parser.add_argument("--count", "-n", default=1)
+    parser.add_argument("--max")
+    parser.add_argument("--min")
+    parser.add_argument("--autoscale", action="store_true")
+    parser.add_argument("--preemptable", action="store_true")
+
+    parser = subparser.add_parser("resize-node-pool")
+    parser.set_defaults(func=resize_node_pool_cmd)
+    parser.add_argument("name")
+    parser.add_argument("--count", "-n", default=1)
+    parser.add_argument("--max")
+    parser.add_argument("--min")
+    parser.add_argument("--autoscale", action="store_true")
+    parser.add_argument("--preemptable", action="store_true")
+
+    parser = subparser.add_parser("rm-node-pool")
+    parser.set_defaults(func=rm_node_pool_cmd)
+    parser.add_argument("node_pool_name")
+
+    parser = subparser.add_parser("peek")
+    parser.set_defaults(func=peek_cmd)
+    parser.add_argument("pod_name")
+    parser.add_argument("--lines", default=100, type=int)
 
     args = parse.parse_args(argv)
     
