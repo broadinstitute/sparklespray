@@ -1,9 +1,38 @@
 # Kubeque: Easy submission of batch jobs to kubernetes
 
+"Kubernetes is an open-source system for automating deployment, scaling, and management of containerized applications."
+
+(See also https://kubernetes.io/ )
+
+kubeque is a command line tool to make it easy to manage a kubernetes cluster via googles GKE service and submit adhoc batch jobs that cluster. 
+
+
 # Getting started:
+
+## Overview
+
+To run a process or batch of processes via kubeque, you will need to:
+
+1. Create a kubernetes cluster (kubeque start)
+2. Create a docker image and upload into a repository that the cluster can access.   
+3. Submit the actual job (kubeque sub ...)
+4. You then may optionally download the output or leave it in google storage for later.  (kubeque fetch ...) 
+
+When you're all done, you may want to remove the cluster entirely (kubeque stop)
 
 ## Prereqs
 Google's cloud SDK installed and in your path: https://cloud.google.com/sdk/
+
+run `gcloud init` to finsh sdk setup.
+
+install kubectl via `gcloud components update kubectl`
+
+Then to provide your google credentials to kubeque, thus giving it the access needed to submit jobs, run:
+ 
+```
+gcloud auth application-default login
+```
+
 
 ## Setting up
 
@@ -34,6 +63,14 @@ cd examples/docker
 ./prepare-image PROJECT_NAME
 ```
 
+or
+```
+docker build . -t us.gcr.io/broad-achilles/demeter
+gcloud docker push us.gcr.io/broad-achilles/demeter
+```
+
+GKE is simple to use with the docker repository within GKE.  To push to that repo, my buil
+
 ## Running jobs
 
 recorded a session as:
@@ -52,6 +89,12 @@ cd examples/sample-job
 kubeque sub -n sample-job python3 '^mandelbrot.py' 0 0 0.5
 ```
 
+Submit a sample job reserving 1G of memory
+
+```
+kubeque sub -r memory=1G -n sample-job python3 '^mandelbrot.py' 0 0 0.5
+```
+
 Download the results
 
 ```
@@ -65,6 +108,12 @@ kubeque sub --params params.csv python3 '^mandelbrot.py' '{x_scale}' '{y_scale}'
 kubeque sub --fetch results --params params.csv python3 '^mandelbrot.py' '{x_scale}' '{y_scale}' '{zoom}'
 ```
 
+Add another class of machines for use
+
+```
+kubeque add-node-pool n-standard-16
+```
+
 Resize cluster
 
 ```
@@ -73,6 +122,19 @@ gcloud container clusters resize kubeque-cluster --size 4
 
 ## Cleaning up
 
+Kubeque remembers jobs until you explicitly remove them.   To remove all non-running jobs:
+
+```
+kubeque remove "*"
+```
+
+If there were jobs that got stuck with some "claimed" tasks, you can reset the claimed status to pending via:
+```
+kubeque reset "*"
+```
+
+After which rerunning `kubeque remove` should clean out those jobs.
+
 Once you're done running jobs, you can shut down the cluster.
 
 Stop the cluster:
@@ -80,6 +142,31 @@ Stop the cluster:
 ```
 kubeque stop
 ```
+
+## Debugging
+
+You can view the kubernetes dashboard to see what's running/status of everything starting a proxy on your local machine:
+
+```
+kubectl proxy
+```
+
+Then, you can go to http://127.0.0.1:8001 to view the dashboard.
+
+You can also ssh into any host by looking up its name (on the google console or via gcloud tool) and 
+ 
+```
+cloud compute ssh gke-kubeque-cluster-default-pool-9d31348f-wfqh
+```
+
+Alternatively you can connect to a specific container.  Find the name of the name of the container via `kubeque status --detailed`  
+You can then spawn a process within that container and look around
+
+```
+kubectl exec 20161202-231034-334e-j5nja -i -t -- bash -il
+```
+
+You can find the working directory of the task in `/tmp/task-*`
 
 # Notes
 
@@ -154,7 +241,9 @@ Could use "paralellism" to manage, but definitely not the same as having a prior
 Best I can come up with is to periodically update paralellism.  That is, while there are pods which could not be scheduled due to insufficient resources, set parallelism to other jobs to 0 to 
 effectively suspend them.
 
-### "peek" command to see live stdout/stderr output
-Would be helpful to see stdout/stderr while running.  Where/how to log?  To cloud logs?
-What should cli for fetching look like?
-Perhaps only keep a trailing log and keep in memory.  Have a redis service per node hold this?  
+### cluster monitoring
+
+We should probably report on the cluster size while jobs are running.  Two sources of this information:
+    GCP # of instances in managed groups (need to find way to go from cluster -> managed groups containing associated node pools)
+    Kubernettes reports # of nodes in the system
+    
