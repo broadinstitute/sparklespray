@@ -13,7 +13,7 @@ import shutil
 import sys
 log = logging.getLogger(__name__)
 
-KILLED_RET_CODE = -9
+KILLED_RET_CODE = 137
 
 def exec_lifecycle_script(workdir, spec, stage_name):
     if stage_name not in spec:
@@ -101,12 +101,16 @@ def consume_cmd(args):
 
         exec_lifecycle_script(workdir, spec, 'post-exec-script')
 
+        def log_and_put(src, dst):
+            log.info("Uploading %s to %s", src, dst)
+            io.put(src, dst)
+
         for ul in local_to_url_mapping:
-            io.put(os.path.join(workdir, ul['src']), ul['dst_url'])
+            log_and_put(os.path.join(workdir, ul['src']), ul['dst_url'])
 
         write_result_file(result_path, retcode, workdir, local_to_url_mapping)
-        io.put(result_path, spec['command_result_url'])
-        io.put(stdout_path, spec['stdout_url'])
+        log_and_put(result_path, spec['command_result_url'])
+        log_and_put(stdout_path, spec['stdout_url'])
 
         log.info("retcode = %s", repr(retcode))
         return retcode != KILLED_RET_CODE
@@ -144,10 +148,34 @@ def write_result_file(command_result_path, retcode, workdir, local_to_url_mappin
 def exec_command_(command, workdir, stdout):
     log.info("(workingdir: %s) Executing: %s", workdir, command)
     stdoutfd = os.open(stdout, os.O_WRONLY | os.O_APPEND | os.O_CREAT)
+
+    handle_for_polling = open(stdout, "rt")
+    def poll_stdout_file():
+        while True:
+            b = handle_for_polling.read(8000)
+            if b == "":
+                break
+            sys.stdout.write(b)
+            sys.stdout.flush()
+
     try:
-        retcode = subprocess.call(command, stderr=subprocess.STDOUT, stdout=stdoutfd, shell=True, cwd=workdir)
+        # TODO: Change this to async execution and poll stdout file, dumping the contents to our stdout?
+        # that way the in-progress stdout would be visible in the POD log.
+        p = subprocess.Popen(command, stderr=subprocess.STDOUT, stdout=stdoutfd, shell=True, cwd=workdir)
+        while True:
+            try:
+                poll_stdout_file()
+                retcode = p.wait(timeout=1)
+                break
+            except subprocess.TimeoutExpired:
+                pass
+
+        # do one final read now that the process has terminated
+        sys.stdout.write(handle_for_polling.read())
+
     finally:
         os.close(stdoutfd)
+        handle_for_polling.close()
     return retcode
 
 def resolve_uploads(dir, uploads, paths_to_exclude):
