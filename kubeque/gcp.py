@@ -4,6 +4,9 @@ from gcloud.datastore.query import Query
 from gcloud.datastore.query import Iterator
 import gcloud.exceptions
 
+from google.cloud.exceptions import Conflict
+
+
 from fnmatch import fnmatch
 
 from contextlib import contextmanager
@@ -38,28 +41,30 @@ class Job(object):
     tasks = attr.ib()
 
 class BatchAdapter:
-    def __init__(self, client):
+    def __init__(self, client, cluster):
         self.client = client
         self.batch = client.batch()
         self.batch.begin()
+        self.cluster = cluster
 
     def save(self, o):
         if isinstance(o, Task):
             # The name/ID for the new entity
-            entity = task_to_entity(self.client, o)
+            entity = task_to_entity(self.client, o, self.cluster)
 
         else:
             assert isinstance(o, Job)
             entity_key = self.client.key("Job", o.job_id)
             entity = datastore.Entity(key=entity_key)
             entity['tasks'] = o.tasks
+            entity['cluster'] = self.cluster
 
         self.batch.put(entity)
     
     def commit(self):
         self.batch.commit()
 
-def task_to_entity(client, o):
+def task_to_entity(client, o, cluster):
     entity_key = client.key("Task", o.task_id)
     entity = datastore.Entity(key=entity_key)
     entity['task_index'] = o.task_index
@@ -69,6 +74,7 @@ def task_to_entity(client, o):
     entity['owner'] = o.owner
     entity['args'] = o.args
     entity['failure_reason'] = o.failure_reason
+    entity['cluster'] = cluster
     # can't save a list of dicts?
 #            entity['history'] = o.history
     entity['version'] = o.version
@@ -89,8 +95,9 @@ def entity_to_task(entity):
     )
 
 class JobStorage:
-    def __init__(self, client):
+    def __init__(self, client, cluster_name):
         self.client = client
+        self.cluster_name = cluster_name
 
     def get_task(self, task_id):
         task_key = self.client.key("Task", task_id)
@@ -98,6 +105,7 @@ class JobStorage:
 
     def get_jobids(self):
         query = self.client.query(kind="Job")
+        query.add_filter("cluster", "=", self.cluster_name)
         jobs_it = query.fetch()
         jobids = []
         for entity_job in jobs_it:
@@ -112,6 +120,7 @@ class JobStorage:
 
     def get_tasks(self, job_id = None, status = None, max_fetch=None):
         query = self.client.query(kind="Task")
+        query.add_filter("cluster", "=", self.cluster_name)
         if job_id is not None:
             query.add_filter("job_id", "=", job_id)
         if status is not None:
@@ -132,47 +141,50 @@ class JobStorage:
         log.debug("get_tasks took %s seconds", end_time-start_time)
         return tasks
 
-    def atomic_task_update(self, task_id, expected_version, mutate_task_callback):
+    def atomic_task_update(self, task_id, mutate_task_callback):
         try:
             with self.client.transaction():
 #                log.info("atomic update of task %s start version: %s", task_id, expected_version)
                 task_key = self.client.key("Task", task_id)
                 entity_task = self.client.get(task_key)
-#                print("atomic update of task", task_id, "start, version:", expected_version, "status:", entity_task["status"])
-                if entity_task['version'] != expected_version:
-                    return False
+                print("atomic update of task", task_id, "start, status:", entity_task["status"])
 
                 task = entity_to_task(entity_task)
-                mutate_task_callback(task)
+                successful_update = mutate_task_callback(task)
+                if not successful_update:
+                    return False
                 task.version = task.version + 1
-                self.client.put(task_to_entity(self.client, task))
+                self.client.put(task_to_entity(self.client, task, self.cluster_name))
                 
-#                print("atomic update of task", task_id, "success, version:", task.version, "status", task.status)
+                print("atomic update of task", task_id, "success, version:", task.version, "status", task.status)
                 return True
-        except google.cloud.exceptions.Conflict:
+        except Conflict:
             log.warn("Caught exception: Conflict")
             return False            
 
     def update_task(self, task):
         original_version = task.version
         task.version = original_version + 1
-        self.client.put(task_to_entity(self.client, task))
+        self.client.put(task_to_entity(self.client, task, self.cluster_name))
 #        updated = task.save(version__eq = original_version)
         return True
     
     @contextmanager
     def batch_write(self):
-        batch = BatchAdapter(self.client)
+        batch = BatchAdapter(self.client, self.cluster_name)
         yield batch
         batch.commit()
+
+STATUS_CLAIMED = "claimed"
+STATUS_PENDING = "pending"
 
 class JobQueue:
     def __init__(self, storage):
         self.storage = storage 
 
     def get_claimed_task_ids(self):
-        tasks = self.storage.get_tasks(status="claimed")
-        tasks = [t for t in tasks if t.status == "claimed"]
+        tasks = self.storage.get_tasks(status=STATUS_CLAIMED)
+        tasks = [t for t in tasks if t.status == STATUS_CLAIMED]
         for t in tasks:
             assert t.owner is not None
         return [(t.task_id, t.owner) for t in tasks]
@@ -203,7 +215,7 @@ class JobQueue:
             if owner is not None and owner != task.owner:
                 continue
             task.owner = None
-            task.status = "pending"
+            task.status = STATUS_PENDING
             task.history.append( dict(timestamp=now, status="reset") )
             self.storage.update_task(task)
 
@@ -213,8 +225,8 @@ class JobQueue:
         with self.storage.batch_write() as batch:
             for i, arg in enumerate(args):
                 task_id = "{}.{}".format(job_id, i)
-                task = Task(task_id=task_id, 
-                    task_index=i, 
+                task = Task(task_id=task_id,
+                    task_index=i,
                     job_id=job_id, 
                     status="pending", 
                     args=arg, 
@@ -249,10 +261,14 @@ class JobQueue:
             task = random.choice(tasks)
 
             def mutate_task(task):
+                if task.status != STATUS_PENDING:
+                    return False
                 task.owner = new_owner
-                task.status = "claimed"
-                task.history.append( dict(timestamp=now, status="claimed", owner=new_owner) )
-            updated = self.storage.atomic_task_update(task.task_id, task.version, mutate_task)
+                task.status = STATUS_CLAIMED
+                task.history.append( dict(timestamp=now, status=STATUS_CLAIMED, owner=new_owner) )
+                return True
+
+            updated = self.storage.atomic_task_update(task.task_id, mutate_task)
 
             if updated:
                 return task.task_id, task.args
@@ -284,11 +300,11 @@ class JobQueue:
     def owner_lost(self, owner):
         tasks = self.Task.scan(owner == owner)
         for task in tasks:
-            self._update_task_status(task_id, "lost")
+            self._update_task_status(task.task_id, "lost")
 
-def create_gcs_job_queue(project_id):
+def create_gcs_job_queue(project_id, cluster_name):
     client = datastore.Client(project_id)
-    storage = JobStorage(client)
+    storage = JobStorage(client, cluster_name)
     return JobQueue(storage)
 
 from gcloud.storage.client import Client as GSClient
@@ -374,9 +390,71 @@ class IO:
         obj_str = json.dumps(obj)
         return self.write_str_to_cas(obj_str)
 
-
+from collections import namedtuple
+NodePoolInfo = namedtuple("NodePoolInfo", "name machine_type disk_size_gb target_size running creating creating_without_retries recreating deleting abandoning restarting refreshing")
 
 # from oauth2client.contrib import gce
 # credentials = gce.AppAssertionCredentials(
 #     scope='https://www.googleapis.com/auth/devstorage.read_write')
 # http = credentials.authorize(httplib2.Http())
+
+# import httplib2
+#
+# from google.cloud.client import JSONClient
+# class ProjectConnection(_http.JSONConnection):
+#     API_BASE_URL = "https://www.googleapis.com"
+#     API_VERSION = 'v1'
+#     API_URL_TEMPLATE = '{api_base_url}/projects/{api_version}{path}'
+#     SCOPE = ('https://www.googleapis.com/auth/devstorage.full_control',
+#              'https://www.googleapis.com/auth/devstorage.read_only',
+#              'https://www.googleapis.com/auth/devstorage.read_write')
+#
+# class NodePoolQuery:
+#     def __init__(self):
+#         self._connection = ProjectConnection()
+# #        from oauth2client.contrib import gce
+# #
+# #        credentials = gce.AppAssertionCredentials(
+# #            scope='https://www.googleapis.com/auth/devstorage.read_write')
+# #        self.http = credentials.authorize(httplib2.Http())
+#
+#     def _get(self, url):
+#         resp, content = self.http.request(url, "GET")
+#         return json.loads(content)
+#
+#     def get_node_pools(self, project_id, zone, cluster):
+#         node_pools = []
+#         response_json = self._connection.api_request(method="GET", path="/{project_id}/zones/{zone}/clusters/{cluster}/nodePools".format(
+#             project_id=project_id,
+#             zone=zone,
+#             cluster=cluster
+#         ))
+#         for np in response_json["nodePools"]:
+#             for instance_group_url in np["instanceGroupUrls"]:
+#                 print(instance_group_url)
+#                 self._connection.api_request(method="GET",
+#                                              path="/{project_id}/zones/{zone}/clusters/{cluster}/nodePools".format(
+#                                                  project_id=project_id,
+#                                                  zone=zone,
+#                                                  cluster=cluster
+#                                              ))
+#                 instance_group = self._get(instance_group_url)
+#                 #https: // www.googleapis.com / compute / v1 / projects / broad - achilles / zones / us - east1 - b / instanceGroupManagers / gke - kubeque - cluster - default - pool - 5
+#                 #d999586 - grp?key = {YOUR_API_KEY}
+#                 actions = instance_group["currentActions"]
+#                 np = NodePoolInfo(name=np["name"],
+#                                   machine_type=np["machineType"],
+#                                   disk_size_gb=np["diskSizeGb"],
+#                                   target_size=instance_group["targetSize"],
+#                                   running=actions["none"],
+#                                   creating=actions["creating"],
+#                                   creating_without_retries=actions["creatingWithoutRetries"],
+#                                   recreating=actions['recreating'],
+#                                   deleting=actions["deleting"],
+#                                   abandoning=actions["abandoning"],
+#                                   restarting=actions["restarting"],
+#                                   refreshing=actions["refreshing"]
+#                                   )
+#                 node_pools.append(np)
+#         return node_pools
+
