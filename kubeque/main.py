@@ -87,7 +87,7 @@ def rewrite_downloads(io, downloads, default_url_prefix):
 
 def upload_config_for_consume(io, config):
     consume_config = {}
-    for key in ['cas_url_prefix', 'project']:
+    for key in ['cas_url_prefix', 'project', "cluster_name"]:
         consume_config[key] = config[key]
 
     log.debug("consume_config: %s", consume_config)
@@ -145,7 +145,7 @@ def submit(jq, io, job_id, spec, dry_run, config, skip_kube_submit):
             submit_job(job_id, parallelism, image, kubeque_command, cpu_request=resources.get("cpu",config['default_resource_cpu']), mem_limit=resources.get("memory",config["default_resource_memory"]))
         else:
             image = spec['image']
-            log.info("Skipping submission.  You can execute tasks locally via %s", " ".join(["docker", "run", "-v", os.path.expanduser("~/.config/gcloud")+":/google-creds", "-e", "GOOGLE_APPLICATION_CREDENTIALS=/google-creds/application_default_credentials.json", image] + kubeque_command + ["--nodename", "local"]))
+            log.info("Skipping submission.  You can execute tasks locally via:\n   %s", " ".join(["gcloud", "docker", "--", "run", "-v", os.path.expanduser("~/.config/gcloud")+":/google-creds", "-e", "GOOGLE_APPLICATION_CREDENTIALS=/google-creds/application_default_credentials.json", image] + kubeque_command + ["--nodename", "local"]))
         return config_url
 
 def load_config(config_file):

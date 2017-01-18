@@ -89,6 +89,16 @@ cd examples/sample-job
 kubeque sub -n sample-job python3 '^mandelbrot.py' 0 0 0.5
 ```
 
+# Simulating a submission by running it locally
+
+The following will do all the upload data and bookkeeping normally done for jobs, but will not actually create a kubernetes job to run it.  Instead, after
+all data is uploaded, it will print the equivilent docker command which you 
+can run locally to simulate execution.  This can be helpful for debugging issues.
+
+```
+kubeque sub --skipkube python3 '^mandelbrot.py' 0 0 0.5
+```
+
 Submit a sample job reserving 1G of memory
 
 ```

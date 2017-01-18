@@ -12,4 +12,4 @@ set -ex
 (cd ../.. ; python setup.py sdist)
 cp ../../dist/kubeque-0.1.tar.gz .
 docker build . -t us.gcr.io/$PROJECT_ID/kubeque-example
-gcloud docker push us.gcr.io/$PROJECT_ID/kubeque-example
+gcloud docker -- push us.gcr.io/$PROJECT_ID/kubeque-example

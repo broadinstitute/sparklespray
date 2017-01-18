@@ -2,9 +2,8 @@
 from gcloud import datastore
 from gcloud.datastore.query import Query
 from gcloud.datastore.query import Iterator
-import gcloud.exceptions
+from gcloud.exceptions import Conflict
 
-from google.cloud.exceptions import Conflict
 
 
 from fnmatch import fnmatch
