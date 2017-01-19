@@ -66,7 +66,7 @@ def submit_job(name, parallelism, image, command, environment_vars=[], secrets=[
                 "valueFrom": {"fieldRef": {"fieldPath": "metadata.name"}}}
              ]
             }],
-          "restartPolicy": "OnFailure"
+          "restartPolicy": "Never"
         }
     }}}
 
