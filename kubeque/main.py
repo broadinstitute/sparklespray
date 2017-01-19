@@ -186,17 +186,20 @@ def expand_files_to_upload(filenames):
             src, dst = src_dst
             #assert os.path.exists(src)
 
-            if os.path.isdir(src):
-                files_in_dir = [os.path.join(src, x) for x in os.listdir(src)]
-                return [SrcDstPair(fn, os.path.join(dst, os.path.basename(fn))) for fn in files_in_dir]
+            return make_src_dst_pairs(src, dst)
+        else:
+            return make_src_dst_pairs(filename, ".")
+
+    def make_src_dst_pairs(src, dst):
+        if os.path.isdir(src):
+            files_in_dir = [os.path.join(src, x) for x in os.listdir(src)]
+            files_in_dir = [x for x in files_in_dir if not os.path.isdir(x)]
+            return [SrcDstPair(fn, os.path.normpath(os.path.join(dst, os.path.basename(fn)))) for fn in files_in_dir]
+        else:
+            if dst == ".":
+                return [SrcDstPair(src, os.path.basename(src))]
             else:
                 return [SrcDstPair(src, dst)]
-        else:
-            if os.path.isdir(filename):
-                files_in_dir = [os.path.join(filename, x) for x in os.listdir(filename)]
-                return [SrcDstPair(fn, os.path.basename(fn)) for fn in files_in_dir]
-            else:
-                return [SrcDstPair(filename, os.path.basename(filename))]
 
     # preprocess list of files to handle those that are actual a file containing list of more files
     expanded = []

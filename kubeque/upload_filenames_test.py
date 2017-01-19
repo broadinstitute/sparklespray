@@ -26,3 +26,16 @@ def test_dir_upload(tmpdir):
 
     assert expand_files_to_upload([dirname]) == [SrcDstPair(dirname+"/a", "a"), SrcDstPair(dirname+"/b", "b")]
     assert expand_files_to_upload([dirname+":x"]) == [SrcDstPair(dirname+"/a", "x/a"), SrcDstPair(dirname+"/b", "x/b")]
+
+
+def test_skip_subdir_upload(tmpdir):
+    dirname = str(tmpdir.join("files"))
+    os.makedirs(dirname)
+    os.makedirs(dirname+"/sub")
+
+    with open(dirname+"/a", "wt") as fd:
+        fd.write("a")
+    with open(dirname+"/sub/b", "wt") as fd:
+        fd.write("b")
+
+    assert expand_files_to_upload([dirname]) == [SrcDstPair(dirname+"/a", "a")]
