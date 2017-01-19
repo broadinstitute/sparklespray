@@ -84,16 +84,18 @@ class Download:
         return d
 
 DownloadsAndCommand = collections.namedtuple("DownloadsAndCommand", "downloads command")
+SrcDstPair = collections.namedtuple("SrcDstPair", "src dst")
 
-def add_file_to_pull_to_wd(filename, upload_map, hash_function, is_executable_function, cas_url, files_to_dl):
-    if filename in upload_map:
-        url = upload_map[filename]
+def add_file_to_pull_to_wd(src_dst_pair, upload_map, hash_function, is_executable_function, cas_url, files_to_dl):
+    assert isinstance(src_dst_pair, SrcDstPair)
+    if src_dst_pair.src in upload_map:
+        url = upload_map[src_dst_pair.src]
     else:
-        h = hash_function(filename)
+        h = hash_function(src_dst_pair.src)
         url = cas_url + h
-        upload_map[filename] = url
+        upload_map[src_dst_pair.src] = url
 
-    files_to_dl.append( Download(url, filename, is_executable_function(filename)) )
+    files_to_dl.append( Download(url, src_dst_pair.dst, is_executable_function(src_dst_pair.src)) )
 
 
 def rewrite_argvs_files_to_upload(list_of_argvs, cas_url, hash_function, is_executable_function, extra_files):
@@ -111,12 +113,12 @@ def rewrite_argvs_files_to_upload(list_of_argvs, cas_url, hash_function, is_exec
                 return x
             else:
                 filename = m.group(1)
-                add_file_to_pull_to_wd(filename, upload_map, hash_function, is_executable_function, cas_url, files_to_dl)
+                add_file_to_pull_to_wd(SrcDstPair(filename, filename), upload_map, hash_function, is_executable_function, cas_url, files_to_dl)
                 return filename
 
         l.append(DownloadsAndCommand(files_to_dl, " ".join([rewrite_filenames(x) for x in argv])))
-    for filename in extra_files:
-        add_file_to_pull_to_wd(filename, upload_map, hash_function, is_executable_function, cas_url, files_to_dl)
+    for src_dst_pair in extra_files:
+        add_file_to_pull_to_wd(src_dst_pair, upload_map, hash_function, is_executable_function, cas_url, files_to_dl)
     return upload_map, l
 
 def is_executable(filename):

@@ -9,7 +9,7 @@ from kubeque.kubesub import submit_job
 from kubeque.gcp import create_gcs_job_queue, IO
 from kubeque.hasher import CachingHashFunction
 
-from kubeque.spec import make_spec_from_command
+from kubeque.spec import make_spec_from_command, SrcDstPair
 import csv
 import copy
 
@@ -79,7 +79,12 @@ def rewrite_downloads(io, downloads, default_url_prefix):
         else:
             src_url = url['src_url']
 
-        return dict(src_url=src_url, dst=url['dst'], executable=url.get("executable", False))
+        dst = os.path.normpath(url['dst'])
+        # only allow paths to be relative to working directory
+        assert not (dst.startswith("../"))
+        assert not (dst.startswith("/"))
+
+        return dict(src_url=src_url, dst=dst, executable=url.get("executable", False))
 
     src_expanded = [ rewrite_download(x) for x in downloads ]
 
@@ -174,6 +179,25 @@ def read_parameters_from_csv(filename):
         return list(csv.DictReader(fd))
 
 def expand_files_to_upload(filenames):
+    def split_into_src_dst_pairs(filename):
+        if ":" in filename:
+            src_dst = filename.split(":")
+            assert len(src_dst) == 2, "Could not split {} into a source and destination path".format(repr(filename))
+            src, dst = src_dst
+            #assert os.path.exists(src)
+
+            if os.path.isdir(src):
+                files_in_dir = [os.path.join(src, x) for x in os.listdir(src)]
+                return [SrcDstPair(fn, os.path.join(dst, os.path.basename(fn))) for fn in files_in_dir]
+            else:
+                return [SrcDstPair(src, dst)]
+        else:
+            if os.path.isdir(filename):
+                files_in_dir = [os.path.join(filename, x) for x in os.listdir(filename)]
+                return [SrcDstPair(fn, os.path.basename(fn)) for fn in files_in_dir]
+            else:
+                return [SrcDstPair(filename, os.path.basename(filename))]
+
     # preprocess list of files to handle those that are actual a file containing list of more files
     expanded = []
     for filename in filenames:
@@ -183,7 +207,13 @@ def expand_files_to_upload(filenames):
                 expanded.extend(file_list)
         else:
             expanded.append(filename)
-    return expanded 
+
+
+    fully_expanded = []
+    for x in expanded:
+        fully_expanded.extend(split_into_src_dst_pairs(x))
+
+    return fully_expanded
 
 def submit_cmd(jq, io, args, config):
     if args.image:
