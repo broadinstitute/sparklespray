@@ -83,6 +83,8 @@ def consume_cmd(args):
                 else:
                     log.info("No download, %s already exists", cache_dest_name)
                 log.info("Copying %s to %s", cache_dest_name, destination)
+                if not os.path.exists(os.path.dirname(destination)):
+                    os.makedirs(os.path.dirname(destination))
                 shutil.copy(cache_dest_name, destination)
             else:
                 log.info("%s does not look at a CAS url. Skipping caching", src_url)
