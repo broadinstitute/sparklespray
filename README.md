@@ -89,6 +89,28 @@ cd examples/sample-job
 kubeque sub -n sample-job python3 '^mandelbrot.py' 0 0 0.5
 ```
 
+# Submitting along with multiple files that are needed by job
+
+Files can automatically be uploaded from your local host on submission, and will be downloaded to the working directory before your job starts.  You can specify what files you'd like uploaded with the "-u" option.
+
+For example:
+
+```
+kubeque sub -n sample-job -u mandelbrot.py python3 mandelbrot.py 0 0 0.5
+```
+
+will upload the latest mandelbrot.py and download it onto the remote machine before execution starts.   It's worth noting that this is equvilient to:
+```
+kubeque sub -n sample-job python3 '^mandelbrot.py' 0 0 0.5
+```
+
+If you have many files that your job depends on, it may be easier to list the files in a seperate file (one filename per line) and upload all of the files by specifying '-u @file_list'
+
+If a directory is specified then each file within that directory will be uploaded.
+When files are downloaded onto the remote node, they are always placed within the current working directory.  You can override that behavior by appending ":destination_path" onto the end of the filename.
+
+For example "-u /users/pgm/foo" will be stored on the execution host in "./foo".     However, if you specify the file as '-u /users/pgm/foo:pgm/foo' then it will be stored in ./pgm/foo
+
 # Simulating a submission by running it locally
 
 The following will do all the upload data and bookkeeping normally done for jobs, but will not actually create a kubernetes job to run it.  Instead, after
