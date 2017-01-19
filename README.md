@@ -183,7 +183,7 @@ You can view the kubernetes dashboard to see what's running/status of everything
 kubectl proxy
 ```
 
-Then, you can go to http://127.0.0.1:8001 to view the dashboard.
+Then, you can go to http://127.0.0.1:8001/ui to view the dashboard.
 
 You can also ssh into any host by looking up its name (on the google console or via gcloud tool) and 
  
