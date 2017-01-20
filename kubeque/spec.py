@@ -117,8 +117,10 @@ def rewrite_argvs_files_to_upload(list_of_argvs, cas_url, hash_function, is_exec
                 return filename
 
         l.append(DownloadsAndCommand(files_to_dl, " ".join([rewrite_filenames(x) for x in argv])))
-    for src_dst_pair in extra_files:
-        add_file_to_pull_to_wd(src_dst_pair, upload_map, hash_function, is_executable_function, cas_url, files_to_dl)
+
+        for src_dst_pair in extra_files:
+            add_file_to_pull_to_wd(src_dst_pair, upload_map, hash_function, is_executable_function, cas_url, files_to_dl)
+
     return upload_map, l
 
 def is_executable(filename):
