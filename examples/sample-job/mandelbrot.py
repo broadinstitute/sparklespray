@@ -1,6 +1,7 @@
 # script which generates ascii rendering of mandelbrot set
 # based on code copied from http://forthescience.org/blog/2010/07/12/the-mandelbrot-set-in-python/
 import argparse
+import time
 
 def main(x_center, y_center, scale, max_iteration = 1000, x_size = 100, y_size = 50):
     lines = []
@@ -31,5 +32,9 @@ if __name__ == "__main__":
     parse.add_argument("zoom", type=float)
 
     args = parse.parse_args()
+    start = time.time()
     main(args.x_center, args.y_center, 1.0/args.zoom)
+    end = time.time()
+    with open("timing.txt", "wt") as fd:
+        fd.write("Rendering took {} seconds".format(end-start))
 

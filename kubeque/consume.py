@@ -191,7 +191,7 @@ def resolve_uploads(dir, uploads, paths_to_exclude):
                     continue
                 if os.path.isdir(src_filename):
                     continue
-                resolved.append(dict(src=src_filename, dst_url=ul['dst_url']))
+                resolved.append(dict(src=src_filename, dst_url=ul['dst_url']+"/"+os.path.basename(src_filename)))
         elif "src" in ul:
             src = os.path.join(dir, ul['src'])
             if os.path.exists(src):
