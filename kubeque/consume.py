@@ -1,4 +1,3 @@
-import socket
 import stat
 import os
 import tempfile
@@ -45,7 +44,6 @@ def consume_cmd(args):
         os.makedirs(cache_dir)
 
     def exec_task(task_id, json_url):
-
         # make working directory.  A directory for the task with two subdirs ("log" where stdout/stderr is written and return code, "work" the working directory the task will be run in)
         # Returns True if child exited normally, or False if child was forcibly killed 
         taskdir = tempfile.mkdtemp(prefix="task-")

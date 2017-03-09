@@ -23,13 +23,15 @@ When you're all done, you may want to remove the cluster entirely (kubeque stop)
 ## Prereqs
 Google's cloud SDK installed and in your path: https://cloud.google.com/sdk/
 
-run `gcloud init` to finsh sdk setup.
+run `gcloud init` to finsh sdk setup and then `gcloud components install kubectl`
+to install the kubernetes command line tools.
 
 install kubectl via `gcloud components update kubectl`
 
 Then to provide your google credentials to kubeque, thus giving it the access needed to submit jobs, run:
  
 ```
+gcloud auth login
 gcloud auth application-default login
 ```
 
@@ -139,6 +141,10 @@ Submit multiple parameterized by csv file
 kubeque sub --params params.csv python3 '^mandelbrot.py' '{x_scale}' '{y_scale}' '{zoom}'
 kubeque sub --fetch results --params params.csv python3 '^mandelbrot.py' '{x_scale}' '{y_scale}' '{zoom}'
 ```
+
+Note: after fetching, each task's output directory will have a
+`parameters.json` file which contains the key/value pairs that were used
+when generating the command.
 
 Add another class of machines for use
 
@@ -279,3 +285,18 @@ We should probably report on the cluster size while jobs are running.  Two sourc
     GCP # of instances in managed groups (need to find way to go from cluster -> managed groups containing associated node pools)
     Kubernettes reports # of nodes in the system
     
+### Google authentication
+
+We should create a command "init" which prompts for a project and creates a
+.kubeque file in the working directory.   Extra bonus points for creating a
+credential file.  Credential file should be referenced in config file.
+
+`client = Client.from_service_account_json('/path/to/keyfile.json')` should
+be used to create client which uses stored credentials.
+
+might be complicated to switch gcloud to use custom credentials.  Looks like
+requires a complex process of using ` gcloud auth activate-service-account `
+to remember credentials, create a custom config `gcloud config` and then
+provide a --configuration flag for each command.   Alternatively, we could 
+use google api calls for everything.   However, the catch there is not all
+api calls are in the python lib.  Not clear best solution.

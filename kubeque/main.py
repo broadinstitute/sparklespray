@@ -106,13 +106,17 @@ def expand_tasks(spec, io, default_url_prefix, default_job_url_prefix):
     common['uploads'] = rewrite_uploads(common.get('uploads', []), default_job_url_prefix)
 
     tasks = []
-    for task_i, task in enumerate(spec['tasks']):
+    for task_i, spec_task in enumerate(spec['tasks']):
         task_url_prefix = "{}/{}".format(default_job_url_prefix, task_i+1)
-        task = expand_task_spec(common, task)
+        task = expand_task_spec(common, spec_task)
         task['downloads'] = rewrite_downloads(io, task['downloads'], default_url_prefix)
         task['uploads'] = rewrite_uploads(task['uploads'], task_url_prefix)
         task['stdout_url'] = rewrite_url_with_prefix(task['stdout_url'], task_url_prefix)
         task['command_result_url'] = rewrite_url_with_prefix(task['command_result_url'], task_url_prefix)
+        task['parameters'] = spec_task['parameters']
+
+        assert set(spec_task.keys()).issubset(task.keys()), "task before expand: {}, after expand: {}".format(spec_task.keys(), task.keys())
+
         tasks.append(task)
     return tasks
 
@@ -133,7 +137,7 @@ def submit(jq, io, job_id, spec, dry_run, config, skip_kube_submit):
             url = io.write_json_to_cas(task)
             task_spec_urls.append(url)
         else:
-            print("task post expand:", json.dumps(task, indent=2))
+            log.debug("task post expand: %s", json.dumps(task, indent=2))
 
     log.info("job_id: %s", job_id)
     if not dry_run:
@@ -318,6 +322,10 @@ def fetch_cmd_(jq, io, jobid, dest_root):
 
         io.get(spec['stdout_url'], os.path.join(dest, "stdout.txt"))
 
+        # save parameters taken from spec
+        with open(os.path.join(dest, "parameters.json"), "wt") as fd:
+            fd.write(json.dumps(spec['parameters']))
+
         command_result = json.loads(io.get_as_str(spec['command_result_url']))
         log.debug("command_result: %s", json.dumps(command_result))
         for ul in command_result['files']:
@@ -405,10 +413,10 @@ def get_func_parameters(func):
     return inspect.getargspec(func)[0]
 
 def main(argv=None):
-    logging.basicConfig(level=logging.INFO)
 
     parse = argparse.ArgumentParser()
     parse.add_argument("--config", default=None)
+    parse.add_argument("--debug", action="store_true", help="If set, debug messages will be output")
     subparser = parse.add_subparsers()
 
     parser = subparser.add_parser("sub", help="Submit a command (or batch of commands) for execution")
@@ -484,7 +492,12 @@ def main(argv=None):
     parser.add_argument("--lines", default=100, type=int)
 
     args = parse.parse_args(argv)
-    
+
+    if args.debug:
+        logging.basicConfig(level=logging.DEBUG)
+    else:
+        logging.basicConfig(level=logging.INFO)
+
     if not hasattr(args, 'func'):
         parse.print_help()
         sys.exit(1)

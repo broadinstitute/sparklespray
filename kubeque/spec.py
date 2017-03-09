@@ -160,6 +160,10 @@ def make_spec_from_command(argv,
 
     upload_map, list_of_dl_and_commands = rewrite_argvs_files_to_upload(list_of_argvs, cas_url, hash_function, is_executable_function, extra_files)
 
+    # we're able to index into parameters and list_of_dl_and_commands because they should be in
+    # the same order.
+    assert len(list_of_dl_and_commands) == len(parameters)
+
     tasks = []
     for task_i, dl_and_command in enumerate(list_of_dl_and_commands):
         tasks.append(dict(
@@ -168,7 +172,8 @@ def make_spec_from_command(argv,
             uploads=[
                 dict(src_wildcard=src_wildcard,
                     dst_url="".format(dest_url, task_i))
-                ]
+                ],
+            parameters=parameters[task_i]
         ))
 
     spec = {
