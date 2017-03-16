@@ -29,55 +29,58 @@ def add_secret_mount(config, secret_name, mount_path):
       "mountPath": mount_path        
     })
 
-def submit_job(name, parallelism, image, command, environment_vars=[], secrets=[], cpu_request="1.0", mem_limit="100M"):
+def create_kube_job_spec(name, parallelism, image, command, environment_vars=[], secrets=[], cpu_request="1.0", mem_limit="100M"):
     assert isinstance(command, list)
     config = {"apiVersion": "batch/v1",
-     "kind": "Job",
-     "metadata": {"name": name},
-     "spec": {
-      "parallelism": parallelism,
-#      "completions": 1,
-      "template": {
-        "metadata": {
-          "name": name
-        },
-        "spec": {
-          "imagePullSecrets": [{"name": "kubeque-registry-key"}],
-          "volumes": [
-              {"name": "host-var-volume",
-               "hostPath": {
-                   "path": "/var"
-               }}
-          ],
-          "containers": [{
-             "name": name,
-             "image": image,
-             "volumeMounts": [{
-               "mountPath": "/host-var",
-               "name": "host-var-volume"
-             }],
-             "command": command,
-             "resources": {
-               "requests": { "cpu": cpu_request, "memory": mem_limit },
-               "limits": { "memory": mem_limit },
-             },
-             "env": [
-               {"name": "KUBE_POD_NAME",
-                "valueFrom": {"fieldRef": {"fieldPath": "metadata.name"}}}
-             ]
-            }],
-          "restartPolicy": "Never"
-        }
-    }}}
+              "kind": "Job",
+              "metadata": {"name": name},
+              "spec": {
+                  "parallelism": parallelism,
+                  #      "completions": 1,
+                  "template": {
+                      "metadata": {
+                          "name": name
+                      },
+                      "spec": {
+                          "imagePullSecrets": [{"name": "kubeque-registry-key"}],
+                          "volumes": [
+                              {"name": "host-var-volume",
+                               "hostPath": {
+                                   "path": "/var"
+                               }}
+                          ],
+                          "containers": [{
+                              "name": name,
+                              "image": image,
+                              "volumeMounts": [{
+                                  "mountPath": "/host-var",
+                                  "name": "host-var-volume"
+                              }],
+                              "command": command,
+                              "resources": {
+                                  "requests": {"cpu": cpu_request, "memory": mem_limit},
+                                  "limits": {"memory": mem_limit},
+                              },
+                              "env": [
+                                  {"name": "KUBE_POD_NAME",
+                                   "valueFrom": {"fieldRef": {"fieldPath": "metadata.name"}}}
+                              ]
+                          }],
+                          "restartPolicy": "Never"
+                      }
+                  }}}
 
     for secret_name, mount_path in secrets:
-      add_secret_mount(config, secret_name, mount_path)
+        add_secret_mount(config, secret_name, mount_path)
 
     for name, value in environment_vars:
-      add_environment_var(name, value)
+        add_environment_var(name, value)
 
+    return json.dumps(config)
+
+def submit_job_spec(job_spec):
     with tempfile.NamedTemporaryFile("wt") as t:
-      json.dump(config, t)
+      t.write(job_spec)
       t.flush()
       cmd = ["kubectl", "create", "-f", t.name]
       execute_command(cmd)

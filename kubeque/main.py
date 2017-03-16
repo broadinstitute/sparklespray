@@ -5,14 +5,13 @@ import json
 import sys
 
 from kubeque import kubesub as kube
-from kubeque.kubesub import submit_job
-from kubeque.gcp import create_gcs_job_queue, IO
+from kubeque.kubesub import submit_job_spec, create_kube_job_spec
+from kubeque.gcp import create_gcs_job_queue, IO, STATUS_PENDING
 from kubeque.hasher import CachingHashFunction
 
 from kubeque.spec import make_spec_from_command, SrcDstPair
 import csv
 import copy
-
 
 log = logging.getLogger(__name__)
 
@@ -132,6 +131,9 @@ def submit(jq, io, job_id, spec, dry_run, config, skip_kube_submit):
 
     tasks = expand_tasks(spec, io, default_url_prefix, default_job_url_prefix)
     task_spec_urls = []
+    
+    # TODO: When len(tasks) is a fair size (>100) this starts taking a noticable amount of time.
+    # Perhaps store tasks in a single blob?  Or do write with multiple requests in parallel? 
     for task in tasks:    
         if not dry_run:
             url = io.write_json_to_cas(task)
@@ -141,17 +143,22 @@ def submit(jq, io, job_id, spec, dry_run, config, skip_kube_submit):
 
     log.info("job_id: %s", job_id)
     if not dry_run:
-        jq.submit(job_id, task_spec_urls)
         config_url = upload_config_for_consume(io, config)
+
         cas_url_prefix = config['cas_url_prefix']
         project = config['project']
         kubeque_command = ["kubeque-consume", config_url, job_id, "--project", project, "--cas_url_prefix", cas_url_prefix, "--cache_dir", "/host-var/kubeque-obj-cache"]
+        parallelism = len(tasks)
+        resources = spec["resources"]
+        image = spec['image']
+        kube_job_spec = create_kube_job_spec(job_id, parallelism, image, kubeque_command,
+                                             cpu_request=resources.get("cpu", config['default_resource_cpu']),
+                                             mem_limit=resources.get("memory", config["default_resource_memory"]))
+
+        jq.submit(job_id, task_spec_urls, kube_job_spec)
         if not skip_kube_submit:
-            image = spec['image']
             #[("GOOGLE_APPLICATION_CREDENTIALS", "/google_creds/cred")], [("kube")]
-            parallelism = len(tasks)
-            resources = spec["resources"]
-            submit_job(job_id, parallelism, image, kubeque_command, cpu_request=resources.get("cpu",config['default_resource_cpu']), mem_limit=resources.get("memory",config["default_resource_memory"]))
+            submit_job_spec(kube_job_spec)
         else:
             image = spec['image']
             log.info("Skipping submission.  You can execute tasks locally via:\n   %s", " ".join(["gcloud", "docker", "--", "run", "-v", os.path.expanduser("~/.config/gcloud")+":/google-creds", "-e", "GOOGLE_APPLICATION_CREDENTIALS=/google-creds/application_default_credentials.json", image] + kubeque_command + ["--nodename", "local"]))
@@ -279,6 +286,17 @@ def reset_cmd(jq, io, args):
     for jobid in jq.get_jobids(args.jobid_pattern):
         log.info("reseting %s", jobid)
         jq.reset(jobid, args.owner)
+        if args.resubmit:
+            pending_count = jq.get_status_counts(jobid)[STATUS_PENDING]
+            kube_job_spec_json = jq.get_kube_job_spec(jobid)
+            kube_job_spec = json.loads(kube_job_spec_json)
+            # correct parallelism to reflect the remaining jobs
+            kube_job_spec["spec"]["parallelism"] = pending_count
+            import random, string
+            name = kube_job_spec["metadata"]["name"]
+            name += "-" + (''.join(random.choice(string.ascii_lowercase + string.digits) for _ in range(5)))
+            kube_job_spec["metadata"]["name"] = name
+            submit_job_spec(json.dumps(kube_job_spec))
 
 def status_cmd(jq, io, args):
     jobid_pattern = args.jobid_pattern
@@ -301,7 +319,12 @@ def status_cmd(jq, io, args):
 def fetch_cmd(jq, io, args):
     fetch_cmd_(jq, io, args.jobid, args.dest)
 
-def fetch_cmd_(jq, io, jobid, dest_root):
+def fetch_cmd_(jq, io, jobid, dest_root, force=False):
+    def get(src, dst, **kwargs):
+        if os.path.exists(dst) and not force:
+            log.warning("%s exists, skipping download", dst)
+        return io.get(src, dst, **kwargs)
+
     tasks = jq.get_tasks(jobid)
 
     if not os.path.exists(dest_root):
@@ -309,31 +332,33 @@ def fetch_cmd_(jq, io, jobid, dest_root):
 
     include_index = len(tasks) > 1
 
-    for i, task in enumerate(tasks):
+    for task in tasks:
         spec = json.loads(io.get_as_str(task.args))
-        log.debug("task %d spec: %s", i, spec)
+        log.debug("task %d spec: %s", task.task_index+1, spec)
 
         if include_index:
-            dest = os.path.join(dest_root, str(i))
+            dest = os.path.join(dest_root, str(task.task_index+1))
             if not os.path.exists(dest):
                 os.mkdir(dest)
         else:
             dest = dest_root
 
-        io.get(spec['stdout_url'], os.path.join(dest, "stdout.txt"))
-
         # save parameters taken from spec
         with open(os.path.join(dest, "parameters.json"), "wt") as fd:
             fd.write(json.dumps(spec['parameters']))
-
-        command_result = json.loads(io.get_as_str(spec['command_result_url']))
-        log.debug("command_result: %s", json.dumps(command_result))
-        for ul in command_result['files']:
-            assert not (ul['src'].startswith("/")), "Source must be a relative path"
-            assert not (ul['src'].startswith("../")), "Source must not refer to parent dir"
-            localpath = os.path.join(dest, ul['src'])
-            log.info("Downloading to %s", localpath)
-            io.get(ul['dst_url'], localpath)
+        command_result_json = io.get_as_str(spec['command_result_url'], must=False)
+        if command_result_json is None:
+            log.warning("Results did not appear to be written yet at %s", spec['command_result_url'])
+        else:
+            get(spec['stdout_url'], os.path.join(dest, "stdout.txt"))
+            command_result = json.loads(command_result_json)
+            log.debug("command_result: %s", json.dumps(command_result))
+            for ul in command_result['files']:
+                assert not (ul['src'].startswith("/")), "Source must be a relative path"
+                assert not (ul['src'].startswith("../")), "Source must not refer to parent dir"
+                localpath = os.path.join(dest, ul['src'])
+                log.info("Downloading to %s", localpath)
+                get(ul['dst_url'], localpath)
 
 
 def is_terminal_status(status):
@@ -438,6 +463,7 @@ def main(argv=None):
     parser.set_defaults(func=reset_cmd)
     parser.add_argument("jobid_pattern")
     parser.add_argument("--owner")
+    parser.add_argument("--resubmit", action="store_true")
 
     parser = subparser.add_parser("status", help="Print the status for the tasks which make up the specified job")
     parser.set_defaults(func=status_cmd)

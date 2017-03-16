@@ -38,6 +38,7 @@ class Task(object):
 class Job(object):
     job_id = attr.ib()
     tasks = attr.ib()
+    kube_job_spec = attr.ib()
 
 class BatchAdapter:
     def __init__(self, client, cluster):
@@ -50,18 +51,22 @@ class BatchAdapter:
         if isinstance(o, Task):
             # The name/ID for the new entity
             entity = task_to_entity(self.client, o, self.cluster)
-
         else:
             assert isinstance(o, Job)
-            entity_key = self.client.key("Job", o.job_id)
-            entity = datastore.Entity(key=entity_key)
-            entity['tasks'] = o.tasks
-            entity['cluster'] = self.cluster
+            entity = job_to_entity(self.client, o, self.cluster)
 
         self.batch.put(entity)
     
     def commit(self):
         self.batch.commit()
+
+def job_to_entity(client, o, cluster):
+    entity_key = client.key("Job", o.job_id)
+    entity = datastore.Entity(key=entity_key)
+    entity['tasks'] = o.tasks
+    entity['cluster'] = cluster
+    entity['kube_job_spec'] = o.kube_job_spec
+    return entity
 
 def task_to_entity(client, o, cluster):
     entity_key = client.key("Task", o.task_id)
@@ -93,6 +98,11 @@ def entity_to_task(entity):
         failure_reason = entity.get('failure_reason')
     )
 
+def entity_to_job(entity):
+    return Job(job_id=entity.key.name,
+               tasks=entity['tasks'],
+               kube_job_spec=entity['kube_job_spec'])
+
 class JobStorage:
     def __init__(self, client, cluster_name):
         self.client = client
@@ -114,8 +124,12 @@ class JobStorage:
     def delete_job(self, jobid):
         job_key = self.client.key("Job", jobid)
         entity_job = self.client.get(job_key)
-        task_keys = [self.client.key("Task", taskid) for taskid in entity_job["tasks"]]
+        task_keys = [self.client.key("Task", taskid) for taskid in set(entity_job["tasks"])]
         self.client.delete_multi(task_keys + [job_key])
+
+    def get_job(self, job_id):
+        job_key = self.client.key("Job", job_id)
+        return entity_to_job(self.client.get(job_key))
 
     def get_tasks(self, job_id = None, status = None, max_fetch=None):
         query = self.client.query(kind="Task")
@@ -129,9 +143,10 @@ class JobStorage:
         # do I need to use next_page?
         tasks = []
         for entity_task in tasks_it:
+            #log.info("fetched: %s", entity_task)
             if status is not None:
                 if entity_task["status"] != status:
-                    log.warn("Query returned something that did not match query: %s", entity_task)
+                    log.warning("Query returned something that did not match query: %s", entity_task)
                     continue
             tasks.append(entity_to_task(entity_task))
             if max_fetch is not None and len(tasks) >= max_fetch:
@@ -176,6 +191,7 @@ class JobStorage:
 
 STATUS_CLAIMED = "claimed"
 STATUS_PENDING = "pending"
+STATUS_FAILED = "failed"
 
 class JobQueue:
     def __init__(self, storage):
@@ -195,6 +211,10 @@ class JobQueue:
         jobids = self.storage.get_jobids()
         return [jobid for jobid in jobids if fnmatch(jobid, jobid_wildcard)]
 
+    def get_kube_job_spec(self, job_id):
+        job = self.storage.get_job(job_id)
+        return job.kube_job_spec
+
     def delete_job(self, job_id):
         self.storage.delete_job(job_id)
 
@@ -208,7 +228,7 @@ class JobQueue:
         return dict(counts)
 
     def reset(self, jobid, owner):
-        tasks = self.storage.get_tasks(jobid)
+        tasks = list(self.storage.get_tasks(jobid, status=STATUS_CLAIMED)) + list(self.storage.get_tasks(jobid, status=STATUS_FAILED))
         now = time.time()
         for task in tasks:
             if owner is not None and owner != task.owner:
@@ -218,26 +238,34 @@ class JobQueue:
             task.history.append( dict(timestamp=now, status="reset") )
             self.storage.update_task(task)
 
-    def submit(self, job_id, args):
+    def submit(self, job_id, args, kube_job_spec):
         tasks = []
         now = time.time()
-        with self.storage.batch_write() as batch:
-            for i, arg in enumerate(args):
-                task_id = "{}.{}".format(job_id, i)
-                task = Task(task_id=task_id,
-                    task_index=i,
-                    job_id=job_id, 
-                    status="pending", 
-                    args=arg, 
-                    history=[dict(timestamp=now, status="pending")],
-                    owner=None)
-                tasks.append(task)
-#                print("status", batch.batch._status)
-#                print("task", task)
-                batch.save(task)
+        
+        BATCH_SIZE = 300
+        task_index = 0
+        for chunk_start in range(0, len(args), BATCH_SIZE):
+            args_batch = args[chunk_start:chunk_start+BATCH_SIZE]
+            
+            with self.storage.batch_write() as batch:
+                for arg in args_batch:
+                    task_id = "{}.{}".format(job_id, task_index)
+                    task = Task(task_id=task_id,
+                        task_index=task_index,
+                        job_id=job_id, 
+                        status="pending", 
+                        args=arg,
+                        history=[dict(timestamp=now, status="pending")],
+                        owner=None)
+                    tasks.append(task)
+                    batch.save(task)
+                    task_index += 1
+                print("saved {} tasks".format(len(args_batch)))
 
-            job = Job(job_id = job_id, tasks=[t.task_id for t in tasks])
-            batch.save(job)
+        with self.storage.batch_write() as batch:
+           job = Job(job_id = job_id, tasks=[t.task_id for t in tasks], kube_job_spec=kube_job_spec)
+           batch.save(job)
+           print("saved 1 job with {} tasks".format(len(job.tasks)))
 
     def claim_task(self, job_id, new_owner, min_try_time=0, claim_timeout=CLAIM_TIMEOUT):
         "Returns None if no unclaimed ready tasks. Otherwise returns instance of Task"
@@ -343,10 +371,13 @@ class IO:
         else:
             assert not must, "Could not find {}".format(path)
 
-    def get_as_str(self, src_url):
+    def get_as_str(self, src_url, must=True):
         bucket, path = self._get_bucket_and_path(src_url)
         blob = bucket.blob(path)
-        return blob.download_as_string().decode("utf8")
+        if blob.exists():
+            return blob.download_as_string().decode("utf8")
+        else:
+            assert not must, "Could not find {}".format(path)
 
     def put(self, src_filename, dst_url, must=True, skip_if_exists=False):
         if must:
