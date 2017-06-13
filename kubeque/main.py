@@ -470,8 +470,8 @@ def kill_cmd(jq, args):
         # do we let the re-claimer transition these to pending?  Or do we cancel pending and mark claimed as failed?
         # probably we should
 
-def peek_cmd(args):
-    kube.peek(args.pod_name, args.lines)
+def peek_cmd(config, args):
+    kube.peek(config['project'], config['zone'], config['cluster_name'], args.pod_name, args.lines)
 
 def dumpjob_cmd(jq, io, args):
     import attr

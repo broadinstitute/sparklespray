@@ -89,12 +89,15 @@ def submit_job_spec(job_spec):
 def _gcloud_cmd(args, config_name="kubeque"):
     return ["gcloud", "--configuration="+config_name] + list(args)
 
+def _full_cluster_name(project_id, zone, cluster_name):
+    return "gke_{}_{}_{}".format(project_id, zone, cluster_name)
+
 def setup_cluster_creds(project_id, zone, cluster_name, configuration):
     # setup credentials for kubectl
     execute_command(_gcloud_cmd(["container", "clusters", "get-credentials",
                                  cluster_name
                                  ]))
-    full_cluster_name = "gke_{}_{}_{}".format(project_id, zone, cluster_name)
+    full_cluster_name = _full_cluster_name(project_id, zone, cluster_name)
     # rewrite entry getting credentials
     import yaml
     import os
@@ -160,12 +163,16 @@ def rm_node_pool(cluster_name, node_pool_name):
         ])
     execute_command(cmd)
 
-def peek(pod_name, lines):
+def peek(project_id, zone, cluster_name, pod_name, lines):
     import pykube
     import os
 
     kube_config = os.path.expanduser("~/.kube/config")
-    api = pykube.HTTPClient(pykube.KubeConfig.from_file(kube_config))
+    full_cluster_name = _full_cluster_name(project_id, zone, cluster_name)
+    config = pykube.KubeConfig.from_file(kube_config)
+    config.set_current_context(full_cluster_name)
+    print("user={}".format(config.user))
+    api = pykube.HTTPClient(config)
     pods = list(pykube.Pod.objects(api).filter( field_selector={ "metadata.name": pod_name } ))
     if len(pods) > 1:
         print("{} pods had the name {}".format(len(pods), pod_name))
