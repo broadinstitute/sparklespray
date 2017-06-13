@@ -21,28 +21,31 @@ To run a process or batch of processes via kubeque, you will need to:
 When you're all done, you may want to remove the cluster entirely (kubeque stop)
 
 ## Prereqs
-Google's cloud SDK installed and in your path: https://cloud.google.com/sdk/
-
-run `gcloud init` to finsh sdk setup and then `gcloud components install kubectl`
-to install the kubernetes command line tools.
-
-install kubectl via `gcloud components update kubectl`
-
-Then to provide your google credentials to kubeque, thus giving it the access needed to submit jobs, run:
- 
-```
-gcloud auth login
-gcloud auth application-default login
-```
-
-
-## Setting up
-
 Create a google project.  In the below, we'll assume the project name is PROJECT_NAME.
 
+Google's cloud SDK installed and in your path: https://cloud.google.com/sdk/
+
+To set up gcloud, your authentication and the necessary tools to talk to
+kubernetes:
+```
+# authenticate for the gcloud tool
+gcloud auth login
+# authenticate for running tools other than gcloud
+gcloud auth application-default login
+# setup which should be the default project and zone for your cluster
+gcloud init
+# install alpha versions of the command line tools for managing the cluster
+gcloud components install alpha
+# install the kubectl tool for talking to kubernetes
+gcloud components install kubectl
+```
+
+## Setting up
 Create a bucket for holding results and uploads.  In the following example, we'll assume the name of the bucket is BUCKET_NAME.
 
-Create a config file "~/.kubeque" or in the current directory containing the following:
+Create a config file "~/.kubeque" or in the current directory containing the following
+(change the values of zone, region, and account to match what you used when
+running gcloud init):
 
 ```
 [config]
@@ -54,6 +57,9 @@ machine_type=g1-small
 default_image=us.gcr.io/PROJECT_NAME/kubeque-example
 default_resource_cpu=0.2
 default_resource_memory=100M
+zone=us-east1-b
+region=us-east1
+account=username@gmail.com
 ```
 
 ## Create an docker image that your jobs will execute within
