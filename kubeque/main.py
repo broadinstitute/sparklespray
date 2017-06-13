@@ -6,7 +6,7 @@ import sys
 
 from kubeque import kubesub as kube
 from kubeque.kubesub import submit_job_spec, create_kube_job_spec
-from kubeque.gcp import create_gcs_job_queue, IO, STATUS_PENDING
+from kubeque.gcp import create_gcs_job_queue, IO, STATUS_PENDING, get_credentials
 from kubeque.hasher import CachingHashFunction
 
 from kubeque.spec import make_spec_from_command, SrcDstPair
@@ -119,7 +119,7 @@ def expand_tasks(spec, io, default_url_prefix, default_job_url_prefix):
         tasks.append(task)
     return tasks
 
-def submit(jq, io, job_id, spec, dry_run, config, skip_kube_submit):
+def submit(jq, io, job_id, spec, dry_run, config, skip_kube_submit, metadata):
     # where to take this from? arg with a default of 1?
     if dry_run:
         skip_kube_submit = True
@@ -155,13 +155,15 @@ def submit(jq, io, job_id, spec, dry_run, config, skip_kube_submit):
                                              cpu_request=resources.get("cpu", config['default_resource_cpu']),
                                              mem_limit=resources.get("memory", config["default_resource_memory"]))
 
-        jq.submit(job_id, task_spec_urls, kube_job_spec)
+        jq.submit(job_id, task_spec_urls, kube_job_spec, metadata)
         if not skip_kube_submit:
             #[("GOOGLE_APPLICATION_CREDENTIALS", "/google_creds/cred")], [("kube")]
             submit_job_spec(kube_job_spec)
         else:
             image = spec['image']
-            log.info("Skipping submission.  You can execute tasks locally via:\n   %s", " ".join(["gcloud", "docker", "--", "run", "-v", os.path.expanduser("~/.config/gcloud")+":/google-creds", "-e", "GOOGLE_APPLICATION_CREDENTIALS=/google-creds/application_default_credentials.json", image] + kubeque_command + ["--nodename", "local"]))
+            from kubeque.kubesub import _gcloud_cmd
+            cmd = _gcloud_cmd(["gcloud", "docker", "--", "run", "-v", os.path.expanduser("~/.config/gcloud")+":/google-creds", "-e", "GOOGLE_APPLICATION_CREDENTIALS=/google-creds/application_default_credentials.json", image] + kubeque_command + ["--nodename", "local"])
+            log.info("Skipping submission.  You can execute tasks locally via:\n   %s", " ".join(cmd))
         return config_url
 
 def load_config(config_file):
@@ -173,9 +175,36 @@ def load_config(config_file):
 
     return [config] + list(load_config_from_dict(config))
 
+
+GCLOUD_CONFIG_TEMPLATE = """[core]
+account = {account}
+project = {project}
+
+[compute]
+zone = {zone}
+region = {region}
+"""
+
+def update_gcloud_config(config, dest_config_dir="~/.config/gcloud/configurations", config_name="kubeque"):
+    dest_config_dir = os.path.expanduser(dest_config_dir)
+    dest_config_path = os.path.join(dest_config_dir, "config_"+config_name)
+    gcloud_config = GCLOUD_CONFIG_TEMPLATE.format(project=config['project'],
+                                  zone=config['zone'],
+                                  region=config['region'],
+                                  account=config['account'])
+
+    # if it's already what we'd would write, skip update
+    if os.path.exists(dest_config_path):
+        if open(dest_config_path, "rt").read() == gcloud_config:
+            return
+
+    with open(dest_config_path, "wt") as fd:
+        fd.write(gcloud_config)
+
 def load_config_from_dict(config):
-    io = IO(config['project'], config['cas_url_prefix'])
-    jq = create_gcs_job_queue(config['project'], config['cluster_name'])
+    credentials = get_credentials(config['account'])
+    io = IO(config['project'], config['cas_url_prefix'], credentials)
+    jq = create_gcs_job_queue(config['project'], config['cluster_name'], credentials)
 
     return jq, io
 
@@ -230,6 +259,8 @@ def expand_files_to_upload(filenames):
     return fully_expanded
 
 def submit_cmd(jq, io, args, config):
+    metadata = {}
+
     if args.image:
         image = args.image
     else:
@@ -271,7 +302,7 @@ def submit_cmd(jq, io, args, config):
             io.put(filename, dest, skip_if_exists=True)
 
     log.debug("spec: %s", json.dumps(spec, indent=2))
-    submit(jq, io, job_id, spec, args.dryrun, config, args.skip_kube_submit)
+    submit(jq, io, job_id, spec, args.dryrun, config, args.skip_kube_submit, metadata)
 
     if not (args.dryrun or args.skip_kube_submit) and args.wait_for_completion:
         log.info("Waiting for job to terminate")
@@ -282,21 +313,31 @@ def submit_cmd(jq, io, args, config):
         else:
             log.info("Job completed.  You can download results by executing: kubeque fetch %s DEST_DIR", job_id)
 
+def _resubmit(jq, jobid):
+    pending_count = jq.get_status_counts(jobid)[STATUS_PENDING]
+    kube_job_spec_json = jq.get_kube_job_spec(jobid)
+    kube_job_spec = json.loads(kube_job_spec_json)
+    # correct parallelism to reflect the remaining jobs
+    kube_job_spec["spec"]["parallelism"] = pending_count
+    import random, string
+    name = kube_job_spec["metadata"]["name"]
+    name += "-" + (''.join(random.choice(string.ascii_lowercase + string.digits) for _ in range(5)))
+    kube_job_spec["metadata"]["name"] = name
+    submit_job_spec(json.dumps(kube_job_spec))
+
+
+def retry_cmd(jq, io, args):
+    for jobid in jq.get_jobids(args.jobid_pattern):
+        log.info("retrying %s", jobid)
+        jq.reset(jobid, args.owner)
+        _resubmit(jq, jobid)
+
 def reset_cmd(jq, io, args):
     for jobid in jq.get_jobids(args.jobid_pattern):
         log.info("reseting %s", jobid)
         jq.reset(jobid, args.owner)
         if args.resubmit:
-            pending_count = jq.get_status_counts(jobid)[STATUS_PENDING]
-            kube_job_spec_json = jq.get_kube_job_spec(jobid)
-            kube_job_spec = json.loads(kube_job_spec_json)
-            # correct parallelism to reflect the remaining jobs
-            kube_job_spec["spec"]["parallelism"] = pending_count
-            import random, string
-            name = kube_job_spec["metadata"]["name"]
-            name += "-" + (''.join(random.choice(string.ascii_lowercase + string.digits) for _ in range(5)))
-            kube_job_spec["metadata"]["name"] = name
-            submit_job_spec(json.dumps(kube_job_spec))
+            _resubmit(jq, jobid)
 
 def status_cmd(jq, io, args):
     jobid_pattern = args.jobid_pattern
@@ -395,8 +436,9 @@ def remove_cmd(jq, args):
             kube.delete_job(jobid)
             jq.delete_job(jobid)
 
-def start_cmd(config):
+def start_cmd(config, configuration="kubeque"):
     kube.start_cluster(config['cluster_name'], config['machine_type'], 1)
+    kube.setup_cluster_creds(config['project'], config['zone'], config['cluster_name'], configuration)
 
 def stop_cmd(config):
     kube.stop_cluster(config['cluster_name'])
@@ -431,6 +473,19 @@ def kill_cmd(jq, args):
 def peek_cmd(args):
     kube.peek(args.pod_name, args.lines)
 
+def dumpjob_cmd(jq, io, args):
+    import attr
+    tasks_as_dicts = []
+    tasks = jq.get_tasks(args.jobid)
+    for task in tasks:
+        t = attr.asdict(task)
+
+        task_args = io.get_as_str(task.args)
+        t['args_url'] = t['args']
+        t['args'] =  json.loads(task_args)
+        tasks_as_dicts.append(t)
+    print(json.dumps(dict(tasks=tasks_as_dicts), indent=2, sort_keys=True))
+
 import argparse
 
 def get_func_parameters(func):
@@ -438,7 +493,6 @@ def get_func_parameters(func):
     return inspect.getargspec(func)[0]
 
 def main(argv=None):
-
     parse = argparse.ArgumentParser()
     parse.add_argument("--config", default=None)
     parse.add_argument("--debug", action="store_true", help="If set, debug messages will be output")
@@ -446,7 +500,7 @@ def main(argv=None):
 
     parser = subparser.add_parser("sub", help="Submit a command (or batch of commands) for execution")
     parser.set_defaults(func=submit_cmd)
-    parser.add_argument("--resources", "-r")
+    parser.add_argument("--resources", "-r", help="Specify the resources that are needed for running job. (ie: -r memory=5G,cpu=0.9) ")
     parser.add_argument("--file", "-f", help="Job specification file (in JSON).  Only needed if command is not specified.")
     parser.add_argument("--push", "-u", action="append", default=[], help="Path to a local file which should be uploaded to working directory of command before execution starts.  If filename starts with a '@' the file is interpreted as a list of files which need to be uploaded.")
     parser.add_argument("--image", "-i", help="Name of docker image to run job within.  Defaults to value from kubeque config file.")
@@ -464,6 +518,15 @@ def main(argv=None):
     parser.add_argument("jobid_pattern")
     parser.add_argument("--owner")
     parser.add_argument("--resubmit", action="store_true")
+
+    parser = subparser.add_parser("retry", help="Resubmit any 'failed' jobs for execution again.")
+    parser.set_defaults(func=retry_cmd)
+    parser.add_argument("jobid_pattern")
+    parser.add_argument("--owner")
+
+    parser = subparser.add_parser("dumpjob", help="Extract a json description of a submitted job")
+    parser.set_defaults(func=dumpjob_cmd)
+    parser.add_argument("jobid")
 
     parser = subparser.add_parser("status", help="Print the status for the tasks which make up the specified job")
     parser.set_defaults(func=status_cmd)
@@ -489,7 +552,7 @@ def main(argv=None):
     parser.add_argument("jobid")
     parser.add_argument("dest", help="The path to the directory where the results will be downloaded")
 
-    parser = subparser.add_parser("add-node-pool")
+    parser = subparser.add_parser("add-node-pool", help="Create a new node-pool associated with the current cluster")
     parser.set_defaults(func=add_node_pool_cmd)
     parser.add_argument("machinetype")
     parser.add_argument("--name")
@@ -499,7 +562,7 @@ def main(argv=None):
     parser.add_argument("--autoscale", action="store_true")
     parser.add_argument("--preemptable", action="store_true")
 
-    parser = subparser.add_parser("resize-node-pool")
+    parser = subparser.add_parser("resize-node-pool", help="Change the number of machines in an existing node pool")
     parser.set_defaults(func=resize_node_pool_cmd)
     parser.add_argument("name")
     parser.add_argument("--count", "-n", default=1)
@@ -508,11 +571,11 @@ def main(argv=None):
     parser.add_argument("--autoscale", action="store_true")
     parser.add_argument("--preemptable", action="store_true")
 
-    parser = subparser.add_parser("rm-node-pool")
+    parser = subparser.add_parser("rm-node-pool", help="Remove a node pool")
     parser.set_defaults(func=rm_node_pool_cmd)
     parser.add_argument("node_pool_name")
 
-    parser = subparser.add_parser("peek")
+    parser = subparser.add_parser("peek", help="Tail stdout from the specified pod")
     parser.set_defaults(func=peek_cmd)
     parser.add_argument("pod_name")
     parser.add_argument("--lines", default=100, type=int)
@@ -532,6 +595,7 @@ def main(argv=None):
     if len(set(["config", "jq", "io"]).intersection(func_param_names)) > 0:
         config_path = get_config_path(args.config)
         config, jq, io = load_config(config_path)
+        update_gcloud_config(config)
     func_params = {}
     if "args" in func_param_names:
         func_params["args"] = args

@@ -300,3 +300,31 @@ to remember credentials, create a custom config `gcloud config` and then
 provide a --configuration flag for each command.   Alternatively, we could 
 use google api calls for everything.   However, the catch there is not all
 api calls are in the python lib.  Not clear best solution.
+
+### Reset
+
+It would be easier to debug/do dev if the "reset" or "remove" command also cleaned out any orphan tasks.  (note:
+need to worry about multiple clusters under one project.
+Perhaps we could add a "clean project" command which resets everything to a clean slate.)
+
+### Polling efficiency
+
+We could use the pub/sub service to publish an event whenever a task state is successfully updated.  We could then only query the
+state from datastore when we receive a message for that jobid and eliminate polling.
+
+Upon job creation, create a channel for updates.  On clean/remove delete channels.
+Change jq update to write update to channel.  In this way, we can query database for initial snapshot and then listen to channel for updates.
+Does something write merged view somewhere?  Skip for now...
+
+### Requests to functionality
+
+Need "retry" command.
+Change node-pool settings to default to auto-scale (and pre-emptable?)
+    (put these defaults into .kubeque?)
+Write a props somewhere in GCS output directory?
+    - Maybe also write out csv file with job id after fetching?
+Show props in status output
+Set up configuration for all gcloud ops to simplify setup (x)
+    - update instructions 
+    - have kubeque detect whether login is needed. (x)
+Status should report where kubernetes job exists

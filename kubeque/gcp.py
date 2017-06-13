@@ -1,10 +1,15 @@
 # Authorize server-to-server interactions from Google Compute Engine.
-from gcloud import datastore
-from gcloud.datastore.query import Query
-from gcloud.datastore.query import Iterator
+from gcloud import datastore, pubsub
 from gcloud.exceptions import Conflict
+import logging
+from oauth2client.client import GoogleCredentials
+import oauth2client
 
-
+from gcloud.storage.client import Client as GSClient
+import os
+import re
+import hashlib
+import json
 
 from fnmatch import fnmatch
 
@@ -14,11 +19,43 @@ import collections
 import attr
 import time 
 import random
+from collections import namedtuple
+
+STATUS_CLAIMED = "claimed"
+STATUS_PENDING = "pending"
+STATUS_FAILED = "failed"
 
 CLAIM_TIMEOUT = 5
 
-import logging
 log = logging.getLogger(__name__)
+
+def get_credentials(account, cred_file="~/.config/gcloud/credentials"):
+    cred_file = os.path.expanduser(cred_file)
+    with open(cred_file, "rt") as fd:
+        all_credentials = json.load(fd)
+
+        client_credentials = None
+    for c in all_credentials["data"]:
+        if c["key"]["type"] == "google-cloud-sdk" and c["key"]["account"] == account:
+            client_credentials = c["credential"]
+
+    assert client_credentials is not None, "Could not find credentials for {} in {}".format(account, cred_file)
+
+    return GoogleCredentials(
+        access_token=None,
+        client_id=client_credentials['client_id'],
+        client_secret=client_credentials['client_secret'],
+        refresh_token=client_credentials['refresh_token'],
+        token_expiry=None,
+        token_uri=oauth2client.GOOGLE_TOKEN_URI,
+        user_agent='Python client library')
+
+@attr.s
+class TaskHistory(object):
+    timestamp = attr.ib()
+    status = attr.ib()
+    owner = attr.ib(default=None)
+    failure_reason = attr.ib(default=None)
 
 @attr.s
 class Task(object):
@@ -30,7 +67,7 @@ class Task(object):
     status = attr.ib() # one of: pending, claimed, success, failed, lost
     owner = attr.ib()
     args = attr.ib()
-    history = attr.ib() # list of records (timestamp, status)  (maybe include owner?)
+    history = attr.ib() # list of TaskHistory
     failure_reason = attr.ib(default=None)
     version = attr.ib(default=1)
 
@@ -39,6 +76,7 @@ class Job(object):
     job_id = attr.ib()
     tasks = attr.ib()
     kube_job_spec = attr.ib()
+    metadata = attr.ib()
 
 class BatchAdapter:
     def __init__(self, client, cluster):
@@ -66,6 +104,14 @@ def job_to_entity(client, o, cluster):
     entity['tasks'] = o.tasks
     entity['cluster'] = cluster
     entity['kube_job_spec'] = o.kube_job_spec
+    metadata = []
+    for k, v in o.metadata.items():
+        m = datastore.Entity()
+        m['name'] = k
+        m['value'] = v
+        metadata.append(m)
+    entity['metadata'] = metadata
+
     return entity
 
 def task_to_entity(client, o, cluster):
@@ -79,8 +125,14 @@ def task_to_entity(client, o, cluster):
     entity['args'] = o.args
     entity['failure_reason'] = o.failure_reason
     entity['cluster'] = cluster
-    # can't save a list of dicts?
-#            entity['history'] = o.history
+
+    history = []
+    for h in o.history:
+        e = datastore.Entity()
+        e['timestamp'] = h.timestamp
+        e['status'] = h.status
+        history.append(e)
+
     entity['version'] = o.version
     return entity
 
@@ -99,14 +151,17 @@ def entity_to_task(entity):
     )
 
 def entity_to_job(entity):
+    metadata = entity.get('metadata', [])
     return Job(job_id=entity.key.name,
                tasks=entity['tasks'],
-               kube_job_spec=entity['kube_job_spec'])
+               kube_job_spec=entity['kube_job_spec'],
+               metadata=dict([(m['name'],m['value']) for m in metadata]))
 
 class JobStorage:
-    def __init__(self, client, cluster_name):
+    def __init__(self, client, cluster_name, pubsub):
         self.client = client
         self.cluster_name = cluster_name
+        self.pubsub = pubsub
 
     def get_task(self, task_id):
         task_key = self.client.key("Task", task_id)
@@ -121,11 +176,29 @@ class JobStorage:
             jobids.append(entity_job.key.name)
         return jobids
 
-    def delete_job(self, jobid):
-        job_key = self.client.key("Job", jobid)
+    def _job_id_to_topic(self, job_id):
+        return "job-"+job_id
+
+    def store_job(self, job):
+        with self.batch_write() as batch:
+           batch.save(job)
+           print("saved 1 job with {} tasks".format(len(job.tasks)))
+
+        topic_name = self._job_id_to_topic(job.job_id)
+        print("Creating topic {}".format(topic_name))
+        topic = self.pubsub.topic(topic_name)
+        topic.create()
+
+    def delete_job(self, job_id):
+        job_key = self.client.key("Job", job_id)
         entity_job = self.client.get(job_key)
         task_keys = [self.client.key("Task", taskid) for taskid in set(entity_job["tasks"])]
         self.client.delete_multi(task_keys + [job_key])
+
+        topic_name = self._job_id_to_topic(job_id)
+        topic = self.pubsub.topic(topic_name)
+        if topic.exists():
+            topic.delete()
 
     def get_job(self, job_id):
         job_key = self.client.key("Job", job_id)
@@ -169,18 +242,23 @@ class JobStorage:
                     return False
                 task.version = task.version + 1
                 self.client.put(task_to_entity(self.client, task, self.cluster_name))
-                
-                print("atomic update of task", task_id, "success, version:", task.version, "status", task.status)
+
+                task_as_json = json.dumps(attr.asdict(task)).encode("utf8")
+
+                topic_name = self._job_id_to_topic(task.job_id)
+                topic = self.pubsub.topic(topic_name)
+                topic.publish(task_as_json)
+
+                log.info("atomic update of task %s success, version: %s, status: %s", task_id, task.version, task.status)
                 return True
         except Conflict:
-            log.warn("Caught exception: Conflict")
-            return False            
+            log.warning("Caught exception: Conflict")
+            return False
 
     def update_task(self, task):
         original_version = task.version
         task.version = original_version + 1
         self.client.put(task_to_entity(self.client, task, self.cluster_name))
-#        updated = task.save(version__eq = original_version)
         return True
     
     @contextmanager
@@ -189,13 +267,9 @@ class JobStorage:
         yield batch
         batch.commit()
 
-STATUS_CLAIMED = "claimed"
-STATUS_PENDING = "pending"
-STATUS_FAILED = "failed"
-
 class JobQueue:
     def __init__(self, storage):
-        self.storage = storage 
+        self.storage = storage
 
     def get_claimed_task_ids(self):
         tasks = self.storage.get_tasks(status=STATUS_CLAIMED)
@@ -227,18 +301,21 @@ class JobQueue:
             counts[task.status] += 1
         return dict(counts)
 
-    def reset(self, jobid, owner):
-        tasks = list(self.storage.get_tasks(jobid, status=STATUS_CLAIMED)) + list(self.storage.get_tasks(jobid, status=STATUS_FAILED))
+    def reset(self, jobid, owner, statuses_to_clear=[STATUS_CLAIMED, STATUS_FAILED]):
+        tasks = []
+        for status_to_clear in statuses_to_clear:
+            tasks.extend(self.storage.get_tasks(jobid, status=status_to_clear))
+
         now = time.time()
         for task in tasks:
             if owner is not None and owner != task.owner:
                 continue
             task.owner = None
             task.status = STATUS_PENDING
-            task.history.append( dict(timestamp=now, status="reset") )
+            task.history.append( TaskHistory(timestamp=now, status="reset") )
             self.storage.update_task(task)
 
-    def submit(self, job_id, args, kube_job_spec):
+    def submit(self, job_id, args, kube_job_spec, metadata):
         tasks = []
         now = time.time()
         
@@ -255,17 +332,15 @@ class JobQueue:
                         job_id=job_id, 
                         status="pending", 
                         args=arg,
-                        history=[dict(timestamp=now, status="pending")],
+                        history=[ TaskHistory(timestamp=now, status="pending")],
                         owner=None)
                     tasks.append(task)
                     batch.save(task)
                     task_index += 1
                 print("saved {} tasks".format(len(args_batch)))
 
-        with self.storage.batch_write() as batch:
-           job = Job(job_id = job_id, tasks=[t.task_id for t in tasks], kube_job_spec=kube_job_spec)
-           batch.save(job)
-           print("saved 1 job with {} tasks".format(len(job.tasks)))
+        job = Job(job_id=job_id, tasks=[t.task_id for t in tasks], kube_job_spec=kube_job_spec, metadata=metadata)
+        self.storage.store_job(job)
 
     def claim_task(self, job_id, new_owner, min_try_time=0, claim_timeout=CLAIM_TIMEOUT):
         "Returns None if no unclaimed ready tasks. Otherwise returns instance of Task"
@@ -292,7 +367,7 @@ class JobQueue:
                     return False
                 task.owner = new_owner
                 task.status = STATUS_CLAIMED
-                task.history.append( dict(timestamp=now, status=STATUS_CLAIMED, owner=new_owner) )
+                task.history.append( TaskHistory(timestamp=now, status=STATUS_CLAIMED, owner=new_owner) )
                 return True
 
             updated = self.storage.atomic_task_update(task.task_id, mutate_task)
@@ -301,7 +376,7 @@ class JobQueue:
                 return task.task_id, task.args
 
             # add exponential backoff?
-            log.warn("Update failed")
+            log.warning("Update failed")
             time.sleep(random.uniform(0, 1))
 
     def task_completed(self, task_id, was_successful, failure_reason=None):
@@ -315,7 +390,7 @@ class JobQueue:
     def _update_task_status(self, task_id, new_status, failure_reason):
         task = self.storage.get_task(task_id)
         now = time.time()
-        task.history.append( dict(timestamp=now, status=new_status, failure_reason=failure_reason) )
+        task.history.append( TaskHistory(timestamp=now, status=new_status, failure_reason=failure_reason) )
         task.status = new_status
         task.failure_reason = failure_reason
 #        task.owner = None
@@ -329,23 +404,18 @@ class JobQueue:
         for task in tasks:
             self._update_task_status(task.task_id, "lost")
 
-def create_gcs_job_queue(project_id, cluster_name):
-    client = datastore.Client(project_id)
-    storage = JobStorage(client, cluster_name)
+def create_gcs_job_queue(project_id, cluster_name, credentials):
+    client = datastore.Client(project_id, credentials=credentials)
+    pubsub_client = pubsub.Client(project_id, credentials=credentials)
+    storage = JobStorage(client, cluster_name, pubsub_client)
     return JobQueue(storage)
 
-from gcloud.storage.client import Client as GSClient
-import os
-import re
-import hashlib
-import json
-
 class IO:
-    def __init__(self, project, cas_url_prefix):
+    def __init__(self, project, cas_url_prefix, credentials):
         assert project is not None
 
         self.buckets = {}
-        self.client = GSClient(project)
+        self.client = GSClient(project, credentials=credentials)
         if cas_url_prefix[-1] == "/":
             cas_url_prefix = cas_url_prefix[:-1]
         self.cas_url_prefix = cas_url_prefix
@@ -420,71 +490,4 @@ class IO:
         obj_str = json.dumps(obj)
         return self.write_str_to_cas(obj_str)
 
-from collections import namedtuple
 NodePoolInfo = namedtuple("NodePoolInfo", "name machine_type disk_size_gb target_size running creating creating_without_retries recreating deleting abandoning restarting refreshing")
-
-# from oauth2client.contrib import gce
-# credentials = gce.AppAssertionCredentials(
-#     scope='https://www.googleapis.com/auth/devstorage.read_write')
-# http = credentials.authorize(httplib2.Http())
-
-# import httplib2
-#
-# from google.cloud.client import JSONClient
-# class ProjectConnection(_http.JSONConnection):
-#     API_BASE_URL = "https://www.googleapis.com"
-#     API_VERSION = 'v1'
-#     API_URL_TEMPLATE = '{api_base_url}/projects/{api_version}{path}'
-#     SCOPE = ('https://www.googleapis.com/auth/devstorage.full_control',
-#              'https://www.googleapis.com/auth/devstorage.read_only',
-#              'https://www.googleapis.com/auth/devstorage.read_write')
-#
-# class NodePoolQuery:
-#     def __init__(self):
-#         self._connection = ProjectConnection()
-# #        from oauth2client.contrib import gce
-# #
-# #        credentials = gce.AppAssertionCredentials(
-# #            scope='https://www.googleapis.com/auth/devstorage.read_write')
-# #        self.http = credentials.authorize(httplib2.Http())
-#
-#     def _get(self, url):
-#         resp, content = self.http.request(url, "GET")
-#         return json.loads(content)
-#
-#     def get_node_pools(self, project_id, zone, cluster):
-#         node_pools = []
-#         response_json = self._connection.api_request(method="GET", path="/{project_id}/zones/{zone}/clusters/{cluster}/nodePools".format(
-#             project_id=project_id,
-#             zone=zone,
-#             cluster=cluster
-#         ))
-#         for np in response_json["nodePools"]:
-#             for instance_group_url in np["instanceGroupUrls"]:
-#                 print(instance_group_url)
-#                 self._connection.api_request(method="GET",
-#                                              path="/{project_id}/zones/{zone}/clusters/{cluster}/nodePools".format(
-#                                                  project_id=project_id,
-#                                                  zone=zone,
-#                                                  cluster=cluster
-#                                              ))
-#                 instance_group = self._get(instance_group_url)
-#                 #https: // www.googleapis.com / compute / v1 / projects / broad - achilles / zones / us - east1 - b / instanceGroupManagers / gke - kubeque - cluster - default - pool - 5
-#                 #d999586 - grp?key = {YOUR_API_KEY}
-#                 actions = instance_group["currentActions"]
-#                 np = NodePoolInfo(name=np["name"],
-#                                   machine_type=np["machineType"],
-#                                   disk_size_gb=np["diskSizeGb"],
-#                                   target_size=instance_group["targetSize"],
-#                                   running=actions["none"],
-#                                   creating=actions["creating"],
-#                                   creating_without_retries=actions["creatingWithoutRetries"],
-#                                   recreating=actions['recreating'],
-#                                   deleting=actions["deleting"],
-#                                   abandoning=actions["abandoning"],
-#                                   restarting=actions["restarting"],
-#                                   refreshing=actions["refreshing"]
-#                                   )
-#                 node_pools.append(np)
-#         return node_pools
-
