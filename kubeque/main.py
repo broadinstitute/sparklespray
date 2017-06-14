@@ -5,7 +5,7 @@ import json
 import sys
 
 from kubeque import kubesub as kube
-from kubeque.kubesub import submit_job_spec, create_kube_job_spec
+from kubeque.kubesub import submit_job_spec, create_kube_job_spec, set_resource_limits, get_resource_limits
 from kubeque.gcp import create_gcs_job_queue, IO, STATUS_PENDING, get_credentials
 from kubeque.hasher import CachingHashFunction
 
@@ -152,8 +152,8 @@ def submit(jq, io, job_id, spec, dry_run, config, skip_kube_submit, metadata):
         resources = spec["resources"]
         image = spec['image']
         kube_job_spec = create_kube_job_spec(job_id, parallelism, image, kubeque_command,
-                                             cpu_request=resources.get("cpu", config['default_resource_cpu']),
-                                             mem_limit=resources.get("memory", config["default_resource_memory"]))
+                                             cpu_request=resources.get(CPU_REQUEST, config['default_resource_cpu']),
+                                             mem_limit=resources.get(MEMORY_REQUEST, config["default_resource_memory"]))
 
         jq.submit(job_id, task_spec_urls, kube_job_spec, metadata)
         if not skip_kube_submit:
@@ -166,14 +166,36 @@ def submit(jq, io, job_id, spec, dry_run, config, skip_kube_submit, metadata):
             log.info("Skipping submission.  You can execute tasks locally via:\n   %s", " ".join(cmd))
         return config_url
 
-def load_config(config_file):
+def load_config(config_file, gcloud_config_file="~/.config/gcloud/configurations/config_default"):
+    # first load defaults from gcloud config
+    gcloud_config_file = os.path.expanduser(gcloud_config_file)
+    if os.path.exists(gcloud_config_file):
+        gcloud_config = ConfigParser()
+        gcloud_config.read(gcloud_config_file)
+        defaults = dict(account = gcloud_config.get("core", "account"),
+                        project = gcloud_config.get("core", "project"),
+                        zone = gcloud_config.get("compute", "zone"),
+                        region = gcloud_config.get("compute", "region"))
+
     config_file = os.path.expanduser(config_file)
 
     config = ConfigParser()
     config.read(config_file)
-    config = dict(config.items('config'))
 
-    return [config] + list(load_config_from_dict(config))
+    merged_config = dict(defaults)
+    merged_config.update(config.items('config'))
+
+    missing_values = []
+    for property in ["cas_url_prefix", "default_url_prefix", "project", "cluster_name", "machine_type",
+        "default_image", "default_resource_cpu", "default_resource_memory", "zone", "region", "account"]:
+        if property not in merged_config or merged_config[property] == "" or merged_config[property] is None:
+            missing_values.append(property)
+
+    if len(missing_values) > 0:
+        print("Missing the folloing parameters in {}: {}".format(config_file, ", ".join(missing_values)))
+
+    jq, io = load_config_from_dict(merged_config)
+    return merged_config, jq, io
 
 
 GCLOUD_CONFIG_TEMPLATE = """[core]
@@ -258,6 +280,25 @@ def expand_files_to_upload(filenames):
 
     return fully_expanded
 
+MEMORY_REQUEST = "memory"
+CPU_REQUEST = "cpu"
+
+import re
+def _parse_resources(resources_str):
+    # not robust parsing at all
+    spec = {}
+    if resources_str is None:
+        return spec
+    pairs = resources_str.split(",")
+    for pair in pairs:
+        m = re.match("([^=]+)=(.*)", pair)
+        if m is None:
+            raise Exception("resource constraint malformed: {}".format(pair))
+        name, value = m.groups()
+        assert name in [MEMORY_REQUEST, CPU_REQUEST], "Unknown resource requested: {}. Must be one of {} {}".format(name, MEMORY_REQUEST, CPU_REQUEST)
+        spec[name] = value
+    return spec
+
 def submit_cmd(jq, io, args, config):
     metadata = {}
 
@@ -286,13 +327,15 @@ def submit_cmd(jq, io, args, config):
 
         assert len(args.command) != 0
 
+        resource_spec = _parse_resources(args.resources)
+
         hash_db = CachingHashFunction(config.get("cache_db_path", ".kubeque-cached-file-hashes"))
         upload_map, spec = make_spec_from_command(args.command,
             image,
             dest_url=default_url_prefix+job_id, 
             cas_url=cas_url_prefix,
-            parameters=parameters, 
-            resources=args.resources,
+            parameters=parameters,
+            resource_spec=resource_spec,
             hash_function=hash_db.hash_filename,
             extra_files=expand_files_to_upload(args.push))
         hash_db.persist()
@@ -313,8 +356,12 @@ def submit_cmd(jq, io, args, config):
         else:
             log.info("Job completed.  You can download results by executing: kubeque fetch %s DEST_DIR", job_id)
 
-def _resubmit(jq, jobid):
-    pending_count = jq.get_status_counts(jobid)[STATUS_PENDING]
+def _resubmit(jq, jobid, resource_spec={}):
+    pending_count = jq.get_status_counts(jobid).get(STATUS_PENDING, 0)
+    if pending_count == 0:
+        log.warning("No tasks are pending for jobid %s.  Skipping resubmit.", jobid)
+        return False
+
     kube_job_spec_json = jq.get_kube_job_spec(jobid)
     kube_job_spec = json.loads(kube_job_spec_json)
     # correct parallelism to reflect the remaining jobs
@@ -323,14 +370,30 @@ def _resubmit(jq, jobid):
     name = kube_job_spec["metadata"]["name"]
     name += "-" + (''.join(random.choice(string.ascii_lowercase + string.digits) for _ in range(5)))
     kube_job_spec["metadata"]["name"] = name
+    prev_cpu, prev_mem = get_resource_limits(kube_job_spec)
+    set_resource_limits(kube_job_spec, resource_spec.get(CPU_REQUEST, prev_cpu), resource_spec.get(MEMORY_REQUEST, prev_mem))
     submit_job_spec(json.dumps(kube_job_spec))
+    return True
 
 
 def retry_cmd(jq, io, args):
-    for jobid in jq.get_jobids(args.jobid_pattern):
+    resource_spec = _parse_resources(args.resources)
+
+    jobids = jq.get_jobids(args.jobid_pattern)
+    if len(jobids) == 0:
+        print("No jobs found with name matching {}".format(args.jobid_pattern))
+        return
+
+    for jobid in jobids:
         log.info("retrying %s", jobid)
         jq.reset(jobid, args.owner)
-        _resubmit(jq, jobid)
+        _resubmit(jq, jobid, resource_spec)
+
+
+    if args.wait_for_completion:
+        log.info("Waiting for job to terminate")
+        for job_id in jobids:
+            watch(jq, job_id)
 
 def reset_cmd(jq, io, args):
     for jobid in jq.get_jobids(args.jobid_pattern):
@@ -523,8 +586,10 @@ def main(argv=None):
 
     parser = subparser.add_parser("retry", help="Resubmit any 'failed' jobs for execution again.")
     parser.set_defaults(func=retry_cmd)
+    parser.add_argument("--resources", "-r", help="Specify the resources that are needed for running job. (ie: -r memory=5G,cpu=0.9) ")
     parser.add_argument("jobid_pattern")
     parser.add_argument("--owner")
+    parser.add_argument("--no-wait", action="store_false", dest="wait_for_completion", help="Exit immediately after submission instead of waiting for job to complete")
 
     parser = subparser.add_parser("dumpjob", help="Extract a json description of a submitted job")
     parser.set_defaults(func=dumpjob_cmd)
@@ -663,7 +728,6 @@ Helper main:
 
 One entry point to make jobs.  
 """
-
 
 if __name__ == "__main__":
     main(sys.argv[1:])

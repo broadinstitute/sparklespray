@@ -35,8 +35,18 @@ def add_secret_mount(config, secret_name, mount_path):
             "mountPath": mount_path
         })
 
+def get_resource_limits(kub_job_def):
+    "Returns tuple of cpu, memory limits"
+    limits = set()
+    containers = kub_job_def["spec"]["template"]["spec"]["containers"]
+    for c in containers:
+        cpu = c["resources"]["requests"]["cpu"]
+        memory = c["resources"]["requests"]["memory"]
+        limits.add( (cpu, memory) )
+    assert len(limits) == 1
+    return list(limits)[0]
 
-def _set_resource_limits(kub_job_def, cpu_request, mem_limit):
+def set_resource_limits(kub_job_def, cpu_request, mem_limit):
     containers = kub_job_def["spec"]["template"]["spec"]["containers"]
     for c in containers:
         c["resources"] = {
@@ -82,7 +92,7 @@ def create_kube_job_spec(name, parallelism, image, command, environment_vars=[],
                           "restartPolicy": "Never"
                       }
                   }}}
-    _set_resource_limits(config, cpu_request, mem_limit)
+    set_resource_limits(config, cpu_request, mem_limit)
 
     for secret_name, mount_path in secrets:
         add_secret_mount(config, secret_name, mount_path)

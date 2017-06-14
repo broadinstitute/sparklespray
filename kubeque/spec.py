@@ -126,20 +126,6 @@ def rewrite_argvs_files_to_upload(list_of_argvs, cas_url, hash_function, is_exec
 def is_executable(filename):
     return os.access(filename, os.X_OK)
 
-def parse_resources(resources_str):
-    # not robust parsing at all
-    spec = {}
-    if resources_str is None:
-        return spec
-    pairs = resources_str.split(",")
-    for pair in pairs:
-        m = re.match("([^=]+)=(.*)", pair)
-        if m is None:
-            raise Exception("resource constraint malformed: {}".format(pair))
-        name, value = m.groups()
-        assert name in ["memory", "cpu"]
-        spec[name] = value
-    return spec
 
 def make_spec_from_command(argv,
     docker_image,
@@ -148,13 +134,11 @@ def make_spec_from_command(argv,
     parameters=[{}],
     hash_function=None,
     is_executable_function=is_executable,
-    resources=None,
+    resource_spec=None,
     extra_files=[],
     src_wildcard="*",
     pre_exec_script="ls -al",
     post_exec_script="ls -al"):
-
-    resource_spec = parse_resources(resources)
 
     list_of_argvs = rewrite_argv_with_parameters(argv, parameters)
 
