@@ -224,7 +224,7 @@ def update_gcloud_config(config, dest_config_dir="~/.config/gcloud/configuration
         fd.write(gcloud_config)
 
 def load_config_from_dict(config):
-    credentials = get_credentials(config['account'])
+    credentials = None
     io = IO(config['project'], config['cas_url_prefix'], credentials)
     jq = create_gcs_job_queue(config['project'], config['cluster_name'], credentials)
 

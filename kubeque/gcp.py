@@ -412,7 +412,7 @@ def create_gcs_job_queue(project_id, cluster_name, credentials):
     return JobQueue(storage)
 
 class IO:
-    def __init__(self, project, cas_url_prefix, credentials):
+    def __init__(self, project, cas_url_prefix, credentials=None):
         assert project is not None
 
         self.buckets = {}

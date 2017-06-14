@@ -117,7 +117,7 @@ def consume_cmd(args):
 
     normal_termination = consumer_run_loop(jq, args.jobid, node_name, exec_task)
     if not normal_termination:
-        log.warn("Terminating due to forcibly killed child process (OOM?)")
+        log.warning("Terminating due to forcibly killed child process (OOM?)")
         sys.exit(1)
     else:
         log.info("Normal termination")

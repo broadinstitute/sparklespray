@@ -7,7 +7,7 @@ assert sys.version_info >= (3,)
 from setuptools import setup, find_packages
 
 setup(name='kubeque',
-      version='0.1',
+      version='0.2',
       description='batch job submission front to kubernettes',
       author='Philip Montgomery',
       author_email='pmontgom@broadinstitute.org',
