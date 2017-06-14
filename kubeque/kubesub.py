@@ -34,6 +34,15 @@ def add_secret_mount(config, secret_name, mount_path):
       "mountPath": mount_path        
     })
 
+def _set_resource_limits(kub_job_def, cpu_request, mem_limit):
+    containers = kub_job_def["spec"]["template"]["spec"]["containers"]
+    for c in containers:
+        c["resources"] = {
+          "requests": {"cpu": cpu_request, "memory": mem_limit},
+          "limits": {"memory": mem_limit},
+          }
+
+
 def create_kube_job_spec(name, parallelism, image, command, environment_vars=[], secrets=[], cpu_request="1.0", mem_limit="100M"):
     assert isinstance(command, list)
     config = {"apiVersion": "batch/v1",
@@ -62,10 +71,6 @@ def create_kube_job_spec(name, parallelism, image, command, environment_vars=[],
                                   "name": "host-var-volume"
                               }],
                               "command": command,
-                              "resources": {
-                                  "requests": {"cpu": cpu_request, "memory": mem_limit},
-                                  "limits": {"memory": mem_limit},
-                              },
                               "env": [
                                   {"name": "KUBE_POD_NAME",
                                    "valueFrom": {"fieldRef": {"fieldPath": "metadata.name"}}}
@@ -74,6 +79,7 @@ def create_kube_job_spec(name, parallelism, image, command, environment_vars=[],
                           "restartPolicy": "Never"
                       }
                   }}}
+    _set_resource_limits(config, cpu_request, mem_limit)
 
     for secret_name, mount_path in secrets:
         add_secret_mount(config, secret_name, mount_path)
