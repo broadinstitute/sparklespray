@@ -456,10 +456,9 @@ def add_node_pool_cmd(config, args):
     kube.add_node_pool(config['cluster_name'], node_pool_name, args.machinetype, args.count, args.min, args.max, args.autoscale, args.preemptable)
 
 def resize_node_pool_cmd(config, args):
-    raise Exception("unimplemented")
+    kube.resize_node_pool(config['cluster_name'], args.node_pool_name, args.count, args.min, args.max, args.autoscale)
 
 def rm_node_pool_cmd(config, args):
-
     kube.rm_node_pool(config['cluster_name'], args.node_pool_name)
 
 def kill_cmd(jq, args):
@@ -469,6 +468,9 @@ def kill_cmd(jq, args):
         # TODO: stop just marks the job as it shouldn't run any more.  tasks will still be claimed.
         # do we let the re-claimer transition these to pending?  Or do we cancel pending and mark claimed as failed?
         # probably we should
+
+def cluster_status(config, args):
+    kube.cluster_status(config['cluster_name'])
 
 def peek_cmd(config, args):
     kube.peek(config['project'], config['zone'], config['cluster_name'], args.pod_name, args.lines)
@@ -562,14 +564,17 @@ def main(argv=None):
     parser.add_argument("--autoscale", action="store_true")
     parser.add_argument("--preemptable", action="store_true")
 
-    parser = subparser.add_parser("resize-node-pool", help="Change the number of machines in an existing node pool")
+    parser = subparser.add_parser("resize", help="Change the number of machines in an existing node pool")
     parser.set_defaults(func=resize_node_pool_cmd)
-    parser.add_argument("name")
-    parser.add_argument("--count", "-n", default=1)
-    parser.add_argument("--max")
-    parser.add_argument("--min")
-    parser.add_argument("--autoscale", action="store_true")
-    parser.add_argument("--preemptable", action="store_true")
+    parser.add_argument("--count", "-n", default=None, type=int)
+    parser.add_argument("--max", type=int)
+    parser.add_argument("--min", type=int)
+    parser.add_argument("--autoscale", action="store_true", default=None, dest="autoscale")
+    parser.add_argument("--disable-autoscale", action="store_false", default=None, dest="autoscale")
+    parser.add_argument("--name", help="name of node pool to resize", dest="node_pool_name")
+
+    parser = subparser.add_parser("cluster-status", help="Show the current cluster config")
+    parser.set_defaults(func=cluster_status)
 
     parser = subparser.add_parser("rm-node-pool", help="Remove a node pool")
     parser.set_defaults(func=rm_node_pool_cmd)

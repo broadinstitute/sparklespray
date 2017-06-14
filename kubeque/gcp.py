@@ -1,11 +1,11 @@
 # Authorize server-to-server interactions from Google Compute Engine.
-from gcloud import datastore, pubsub
-from gcloud.exceptions import Conflict
+from google.cloud import datastore, pubsub
+from google.cloud.exceptions import Conflict
 import logging
 from oauth2client.client import GoogleCredentials
 import oauth2client
 
-from gcloud.storage.client import Client as GSClient
+from google.cloud.storage.client import Client as GSClient
 import os
 import re
 import hashlib
@@ -30,25 +30,26 @@ CLAIM_TIMEOUT = 5
 log = logging.getLogger(__name__)
 
 def get_credentials(account, cred_file="~/.config/gcloud/credentials"):
-    cred_file = os.path.expanduser(cred_file)
-    with open(cred_file, "rt") as fd:
-        all_credentials = json.load(fd)
-
-        client_credentials = None
-    for c in all_credentials["data"]:
-        if c["key"]["type"] == "google-cloud-sdk" and c["key"]["account"] == account:
-            client_credentials = c["credential"]
-
-    assert client_credentials is not None, "Could not find credentials for {} in {}".format(account, cred_file)
-
-    return GoogleCredentials(
-        access_token=None,
-        client_id=client_credentials['client_id'],
-        client_secret=client_credentials['client_secret'],
-        refresh_token=client_credentials['refresh_token'],
-        token_expiry=None,
-        token_uri=oauth2client.GOOGLE_TOKEN_URI,
-        user_agent='Python client library')
+    return None
+    # cred_file = os.path.expanduser(cred_file)
+    # with open(cred_file, "rt") as fd:
+    #     all_credentials = json.load(fd)
+    #
+    #     client_credentials = None
+    # for c in all_credentials["data"]:
+    #     if c["key"]["type"] == "google-cloud-sdk" and c["key"]["account"] == account:
+    #         client_credentials = c["credential"]
+    #
+    # assert client_credentials is not None, "Could not find credentials for {} in {}".format(account, cred_file)
+    #
+    # return GoogleCredentials(
+    #     access_token=None,
+    #     client_id=client_credentials['client_id'],
+    #     client_secret=client_credentials['client_secret'],
+    #     refresh_token=client_credentials['refresh_token'],
+    #     token_expiry=None,
+    #     token_uri=oauth2client.GOOGLE_TOKEN_URI,
+    #     user_agent='Python client library')
 
 @attr.s
 class TaskHistory(object):

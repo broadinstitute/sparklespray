@@ -11,7 +11,9 @@ setup(name='kubeque',
       description='batch job submission front to kubernettes',
       author='Philip Montgomery',
       author_email='pmontgom@broadinstitute.org',
-      install_requires=['gcloud', 'pykube', 'attrs'],
+      install_requires=['google-cloud', 'pykube', 'attrs', 
+          "oauth2client==3.0.0" # if not specified pip will install v4+ which doesn't seem to be compatible with google-cloud
+          ],
       packages=find_packages(),
       entry_points={'console_scripts': [
         "kubeque = kubeque.main:main",

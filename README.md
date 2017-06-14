@@ -74,7 +74,7 @@ cd examples/docker
 or
 ```
 docker build . -t us.gcr.io/broad-achilles/demeter
-gcloud docker push us.gcr.io/broad-achilles/demeter
+gcloud docker -- push us.gcr.io/broad-achilles/demeter
 ```
 
 GKE is simple to use with the docker repository within GKE.  To push to that repo, my buil

@@ -5,11 +5,15 @@ import tempfile
 import subprocess
 
 
-def execute_command(cmd, ignore_error=False):
-  if ignore_error:
-    subprocess.call(cmd)    
+def execute_command(cmd, ignore_error=False, capture_stdout=False):
+  if capture_stdout:
+      assert not ignore_error
+      return subprocess.check_output(cmd)
   else:
-    subprocess.check_call(cmd)
+      if ignore_error:
+        subprocess.call(cmd)
+      else:
+        subprocess.check_call(cmd)
 
 def add_secret_mount(config, secret_name, mount_path):
   if "volumes" not in config['spec']:
@@ -155,6 +159,86 @@ def add_node_pool(cluster_name, node_pool_name, machine_type, num_nodes,
         assert max_nodes is not None
         cmd += ["--enable-autoscaling", "--max-nodes="+str(max_nodes), "--min-nodes="+str(min_nodes)]
     execute_command(cmd)
+
+def resize_node_pool(cluster_name, node_pool_name, count, min, max, autoscale):
+    cmd = _gcloud_cmd(['alpha', 'container', 'clusters', 'update', cluster_name])
+
+    change_autoscale = False
+    if autoscale == True:
+        cmd.append('--enable-autoscaling')
+        assert min is not None
+        cmd.append("--min-nodes={}".format(min))
+        assert max is not None
+        cmd.append("--max-nodes={}".format(max))
+        change_autoscale = True
+    elif autoscale == False:
+        cmd.append('--disable-autoscaling')
+        assert min is None
+        assert max is None
+        change_autoscale = True
+
+    def append_node_pool(cmd):
+        if node_pool_name is not None:
+            cmd.append("--node-pool={}".format(node_pool_name))
+
+    append_node_pool(cmd)
+    if change_autoscale:
+        execute_command(cmd)
+
+    if count is not None:
+        cmd = _gcloud_cmd([ 'alpha', 'container', 'clusters', 'resize', cluster_name, "--size={}".format(count)])
+        append_node_pool(cmd)
+        execute_command(cmd)
+
+def cluster_status(cluster_name):
+    cmd = _gcloud_cmd(['alpha', 'container', 'clusters', 'describe', cluster_name])
+    stdout = execute_command(cmd, capture_stdout=True)
+    import yaml
+    import io
+    desc = yaml.load(io.StringIO(stdout.decode("utf8")))
+    nodePools = desc['nodePools']
+
+    import google.auth
+
+    credentials, project = google.auth.default()
+
+    from google.auth.transport.requests import AuthorizedSession
+    authed_session = AuthorizedSession(credentials)
+
+    for np in nodePools:
+        for url in np['instanceGroupUrls']:
+            response = authed_session.get(url)
+            response_json = response.json()
+            np['targetSize'] = response_json['targetSize']
+
+        if not ('autoscaling' in np) or 'enabled' not in np['autoscaling']:
+            np['autoscaling'] = dict(enabled=False)
+
+    nodePoolRows = [
+        dict(nodePool=np['name'],
+             targetSize=np['targetSize'],
+             autoscaling=np['autoscaling']['enabled'],
+             max=np['autoscaling'].get('maxNodeCount',''),
+             min=np['autoscaling'].get('minNodeCount',''),
+             machineType=np['config']['machineType'],
+             status=np['status'])
+        for np in nodePools
+    ]
+    _printTable(nodePoolRows, ["nodePool", "targetSize", "autoscaling", "min", "max", "machineType", "status"])
+
+def _printTable(rows, header):
+    def get_col_width(h):
+        widths = [ len(str(row[h])) for row in rows ]
+        return max(widths)
+
+    colwidths = [ max([get_col_width(h), len(h)]) for h in header ]
+    format_string = " ".join(["{{:{}}}".format(w+3) for w in colwidths])
+    header_div = " ".join(["-"*(w+3) for w in colwidths])
+
+    print(format_string.format(*header))
+    print(header_div)
+    for row in rows:
+        print(format_string.format(*[str(row[h]) for h in header]))
 
 def rm_node_pool(cluster_name, node_pool_name):
     cmd = _gcloud_cmd(["container", "node-pools", "delete",
