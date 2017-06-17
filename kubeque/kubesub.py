@@ -66,7 +66,7 @@ def create_kube_job_spec(name, parallelism, image, command, environment_vars=[],
                   #      "completions": 1,
                   "template": {
                       "metadata": {
-                          "name": name
+                          "name": name, "labels": {"kubequeJob": name}
                       },
                       "spec": {
                           "imagePullSecrets": [{"name": "kubeque-registry-key"}],
@@ -276,6 +276,32 @@ def rm_node_pool(cluster_name, node_pool_name):
                        ])
     execute_command(cmd)
 
+
+def was_oom_killed(pod_name):
+    import pykube
+    import os
+
+    kube_config = os.path.expanduser("~/.kube/config")
+    #full_cluster_name = _full_cluster_name(project_id, zone, cluster_name)
+    config = pykube.KubeConfig.from_file(kube_config)
+    #config.set_current_context(full_cluster_name)
+    #print("user={}".format(config.user))
+    api = pykube.HTTPClient(config)
+    pods = list(pykube.Pod.objects(api).filter(field_selector={"metadata.name": pod_name}))
+    if len(pods) > 1:
+        print("{} pods had the name {}".format(len(pods), pod_name))
+    elif len(pods) == 0:
+        print("Could not find pod named {}".format(pod_name))
+    else:
+        pod = pods[0]
+        container_statuses =pod.obj["status"]["containerStatuses"]
+        assert len(container_statuses)
+        state = container_statuses[0]["state"]
+        if "terminated" in state:
+            if state["terminated"]["reason"] == "OOMKilled":
+                return True
+    return False
+#        print(json.dumps(, indent=4))
 
 def peek(project_id, zone, cluster_name, pod_name, lines):
     import pykube

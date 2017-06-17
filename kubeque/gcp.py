@@ -24,6 +24,7 @@ from collections import namedtuple
 STATUS_CLAIMED = "claimed"
 STATUS_PENDING = "pending"
 STATUS_FAILED = "failed"
+STATUS_SUCCESS = "success"
 
 CLAIM_TIMEOUT = 5
 
@@ -69,8 +70,10 @@ class Task(object):
     owner = attr.ib()
     args = attr.ib()
     history = attr.ib() # list of TaskHistory
+    command_result_url = attr.ib()
     failure_reason = attr.ib(default=None)
     version = attr.ib(default=1)
+    exit_code = attr.ib(default=None)
 
 @attr.s
 class Job(object):
@@ -126,7 +129,7 @@ def task_to_entity(client, o, cluster):
     entity['args'] = o.args
     entity['failure_reason'] = o.failure_reason
     entity['cluster'] = cluster
-
+    entity['command_result_url'] = o.command_result_url
     history = []
     for h in o.history:
         e = datastore.Entity()
@@ -134,11 +137,17 @@ def task_to_entity(client, o, cluster):
         e['status'] = h.status
         history.append(e)
 
+    entity['history'] = history
     entity['version'] = o.version
+    entity['exit_code'] = o.exit_code
     return entity
 
 def entity_to_task(entity):
-    assert isinstance(entity['status'], str) 
+    assert isinstance(entity['status'], str)
+    history = []
+    for he in entity.get('history',[]):
+        history.append(TaskHistory(timestamp=he['timestamp'], status=he['status'], owner=he.get('owner'), failure_reason=he.get('failure_reason')))
+
     return Task(
         task_id = entity.key.name,
         task_index = entity['task_index'],
@@ -146,9 +155,11 @@ def entity_to_task(entity):
         status = entity['status'],
         owner = entity['owner'],
         args = entity['args'],
-        history = [], # entity['history'],
+        history = history,
         version = entity['version'],
-        failure_reason = entity.get('failure_reason')
+        failure_reason = entity.get('failure_reason'),
+        command_result_url = entity.get('command_result_url'),
+        exit_code = entity.get('exit_code')
     )
 
 def entity_to_job(entity):
@@ -279,8 +290,8 @@ class JobQueue:
             assert t.owner is not None
         return [(t.task_id, t.owner) for t in tasks]
 
-    def get_tasks(self, job_id):
-        return self.storage.get_tasks(job_id)
+    def get_tasks(self, job_id, status=None):
+        return self.storage.get_tasks(job_id, status=status)
 
     def get_jobids(self, jobid_wildcard="*"):
         jobids = self.storage.get_jobids()
@@ -292,9 +303,6 @@ class JobQueue:
 
     def delete_job(self, job_id):
         self.storage.delete_job(job_id)
-
-    def get_tasks(self, job_id):
-        return self.storage.get_tasks(job_id)
 
     def get_status_counts(self, job_id):
         counts = collections.defaultdict(lambda: 0)
@@ -326,7 +334,7 @@ class JobQueue:
             args_batch = args[chunk_start:chunk_start+BATCH_SIZE]
             
             with self.storage.batch_write() as batch:
-                for arg in args_batch:
+                for arg, command_result_url in args_batch:
                     task_id = "{}.{}".format(job_id, task_index)
                     task = Task(task_id=task_id,
                         task_index=task_index,
@@ -334,7 +342,8 @@ class JobQueue:
                         status="pending", 
                         args=arg,
                         history=[ TaskHistory(timestamp=now, status="pending")],
-                        owner=None)
+                        owner=None,
+                        command_result_url=command_result_url)
                     tasks.append(task)
                     batch.save(task)
                     task_index += 1
@@ -380,20 +389,21 @@ class JobQueue:
             log.warning("Update failed")
             time.sleep(random.uniform(0, 1))
 
-    def task_completed(self, task_id, was_successful, failure_reason=None):
+    def task_completed(self, task_id, was_successful, failure_reason=None, retcode=None):
         if was_successful:
-            new_status = "success"
+            new_status = STATUS_SUCCESS
             assert failure_reason is None
         else:
-            new_status = "failed"
-        self._update_task_status(task_id, new_status, failure_reason)
+            new_status = STATUS_FAILED
+        self._update_task_status(task_id, new_status, failure_reason, retcode)
 
-    def _update_task_status(self, task_id, new_status, failure_reason):
+    def _update_task_status(self, task_id, new_status, failure_reason, retcode):
         task = self.storage.get_task(task_id)
         now = time.time()
         task.history.append( TaskHistory(timestamp=now, status=new_status, failure_reason=failure_reason) )
         task.status = new_status
         task.failure_reason = failure_reason
+        task.exit_code = retcode
 #        task.owner = None
         updated = self.storage.update_task(task)
         if not updated:

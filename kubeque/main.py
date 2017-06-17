@@ -6,7 +6,7 @@ import sys
 
 from kubeque import kubesub as kube
 from kubeque.kubesub import submit_job_spec, create_kube_job_spec, set_resource_limits, get_resource_limits
-from kubeque.gcp import create_gcs_job_queue, IO, STATUS_PENDING, get_credentials
+from kubeque.gcp import create_gcs_job_queue, IO, STATUS_PENDING, get_credentials, STATUS_FAILED, STATUS_SUCCESS, STATUS_CLAIMED
 from kubeque.hasher import CachingHashFunction
 
 from kubeque.spec import make_spec_from_command, SrcDstPair
@@ -131,6 +131,7 @@ def submit(jq, io, job_id, spec, dry_run, config, skip_kube_submit, metadata):
 
     tasks = expand_tasks(spec, io, default_url_prefix, default_job_url_prefix)
     task_spec_urls = []
+    command_result_urls = []
     
     # TODO: When len(tasks) is a fair size (>100) this starts taking a noticable amount of time.
     # Perhaps store tasks in a single blob?  Or do write with multiple requests in parallel? 
@@ -138,6 +139,7 @@ def submit(jq, io, job_id, spec, dry_run, config, skip_kube_submit, metadata):
         if not dry_run:
             url = io.write_json_to_cas(task)
             task_spec_urls.append(url)
+            command_result_urls.append(task['command_result_url'])
         else:
             log.debug("task post expand: %s", json.dumps(task, indent=2))
 
@@ -155,7 +157,7 @@ def submit(jq, io, job_id, spec, dry_run, config, skip_kube_submit, metadata):
                                              cpu_request=resources.get(CPU_REQUEST, config['default_resource_cpu']),
                                              mem_limit=resources.get(MEMORY_REQUEST, config["default_resource_memory"]))
 
-        jq.submit(job_id, task_spec_urls, kube_job_spec, metadata)
+        jq.submit(job_id, list(zip(task_spec_urls, command_result_urls)), kube_job_spec, metadata)
         if not skip_kube_submit:
             #[("GOOGLE_APPLICATION_CREDENTIALS", "/google_creds/cred")], [("kube")]
             submit_job_spec(kube_job_spec)
@@ -354,7 +356,8 @@ def submit_cmd(jq, io, args, config):
             log.info("Job completed, downloading results to %s", args.fetch)
             fetch_cmd_(jq, io, job_id, args.fetch)
         else:
-            log.info("Job completed.  You can download results by executing: kubeque fetch %s DEST_DIR", job_id)
+            log.info("Job completed, results written to %s", default_url_prefix+job_id)
+            log.info("You can download results via gsutil or by executing: kubeque fetch %s DEST_DIR", job_id)
 
 def _resubmit(jq, jobid, resource_spec={}):
     pending_count = jq.get_status_counts(jobid).get(STATUS_PENDING, 0)
@@ -402,23 +405,65 @@ def reset_cmd(jq, io, args):
         if args.resubmit:
             _resubmit(jq, jobid)
 
+def _summarize_task_statuses(tasks):
+    import collections
+    complete = True
+    counts = collections.defaultdict(lambda: 0)
+    for task in tasks:
+        if task.status == STATUS_SUCCESS:
+            label = "{}(code={})".format(task.status, task.exit_code)
+        elif task.status == STATUS_FAILED:
+            label = "{}({})".format(task.status, task.failure_reason)
+        else:
+            label = task.status
+        counts[label] += 1
+
+        if not _is_terminal_status(task.status):
+            complete = False
+
+    labels = list(counts.keys())
+    labels.sort()
+    status_str = ", ".join(["{}: {}".format(l, counts[l]) for l in labels])
+    return status_str, complete
+
+def _was_oom_killed(task):
+    if task.status == STATUS_CLAIMED:
+        oom_killed = kube.was_oom_killed(task.owner)
+        return oom_killed
+    return False
+
 def status_cmd(jq, io, args):
     jobid_pattern = args.jobid_pattern
     if not jobid_pattern:
         jobid_pattern = "*"
 
     for jobid in jq.get_jobids(jobid_pattern):
-        if args.detailed:
+        if args.detailed or args.failures:
             for task in jq.get_tasks(jobid):
+                if args.failures and task.status != STATUS_FAILED:
+                    continue
+
+                command_result_json = None
+                if task.command_result_url is not None:
+                    command_result_json = io.get_as_str(task.command_result_url, must=False)
+                if command_result_json is not None:
+                    command_result = json.loads(command_result_json)
+                    command_result_block = "\n  command result: {}".format(json.dumps(command_result, indent=4))
+                else:
+                    command_result_block = ""
+
                 log.info("task_id: %s\n"
-                         "  status: %s, failure_reason: %s\n"
+                         "  status: %s, exit_code: %s, failure_reason: %s\n"
                          "  started on pod: %s\n"
-                         "  args: %s, history: %s", task.task_id,
-                         task.status, task.failure_reason, task.owner, task.args, task.history)
+                         "  args: %s, history: %s%s", task.task_id,
+                         task.status, task.exit_code, task.failure_reason, task.owner, task.args, task.history, command_result_block)
+
+                if _was_oom_killed(task):
+                    print("Was OOM killed")
         else:
-            counts = jq.get_status_counts(jobid)
-            status_str = ", ".join([ "{}: {}".format(status, count) for status, count in counts.items()])
-            log.info("%s: %s", jobid, status_str)
+            tasks = jq.get_tasks(jobid)
+            status, complete = _summarize_task_statuses(tasks)
+            log.info("%s: %s", jobid, status)
 
 def fetch_cmd(jq, io, args):
     fetch_cmd_(jq, io, args.jobid, args.dest)
@@ -465,27 +510,27 @@ def fetch_cmd_(jq, io, jobid, dest_root, force=False):
                 get(ul['dst_url'], localpath)
 
 
-def is_terminal_status(status):
+def _is_terminal_status(status):
     return status in ["failed", "success"]
 
-def is_complete(counts):
-    complete = True
-    for status in counts.keys():
-        if not is_terminal_status(status):
-            complete = False
-    return complete
+from kubeque.reaper import Reaper
 
-def watch(jq, jobid, refresh_delay=5):
-    prev_counts = None
+def watch(jq, jobid, refresh_delay=5, reaper_delay=1):
+    reaper = Reaper(jobid, jq)
+
+    prev_status = None
+    next_reap = time.time() + reaper_delay
     while True:
-        counts = jq.get_status_counts(jobid)
-        complete = is_complete(counts)
-        if counts != prev_counts:
-            log.info("status: %s", counts)
+        status, complete = _summarize_task_statuses(jq.get_tasks(jobid))
+        if status != prev_status:
+            log.info("status: %s", status)
         if complete:
             break
-        prev_counts = counts
+        prev_status = status
         time.sleep(refresh_delay)
+        if time.time() > next_reap:
+            reaper.poll()
+            next_reap = time.time() + reaper_delay
 
 def remove_cmd(jq, args):
     # TODO: Maybe rename as "clean" and also remove all pods/jobs which are complete _and_ are not referenced by a job
@@ -493,7 +538,7 @@ def remove_cmd(jq, args):
     for jobid in jobids:
         status_counts = jq.get_status_counts(jobid)
         if not is_complete(status_counts) and not ("pending" in status_counts and len(status_counts) == 1):
-            log.warn("job %s is still running (%s), cannot remove", jobid, status_counts)
+            log.warning("job %s is still running (%s), cannot remove", jobid, status_counts)
         else:
             log.info("deleting %s", jobid)
             kube.delete_job(jobid)
@@ -571,7 +616,7 @@ def main(argv=None):
     parser.add_argument("--image", "-i", help="Name of docker image to run job within.  Defaults to value from kubeque config file.")
     parser.add_argument("--name", "-n", help="The name to assign to the job")
     parser.add_argument("--seq", type=int, help="Parameterize the command by index.  Submitting with --seq=10 will submit 10 commands with a parameter index varied from 1 to 10")
-    parser.add_argument("--params", help="Parameterize the command by the rows in the specified CSV file.  If the CSV file has 5 rows, then 5 commands will be submitted.")
+    parser.add_argument("--params", "-p", help="Parameterize the command by the rows in the specified CSV file.  If the CSV file has 5 rows, then 5 commands will be submitted.")
     parser.add_argument("--fetch", help="After run is complete, automatically download the results")
     parser.add_argument("--dryrun", action="store_true", help="Don't actually submit the job but just print what would have been done")
     parser.add_argument("--skipkube", action="store_true", dest="skip_kube_submit", help="Do all steps except submitting the job to kubernetes")
@@ -598,6 +643,7 @@ def main(argv=None):
     parser = subparser.add_parser("status", help="Print the status for the tasks which make up the specified job")
     parser.set_defaults(func=status_cmd)
     parser.add_argument("--detailed", action="store_true", help="List attributes of each task")
+    parser.add_argument("--failures", action="store_true", help="List attributes of each task (only for failures)")
     parser.add_argument("jobid_pattern", nargs="?")
 
     parser = subparser.add_parser("remove", help="Remove completed jobs from the database of jobs")

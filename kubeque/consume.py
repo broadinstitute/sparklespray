@@ -95,7 +95,7 @@ def consume_cmd(args):
 
         exec_lifecycle_script(workdir, spec, 'post-download-script')
 
-        retcode = exec_command_(spec['command'], workdir, stdout_path)
+        retcode, resource_usage = exec_command_(spec['command'], workdir, stdout_path)
 
         local_to_url_mapping = resolve_uploads(workdir, spec['uploads'], downloaded)
 
@@ -108,12 +108,12 @@ def consume_cmd(args):
         for ul in local_to_url_mapping:
             log_and_put(os.path.join(workdir, ul['src']), ul['dst_url'])
 
-        write_result_file(result_path, retcode, workdir, local_to_url_mapping)
+        write_result_file(result_path, retcode, resource_usage, workdir, local_to_url_mapping)
         log_and_put(result_path, spec['command_result_url'])
         log_and_put(stdout_path, spec['stdout_url'])
 
-        log.info("retcode = %s", repr(retcode))
-        return retcode != KILLED_RET_CODE
+        log.info("retcode = %s, resource_usage = %s", repr(retcode), resource_usage)
+        return retcode, retcode != KILLED_RET_CODE
 
     normal_termination = consumer_run_loop(jq, args.jobid, node_name, exec_task)
     if not normal_termination:
@@ -132,18 +132,30 @@ def consumer_run_loop(jq, job_id, owner_name, execute_callback):
             break
         task_id, args = claimed
         log.info("task_id: %s, args: %s", task_id, args)
-        was_normal_termination = execute_callback(task_id, args)
+        retcode, was_normal_termination = execute_callback(task_id, args)
         if was_normal_termination:
-            jq.task_completed(task_id, True)
+            jq.task_completed(task_id, True, retcode=retcode)
         else:
-            jq.task_completed(task_id, False, "Killed")
+            jq.task_completed(task_id, False, failure_reason="Killed", retcode=retcode)
             return False
     return True
 
-def write_result_file(command_result_path, retcode, workdir, local_to_url_mapping):
+def write_result_file(command_result_path, retcode, resource_usage, workdir, local_to_url_mapping):
     relative_local_to_url_mapping = [dict(src=os.path.relpath(x['src'], workdir), dst_url=x['dst_url']) for x in local_to_url_mapping]
     with open(command_result_path, "wt") as fd:
-        fd.write(json.dumps({"return_code": retcode, "files": relative_local_to_url_mapping}))
+        fd.write(json.dumps({"return_code": retcode,
+                             "files": relative_local_to_url_mapping,
+                             "resource_usage": {
+                                 "user_cpu_time": resource_usage.ru_utime,
+                                 "system_cpu_time": resource_usage.ru_stime,
+                                 "max_memory_size": resource_usage.ru_maxrss,
+                                 "shared_memory_size": resource_usage.ru_ixrss,
+                                 "unshared_memory_size": resource_usage.ru_idrss,
+                                 "block_input_ops": resource_usage.ru_inblock,
+                                 "block_output_ops": resource_usage.ru_oublock
+                             }}))
+
+import time
 
 def exec_command_(command, workdir, stdout):
     log.info("(workingdir: %s) Executing: %s", workdir, command)
@@ -163,12 +175,11 @@ def exec_command_(command, workdir, stdout):
         # that way the in-progress stdout would be visible in the POD log.
         p = subprocess.Popen(command, stderr=subprocess.STDOUT, stdout=stdoutfd, shell=True, cwd=workdir)
         while True:
-            try:
-                poll_stdout_file()
-                retcode = p.wait(timeout=1)
+            poll_stdout_file()
+            child_pid, retcode, resource_usage = os.wait4(p.pid, os.WNOHANG)
+            if child_pid == p.pid:
                 break
-            except subprocess.TimeoutExpired:
-                pass
+            time.sleep(0.5)
 
         # do one final read now that the process has terminated
         sys.stdout.write(handle_for_polling.read())
@@ -176,7 +187,7 @@ def exec_command_(command, workdir, stdout):
     finally:
         os.close(stdoutfd)
         handle_for_polling.close()
-    return retcode
+    return retcode, resource_usage
 
 def resolve_uploads(dir, uploads, paths_to_exclude):
     resolved = []

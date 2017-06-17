@@ -290,7 +290,44 @@ effectively suspend them.
 We should probably report on the cluster size while jobs are running.  Two sources of this information:
     GCP # of instances in managed groups (need to find way to go from cluster -> managed groups containing associated node pools)
     Kubernettes reports # of nodes in the system
-    
+
+Reaping: Is reaping done globally or as part of watching service?  I think it'd need to be done globally to fully monitor.
+However, that begs the question how do we push results of reap back out to user.  Cluster warning queue?
+
+To reconcile jobs against pods, we should do two things:
+
+1. query all pods running
+2. query all "claimed" jobs running
+3. pods without associated job should be a warning.
+4. triage jobs without pod into one of a. OOM killed pod (mark job as OOM killed), b. terminated pod (mark job as dead-pod), c. missing pod (mark job as unknown-pod)
+   (b and c should never happen.  If they do, we should generate a warning.)
+5. pods with more than one claimed job should be a warning.
+
+To keep track of warnings, perhaps we can store them as log messages against cluster resource
+```
+{
+      "type": "gke_cluster",
+      "displayName": "GKE Cluster",
+      "description": "A Google Container Engine (GKE) Cluster.",
+      "labels": [
+        {
+          "key": "project_id",
+          "description": "The identifier of the GCP project associated with this resource (e.g., my-project)."
+        },
+        {
+          "key": "cluster_name",
+          "description": "The name of the GKE Cluster."
+        },
+        {
+          "key": "location",
+          "description": "The location in which the GKE Cluster is running."
+        }
+      ]
+    },
+```
+
+Then, in watch, we can poll for log messages on the cluster.
+
 ### Google authentication
 
 We should create a command "init" which prompts for a project and creates a
