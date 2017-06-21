@@ -41,7 +41,15 @@ def consume_cmd(args):
     cache_dir = args.cache_dir
     if not os.path.exists(cache_dir):
         log.info("cache dir %s does not exist, creating.", cache_dir)
-        os.makedirs(cache_dir)
+        if args.needs_sudo_in_container:
+            ret = os.system("sudo mkdir -p "+cache_dir)
+            assert ret == 0
+        else:
+            os.makedirs(cache_dir)
+
+    if args.needs_sudo_in_container:
+        ret = os.system("sudo chown {} {}".format(os.getuid(), cache_dir))
+        assert ret == 0
 
     def exec_task(task_id, json_url):
         # make working directory.  A directory for the task with two subdirs ("log" where stdout/stderr is written and return code, "work" the working directory the task will be run in)
@@ -221,7 +229,7 @@ def main(argv=None):
     parser.add_argument("--cas_url_prefix")
     parser.add_argument("--nodename")
     parser.add_argument("--cache_dir", default="/var/kubeque-obj-cache")
-
+    parser.add_argument("--needs_sudo_in_container", action="store_true")
     args = parser.parse_args(argv)
     consume_cmd(args)
 

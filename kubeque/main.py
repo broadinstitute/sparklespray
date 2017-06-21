@@ -150,6 +150,9 @@ def submit(jq, io, job_id, spec, dry_run, config, skip_kube_submit, metadata):
         cas_url_prefix = config['cas_url_prefix']
         project = config['project']
         kubeque_command = ["kubeque-consume", config_url, job_id, "--project", project, "--cas_url_prefix", cas_url_prefix, "--cache_dir", "/host-var/kubeque-obj-cache"]
+        if config.get("needs_sudo_in_container", "no").lower() == "yes":
+            kubeque_command = kubeque_command + ["--needs_sudo_in_container"]
+
         parallelism = len(tasks)
         resources = spec["resources"]
         image = spec['image']
@@ -515,7 +518,7 @@ def _is_terminal_status(status):
 
 from kubeque.reaper import Reaper
 
-def watch(jq, jobid, refresh_delay=5, reaper_delay=1):
+def watch(jq, jobid, refresh_delay=5, reaper_delay=60):
     reaper = Reaper(jobid, jq)
 
     prev_status = None
@@ -595,6 +598,16 @@ def dumpjob_cmd(jq, io, args):
         t['args'] =  json.loads(task_args)
         tasks_as_dicts.append(t)
     print(json.dumps(dict(tasks=tasks_as_dicts), indent=2, sort_keys=True))
+
+def dashboard_cmd(args):
+    import subprocess
+
+    p = subprocess.Popen("kubectl proxy -p {}".format(args.port))
+    time.sleep(2)
+    assert p.poll() is None
+
+    os.system("open http://127.0.0.1:{}/ui".format(args.port))
+    p.wait()
 
 import argparse
 
@@ -695,6 +708,10 @@ def main(argv=None):
     parser.set_defaults(func=peek_cmd)
     parser.add_argument("pod_name")
     parser.add_argument("--lines", default=100, type=int)
+
+    parser = subparser.add_parser("dashboard", help="show kubernetes dashboard")
+    parser.set_defaults(func=dashboard_cmd)
+    parser.add_argument("--port", default=8001, type=int)
 
     args = parse.parse_args(argv)
 
