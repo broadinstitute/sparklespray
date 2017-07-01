@@ -136,9 +136,13 @@ def make_spec_from_command(argv,
     is_executable_function=is_executable,
     resource_spec=None,
     extra_files=[],
-    src_wildcard="*",
+    src_wildcards=None,
     pre_exec_script="ls -al",
-    post_exec_script="ls -al"):
+    post_exec_script="ls -al",
+    working_dir="."):
+
+    if src_wildcards is None:
+        src_wildcards = ["*"]
 
     list_of_argvs = rewrite_argv_with_parameters(argv, parameters)
 
@@ -156,6 +160,7 @@ def make_spec_from_command(argv,
             uploads=[
                 dict(src_wildcard=src_wildcard,
                     dst_url="".format(dest_url, task_i))
+                for src_wildcard in src_wildcards
                 ],
             parameters=parameters[task_i]
         ))
@@ -164,6 +169,7 @@ def make_spec_from_command(argv,
             "image": docker_image,
             "resources": resource_spec,
             "common": {
+                "working_dir": working_dir,
                 "command_result_url": "result.json",
                 "stdout_url": "stdout.txt",
                 "pre-exec-script": pre_exec_script,

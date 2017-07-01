@@ -103,7 +103,7 @@ def consume_cmd(args):
 
         exec_lifecycle_script(workdir, spec, 'post-download-script')
 
-        retcode, resource_usage = exec_command_(spec['command'], workdir, stdout_path)
+        retcode, resource_usage = exec_command_(spec['command'], os.path.join(workdir, spec.get('working_dir', ".")), stdout_path)
 
         local_to_url_mapping = resolve_uploads(workdir, spec['uploads'], downloaded)
 

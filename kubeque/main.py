@@ -119,7 +119,7 @@ def expand_tasks(spec, io, default_url_prefix, default_job_url_prefix):
         tasks.append(task)
     return tasks
 
-def submit(jq, io, job_id, spec, dry_run, config, skip_kube_submit, metadata):
+def submit(jq, io, job_id, spec, dry_run, config, skip_kube_submit, metadata, exec_local=False):
     # where to take this from? arg with a default of 1?
     if dry_run:
         skip_kube_submit = True
@@ -161,15 +161,35 @@ def submit(jq, io, job_id, spec, dry_run, config, skip_kube_submit, metadata):
                                              mem_limit=resources.get(MEMORY_REQUEST, config["default_resource_memory"]))
 
         jq.submit(job_id, list(zip(task_spec_urls, command_result_urls)), kube_job_spec, metadata)
-        if not skip_kube_submit:
+        if not skip_kube_submit and not exec_local:
             #[("GOOGLE_APPLICATION_CREDENTIALS", "/google_creds/cred")], [("kube")]
             submit_job_spec(kube_job_spec)
+        elif exec_local:
+            cmd = _write_local_script(job_id, spec, kubeque_command)
+            print("Running job locally via executing: ./%s", cmd)
+            os.system(os.path.abspath(cmd))
         else:
-            image = spec['image']
-            from kubeque.kubesub import _gcloud_cmd
-            cmd = _gcloud_cmd(["gcloud", "docker", "--", "run", "-v", os.path.expanduser("~/.config/gcloud")+":/google-creds", "-e", "GOOGLE_APPLICATION_CREDENTIALS=/google-creds/application_default_credentials.json", image] + kubeque_command + ["--nodename", "local"])
-            log.info("Skipping submission.  You can execute tasks locally via:\n   %s", " ".join(cmd))
+            cmd = _write_local_script(job_id, spec, kubeque_command)
+            log.info("Skipping submission.  You can execute tasks locally via: ./%s", cmd)
         return config_url
+
+def _write_local_script(job_id, spec, kubeque_command):
+    from kubeque.kubesub import _gcloud_cmd
+    import stat
+
+    image = spec['image']
+    cmd = _gcloud_cmd(
+        ["docker", "--", "run", "-v", os.path.expanduser("~/.config/gcloud") + ":/google-creds", "-e",
+         "GOOGLE_APPLICATION_CREDENTIALS=/google-creds/application_default_credentials.json",
+         image] + kubeque_command + ["--nodename", "local"])
+    script_name = "run-{}-locally.sh".format(job_id)
+    with open(script_name, "wt") as fd:
+        fd.write("#!/usr/bin/env bash\n")
+        fd.write(" ".join(cmd)+"\n")
+    # make script executable
+    os.chmod(script_name, os.stat(script_name).st_mode | stat.S_IXUSR)
+    return script_name
+
 
 def load_config(config_file, gcloud_config_file="~/.config/gcloud/configurations/config_default"):
     # first load defaults from gcloud config
@@ -342,7 +362,9 @@ def submit_cmd(jq, io, args, config):
             parameters=parameters,
             resource_spec=resource_spec,
             hash_function=hash_db.hash_filename,
-            extra_files=expand_files_to_upload(args.push))
+            src_wildcards=args.results_wildcards,
+            extra_files=expand_files_to_upload(args.push),
+            working_dir=args.working_dir)
         hash_db.persist()
 
         log.info("upload_map = %s", upload_map)
@@ -350,9 +372,11 @@ def submit_cmd(jq, io, args, config):
             io.put(filename, dest, skip_if_exists=True)
 
     log.debug("spec: %s", json.dumps(spec, indent=2))
-    submit(jq, io, job_id, spec, args.dryrun, config, args.skip_kube_submit, metadata)
+    submit(jq, io, job_id, spec, args.dryrun, config, args.skip_kube_submit, metadata, args.local)
 
-    if not (args.dryrun or args.skip_kube_submit) and args.wait_for_completion:
+    print("local: ", args.local)
+
+    if not (args.dryrun or args.skip_kube_submit or args.local) and args.wait_for_completion:
         log.info("Waiting for job to terminate")
         watch(jq, job_id)
         if args.fetch:
@@ -404,7 +428,11 @@ def retry_cmd(jq, io, args):
 def reset_cmd(jq, io, args):
     for jobid in jq.get_jobids(args.jobid_pattern):
         log.info("reseting %s", jobid)
-        jq.reset(jobid, args.owner)
+        if args.all:
+            statuses_to_clear=[STATUS_CLAIMED, STATUS_FAILED, STATUS_SUCCESS]
+        else:
+            statuses_to_clear=[STATUS_CLAIMED, STATUS_FAILED]
+        jq.reset(jobid, args.owner, statuses_to_clear=statuses_to_clear)
         if args.resubmit:
             _resubmit(jq, jobid)
 
@@ -634,6 +662,9 @@ def main(argv=None):
     parser.add_argument("--dryrun", action="store_true", help="Don't actually submit the job but just print what would have been done")
     parser.add_argument("--skipkube", action="store_true", dest="skip_kube_submit", help="Do all steps except submitting the job to kubernetes")
     parser.add_argument("--no-wait", action="store_false", dest="wait_for_completion", help="Exit immediately after submission instead of waiting for job to complete")
+    parser.add_argument("--results", action="append", help="Wildcard to use to find results which will be uploaded.  (defaults to '*')  Can be specified multiple times", default=None, dest="results_wildcards")
+    parser.add_argument("--cd", help="The directory to change to before executing the command", default=".", dest="working_dir")
+    parser.add_argument("--local", help="Run the tasks inside of docker on the local machine", action="store_true")
     parser.add_argument("command", nargs=argparse.REMAINDER)
 
     parser = subparser.add_parser("reset", help="Mark any 'claimed' or 'failed' jobs as ready for execution again.  Useful largely only during debugging issues with job submission.")
@@ -641,6 +672,7 @@ def main(argv=None):
     parser.add_argument("jobid_pattern")
     parser.add_argument("--owner")
     parser.add_argument("--resubmit", action="store_true")
+    parser.add_argument("--all", action="store_true")
 
     parser = subparser.add_parser("retry", help="Resubmit any 'failed' jobs for execution again.")
     parser.set_defaults(func=retry_cmd)
