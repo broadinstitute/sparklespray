@@ -560,21 +560,38 @@ def _is_complete(status_counts):
             all_terminal = True
     return all_terminal
 
+import contextlib
+
+@contextlib.contextmanager
+def _exception_guard(deferred_msg):
+    try:
+        yield
+    except OSError as ex:
+        # consider these as non-fatal
+        msg = deferred_msg()
+        log.exception(msg)
+        log.warning("Ignoring exception and continuing...")
+
 def watch(jq, jobid, refresh_delay=5, reaper_delay=60):
     reaper = Reaper(jobid, jq)
 
     prev_status = None
     next_reap = time.time() + reaper_delay
     while True:
-        status, complete = _summarize_task_statuses(jq.get_tasks(jobid))
-        if status != prev_status:
-            log.info("status: %s", status)
-        if complete:
-            break
-        prev_status = status
+        with _exception_guard(lambda: "summarizing status of job {} threw exception".format(jobid)):
+            status, complete = _summarize_task_statuses(jq.get_tasks(jobid))
+            if status != prev_status:
+                log.info("status: %s", status)
+            if complete:
+                break
+            prev_status = status
+
         time.sleep(refresh_delay)
+
         if time.time() > next_reap:
-            reaper.poll()
+            with _exception_guard(lambda: "Reaping job {} threw an exception".format(jobid)):
+                reaper.poll()
+
             next_reap = time.time() + reaper_delay
 
 def remove_cmd(jq, args):
