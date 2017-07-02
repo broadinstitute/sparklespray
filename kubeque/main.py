@@ -13,6 +13,8 @@ from kubeque.spec import make_spec_from_command, SrcDstPair
 import csv
 import copy
 
+from kubeque.reaper import Reaper
+
 log = logging.getLogger(__name__)
 
 try:
@@ -468,33 +470,40 @@ def status_cmd(jq, io, args):
     if not jobid_pattern:
         jobid_pattern = "*"
 
-    for jobid in jq.get_jobids(jobid_pattern):
-        if args.detailed or args.failures:
-            for task in jq.get_tasks(jobid):
-                if args.failures and task.status != STATUS_FAILED:
-                    continue
+    jobids = jq.get_jobids(jobid_pattern)
 
-                command_result_json = None
-                if task.command_result_url is not None:
-                    command_result_json = io.get_as_str(task.command_result_url, must=False)
-                if command_result_json is not None:
-                    command_result = json.loads(command_result_json)
-                    command_result_block = "\n  command result: {}".format(json.dumps(command_result, indent=4))
-                else:
-                    command_result_block = ""
+    if args.wait:
+        assert len(jobids) == 1, "When watching, only one jobid allowed, but the following matched wildcard: {}".format(jobids)
+        jobid = jobids[0]
+        watch(jq, jobid)
+    else:
+        for jobid in jobids:
+            if args.detailed or args.failures:
+                for task in jq.get_tasks(jobid):
+                    if args.failures and task.status != STATUS_FAILED:
+                        continue
 
-                log.info("task_id: %s\n"
-                         "  status: %s, exit_code: %s, failure_reason: %s\n"
-                         "  started on pod: %s\n"
-                         "  args: %s, history: %s%s", task.task_id,
-                         task.status, task.exit_code, task.failure_reason, task.owner, task.args, task.history, command_result_block)
+                    command_result_json = None
+                    if task.command_result_url is not None:
+                        command_result_json = io.get_as_str(task.command_result_url, must=False)
+                    if command_result_json is not None:
+                        command_result = json.loads(command_result_json)
+                        command_result_block = "\n  command result: {}".format(json.dumps(command_result, indent=4))
+                    else:
+                        command_result_block = ""
 
-                if _was_oom_killed(task):
-                    print("Was OOM killed")
-        else:
-            tasks = jq.get_tasks(jobid)
-            status, complete = _summarize_task_statuses(tasks)
-            log.info("%s: %s", jobid, status)
+                    log.info("task_id: %s\n"
+                             "  status: %s, exit_code: %s, failure_reason: %s\n"
+                             "  started on pod: %s\n"
+                             "  args: %s, history: %s%s", task.task_id,
+                             task.status, task.exit_code, task.failure_reason, task.owner, task.args, task.history, command_result_block)
+
+                    if _was_oom_killed(task):
+                        print("Was OOM killed")
+            else:
+                tasks = jq.get_tasks(jobid)
+                status, complete = _summarize_task_statuses(tasks)
+                log.info("%s: %s", jobid, status)
 
 def fetch_cmd(jq, io, args):
     fetch_cmd_(jq, io, args.jobid, args.dest)
@@ -544,7 +553,12 @@ def fetch_cmd_(jq, io, jobid, dest_root, force=False):
 def _is_terminal_status(status):
     return status in ["failed", "success"]
 
-from kubeque.reaper import Reaper
+def _is_complete(status_counts):
+    all_terminal = True
+    for status in status_counts.keys():
+        if not _is_terminal_status(status):
+            all_terminal = True
+    return all_terminal
 
 def watch(jq, jobid, refresh_delay=5, reaper_delay=60):
     reaper = Reaper(jobid, jq)
@@ -568,7 +582,7 @@ def remove_cmd(jq, args):
     jobids = jq.get_jobids(args.jobid_pattern)
     for jobid in jobids:
         status_counts = jq.get_status_counts(jobid)
-        if not is_complete(status_counts) and not ("pending" in status_counts and len(status_counts) == 1):
+        if not _is_complete(status_counts) and not ("pending" in status_counts and len(status_counts) == 1):
             log.warning("job %s is still running (%s), cannot remove", jobid, status_counts)
         else:
             log.info("deleting %s", jobid)
@@ -689,6 +703,7 @@ def main(argv=None):
     parser.set_defaults(func=status_cmd)
     parser.add_argument("--detailed", action="store_true", help="List attributes of each task")
     parser.add_argument("--failures", action="store_true", help="List attributes of each task (only for failures)")
+    parser.add_argument("--wait", action="store_true", help="If set, will periodically poll and print the status until all tasks terminate")
     parser.add_argument("jobid_pattern", nargs="?")
 
     parser = subparser.add_parser("remove", help="Remove completed jobs from the database of jobs")
