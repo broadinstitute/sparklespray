@@ -6,12 +6,14 @@ import sys
 
 from kubeque import kubesub as kube
 from kubeque.kubesub import submit_job_spec, create_kube_job_spec, set_resource_limits, get_resource_limits
-from kubeque.gcp import create_gcs_job_queue, IO, STATUS_PENDING, get_credentials, STATUS_FAILED, STATUS_SUCCESS, STATUS_CLAIMED
+from kubeque.gcp import create_gcs_job_queue, IO, STATUS_PENDING, STATUS_FAILED, STATUS_SUCCESS, STATUS_CLAIMED
 from kubeque.hasher import CachingHashFunction
 
 from kubeque.spec import make_spec_from_command, SrcDstPair
 import csv
 import copy
+import contextlib
+
 
 from kubeque.reaper import Reaper
 
@@ -376,16 +378,22 @@ def submit_cmd(jq, io, args, config):
     log.debug("spec: %s", json.dumps(spec, indent=2))
     submit(jq, io, job_id, spec, args.dryrun, config, args.skip_kube_submit, metadata, args.local)
 
-    print("local: ", args.local)
+    finished = False
+    if args.local:
+        # if we ran it within docker, and the docker command completed, then the job is done
+        finished = True
+    else:
+        if not (args.dryrun or args.skip_kube_submit) and args.wait_for_completion:
+            log.info("Waiting for job to terminate")
+            watch(jq, job_id)
+            finished = True
 
-    if not (args.dryrun or args.skip_kube_submit or args.local) and args.wait_for_completion:
-        log.info("Waiting for job to terminate")
-        watch(jq, job_id)
+    if finished:
         if args.fetch:
-            log.info("Job completed, downloading results to %s", args.fetch)
+            log.info("Done waiting for job to complete, downloading results to %s", args.fetch)
             fetch_cmd_(jq, io, job_id, args.fetch)
         else:
-            log.info("Job completed, results written to %s", default_url_prefix+job_id)
+            log.info("Done waiting for job to complete, results written to %s", default_url_prefix+job_id)
             log.info("You can download results via gsutil or by executing: kubeque fetch %s DEST_DIR", job_id)
 
 def _resubmit(jq, jobid, resource_spec={}):
@@ -560,7 +568,6 @@ def _is_complete(status_counts):
             all_terminal = True
     return all_terminal
 
-import contextlib
 
 @contextlib.contextmanager
 def _exception_guard(deferred_msg):
@@ -588,11 +595,11 @@ def watch(jq, jobid, refresh_delay=5, reaper_delay=60):
 
         time.sleep(refresh_delay)
 
-        if time.time() > next_reap:
-            with _exception_guard(lambda: "Reaping job {} threw an exception".format(jobid)):
-                reaper.poll()
-
-            next_reap = time.time() + reaper_delay
+#        if time.time() > next_reap:
+#            with _exception_guard(lambda: "Reaping job {} threw an exception".format(jobid)):
+#                reaper.poll()
+#
+#            next_reap = time.time() + reaper_delay
 
 def remove_cmd(jq, args):
     # TODO: Maybe rename as "clean" and also remove all pods/jobs which are complete _and_ are not referenced by a job
