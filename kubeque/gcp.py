@@ -204,8 +204,12 @@ class JobStorage:
     def delete_job(self, job_id):
         job_key = self.client.key("Job", job_id)
         entity_job = self.client.get(job_key)
-        task_keys = [self.client.key("Task", taskid) for taskid in set(entity_job["tasks"])]
-        self.client.delete_multi(task_keys + [job_key])
+
+        task_keys = [self.client.key("Task", taskid) for taskid in set(entity_job["tasks"])] + [job_key]
+        BATCH_SIZE = 300
+        for chunk_start in range(0, len(task_keys), BATCH_SIZE):
+            key_batch = task_keys[chunk_start:chunk_start+BATCH_SIZE]
+            self.client.delete_multi(key_batch)
 
         topic_name = self._job_id_to_topic(job_id)
         topic = self.pubsub.topic(topic_name)
