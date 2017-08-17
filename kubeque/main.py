@@ -4,6 +4,7 @@ import os
 import json
 import sys
 
+import kubeque
 from kubeque import kubesub as kube
 from kubeque.kubesub import submit_job_spec, create_kube_job_spec, set_resource_limits, get_resource_limits
 from kubeque.gcp import create_gcs_job_queue, IO, STATUS_PENDING, STATUS_FAILED, STATUS_SUCCESS, STATUS_CLAIMED
@@ -665,6 +666,9 @@ def dumpjob_cmd(jq, io, args):
         tasks_as_dicts.append(t)
     print(json.dumps(dict(tasks=tasks_as_dicts), indent=2, sort_keys=True))
 
+def version_cmd():
+    print(kubeque.__version__)
+
 def dashboard_cmd(args):
     import subprocess
 
@@ -783,6 +787,9 @@ def main(argv=None):
     parser = subparser.add_parser("dashboard", help="show kubernetes dashboard")
     parser.set_defaults(func=dashboard_cmd)
     parser.add_argument("--port", default=8001, type=int)
+
+    parser = subparser.add_parser("version", help="print the version and exit")
+    parser.set_defaults(func=version_cmd)
 
     args = parse.parse_args(argv)
 
