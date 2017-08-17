@@ -151,6 +151,15 @@ def start_cluster(cluster_name, machine_type, num_nodes):
                                  "--num-nodes", str(num_nodes),
                                  "--scopes", "datastore,storage-full,https://www.googleapis.com/auth/pubsub"
                                  ]))
+    # increase the memory needed by the dashboard ( https://github.com/kubernetes/dashboard/issues/2011 )
+    # dashboard_spec_json = execute_command(["kubectl", "get", "deployment", "kubernetes-dashboard", "--namespace", "kube-system", "-o", "json"], capture_stdout=True)
+    # dashboard_spec = json.loads(dashboard_spec_json)
+    # for c in dashboard_spec['spec']['template']['spec']['containers']:
+    #     if c["resources"]["limits"]["memory"] == "50Mi":
+    #         c["resources"]["limits"]["memory"] = "300Mi"
+    #         c["resources"]["requests"]["memory"] = "300Mi"
+    print("Requesting more memory for the dashboard to avoid flaky behavior")
+    execute_command(["kubectl", "set", "resources", "deployment", "kubernetes-dashboard", "--namespace", "kube-system", "--limits=memory=300Mi"])
 
 
 def stop_cluster(cluster_name):

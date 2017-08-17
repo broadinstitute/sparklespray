@@ -218,7 +218,6 @@ def resolve_uploads(dir, uploads, paths_to_exclude):
 
     return resolved
 
-
 def main(argv=None):
     logging.basicConfig(level=logging.INFO)
 
