@@ -18,11 +18,15 @@ setup(name='kubeque',
       description='batch job submission front to kubernettes',
       author='Philip Montgomery',
       author_email='pmontgom@broadinstitute.org',
-      install_requires=['google-cloud-storage',
-          'google-cloud-datastore',
-          'google-cloud-pubsub',
-          'pykube', 'attrs',
-          "oauth2client==3.0.0" # if not specified pip will install v4+ which doesn't seem to be compatible with google-cloud
+      install_requires=[
+#          'google-api-python-client',
+          'google-cloud-storage==1.1.1',
+          'google-cloud-datastore==1.0.0',
+          'google-cloud-pubsub==0.25.0',
+          'google-cloud-core==0.24.1',
+          'pykube', 'attrs'
+#          ,
+#          "oauth2client==3.0.0" # if not specified pip will install v4+ which doesn't seem to be compatible with google-cloud
           ],
       packages=find_packages(),
       entry_points={'console_scripts': [
