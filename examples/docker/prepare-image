@@ -9,7 +9,7 @@ fi
 
 set -ex
 
-(cd ../.. && rm -r dist && python setup.py sdist)
-cp ../../dist/kubeque-*.tar.gz kubeque-0.2.tar.gz
+(cd ../.. && rm -rf dist && python setup.py sdist)
+cp ../../dist/kubeque-*.tar.gz .
 docker build . -t us.gcr.io/$PROJECT_ID/kubeque-example
 gcloud docker -- push us.gcr.io/$PROJECT_ID/kubeque-example
