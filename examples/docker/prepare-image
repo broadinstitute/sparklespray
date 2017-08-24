@@ -1,6 +1,6 @@
 #!/bin/bash
 
-PROJECT_ID=$1
+PROJECT_ID=`gcloud config get-value core/project`
 
 if [ "$PROJECT_ID" == "" ]; then
     echo "Needs project id"
@@ -10,6 +10,6 @@ fi
 set -ex
 
 (cd ../.. ; python setup.py sdist)
-cp ../../dist/kubeque-0.2.tar.gz .
+cp ../../dist/kubeque-*.tar.gz kubeque-0.2.tar.gz
 docker build . -t us.gcr.io/$PROJECT_ID/kubeque-example
 gcloud docker -- push us.gcr.io/$PROJECT_ID/kubeque-example
