@@ -672,7 +672,7 @@ def version_cmd():
 def dashboard_cmd(args):
     import subprocess
 
-    p = subprocess.Popen("kubectl proxy -p {}".format(args.port))
+    p = subprocess.Popen(["kubectl", "proxy", "-p", str(args.port)])
     time.sleep(2)
     assert p.poll() is None
 
