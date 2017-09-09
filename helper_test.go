@@ -137,5 +137,7 @@ func TestExecute(t *testing.T) {
 		CommandResultURL: urlprefix + "result.json",
 		StdoutURL:        urlprefix + "stdout.txt"}
 
-	assert.Nil(t, executeTaskInDir(ioc, workdir, spec, cachedir))
+	retcode, err := executeTaskInDir(ioc, workdir, spec, cachedir)
+	assert.Nil(t, err)
+	assert.Equal(t, "0", retcode)
 }
