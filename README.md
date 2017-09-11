@@ -53,7 +53,7 @@ cas_url_prefix=gs://BUCKET_NAME/cas/
 default_url_prefix=gs://BUCKET_NAME/kubeque/
 project=PROJECT_NAME
 cluster_name=kubeque-cluster
-machine_type=g1-small
+machine_type=n1-standard-2
 default_image=us.gcr.io/PROJECT_NAME/kubeque-example
 default_resource_cpu=0.2
 default_resource_memory=100M
@@ -361,9 +361,6 @@ Does something write merged view somewhere?  Skip for now...
 
 ### Requests to functionality
 
-Need "retry" command.
-Change node-pool settings to default to auto-scale (and pre-emptable?)
-    (put these defaults into .kubeque?)
 Write a props somewhere in GCS output directory?
     - Maybe also write out csv file with job id after fetching?
 Show props in status output
@@ -371,3 +368,13 @@ Set up configuration for all gcloud ops to simplify setup (x)
     - update instructions 
     - have kubeque detect whether login is needed. (x)
 Status should report where kubernetes job exists
+Reaper should look for example of lots of failed pods (sign of kubeque-consume failing)
+Something should clean out dead pods
+statically linked version of kubeque-consume
+
+Lower hanging fruit: Reaper suffered from incorrectly believing that jobs
+were failing. However, common failure is container being incorrectly
+created. Would be good if status poll warned if pods were being respawned.
+Maybe status should show both a task view and pod view of what's running?
+(Even better if we dump stdout of failed pod for user to review)
+
