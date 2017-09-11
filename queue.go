@@ -46,10 +46,10 @@ type Job struct {
 const INITIAL_CLAIM_RETRY_DELAY = 1000
 
 type Options struct {
-	minTryTime        int
-	claimTimeout      int
-	initialClaimRetry int
-	owner             string
+	MinTryTime        int
+	ClaimTimeout      int
+	InitialClaimRetry int
+	Owner             string
 }
 
 type Executor func(taskId string, taskParam string) (string, error)
@@ -121,9 +121,9 @@ func sleepMillis(milliseconds int32) {
 	time.Sleep(time.Duration(milliseconds) * time.Millisecond)
 }
 
-func consumerRunLoop(ctx context.Context, client *datastore.Client, jobId string, executor Executor, options *Options) error {
+func ConsumerRunLoop(ctx context.Context, client *datastore.Client, jobId string, executor Executor, options *Options) error {
 	for {
-		claimed, err := claimTask(ctx, client, jobId, options.owner, options.initialClaimRetry, options.minTryTime, options.claimTimeout)
+		claimed, err := claimTask(ctx, client, jobId, options.Owner, options.InitialClaimRetry, options.MinTryTime, options.ClaimTimeout)
 		if err != nil {
 			return err
 		}

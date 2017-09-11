@@ -17,10 +17,10 @@ func spawnExecuteTasks(t *testing.T, projectID string, jobID string, index int, 
 	client, err := datastore.NewClient(ctx, projectID)
 	assert.Nil(t, err)
 
-	options := &Options{minTryTime: 1000,
-		claimTimeout:      60 * 1000,
-		initialClaimRetry: 1000,
-		owner:             fmt.Sprintf("thread-%d", index)}
+	options := &Options{MinTryTime: 1000,
+		ClaimTimeout:      60 * 1000,
+		InitialClaimRetry: 1000,
+		Owner:             fmt.Sprintf("thread-%d", index)}
 
 	run := func() {
 		ready.Wait()
@@ -30,7 +30,7 @@ func spawnExecuteTasks(t *testing.T, projectID string, jobID string, index int, 
 			log.Printf("client %d executed %s\n", index, taskParam)
 			return "0", nil
 		}
-		err := consumerRunLoop(ctx, client, jobID, executor, options)
+		err := ConsumerRunLoop(ctx, client, jobID, executor, options)
 		if err != nil {
 			log.Printf("consumerRunLoop returned error: %v\n", err)
 		}

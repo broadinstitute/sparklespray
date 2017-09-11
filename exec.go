@@ -332,7 +332,7 @@ func loadTaskSpec(ioc IOClient, taskURL string) (*TaskSpec, error) {
 	return &taskSpec, nil
 }
 
-func executeTaskFromUrl(ioc IOClient, taskId string, taskURL string, cacheDir string) (string, error) {
+func ExecuteTaskFromUrl(ioc IOClient, taskId string, taskURL string, cacheDir string) (string, error) {
 	taskSpec, err := loadTaskSpec(ioc, taskURL)
 	if err != nil {
 		return "", err
