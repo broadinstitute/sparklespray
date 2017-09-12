@@ -30,7 +30,7 @@ func main() {
 				cli.StringFlag{Name: "owner"},
 				cli.StringFlag{Name: "projectId"},
 				cli.StringFlag{Name: "cacheDir"},
-				cli.StringFlag{Name: "jobId"},
+				cli.StringFlag{Name: "cluster"},
 			},
 			Action: consume}}
 
@@ -41,7 +41,7 @@ func consume(c *cli.Context) error {
 	owner := c.String("owner")
 	projectID := c.String("projectId")
 	cacheDir := c.String("cacheDir")
-	jobID := c.String("jobId")
+	cluster := c.String("cluster")
 
 	ctx := context.Background()
 	client, err := datastore.NewClient(ctx, projectID)
@@ -65,7 +65,7 @@ func consume(c *cli.Context) error {
 		return kubequeconsume.ExecuteTaskFromUrl(ioc, taskId, taskParam, cacheDir)
 	}
 
-	err = kubequeconsume.ConsumerRunLoop(ctx, client, jobID, executor, options)
+	err = kubequeconsume.ConsumerRunLoop(ctx, client, cluster, executor, options)
 	if err != nil {
 		log.Printf("consumerRunLoop exited with: %v\n", err)
 		return err

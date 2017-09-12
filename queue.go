@@ -34,6 +34,7 @@ type Task struct {
 	FailureReason    string         `datastore:"failure_reason,omitempty"`
 	Version          int32          `datastore:"version"`
 	ExitCode         string         `datastore:"exit_code"`
+	Cluster          string         `datastore:"cluster"`
 }
 
 type Job struct {
@@ -58,8 +59,8 @@ func getTimestampMillis() int64 {
 	return int64(time.Now().UnixNano()) / int64(time.Millisecond)
 }
 
-func getTasks(ctx context.Context, client *datastore.Client, jobID string, status string, maxFetch int) ([]*Task, error) {
-	q := datastore.NewQuery("Task").Filter("job_id =", jobID).Filter("status =", status).Limit(maxFetch)
+func getTasks(ctx context.Context, client *datastore.Client, cluster string, status string, maxFetch int) ([]*Task, error) {
+	q := datastore.NewQuery("Task").Filter("cluster =", cluster).Filter("status =", status).Limit(maxFetch)
 	var tasks []*Task
 	_, err := client.GetAll(ctx, q, &tasks)
 	//log.Printf("getTasks got: %v\n", tasks)
@@ -70,13 +71,13 @@ func getTasks(ctx context.Context, client *datastore.Client, jobID string, statu
 	return tasks, nil
 }
 
-func claimTask(ctx context.Context, client *datastore.Client, jobID string, newOwner string, initialClaimRetry int, minTryTime int, claimTimeout int) (*Task, error) {
+func claimTask(ctx context.Context, client *datastore.Client, cluster string, newOwner string, initialClaimRetry int, minTryTime int, claimTimeout int) (*Task, error) {
 	//     "Returns None if no unclaimed ready tasks. Otherwise returns instance of Task"
 	claimStart := getTimestampMillis()
 	maxSleepTime := initialClaimRetry
 	for {
 		// log.Println("getTask of pending")
-		tasks, err := getTasks(ctx, client, jobID, STATUS_PENDING, 20)
+		tasks, err := getTasks(ctx, client, cluster, STATUS_PENDING, 20)
 		if err != nil {
 			return nil, err
 		}
