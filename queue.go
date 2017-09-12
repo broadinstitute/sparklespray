@@ -15,10 +15,10 @@ const STATUS_PENDING = "pending"
 const STATUS_COMPLETE = "complete"
 
 type TaskHistory struct {
-	Timestamp     int64  `datastore:"timestamp,noindex"`
-	Status        string `datastore:"status,noindex"`
-	FailureReason string `datastore:"failure_reason,noindex,omitempty"`
-	Owner         string `datastore:"owner,noindex,omitempty"`
+	Timestamp     float64 `datastore:"timestamp,noindex"`
+	Status        string  `datastore:"status,noindex"`
+	FailureReason string  `datastore:"failure_reason,noindex,omitempty"`
+	Owner         string  `datastore:"owner,noindex,omitempty"`
 }
 
 type Task struct {
@@ -122,9 +122,9 @@ func sleepMillis(milliseconds int32) {
 	time.Sleep(time.Duration(milliseconds) * time.Millisecond)
 }
 
-func ConsumerRunLoop(ctx context.Context, client *datastore.Client, jobId string, executor Executor, options *Options) error {
+func ConsumerRunLoop(ctx context.Context, client *datastore.Client, cluster string, executor Executor, options *Options) error {
 	for {
-		claimed, err := claimTask(ctx, client, jobId, options.Owner, options.InitialClaimRetry, options.MinTryTime, options.ClaimTimeout)
+		claimed, err := claimTask(ctx, client, cluster, options.Owner, options.InitialClaimRetry, options.MinTryTime, options.ClaimTimeout)
 		if err != nil {
 			return err
 		}
@@ -153,7 +153,7 @@ func ConsumerRunLoop(ctx context.Context, client *datastore.Client, jobId string
 
 func updateTaskClaimed(ctx context.Context, client *datastore.Client, task_id string, newOwner string) (*Task, error) {
 	now := getTimestampMillis()
-	event := TaskHistory{Timestamp: now,
+	event := TaskHistory{Timestamp: float64(now) / 1000.0,
 		Status: STATUS_CLAIMED,
 		Owner:  newOwner}
 
@@ -180,7 +180,7 @@ func updateTaskClaimed(ctx context.Context, client *datastore.Client, task_id st
 
 func updateTaskCompleted(ctx context.Context, client *datastore.Client, task_id string, retcode string) (*Task, error) {
 	now := getTimestampMillis()
-	taskHistory := &TaskHistory{Timestamp: now,
+	taskHistory := &TaskHistory{Timestamp: float64(now) / 1000.0,
 		Status: STATUS_COMPLETE}
 
 	mutate := func(task *Task) bool {
