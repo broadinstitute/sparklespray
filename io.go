@@ -5,6 +5,7 @@ import (
 	"io"
 	"io/ioutil"
 	"log"
+	"net/http"
 	"os"
 	"path"
 	"regexp"
@@ -137,4 +138,22 @@ func (ioc *GCSIOClient) Download(srcUrl string, destPath string) error {
 	}
 
 	return nil
+}
+
+func GetInstanceName() (string, error) {
+	url := "http://metadata.google.internal/computeMetadata/v1/instance/name"
+	var client http.Client
+	resp, err := client.Get(url)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		log.Printf("Got status=%d from fetching instance name", resp.StatusCode)
+		return "", errors.New("fetching instance name failed")
+	}
+
+	bodyBytes, err2 := ioutil.ReadAll(resp.Body)
+	return string(bodyBytes), nil
 }

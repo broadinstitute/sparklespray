@@ -46,6 +46,7 @@ type Job struct {
 	Metadata    string   `datastore:"metadata"`
 	Cluster     string   `datastore:"cluster"`
 	Status      string   `datastore:"status"`
+	SubmitTime  float64  `datastore:"submit_time"`
 }
 
 const INITIAL_CLAIM_RETRY_DELAY = 1000

@@ -58,6 +58,15 @@ func consume(c *cli.Context) error {
 		return err
 	}
 
+	if owner == "" {
+		log.Printf("Querying metadata to get host instance name")
+		owner, err = kubequeconsume.GetInstanceName()
+		if err != nil {
+			log.Printf("Creating io client failed: %v", err)
+			return err
+		}
+	}
+
 	options := &kubequeconsume.Options{MinTryTime: 1000,
 		ClaimTimeout:      1000,
 		InitialClaimRetry: 1000,
