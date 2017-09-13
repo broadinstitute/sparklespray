@@ -40,12 +40,12 @@ type Task struct {
 }
 
 type Job struct {
-	JobID       int     `datastore:"job_id"`
-	Tasks       []*Task `datastore:"tasks"`
-	KubeJobSpec string  `datastore:"kube_job_spec"`
-	Metadata    string  `datastore:"metadata"`
-	Cluster     string  `datastore:"cluster"`
-	Status      string  `datastore:"status"`
+	JobID       int      `datastore:"job_id"`
+	Tasks       []string `datastore:"tasks"`
+	KubeJobSpec string   `datastore:"kube_job_spec"`
+	Metadata    string   `datastore:"metadata"`
+	Cluster     string   `datastore:"cluster"`
+	Status      string   `datastore:"status"`
 }
 
 const INITIAL_CLAIM_RETRY_DELAY = 1000
