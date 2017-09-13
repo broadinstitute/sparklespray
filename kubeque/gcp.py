@@ -1,9 +1,6 @@
 # Authorize server-to-server interactions from Google Compute Engine.
 from google.cloud import datastore, pubsub
-from google.cloud.exceptions import Conflict
 import logging
-from oauth2client.client import GoogleCredentials
-import oauth2client
 
 from google.cloud.storage.client import Client as GSClient
 import os
@@ -18,15 +15,17 @@ import collections
 
 import attr
 import time 
-import random
 from collections import namedtuple
 
 STATUS_CLAIMED = "claimed"
 STATUS_PENDING = "pending"
 STATUS_FAILED = "failed"
-STATUS_SUCCESS = "success"
+STATUS_COMPLETE = "complete"
 
 CLAIM_TIMEOUT = 5
+
+JOB_STATUS_SUBMITTED = "submitted"
+JOB_STATUS_KILLED = "killed"
 
 log = logging.getLogger(__name__)
 
@@ -71,6 +70,7 @@ class Task(object):
     args = attr.ib()
     history = attr.ib() # list of TaskHistory
     command_result_url = attr.ib()
+    cluster = attr.ib()
     failure_reason = attr.ib(default=None)
     version = attr.ib(default=1)
     exit_code = attr.ib(default=None)
@@ -81,32 +81,33 @@ class Job(object):
     tasks = attr.ib()
     kube_job_spec = attr.ib()
     metadata = attr.ib()
+    cluster = attr.ib()
+    status = attr.ib()
 
 class BatchAdapter:
-    def __init__(self, client, cluster):
+    def __init__(self, client):
         self.client = client
         self.batch = client.batch()
         self.batch.begin()
-        self.cluster = cluster
 
     def save(self, o):
         if isinstance(o, Task):
             # The name/ID for the new entity
-            entity = task_to_entity(self.client, o, self.cluster)
+            entity = task_to_entity(self.client, o)
         else:
             assert isinstance(o, Job)
-            entity = job_to_entity(self.client, o, self.cluster)
+            entity = job_to_entity(self.client, o)
 
         self.batch.put(entity)
     
     def commit(self):
         self.batch.commit()
 
-def job_to_entity(client, o, cluster):
+def job_to_entity(client, o):
     entity_key = client.key("Job", o.job_id)
     entity = datastore.Entity(key=entity_key)
     entity['tasks'] = o.tasks
-    entity['cluster'] = cluster
+    entity['cluster'] = o.cluster
     entity['kube_job_spec'] = o.kube_job_spec
     metadata = []
     for k, v in o.metadata.items():
@@ -115,10 +116,11 @@ def job_to_entity(client, o, cluster):
         m['value'] = v
         metadata.append(m)
     entity['metadata'] = metadata
+    entity['status'] = o.status
 
     return entity
 
-def task_to_entity(client, o, cluster):
+def task_to_entity(client, o):
     entity_key = client.key("Task", o.task_id)
     entity = datastore.Entity(key=entity_key)
     entity['task_index'] = o.task_index
@@ -128,7 +130,7 @@ def task_to_entity(client, o, cluster):
     entity['owner'] = o.owner
     entity['args'] = o.args
     entity['failure_reason'] = o.failure_reason
-    entity['cluster'] = cluster
+    entity['cluster'] = o.cluster
     entity['command_result_url'] = o.command_result_url
     history = []
     for h in o.history:
@@ -159,20 +161,22 @@ def entity_to_task(entity):
         version = entity['version'],
         failure_reason = entity.get('failure_reason'),
         command_result_url = entity.get('command_result_url'),
-        exit_code = entity.get('exit_code')
+        exit_code = entity.get('exit_code'),
+        cluster = entity.get("cluster")
     )
 
 def entity_to_job(entity):
     metadata = entity.get('metadata', [])
     return Job(job_id=entity.key.name,
                tasks=entity['tasks'],
+               cluster=entity['cluster'],
                kube_job_spec=entity['kube_job_spec'],
-               metadata=dict([(m['name'],m['value']) for m in metadata]))
+               metadata=dict([(m['name'],m['value']) for m in metadata]),
+               status=entity['status'])
 
 class JobStorage:
-    def __init__(self, client, cluster_name, pubsub):
+    def __init__(self, client, pubsub):
         self.client = client
-        self.cluster_name = cluster_name
         self.pubsub = pubsub
 
     def get_task(self, task_id):
@@ -181,7 +185,6 @@ class JobStorage:
 
     def get_jobids(self):
         query = self.client.query(kind="Job")
-        query.add_filter("cluster", "=", self.cluster_name)
         jobs_it = query.fetch()
         jobids = []
         for entity_job in jobs_it:
@@ -194,12 +197,23 @@ class JobStorage:
     def store_job(self, job):
         with self.batch_write() as batch:
            batch.save(job)
-           print("saved 1 job with {} tasks".format(len(job.tasks)))
+           log.info("saved job with %d tasks", len(job.tasks))
 
         topic_name = self._job_id_to_topic(job.job_id)
-        print("Creating topic {}".format(topic_name))
-        topic = self.pubsub.topic(topic_name)
-        topic.create()
+        if self.pubsub:
+            log.info("Creating topic %s", topic_name)
+            topic = self.pubsub.topic(topic_name)
+            topic.create()
+
+    def update_job(self, job_id, mutate_fn):
+        job_key = self.client.key("Job", job_id)
+        entity_job = self.client.get(job_key)
+        job = entity_to_job(entity_job)
+        update_ok = mutate_fn()
+        if update_ok:
+            entity_job = job_to_entity(self.client, job)
+            self.client.put(entity_job)
+        return update_ok, job
 
     def delete_job(self, job_id):
         job_key = self.client.key("Job", job_id)
@@ -212,9 +226,10 @@ class JobStorage:
             self.client.delete_multi(key_batch)
 
         topic_name = self._job_id_to_topic(job_id)
-        topic = self.pubsub.topic(topic_name)
-        if topic.exists():
-            topic.delete()
+        if self.pubsub:
+            topic = self.pubsub.topic(topic_name)
+            if topic.exists():
+                topic.delete()
 
     def get_job(self, job_id):
         job_key = self.client.key("Job", job_id)
@@ -222,7 +237,6 @@ class JobStorage:
 
     def get_tasks(self, job_id = None, status = None, max_fetch=None):
         query = self.client.query(kind="Task")
-        query.add_filter("cluster", "=", self.cluster_name)
         if job_id is not None:
             query.add_filter("job_id", "=", job_id)
         if status is not None:
@@ -244,42 +258,15 @@ class JobStorage:
         log.debug("get_tasks took %s seconds", end_time-start_time)
         return tasks
 
-    def atomic_task_update(self, task_id, mutate_task_callback):
-        try:
-            with self.client.transaction():
-#                log.info("atomic update of task %s start version: %s", task_id, expected_version)
-                task_key = self.client.key("Task", task_id)
-                entity_task = self.client.get(task_key)
-                print("atomic update of task", task_id, "start, status:", entity_task["status"])
-
-                task = entity_to_task(entity_task)
-                successful_update = mutate_task_callback(task)
-                if not successful_update:
-                    return False
-                task.version = task.version + 1
-                self.client.put(task_to_entity(self.client, task, self.cluster_name))
-
-                task_as_json = json.dumps(attr.asdict(task)).encode("utf8")
-
-                topic_name = self._job_id_to_topic(task.job_id)
-                topic = self.pubsub.topic(topic_name)
-                topic.publish(task_as_json)
-
-                log.info("atomic update of task %s success, version: %s, status: %s", task_id, task.version, task.status)
-                return True
-        except Conflict:
-            log.warning("Caught exception: Conflict")
-            return False
-
     def update_task(self, task):
         original_version = task.version
         task.version = original_version + 1
-        self.client.put(task_to_entity(self.client, task, self.cluster_name))
+        self.client.put(task_to_entity(self.client, task))
         return True
     
     @contextmanager
     def batch_write(self):
-        batch = BatchAdapter(self.client, self.cluster_name)
+        batch = BatchAdapter(self.client)
         yield batch
         batch.commit()
 
@@ -297,6 +284,9 @@ class JobQueue:
     def get_tasks(self, job_id, status=None):
         return self.storage.get_tasks(job_id, status=status)
 
+    def get_job(self, job_id):
+        return self.storage.get_job(job_id)
+
     def get_jobids(self, jobid_wildcard="*"):
         jobids = self.storage.get_jobids()
         return [jobid for jobid in jobids if fnmatch(jobid, jobid_wildcard)]
@@ -307,6 +297,13 @@ class JobQueue:
 
     def delete_job(self, job_id):
         self.storage.delete_job(job_id)
+
+    def kill_job(self, job_id):
+
+        def mark_killed(job):
+            job.status = JOB_STATUS_KILLED
+
+        return self.storage.update_job(job_id, mark_killed)
 
     def get_status_counts(self, job_id):
         counts = collections.defaultdict(lambda: 0)
@@ -328,7 +325,9 @@ class JobQueue:
             task.history.append( TaskHistory(timestamp=now, status="reset") )
             self.storage.update_task(task)
 
-    def submit(self, job_id, args, kube_job_spec, metadata):
+    def submit(self, job_id, args, kube_job_spec, metadata, cluster):
+        import json
+        kube_job_spec = json.dumps(kube_job_spec)
         tasks = []
         now = time.time()
         
@@ -347,59 +346,15 @@ class JobQueue:
                         args=arg,
                         history=[ TaskHistory(timestamp=now, status="pending")],
                         owner=None,
-                        command_result_url=command_result_url)
+                        command_result_url=command_result_url,
+                                cluster=cluster)
                     tasks.append(task)
                     batch.save(task)
                     task_index += 1
-                print("saved {} tasks".format(len(args_batch)))
+                log.info("saved batch containing %d tasks", len(args_batch))
 
-        job = Job(job_id=job_id, tasks=[t.task_id for t in tasks], kube_job_spec=kube_job_spec, metadata=metadata)
+        job = Job(job_id=job_id, tasks=[t.task_id for t in tasks], kube_job_spec=kube_job_spec, metadata=metadata, cluster=cluster, status=JOB_STATUS_SUBMITTED)
         self.storage.store_job(job)
-
-    def claim_task(self, job_id, new_owner, min_try_time=0, claim_timeout=CLAIM_TIMEOUT):
-        "Returns None if no unclaimed ready tasks. Otherwise returns instance of Task"
-        claim_start = time.time()
-        while True:
-            # fetch all pending with this job_id
-            tasks = self.storage.get_tasks(job_id, status="pending", max_fetch=10)
-            if len(tasks) == 0:
-                # We might have tasks we can't see yet
-                if time.time() - claim_start < min_try_time:
-                    time.sleep(1)
-                    continue
-                else:
-                    return None
-
-            now = time.time()
-            if now - claim_start > claim_timeout:
-                raise Exception("Timeout attempting to claim task")
-
-            task = random.choice(tasks)
-
-            def mutate_task(task):
-                if task.status != STATUS_PENDING:
-                    return False
-                task.owner = new_owner
-                task.status = STATUS_CLAIMED
-                task.history.append( TaskHistory(timestamp=now, status=STATUS_CLAIMED, owner=new_owner) )
-                return True
-
-            updated = self.storage.atomic_task_update(task.task_id, mutate_task)
-
-            if updated:
-                return task.task_id, task.args
-
-            # add exponential backoff?
-            log.warning("Update failed")
-            time.sleep(random.uniform(0, 1))
-
-    def task_completed(self, task_id, was_successful, failure_reason=None, retcode=None):
-        if was_successful:
-            new_status = STATUS_SUCCESS
-            assert failure_reason is None
-        else:
-            new_status = STATUS_FAILED
-        self._update_task_status(task_id, new_status, failure_reason, retcode)
 
     def _update_task_status(self, task_id, new_status, failure_reason, retcode):
         task = self.storage.get_task(task_id)
@@ -419,10 +374,13 @@ class JobQueue:
         for task in tasks:
             self._update_task_status(task.task_id, "lost")
 
-def create_gcs_job_queue(project_id, cluster_name, credentials):
+def create_gcs_job_queue(project_id, credentials, use_pubsub):
     client = datastore.Client(project_id, credentials=credentials)
-    pubsub_client = pubsub.Client(project_id, credentials=credentials)
-    storage = JobStorage(client, cluster_name, pubsub_client)
+    if use_pubsub:
+        pubsub_client = pubsub.Client(project_id, credentials=credentials)
+    else:
+        pubsub_client = None
+    storage = JobStorage(client, pubsub_client)
     return JobQueue(storage)
 
 class IO:
@@ -505,4 +463,6 @@ class IO:
         obj_str = json.dumps(obj)
         return self.write_str_to_cas(obj_str)
 
-NodePoolInfo = namedtuple("NodePoolInfo", "name machine_type disk_size_gb target_size running creating creating_without_retries recreating deleting abandoning restarting refreshing")
+def _gcloud_cmd(args, config_name="kubeque"):
+    return ["gcloud", "--configuration=" + config_name] + list(args)
+

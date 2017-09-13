@@ -19,7 +19,7 @@ setup(name='kubeque',
       author='Philip Montgomery',
       author_email='pmontgom@broadinstitute.org',
       install_requires=[
-#          'google-api-python-client',
+          'google-api-python-client',
           'google-cloud-storage==1.1.1',
           'google-cloud-datastore==1.0.0',
           'google-cloud-pubsub==0.25.0',

@@ -39,7 +39,7 @@ def test_gs_io(tmpdir):
 def test_gcs_job_queue():
     task_count = 100
 
-    queue = create_gcs_job_queue("gcs-test-1136", "test")
+    queue = create_gcs_job_queue("gcs-test-1136")
     jobid = uuid.uuid4().hex
     queue.submit(jobid, ["cmd"] * task_count)
     time.sleep(2)
@@ -93,8 +93,8 @@ class CountDownLatch(object):
 
 def _test_atomic_updates():
     # This appears to fail due to threading issue https://github.com/GoogleCloudPlatform/google-cloud-python/issues/1214
-    queue1 = create_gcs_job_queue("gcs-test-1136", "test")
-    queue2 = create_gcs_job_queue("gcs-test-1136", "test")
+    queue1 = create_gcs_job_queue("gcs-test-1136")
+    queue2 = create_gcs_job_queue("gcs-test-1136")
     jobid = uuid.uuid4().hex
     queue1.submit(jobid, ["cmd"] )
     time.sleep(2)
