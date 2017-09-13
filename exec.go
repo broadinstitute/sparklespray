@@ -55,9 +55,11 @@ type ResourceUsage struct {
 }
 
 type ResultStruct struct {
-	ReturnCode string         `json:"return_code"`
-	Files      []*ResultFile  `json:"files"`
-	Usage      *ResourceUsage `json:"resource_usage"`
+	Command    string            `json:"command"`
+	Parameters map[string]string `json:"parameters,omitempty"`
+	ReturnCode string            `json:"return_code"`
+	Files      []*ResultFile     `json:"files"`
+	Usage      *ResourceUsage    `json:"resource_usage"`
 }
 
 type stringset map[interface{}]bool
@@ -126,7 +128,8 @@ func execCommand(command, workdir, stdoutPath string) (*syscall.Rusage, string, 
 	}
 
 	attr := &os.ProcAttr{Dir: workdir, Env: nil, Files: []*os.File{nil, stdout, stdout}}
-	proc, err := os.StartProcess("/bin/sh", []string{"-c", command}, attr)
+	exePath := "/bin/sh"
+	proc, err := os.StartProcess(exePath, []string{exePath, "-c", command}, attr)
 	if err != nil {
 		return nil, "", err
 	}
@@ -193,12 +196,14 @@ func execLifecycleScript(label string, workdir string, script string) {
 		return
 	}
 
-	log.Printf("Executing %s script:", label)
+	log.Printf("Executing %s script: %s", label, script)
 	cmd := exec.Command("sh", "-c", script)
 	cmd.Dir = workdir
 	err := cmd.Run()
 	if err != nil {
 		log.Printf("Command finished with error: %v", err)
+	} else {
+		log.Printf("Command completed succesfully")
 	}
 }
 
@@ -221,7 +226,9 @@ func executeTaskInDir(ioc IOClient, workdir string, spec *TaskSpec, cachedir str
 		panic("bad commandWorkingDir")
 	}
 
-	resourceUsage, retcode, err := execCommand(spec.Command, path.Join(workdir, commandWorkingDir), stdoutPath)
+	cwdDir := path.Join(workdir, commandWorkingDir)
+	log.Printf("Executing (working dir: %s, output written to: %s): %s", cwdDir, stdoutPath, spec.Command)
+	resourceUsage, retcode, err := execCommand(spec.Command, cwdDir, stdoutPath)
 	if err != nil {
 		return retcode, err
 	}
@@ -235,7 +242,7 @@ func executeTaskInDir(ioc IOClient, workdir string, spec *TaskSpec, cachedir str
 
 	addUpload(filesToUpload, stdoutPath, spec.StdoutURL)
 
-	err = writeResultFile(ioc, spec.CommandResultURL, retcode, resourceUsage, workdir, filesToUpload)
+	err = writeResultFile(ioc, spec.CommandResultURL, retcode, resourceUsage, workdir, filesToUpload, spec.Command, spec.Parameters)
 	if err != nil {
 		return retcode, err
 	}
@@ -245,12 +252,16 @@ func executeTaskInDir(ioc IOClient, workdir string, spec *TaskSpec, cachedir str
 	return retcode, err
 }
 
-func executeTask(ioc IOClient, taskId string, taskSpec *TaskSpec, cacheDir string) (string, error) {
+func executeTask(ioc IOClient, taskId string, taskSpec *TaskSpec, cacheDir string, tasksDir string) (string, error) {
 	//	log.Printf("Job spec (%s) of claimed task: %s", json_url, json.dumps(spec, indent=2))
 
 	mode := os.FileMode(0700)
-	taskDir, err := ioutil.TempDir(".", "task-")
-	err = os.Mkdir(taskDir, mode)
+	err := os.MkdirAll(tasksDir, mode)
+	if err != nil {
+		return "", err
+	}
+
+	taskDir, err := ioutil.TempDir(tasksDir, "task-")
 	if err != nil {
 		return "", err
 	}
@@ -267,6 +278,16 @@ func executeTask(ioc IOClient, taskId string, taskSpec *TaskSpec, cacheDir strin
 		return "", err
 	}
 
+	workDir, err = filepath.Abs(workDir)
+	if err != nil {
+		return "", err
+	}
+
+	cacheDir, err = filepath.Abs(cacheDir)
+	if err != nil {
+		return "", err
+	}
+
 	retcode, err := executeTaskInDir(ioc, workDir, taskSpec, cacheDir)
 	if err != nil {
 		return retcode, err
@@ -276,6 +297,7 @@ func executeTask(ioc IOClient, taskId string, taskSpec *TaskSpec, cacheDir strin
 }
 
 func uploadMapped(ioc IOClient, files map[string]string) error {
+	log.Printf("Uploading %d files", len(files))
 	for src, dst := range files {
 		err := ioc.Upload(src, dst)
 		if err != nil {
@@ -290,7 +312,9 @@ func writeResultFile(ioc IOClient,
 	retcode string,
 	resourceUsage *syscall.Rusage,
 	workdir string,
-	filesToUpload map[string]string) error {
+	filesToUpload map[string]string,
+	command string,
+	parameters map[string]string) error {
 
 	files := make([]*ResultFile, 0, 100)
 	for src, dstURL := range filesToUpload {
@@ -298,6 +322,8 @@ func writeResultFile(ioc IOClient,
 	}
 
 	result := &ResultStruct{
+		Command:    command,
+		Parameters: parameters,
 		ReturnCode: retcode,
 		Files:      files,
 		Usage: &ResourceUsage{
@@ -332,11 +358,11 @@ func loadTaskSpec(ioc IOClient, taskURL string) (*TaskSpec, error) {
 	return &taskSpec, nil
 }
 
-func ExecuteTaskFromUrl(ioc IOClient, taskId string, taskURL string, cacheDir string) (string, error) {
+func ExecuteTaskFromUrl(ioc IOClient, taskId string, taskURL string, cacheDir string, tasksDir string) (string, error) {
 	taskSpec, err := loadTaskSpec(ioc, taskURL)
 	if err != nil {
 		return "", err
 	}
 
-	return executeTask(ioc, taskId, taskSpec, cacheDir)
+	return executeTask(ioc, taskId, taskSpec, cacheDir, tasksDir)
 }

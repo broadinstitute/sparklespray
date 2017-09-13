@@ -4,3 +4,7 @@ count. Get tasks independant of status and compare count. Repeat until
 timeout or task count agrees.
 
 
+TODO: 
+    - add support for reserved capacity
+    - add support for honoring job killed flag
+    

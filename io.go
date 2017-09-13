@@ -34,6 +34,7 @@ func NewIOClient(ctx context.Context) (IOClient, error) {
 }
 
 func (ioc *GCSIOClient) Upload(src string, destURL string) error {
+	log.Printf("Uploading %s -> %s", src, destURL)
 	obj, err := ioc.getObj(destURL)
 	if err != nil {
 		return err

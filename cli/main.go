@@ -31,6 +31,7 @@ func main() {
 				cli.StringFlag{Name: "projectId"},
 				cli.StringFlag{Name: "cacheDir"},
 				cli.StringFlag{Name: "cluster"},
+				cli.StringFlag{Name: "tasksDir"},
 			},
 			Action: consume}}
 
@@ -42,6 +43,7 @@ func consume(c *cli.Context) error {
 	projectID := c.String("projectId")
 	cacheDir := c.String("cacheDir")
 	cluster := c.String("cluster")
+	tasksDir := c.String("tasksDir")
 
 	ctx := context.Background()
 	client, err := datastore.NewClient(ctx, projectID)
@@ -62,7 +64,7 @@ func consume(c *cli.Context) error {
 		Owner:             owner}
 
 	executor := func(taskId string, taskParam string) (string, error) {
-		return kubequeconsume.ExecuteTaskFromUrl(ioc, taskId, taskParam, cacheDir)
+		return kubequeconsume.ExecuteTaskFromUrl(ioc, taskId, taskParam, cacheDir, tasksDir)
 	}
 
 	err = kubequeconsume.ConsumerRunLoop(ctx, client, cluster, executor, options)
