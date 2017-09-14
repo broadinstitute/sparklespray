@@ -331,6 +331,7 @@ class JobQueue:
             tasks.extend(self.storage.get_tasks(jobid, status=status_to_clear))
 
         now = time.time()
+        updated = 0
         for task in tasks:
             if owner is not None and owner != task.owner:
                 continue
@@ -338,6 +339,15 @@ class JobQueue:
             task.status = STATUS_PENDING
             task.history.append( TaskHistory(timestamp=now, status="reset") )
             self.storage.update_task(task)
+            updated += 1
+
+        def mark_not_killed(job):
+            job.status = JOB_STATUS_SUBMITTED
+            return True
+
+        self.storage.update_job(jobid, mark_not_killed)
+
+        return updated
 
     def submit(self, job_id, args, kube_job_spec, metadata, cluster):
         import json
@@ -468,7 +478,6 @@ class IO:
         text = text.encode("utf8")
         hash = hashlib.sha256(text).hexdigest()
         dst_url = self.cas_url_prefix+"/"+hash
-#        print("self.cas_url_prefix", self.cas_url_prefix)
         bucket, path = self._get_bucket_and_path(dst_url)
         blob = bucket.blob(path)
         blob.upload_from_string(text)
