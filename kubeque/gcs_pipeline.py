@@ -75,17 +75,30 @@ class Cluster:
         self.project = project
         self.zones = zones
 
-    def get_cluster_status(self, cluster_name):
+    def _get_cluster_instances(self, cluster_name):
         instances = []
         for zone in self.zones:
             i = self.compute.instances().list(project=self.project, zone=zone, filter="labels.kubeque-cluster="+cluster_name).execute().get('items', [])
             instances.extend(i)
+        return instances
+
+    def get_cluster_status(self, cluster_name):
+        instances = self._get_cluster_instances(cluster_name)
         return ClusterStatus(instances)
+
+    def stop_cluster(self, cluster_name):
+        log.info("Deleting instances in cluster %s", cluster_name)
+        instances = self._get_cluster_instances(cluster_name)
+        for instance in instances:
+            log.info("deleting instance %s", instance['id'])
+            self.compute.instances().delete(project=self.project, zone=instance['zone'], instance=instance['id'])
 
     def add_node(self, pipeline_def):
         # Run the pipeline
+        logging_url = pipeline_def['pipelineArgs']['logging']['gcsPath']
         operation = self.service.pipelines().run(body=pipeline_def).execute()
-        log.info("Creation of node has op-name: %s", operation['name'])
+        log_prefix = operation['name'].replace("operations/", "")
+        log.info("Node's log will be written to: %s/%s", logging_url, log_prefix)
 
         # Emit the result of the pipeline run submission
         #pp = pprint.PrettyPrinter(indent=2)

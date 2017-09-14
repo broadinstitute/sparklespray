@@ -378,3 +378,18 @@ created. Would be good if status poll warned if pods were being respawned.
 Maybe status should show both a task view and pod view of what's running?
 (Even better if we dump stdout of failed pod for user to review)
 
+TODO: 
+    - essential
+        - broken: sub --local
+            - only problem left: need to limit to a single job. Presently will run as a 'cluster' and can pick up other jobs which is confusing
+        - new feature: generate a csv file of parameters of tasks which did not complete successfully
+        - to test: OOM
+        - to test: kill
+    - productivity
+        - new feature: LAST as an alias for last submitted job when invoking kill, reset, status, etc
+        - new feature: reservation
+        - broken: resubmit with new resource requirements
+    - nice to have
+        - missing: resource utilization over time
+        - new feature: speed up submission of jobs with > 100 tasks
+

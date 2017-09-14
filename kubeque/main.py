@@ -5,10 +5,10 @@ import json
 import sys
 
 import kubeque
-from kubeque.gcp import create_gcs_job_queue, IO, STATUS_PENDING, STATUS_FAILED, STATUS_COMPLETE, STATUS_CLAIMED
+from kubeque.gcp import create_gcs_job_queue, IO, STATUS_PENDING, STATUS_FAILED, STATUS_COMPLETE, STATUS_CLAIMED, STATUS_KILLED
 from kubeque.hasher import CachingHashFunction
 
-from kubeque.spec import make_spec_from_command, SrcDstPair
+from kubeque.spec import make_spec_from_command, SrcDstPair, add_file_to_upload_map
 import csv
 import copy
 import contextlib
@@ -137,7 +137,7 @@ def _make_cluster_name(image, cpu_request, mem_limit):
     import hashlib
     return "c-"+hashlib.md5("{}-{}-{}".format(image, cpu_request, mem_limit).encode("utf8")).hexdigest()[:10]
 
-def submit(jq, io, cluster, job_id, spec, dry_run, config, skip_kube_submit, metadata, exec_local=False):
+def submit(jq, io, cluster, job_id, spec, dry_run, config, skip_kube_submit, metadata, kubequeconsume_url, exec_local=False):
     # where to take this from? arg with a default of 1?
     if dry_run:
         skip_kube_submit = True
@@ -177,12 +177,9 @@ def submit(jq, io, cluster, job_id, spec, dry_run, config, skip_kube_submit, met
         kubeque_command = [kubeque_exe_in_container, "consume", "--cluster", cluster_name, "--projectId", project,
                            "--cacheDir", stage_dir+"/cache",
                            "--tasksDir", stage_dir+"/tasks"]
-        if config.get("needs_sudo_in_container", "no").lower() == "yes":
-            kubeque_command = kubeque_command + ["--needs_sudo_in_container"]
         kubeque_command = "chmod +x {} && {}".format(kubeque_exe_in_container, " ".join(kubeque_command))
 
         logging_url = config["default_url_prefix"]+"/logs"
-        kubequeconsume_url = "gs://broad-achilles-kubeque/kubequeconsume"
         pipeline_spec = cluster.create_pipeline_spec(
                          image,
                          kubeque_command,
@@ -204,16 +201,15 @@ def submit(jq, io, cluster, job_id, spec, dry_run, config, skip_kube_submit, met
             else:
                 log.info("Cluster already exists: %s", existing_nodes.as_string())
         elif exec_local:
-            cmd = _write_local_script(job_id, spec, kubeque_command, config['kubequeconsume_exe_path'])
+            cmd = _write_local_script(job_id, spec, kubeque_command, config['kubequeconsume_exe_path'], kubeque_exe_in_container)
             log.info("Running job locally via executing: ./%s", cmd)
             os.system(os.path.abspath(cmd))
         else:
-            cmd = _write_local_script(job_id, spec, kubeque_command, config['kubequeconsume_exe_path'])
+            cmd = _write_local_script(job_id, spec, kubeque_command, config['kubequeconsume_exe_path'], kubeque_exe_in_container)
             log.info("Skipping submission.  You can execute tasks locally via: ./%s", cmd)
         return config_url
 
-def _write_local_script(job_id, spec, kubeque_command, kubequeconsume_exe_path):
-    kubeque_consume_exe_in_container = kubeque_command.split(" ")[0]
+def _write_local_script(job_id, spec, kubeque_command, kubequeconsume_exe_path, kubeque_exe_in_container):
     from kubeque.gcp import _gcloud_cmd
     import stat
 
@@ -222,8 +218,8 @@ def _write_local_script(job_id, spec, kubeque_command, kubequeconsume_exe_path):
         ["docker", "--", "run",
          "-v", os.path.expanduser("~/.config/gcloud") + ":/google-creds",
          "-e", "GOOGLE_APPLICATION_CREDENTIALS=/google-creds/application_default_credentials.json",
-         "-v", kubequeconsume_exe_path+":"+kubeque_consume_exe_in_container,
-         image, kubeque_command, "--owner", "local"])
+         "-v", kubequeconsume_exe_path+":"+kubeque_exe_in_container,
+         image, 'bash -c "'+kubeque_command+' --owner local"', ])
     script_name = "run-{}-locally.sh".format(job_id)
     with open(script_name, "wt") as fd:
         fd.write("#!/usr/bin/env bash\n")
@@ -265,31 +261,6 @@ def load_config(config_file, gcloud_config_file="~/.config/gcloud/configurations
     jq, io, cluster = load_config_from_dict(merged_config)
     return merged_config, jq, io, cluster
 
-
-GCLOUD_CONFIG_TEMPLATE = """[core]
-account = {account}
-project = {project}
-
-[compute]
-zone = {zone}
-region = {region}
-"""
-
-def update_gcloud_config(config, dest_config_dir="~/.config/gcloud/configurations", config_name="kubeque"):
-    dest_config_dir = os.path.expanduser(dest_config_dir)
-    dest_config_path = os.path.join(dest_config_dir, "config_"+config_name)
-    gcloud_config = GCLOUD_CONFIG_TEMPLATE.format(project=config['project'],
-                                  zone=config['zone'],
-                                  region=config['region'],
-                                  account=config['account'])
-
-    # if it's already what we'd would write, skip update
-    if os.path.exists(dest_config_path):
-        if open(dest_config_path, "rt").read() == gcloud_config:
-            return
-
-    with open(dest_config_path, "wt") as fd:
-        fd.write(gcloud_config)
 
 def load_config_from_dict(config):
     credentials = None
@@ -409,6 +380,10 @@ def submit_cmd(jq, io, cluster, args, config):
             src_wildcards=args.results_wildcards,
             extra_files=expand_files_to_upload(args.push),
             working_dir=args.working_dir)
+
+        kubequeconsume_exe_path = config['kubequeconsume_exe_path']
+        kubequeconsume_exe_url = add_file_to_upload_map(upload_map, hash_db.hash_filename, cas_url_prefix, kubequeconsume_exe_path, "!KUBEQUECONSUME")
+
         hash_db.persist()
 
         log.info("upload_map = %s", upload_map)
@@ -416,7 +391,7 @@ def submit_cmd(jq, io, cluster, args, config):
             io.put(filename, dest, skip_if_exists=True)
 
     log.debug("spec: %s", json.dumps(spec, indent=2))
-    submit(jq, io, cluster, job_id, spec, args.dryrun, config, args.skip_kube_submit, metadata, args.local)
+    submit(jq, io, cluster, job_id, spec, args.dryrun, config, args.skip_kube_submit, metadata, kubequeconsume_exe_url, args.local)
 
     finished = False
     if args.local:
@@ -460,7 +435,7 @@ def _resubmit(jq, jobid, resource_spec={}):
 def retry_cmd(jq, cluster, io, args):
     resource_spec = _parse_resources(args.resources)
 
-    jobids = jq.get_jobids(args.jobid_pattern)
+    jobids = _get_jobids_from_pattern(jq, args.jobid_pattern)
     if len(jobids) == 0:
         print("No jobs found with name matching {}".format(args.jobid_pattern))
         return
@@ -470,19 +445,52 @@ def retry_cmd(jq, cluster, io, args):
         jq.reset(jobid, args.owner)
         _resubmit(jq, jobid, resource_spec)
 
-
     if args.wait_for_completion:
         log.info("Waiting for job to terminate")
         for job_id in jobids:
             watch(jq, job_id, cluster)
 
-def reset_cmd(jq, io, args):
-    for jobid in jq.get_jobids(args.jobid_pattern):
+def list_params_cmd(jq, io, args):
+    jobid = _resolve_jobid(jq, args.jobid)
+
+    if args.incomplete:
+        tasks = []
+        for status in [STATUS_FAILED, STATUS_CLAIMED, STATUS_PENDING, STATUS_KILLED]:
+            tasks.extend(jq.get_tasks(jobid, status = status))
+    else:
+        tasks = jq.get_tasks(jobid)
+
+    if len(tasks) == 0:
+        print("No tasks found")
+    else:
+        print("Getting parameters from %d tasks" % len(tasks))
+        parameters = []
+        for task in tasks:
+            task_spec = json.loads(io.get_as_str(task.args))
+            parameters.append( task_spec.get('parameters', {}) )
+
+        # find the union of all keys
+        keys = set()
+        for p in parameters:
+            keys.update(p.keys())
+
+        columns = list(keys)
+        columns.sort()
+
+        with open(args.filename, "wt") as fd:
+            w = csv.writer(fd)
+            w.writerow(columns)
+            for p in parameters:
+                row = [p.get(column, "") for column in columns]
+                w.writerow(row)
+
+def reset_cmd(jq, args):
+    for jobid in _get_jobids_from_pattern(jq, args.jobid_pattern):
         log.info("reseting %s", jobid)
         if args.all:
-            statuses_to_clear=[STATUS_CLAIMED, STATUS_FAILED, STATUS_COMPLETE]
+            statuses_to_clear=[STATUS_CLAIMED, STATUS_FAILED, STATUS_COMPLETE, STATUS_KILLED]
         else:
-            statuses_to_clear=[STATUS_CLAIMED, STATUS_FAILED]
+            statuses_to_clear=[STATUS_CLAIMED, STATUS_FAILED, STATUS_KILLED]
         jq.reset(jobid, args.owner, statuses_to_clear=statuses_to_clear)
         if args.resubmit:
             _resubmit(jq, jobid)
@@ -515,12 +523,25 @@ def _was_oom_killed(task):
     #     return oom_killed
     return False
 
-def status_cmd(jq, io, cluster, args):
-    jobid_pattern = args.jobid_pattern
+def _get_jobids_from_pattern(jq, jobid_pattern):
     if not jobid_pattern:
         jobid_pattern = "*"
 
-    jobids = jq.get_jobids(jobid_pattern)
+    if jobid_pattern == "LAST":
+        job = jq.get_last_job()
+        return [job.job_id]
+    else:
+        return jq.get_jobids(jobid_pattern)
+
+def _resolve_jobid(jq, jobid):
+    if jobid == "LAST":
+        job = jq.get_last_job()
+        return job.job_id
+    else:
+        return jobid
+
+def status_cmd(jq, io, cluster, args):
+    jobids = _get_jobids_from_pattern(jq, args.jobid_pattern)
 
     if args.wait:
         assert len(jobids) == 1, "When watching, only one jobid allowed, but the following matched wildcard: {}".format(jobids)
@@ -556,7 +577,7 @@ def status_cmd(jq, io, cluster, args):
                 log.info("%s: %s", jobid, status)
 
 def fetch_cmd(jq, io, args):
-    fetch_cmd_(jq, io, args.jobid, args.dest)
+    fetch_cmd_(jq, io, _resolve_jobid(jq, args.jobid), args.dest)
 
 def fetch_cmd_(jq, io, jobid, dest_root, force=False):
     def get(src, dst, **kwargs):
@@ -653,9 +674,16 @@ def watch(jq, jobid, cluster, refresh_delay=5, min_check_time=10):
 
         time.sleep(refresh_delay)
 
-def remove_cmd(jq, args):
-    # TODO: Maybe rename as "clean" and also remove all pods/jobs which are complete _and_ are not referenced by a job
-    jobids = jq.get_jobids(args.jobid_pattern)
+def addnodes_cmd(jq, cluster, args):
+    job_id = _resolve_jobid(args.job_id)
+    job = jq.get_job(job_id)
+
+    spec = json.loads(job.kube_job_spec)
+    for i in range(args.count):
+        cluster.add_node(spec)
+
+def clean_cmd(jq, args):
+    jobids = _get_jobids_from_pattern(jq, args.jobid_pattern)
     for jobid in jobids:
         status_counts = jq.get_status_counts(jobid)
         if not _is_complete(status_counts) and not ("pending" in status_counts and len(status_counts) == 1):
@@ -664,14 +692,14 @@ def remove_cmd(jq, args):
             log.info("deleting %s", jobid)
             jq.delete_job(jobid)
 
-def kill_cmd(jq, args):
+def kill_cmd(jq, cluster, args):
     jobids = jq.get_jobids(args.jobid_pattern)
     for jobid in jobids:
-        jq.kill(jobid)
         # TODO: stop just marks the job as it shouldn't run any more.  tasks will still be claimed.
-        # do we let the re-claimer transition these to pending?  Or do we cancel pending and mark claimed as failed?
-        # probably we should
-
+        ok, job = jq.kill_job(jobid)
+        assert ok
+        if args.killcluster:
+            cluster.stop_cluster(job.cluster)
 
 def dumpjob_cmd(jq, io, args):
     import attr
@@ -718,19 +746,30 @@ def main(argv=None):
     parser.add_argument("--local", help="Run the tasks inside of docker on the local machine", action="store_true")
     parser.add_argument("command", nargs=argparse.REMAINDER)
 
-    parser = subparser.add_parser("reset", help="Mark any 'claimed' or 'failed' jobs as ready for execution again.  Useful largely only during debugging issues with job submission.")
+    parser = subparser.add_parser("addnodes", help="Add nodes to be used for executing a specific job")
+    parser.set_defaults(func=addnodes_cmd)
+    parser.add_argument("job", help="the job id used to determine which cluster node should be added to.")
+    parser.add_argument("count", help="the number of worker nodes to add to the cluster", type=int)
+
+    parser = subparser.add_parser("reset", help="Mark any 'claimed', 'killed' or 'failed' jobs as ready for execution again.  Useful largely only during debugging issues with job submission.")
     parser.set_defaults(func=reset_cmd)
     parser.add_argument("jobid_pattern")
     parser.add_argument("--owner")
     parser.add_argument("--resubmit", action="store_true")
     parser.add_argument("--all", action="store_true")
 
-    parser = subparser.add_parser("retry", help="Resubmit any 'failed' jobs for execution again.")
-    parser.set_defaults(func=retry_cmd)
-    parser.add_argument("--resources", "-r", help="Specify the resources that are needed for running job. (ie: -r memory=5G,cpu=0.9) ")
-    parser.add_argument("jobid_pattern")
-    parser.add_argument("--owner")
-    parser.add_argument("--no-wait", action="store_false", dest="wait_for_completion", help="Exit immediately after submission instead of waiting for job to complete")
+    parser = subparser.add_parser("listparams", help="Write to a csv file the parameters for each task")
+    parser.set_defaults(func=list_params_cmd)
+    parser.add_argument("jobid")
+    parser.add_argument("filename", help="The filename to write the csv file containing the parameters")
+    parser.add_argument("--incomplete", "-i", help="By default, will list all parameters. If this flag is present, only those tasks which are not complete will be written to the csv", action="store_true")
+
+#    parser = subparser.add_parser("retry", help="Resubmit any 'failed' jobs for execution again. (often after increasing memory required)")
+#    parser.set_defaults(func=retry_cmd)
+#    parser.add_argument("jobid_pattern")
+#    parser.add_argument("--resources", "-r", help="Update the resource requirements that should be used when re-running job. (ie: -r memory=5G,cpu=2) ")
+#    parser.add_argument("--owner", help="if specified, only tasks with this owner will be retried")
+#    parser.add_argument("--no-wait", action="store_false", dest="wait_for_completion", help="Exit immediately after submission instead of waiting for job to complete")
 
     parser = subparser.add_parser("dumpjob", help="Extract a json description of a submitted job")
     parser.set_defaults(func=dumpjob_cmd)
@@ -743,12 +782,13 @@ def main(argv=None):
     parser.add_argument("--wait", action="store_true", help="If set, will periodically poll and print the status until all tasks terminate")
     parser.add_argument("jobid_pattern", nargs="?")
 
-    parser = subparser.add_parser("remove", help="Remove completed jobs from the database of jobs")
-    parser.set_defaults(func=remove_cmd)
-    parser.add_argument("jobid_pattern")
+    parser = subparser.add_parser("clean", help="Remove completed jobs from the database of jobs")
+    parser.set_defaults(func=clean_cmd)
+    parser.add_argument("jobid_pattern", nargs="?", help="If specified will only attempt to remove jobs that match this pattern")
 
     parser = subparser.add_parser("kill", help="Terminate the specified job")
     parser.set_defaults(func=kill_cmd)
+    parser.add_argument("--killcluster", "-k", action="store_true", help="If set will also terminate the nodes that the job is using to run. (This could impact other running jobs that use the same docker image)")
     parser.add_argument("jobid_pattern")
 
     parser = subparser.add_parser("fetch", help="Download results from a completed job")
@@ -762,10 +802,11 @@ def main(argv=None):
     args = parse.parse_args(argv)
 
     if args.debug:
-        logging.basicConfig(level=logging.DEBUG)
+        logging.basicConfig(level=logging.DEBUG, format="%(asctime)s:%(levelname)s:%(name)s:%(message)s")
     else:
-        logging.basicConfig(level=logging.INFO)
+        logging.basicConfig(level=logging.INFO, format="%(asctime)s:%(levelname)s:%(name)s %(message)s")
         logging.getLogger("googleapiclient.discovery").setLevel(logging.WARN)
+
 
     if not hasattr(args, 'func'):
         parse.print_help()
@@ -775,7 +816,6 @@ def main(argv=None):
     if len(set(["config", "jq", "io"]).intersection(func_param_names)) > 0:
         config_path = get_config_path(args.config)
         config, jq, io, cluster = load_config(config_path)
-        update_gcloud_config(config)
     func_params = {}
     if "args" in func_param_names:
         func_params["args"] = args
@@ -802,44 +842,6 @@ def get_config_path(config_path):
             if not os.path.exists(config_path):
                 raise Exception("Could not find config file at neither ./.kubeque nor ~/.kubeque")
     return config_path
-
-
-NOTES = """
-Assume process has all necessary with tokens in environment.
-
-Job def consists of
-Download via mapping.  Mapping defined as list of (URL, name).   Will download to relative path.
-(1) Download file SRC destination
-Download folder s3prefix destination 
-(1) Execute command stdoutpath stdoutpath, cmdoutpath, command string
-     Cmdoutpath will include the return code as well as any useful stats
-(1) Upload file SRC destination 
-Upload dir destination
-Upload to casaddr, path for mapping file to write, list of src filenames
-
-Downloading missing file is hard error 
-Uploading missing file is a warning 
-Logdest where to write/upload helper output.
-
-Cmd: helper cmdfileins3
-
-Need with for dynamo read/write, s3 read/write/list
-
-Stack driver for logging?
-
-Helper main: 
-  Loop forever
-  Claim task
-  If none stop
-  Use args as s3cmdfile
-  Download file
-  Execute downloads
-  Execute command 
-  Execute uploads
-  Mark task done
-
-One entry point to make jobs.  
-"""
 
 if __name__ == "__main__":
     main(sys.argv[1:])

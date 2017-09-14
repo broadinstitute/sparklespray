@@ -21,6 +21,7 @@ STATUS_CLAIMED = "claimed"
 STATUS_PENDING = "pending"
 STATUS_FAILED = "failed"
 STATUS_COMPLETE = "complete"
+STATUS_KILLED = "killed"
 
 CLAIM_TIMEOUT = 5
 
@@ -83,6 +84,7 @@ class Job(object):
     metadata = attr.ib()
     cluster = attr.ib()
     status = attr.ib()
+    submit_time = attr.ib()
 
 class BatchAdapter:
     def __init__(self, client):
@@ -117,6 +119,7 @@ def job_to_entity(client, o):
         metadata.append(m)
     entity['metadata'] = metadata
     entity['status'] = o.status
+    entity['submit_time'] = o.submit_time
 
     return entity
 
@@ -172,7 +175,8 @@ def entity_to_job(entity):
                cluster=entity['cluster'],
                kube_job_spec=entity['kube_job_spec'],
                metadata=dict([(m['name'],m['value']) for m in metadata]),
-               status=entity['status'])
+               status=entity['status'],
+               submit_time=entity.get('submit_time'))
 
 class JobStorage:
     def __init__(self, client, pubsub):
@@ -209,7 +213,7 @@ class JobStorage:
         job_key = self.client.key("Job", job_id)
         entity_job = self.client.get(job_key)
         job = entity_to_job(entity_job)
-        update_ok = mutate_fn()
+        update_ok = mutate_fn(job)
         if update_ok:
             entity_job = job_to_entity(self.client, job)
             self.client.put(entity_job)
@@ -234,6 +238,12 @@ class JobStorage:
     def get_job(self, job_id):
         job_key = self.client.key("Job", job_id)
         return entity_to_job(self.client.get(job_key))
+
+    def get_last_job(self):
+        query = self.client.query(kind="Job")
+        query.order = ["-submit_time"]
+        job_entity = list(query.fetch(limit=1))[0]
+        return entity_to_job(job_entity)
 
     def get_tasks(self, job_id = None, status = None, max_fetch=None):
         query = self.client.query(kind="Task")
@@ -287,6 +297,9 @@ class JobQueue:
     def get_job(self, job_id):
         return self.storage.get_job(job_id)
 
+    def get_last_job(self):
+        return self.storage.get_last_job()
+
     def get_jobids(self, jobid_wildcard="*"):
         jobids = self.storage.get_jobids()
         return [jobid for jobid in jobids if fnmatch(jobid, jobid_wildcard)]
@@ -302,6 +315,7 @@ class JobQueue:
 
         def mark_killed(job):
             job.status = JOB_STATUS_KILLED
+            return True
 
         return self.storage.update_job(job_id, mark_killed)
 
@@ -353,7 +367,8 @@ class JobQueue:
                     task_index += 1
                 log.info("saved batch containing %d tasks", len(args_batch))
 
-        job = Job(job_id=job_id, tasks=[t.task_id for t in tasks], kube_job_spec=kube_job_spec, metadata=metadata, cluster=cluster, status=JOB_STATUS_SUBMITTED)
+        job = Job(job_id=job_id, tasks=[t.task_id for t in tasks], kube_job_spec=kube_job_spec, metadata=metadata, cluster=cluster, status=JOB_STATUS_SUBMITTED,
+                  submit_time=time.time())
         self.storage.store_job(job)
 
     def _update_task_status(self, task_id, new_status, failure_reason, retcode):
@@ -424,7 +439,7 @@ class IO:
 
     def put(self, src_filename, dst_url, must=True, skip_if_exists=False):
         if must:
-            assert os.path.exists(src_filename)
+            assert os.path.exists(src_filename), "{} does not exist".format(src_filename)
 
         bucket, path = self._get_bucket_and_path(dst_url)
         blob = bucket.blob(path)
@@ -463,6 +478,6 @@ class IO:
         obj_str = json.dumps(obj)
         return self.write_str_to_cas(obj_str)
 
-def _gcloud_cmd(args, config_name="kubeque"):
-    return ["gcloud", "--configuration=" + config_name] + list(args)
+def _gcloud_cmd(args):
+    return ["gcloud"] + list(args)
 
