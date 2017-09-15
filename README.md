@@ -1,11 +1,7 @@
-# Kubeque: Easy submission of batch jobs to kubernetes
+# Kubeque: Easy submission of batch jobs to google compute engine
 
-"Kubernetes is an open-source system for automating deployment, scaling, and management of containerized applications."
-
-(See also https://kubernetes.io/ )
-
-kubeque is a command line tool to make it easy to manage a kubernetes cluster via googles GKE service and submit adhoc batch jobs that cluster. 
-
+kubeque is a command line tool to make it easy to submit adhoc batch jobs that
+GCE instances.
 
 # Getting started:
 
@@ -13,20 +9,20 @@ kubeque is a command line tool to make it easy to manage a kubernetes cluster vi
 
 To run a process or batch of processes via kubeque, you will need to:
 
-1. Create a kubernetes cluster (kubeque start)
-2. Create a docker image and upload into a repository that the cluster can access.   
-3. Submit the actual job (kubeque sub ...)
-4. You then may optionally download the output or leave it in google storage for later.  (kubeque fetch ...) 
-
-When you're all done, you may want to remove the cluster entirely (kubeque stop)
+1. Create a docker image and upload into a repository that the cluster can access.
+(or use an existing image)
+2. Submit the actual job (kubeque sub ...)
+3. You then may optionally download the output or leave it in google storage for later.  (kubeque fetch ...) 
 
 ## Prereqs
 Create a google project.  In the below, we'll assume the project name is PROJECT_NAME.
 
+Create a bucket for holding results and uploads.  In the following example, we'll assume the name of the bucket is BUCKET_NAME.
+
 Google's cloud SDK installed and in your path: https://cloud.google.com/sdk/
 
-To set up gcloud, your authentication and the necessary tools to talk to
-kubernetes:
+To set up gcloud:
+
 ```
 # authenticate for the gcloud tool
 gcloud auth login
@@ -34,15 +30,9 @@ gcloud auth login
 gcloud auth application-default login
 # setup which should be the default project and zone for your cluster
 gcloud init
-# install alpha versions of the command line tools for managing the cluster
-gcloud components install alpha
-# install the kubectl tool for talking to kubernetes
-gcloud components install kubectl
 ```
 
 ## Setting up
-Create a bucket for holding results and uploads.  In the following example, we'll assume the name of the bucket is BUCKET_NAME.
-
 Create a config file "~/.kubeque" or in the current directory containing the following
 (change the values of zone, region, and account to match what you used when
 running gcloud init):
@@ -62,40 +52,69 @@ region=us-east1
 account=username@gmail.com
 ```
 
-## Create an docker image that your jobs will execute within
-
-Create an image to use by our job:
-
-```
-cd examples/docker
-./prepare-image PROJECT_NAME
-```
-
-or
-```
-docker build . -t us.gcr.io/broad-achilles/demeter
-gcloud docker -- push us.gcr.io/broad-achilles/demeter
-```
-
-GKE is simple to use with the docker repository within GKE.  To push to that repo, my buil
-
 ## Running jobs
 
-recorded a session as:
-https://asciinema.org/a/7rl131knip6g8pkh81yewb9il
+Submitting a sample job
 
-Create the cluster:
-
-```
-kubeque start 
-```
-
-Submit the sample job
+There's a sample script in the examples/sample-job directory. In order to
+run, you will need to make a '.kubeque' file in that directory with the
+following content:
 
 ```
-cd examples/sample-job
-kubeque sub -n sample-job python3 '^mandelbrot.py' 0 0 0.5
+[config]
+default_url_prefix=gs://YOUR_BUCKET/PREFIX
+project=YOUR_PROJECT
+default_image=python
+default_resource_cpu=1
+default_resource_memory=100M
+zones=us-east1-b
 ```
+
+To run:
+
+```
+> kubeque sub python '^mandelbrot.py' 0 0 0.5
+2017-09-15 09:49:48,062 Already in CAS cache, skipping upload of mandelbrot.py
+2017-09-15 09:49:48,171 Already in CAS cache, skipping upload of /Users/pmontgom/dev/kubeque/kubeque/bin/kubequeconsume
+2017-09-15 09:49:48,171 Submitting job with id: 20170915-094947-1fb5
+2017-09-15 09:49:48,386 Saved task definition batch containing 1 tasks
+2017-09-15 09:49:49,195 Saved job definition with 1 tasks
+2017-09-15 09:49:49,891 Adding initial node for cluster
+2017-09-15 09:49:50,554 Node's log will be written to: gs://broad-achilles-kubeque/test/kube/node-logs/EJCHtq7oKxjbzq-lrdL-xg8gtubt_vUYKg9wcm9kdWN0aW9uUXVldWU
+2017-09-15 09:49:50,554 Waiting for job to terminate
+2017-09-15 09:49:50,805 Tasks: pending: 1
+2017-09-15 09:49:50,976 Nodes: (no nodes)
+2017-09-15 09:50:01,603 Nodes: RUNNING: 1
+2017-09-15 09:51:04,076 Tasks: complete(code=0): 1
+2017-09-15 09:51:04,076 Done waiting for job to complete, results written to gs://broad-achilles-kubeque/test/kube/20170915-094947-1fb5
+2017-09-15 09:51:04,076 You can download results via 'gsutil rsync -r gs://broad-achilles-kubeque/test/kube/20170915-094947-1fb5 DEST_DIR'
+```
+
+Note, it took about 10 seconds to get the first worker node started (@
+09:49) and then another minute for it to pull the docker container and start
+running the task. (The task itself, took less than a second and completed @ 9:51). However, if we submit a second job which has the same requirements
+(# number of CPUs required, same memory required, same docker image) then we
+can use the worker that is still running from this last invocation.
+
+```
+> kubeque sub python '^mandelbrot.py' 0 0 0.4
+2017-09-15 09:51:18,430 Already in CAS cache, skipping upload of mandelbrot.py
+2017-09-15 09:51:18,538 Already in CAS cache, skipping upload of /Users/pmontgom/dev/kubeque/kubeque/bin/kubequeconsume
+2017-09-15 09:51:18,538 Submitting job with id: 20170915-095118-af10
+2017-09-15 09:51:18,735 Saved task definition batch containing 1 tasks
+2017-09-15 09:51:19,439 Saved job definition with 1 tasks
+2017-09-15 09:51:20,086 Cluster already exists, not adding node. Cluster status: RUNNING: 1
+2017-09-15 09:51:20,086 Waiting for job to terminate
+2017-09-15 09:51:20,361 Tasks: claimed: 1
+2017-09-15 09:51:20,524 Nodes: RUNNING: 1
+2017-09-15 09:51:25,632 Tasks: complete(code=0): 1
+2017-09-15 09:51:25,632 Done waiting for job to complete, results written to gs://broad-achilles-kubeque/test/kube/20170915-095118-af10
+2017-09-15 09:51:25,632 You can download results via 'gsutil rsync -r gs://broad-achilles-kubeque/test/kube/20170915-095118-af10 DEST_DIR'
+```
+
+Note at 9:51 it recognizes there's already a worker running, so the task
+gets picked up right away at 09:51:20 and the whole process takes only 7
+seconds.
 
 # Submitting along with multiple files that are needed by job
 
@@ -122,14 +141,14 @@ For example "-u /users/pgm/foo" will be stored on the execution host in "./foo".
 # Simulating a submission by running it locally
 
 The following will do all the upload data and bookkeeping normally done for jobs, but will not actually create a kubernetes job to run it.  Instead, after
-all data is uploaded, it will print the equivilent docker command which you 
-can run locally to simulate execution.  This can be helpful for debugging issues.
+all data is uploaded, it will run the equivilent docker command locally to simulate execution.  This can be helpful for debugging issues.
 
 ```
-kubeque sub --skipkube python3 '^mandelbrot.py' 0 0 0.5
+kubeque sub --local python3 '^mandelbrot.py' 0 0 0.5
 ```
 
-Submit a sample job reserving 1G of memory
+Submit a sample job reserving 1G of memory (or you can update the memory
+settings in .kubeque)
 
 ```
 kubeque sub -r memory=1G -n sample-job python3 '^mandelbrot.py' 0 0 0.5
@@ -138,7 +157,7 @@ kubeque sub -r memory=1G -n sample-job python3 '^mandelbrot.py' 0 0 0.5
 Download the results
 
 ```
-kubeque fetch sample-job results-from-job
+kubeque fetch sample-job
 ```
 
 Submit multiple parameterized by csv file
@@ -148,20 +167,14 @@ kubeque sub --params params.csv python3 '^mandelbrot.py' '{x_scale}' '{y_scale}'
 kubeque sub --fetch results --params params.csv python3 '^mandelbrot.py' '{x_scale}' '{y_scale}' '{zoom}'
 ```
 
-Note: after fetching, each task's output directory will have a
-`parameters.json` file which contains the key/value pairs that were used
-when generating the command.
-
-Add another class of machines for use
+Add additional machines to be used for a job:
 
 ```
-kubeque add-node-pool n-standard-16
-```
-
-Resize cluster
-
-```
-gcloud container clusters resize kubeque-cluster --size 4
+# the following will add 2 more worker nodes which will be used by the last
+# job submitted. Instead of the word "LAST" you can use a job id. Most
+# commands which accept a jobid also understand "LAST" as a synonym for the
+# last submitted job.
+kubeque addnodes 2 LAST
 ```
 
 ## Cleaning up
@@ -169,7 +182,7 @@ gcloud container clusters resize kubeque-cluster --size 4
 Kubeque remembers jobs until you explicitly remove them.   To remove all non-running jobs:
 
 ```
-kubeque remove "*"
+kubeque clean
 ```
 
 If there were jobs that got stuck with some "claimed" tasks, you can reset the claimed status to pending via:
@@ -177,178 +190,7 @@ If there were jobs that got stuck with some "claimed" tasks, you can reset the c
 kubeque reset "*"
 ```
 
-After which rerunning `kubeque remove` should clean out those jobs.
-
-Once you're done running jobs, you can shut down the cluster.
-
-Stop the cluster:
-
-```
-kubeque stop
-```
-
-## Debugging
-
-You can view the kubernetes dashboard to see what's running/status of everything starting a proxy on your local machine:
-
-```
-kubectl proxy
-```
-
-Then, you can go to http://127.0.0.1:8001/ui to view the dashboard.
-
-You can also ssh into any host by looking up its name (on the google console or via gcloud tool) and 
- 
-```
-cloud compute ssh gke-kubeque-cluster-default-pool-9d31348f-wfqh
-```
-
-Alternatively you can connect to a specific container.  Find the name of the name of the container via `kubeque status --detailed`  
-You can then spawn a process within that container and look around
-
-```
-kubectl exec 20161202-231034-334e-j5nja -i -t -- bash -il
-```
-
-You can find the working directory of the task in `/tmp/task-*`
-
-# Notes
-
-## Open issues:
-
-  * Reaper marks tasks as failed when node disappears instead of reseting back to pending
-  * If node disappears new pod will be created, but if all tasks are still claimed, then it will exit.  Reaper needs to detect case where job is still alive, but has no running pods.  In such a case, re-submit new kube job.
-  * Race condition: sometimes new job submission exit immediately because watch() doesn't see the tasks that were just created.  Add some polling to wait for the expected number of tasks.
-  * "status" should have option to get detailed per-task info.  Currently status just gives aggregate counts.  Would be good to get job parameters and status for each job.
-  * Add timeline export
-  * Add -xml or -json flags so that outputs can programmatically parsed
-  * Should we have a command for managing pools?  Currently can do that via kubectl but we have wrappers for everything else.  Perhaps would be moot if autoscaling was enabled
-
-### OOM handling:
-
-Unclear how to properly detect OOM case.  It appears that what happens is OOM killer gets invoked, the child process gets killed, the kubeque-consume script receives that the child process exited with error code 137, and marks that task as complete. 
-However, it is true that containerstatus[0].state == "terminated" and containerstatus[0].reason == "OOMKilled" so perhaps this is a race condition where the kubeque-consume is able to update the status of the task but 
-ultimately was eventually being terminated due to OOM condition.   Perhaps kubeque-consume can ask if there has been an OOM event since the task started?
-It looks like getting this would have to be by asking cAdvisor.  Similar issue:
-https://groups.google.com/forum/#!msg/kubernetes-users/MH1sDDwEKZs/zvfqzYSeBAAJ
-New solution: kubeque-consume should test for retcode == 137.  That means the child was killed, and in such case we should update the task status as "killed" and then in reaper we should figure out why and update the reason.
-Should probably exit from kubeque-consume after child found to exit because it appears the OOMKilled event is recorded on the container level.
-
-That didn't work so well.  Two options: It looks like cAdvisor should be capturing the OOM event, however, cannot figure out how to get it out.
-It's worth note that cAdvisor executes outside of pods.  Unclear how heapster knows how to connect to cAdvisor instances.
-[update: reading about cAdvisor somewhere else they mention that it only retains the 1 minute's worth of data.  So, perhaps that's why I see no OOM events.  I would need to poll frequently to catch them.]
-
-Anyway, option 2 is we could _assume_ that any kill -9 is a result of OOM and update the task status ourselves as OOM.  May be best in short term.
-I'm a little nervous that the OOM could kill the parent and the reaper wouldn't know what to do with that.
-
-Leaning towards checking if return code == -9, then consume should set status to oom-failed.  (And documenting cavets)
-Better solution would be after getting return code == -9, poll cAdvisor and ask if there was a new OOM event in this container, and then only then call it oom-failed
-
-### Cannot reserve disk space
-
-No solution for ensuring sufficient diskspace for scheduling:
-    - it appears there's no per-pod/container way to require sufficient space.
-    - best bet might be to somehow control what type of instance or mounted volume while running.
-    - having trouble finding how autoscaler determines which machine type to spawn
-        - answer: uses nodepool/template/managed group
-
-For now, probably best to take a parameter from config with diskspace required per node (optionally, could also 
-take number of local SSDs to attach.  Local SSD are 375GB each and currently cost 0.11/month, contrast with equiv persistent disk 0.02/month )
-
-### Does not handle case where node disappears
-Write service (reaper) which watches pods.  On change, reconcile with tasks.  mark all claimed tasks as "ready" if their owner has disappeared.
-
-Best solution would be to have a kubernetes process run somewhere which polls kube for active nodes and reconcile 
-those with the owners in the job table.  
-
-TODO: test, does a failed pod result in a new node with a new name being created, or does the pod keep its name when its created elsewhere?
-This could be a problem when detecting failures of claimed tasks.  Would like to use UID but not exposed in downward API.  Can work around by
-using volume export and adding uid label, but will be more work.
-
-Add: store job spec submitted to kube in CAS, so that it's trivial to re-submit if kube thinks the original "job" finished.  (which can happen when the queue has no unclaimed items, and a claimed task gets reaped)
-
-### autoscaling
-Currently manually enabled and handled out of band.  Also, autoscaling didn't appear to shrink cluster.  (perhaps due to the tiny VMs being used?)
-Need to learn more about the default policy used to autoscale.  
-
-* Missing support: Preemptable node support:
-tutorial on creating pre-emptable nodepool
-https://gist.github.com/rimusz/bd5c9fd9727522fd546329f61d4064a6
-So, we should create two nodepools at startup.  One with standard VMs, and a second with preemptable nodes with autoscaling enabled.
-
-Implement only after "un-claiming" works
-
-### multiple job submission
-Question: How do we manage multiple jobs running concurrently?   More specifically, do we put anything in to execute them in queued order?
-Could use "paralellism" to manage, but definitely not the same as having a priority queue.
-
-Best I can come up with is to periodically update paralellism.  That is, while there are pods which could not be scheduled due to insufficient resources, set parallelism to other jobs to 0 to 
-effectively suspend them.
-
-### cluster monitoring
-
-We should probably report on the cluster size while jobs are running.  Two sources of this information:
-    GCP # of instances in managed groups (need to find way to go from cluster -> managed groups containing associated node pools)
-    Kubernettes reports # of nodes in the system
-
-Reaping: Is reaping done globally or as part of watching service?  I think it'd need to be done globally to fully monitor.
-However, that begs the question how do we push results of reap back out to user.  Cluster warning queue?
-
-To reconcile jobs against pods, we should do two things:
-
-1. query all pods running
-2. query all "claimed" jobs running
-3. pods without associated job should be a warning.
-4. triage jobs without pod into one of a. OOM killed pod (mark job as OOM killed), b. terminated pod (mark job as dead-pod), c. missing pod (mark job as unknown-pod)
-   (b and c should never happen.  If they do, we should generate a warning.)
-5. pods with more than one claimed job should be a warning.
-
-To keep track of warnings, perhaps we can store them as log messages against cluster resource
-```
-{
-      "type": "gke_cluster",
-      "displayName": "GKE Cluster",
-      "description": "A Google Container Engine (GKE) Cluster.",
-      "labels": [
-        {
-          "key": "project_id",
-          "description": "The identifier of the GCP project associated with this resource (e.g., my-project)."
-        },
-        {
-          "key": "cluster_name",
-          "description": "The name of the GKE Cluster."
-        },
-        {
-          "key": "location",
-          "description": "The location in which the GKE Cluster is running."
-        }
-      ]
-    },
-```
-
-Then, in watch, we can poll for log messages on the cluster.
-
-### Google authentication
-
-We should create a command "init" which prompts for a project and creates a
-.kubeque file in the working directory.   Extra bonus points for creating a
-credential file.  Credential file should be referenced in config file.
-
-`client = Client.from_service_account_json('/path/to/keyfile.json')` should
-be used to create client which uses stored credentials.
-
-might be complicated to switch gcloud to use custom credentials.  Looks like
-requires a complex process of using ` gcloud auth activate-service-account `
-to remember credentials, create a custom config `gcloud config` and then
-provide a --configuration flag for each command.   Alternatively, we could 
-use google api calls for everything.   However, the catch there is not all
-api calls are in the python lib.  Not clear best solution.
-
-### Reset
-
-It would be easier to debug/do dev if the "reset" or "remove" command also cleaned out any orphan tasks.  (note:
-need to worry about multiple clusters under one project.
-Perhaps we could add a "clean project" command which resets everything to a clean slate.)
+# Development notes (Not useful for users)
 
 ### Polling efficiency
 
