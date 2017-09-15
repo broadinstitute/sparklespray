@@ -33,23 +33,27 @@ gcloud init
 ```
 
 ## Setting up
-Create a config file "~/.kubeque" or in the current directory containing the following
+
+Check out the kubeque repo and install by running:
+
+```
+python setup.py install
+```
+
+This will add the `kubeque` command which is used for all operations.
+
+Then to configure kubeque, create a config file "~/.kubeque" or in the current directory containing the following
 (change the values of zone, region, and account to match what you used when
 running gcloud init):
 
 ```
 [config]
-cas_url_prefix=gs://BUCKET_NAME/cas/
-default_url_prefix=gs://BUCKET_NAME/kubeque/
-project=PROJECT_NAME
-cluster_name=kubeque-cluster
-machine_type=n1-standard-2
-default_image=us.gcr.io/PROJECT_NAME/kubeque-example
-default_resource_cpu=0.2
+default_url_prefix=gs://YOUR_BUCKET/PREFIX
+project=YOUR_PROJECT
+default_image=python
+default_resource_cpu=1
 default_resource_memory=100M
-zone=us-east1-b
-region=us-east1
-account=username@gmail.com
+zones=us-east1-b
 ```
 
 ## Running jobs
@@ -186,6 +190,7 @@ kubeque clean
 ```
 
 If there were jobs that got stuck with some "claimed" tasks, you can reset the claimed status to pending via:
+
 ```
 kubeque reset "*"
 ```
