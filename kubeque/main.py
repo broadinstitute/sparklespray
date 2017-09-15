@@ -743,9 +743,12 @@ def clean_cmd(jq, args):
 
 
 def kill_cmd(jq, cluster, args):
-    jobids = jq.get_jobids(args.jobid_pattern)
+    jobids = _get_jobids_from_pattern(jq, args.jobid_pattern)
+    if len(jobids) == 0:
+        log.warning("No jobs found matching pattern")
     for jobid in jobids:
         # TODO: stop just marks the job as it shouldn't run any more.  tasks will still be claimed.
+        log.info("Marking %s as killed", jobid)
         ok, job = jq.kill_job(jobid)
         assert ok
         if args.killcluster:

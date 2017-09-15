@@ -90,8 +90,8 @@ class Cluster:
         log.info("Deleting instances in cluster %s", cluster_name)
         instances = self._get_cluster_instances(cluster_name)
         for instance in instances:
-            log.info("deleting instance %s", instance['id'])
-            self.compute.instances().delete(project=self.project, zone=instance['zone'], instance=instance['id'])
+            log.info("deleting instance %s", instance['name'])
+            self.compute.instances().delete(project=self.project, zone=instance['zone'], instance=instance['name'])
 
     def add_node(self, pipeline_def):
         # Run the pipeline
