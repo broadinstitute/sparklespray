@@ -201,7 +201,7 @@ class JobStorage:
     def store_job(self, job):
         with self.batch_write() as batch:
            batch.save(job)
-           log.info("saved job with %d tasks", len(job.tasks))
+           log.info("Saved job definition with %d tasks", len(job.tasks))
 
         topic_name = self._job_id_to_topic(job.job_id)
         if self.pubsub:
@@ -375,7 +375,7 @@ class JobQueue:
                     tasks.append(task)
                     batch.save(task)
                     task_index += 1
-                log.info("saved batch containing %d tasks", len(args_batch))
+                log.info("Saved task definition batch containing %d tasks", len(args_batch))
 
         job = Job(job_id=job_id, tasks=[t.task_id for t in tasks], kube_job_spec=kube_job_spec, metadata=metadata, cluster=cluster, status=JOB_STATUS_SUBMITTED,
                   submit_time=time.time())
@@ -431,7 +431,7 @@ class IO:
         return bucket, path
 
     def get(self, src_url, dst_filename, must=True):
-        log.info("get %s -> %s", src_url, dst_filename)
+        log.info("Downloading %s -> %s", src_url, dst_filename)
         bucket, path = self._get_bucket_and_path(src_url)
         blob = bucket.blob(path)
         if blob.exists():
@@ -454,7 +454,8 @@ class IO:
         bucket, path = self._get_bucket_and_path(dst_url)
         blob = bucket.blob(path)
         if skip_if_exists and blob.exists():
-            log.info("skipping put %s -> %s", src_filename, dst_url)
+            log.info("Already in CAS cache, skipping upload of %s", src_filename)
+            log.debug("skipping put %s -> %s", src_filename, dst_url)
         else:
             log.info("put %s -> %s", src_filename, dst_url)
             blob.upload_from_filename(src_filename)

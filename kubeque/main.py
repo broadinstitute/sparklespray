@@ -150,6 +150,8 @@ def _make_cluster_name(image, cpu_request, mem_limit, unique_name):
 
 def submit(jq, io, cluster, job_id, spec, dry_run, config, skip_kube_submit, metadata, kubequeconsume_url,
            exec_local=False):
+    log.info("Submitting job with id: %s", job_id)
+
     # where to take this from? arg with a default of 1?
     if dry_run:
         skip_kube_submit = True
@@ -173,7 +175,6 @@ def submit(jq, io, cluster, job_id, spec, dry_run, config, skip_kube_submit, met
         else:
             log.debug("task post expand: %s", json.dumps(task, indent=2))
 
-    log.info("job_id: %s", job_id)
     if not dry_run:
         image = spec['image']
         resources = spec["resources"]
@@ -207,7 +208,7 @@ def submit(jq, io, cluster, job_id, spec, dry_run, config, skip_kube_submit, met
                 log.info("Adding initial node for cluster")
                 cluster.add_node(pipeline_spec)
             else:
-                log.info("Cluster already exists: %s", existing_nodes.as_string())
+                log.info("Cluster already exists, not adding node. Cluster status: %s", existing_nodes.as_string())
         elif exec_local:
             cmd = _write_local_script(job_id, spec, kubeque_command, config['kubequeconsume_exe_path'],
                                       kubeque_exe_in_container)
@@ -416,7 +417,7 @@ def submit_cmd(jq, io, cluster, args, config):
 
         hash_db.persist()
 
-        log.info("upload_map = %s", upload_map)
+        log.debug("upload_map = %s", upload_map)
         for filename, dest in upload_map.items():
             io.put(filename, dest, skip_if_exists=True)
 
@@ -440,7 +441,7 @@ def submit_cmd(jq, io, cluster, args, config):
             fetch_cmd_(jq, io, job_id, args.fetch)
         else:
             log.info("Done waiting for job to complete, results written to %s", default_url_prefix + "/" + job_id)
-            log.info("You can download results via gsutil or by executing: kubeque fetch %s DEST_DIR", job_id)
+            log.info("You can download results via 'gsutil rsync -r %s DEST_DIR'", default_url_prefix + "/" + job_id)
 
 
 def _resubmit(jq, jobid, resource_spec={}):
@@ -619,10 +620,33 @@ def status_cmd(jq, io, cluster, args):
                 status, complete = _summarize_task_statuses(tasks)
                 log.info("%s: %s", jobid, status)
 
+def _commonprefix(paths):
+    "Given a list of paths, returns the longest common prefix"
+    if not paths:
+        return ()
+
+    # def split(path):
+    #     return [x for x in path.split("/") if x != ""]
+
+    paths = [x.split("/") for x in paths]
+
+    min_path = min(paths)
+    max_path = max(paths)
+    common_path = min_path
+    for i in range(len(min_path)):
+        if min_path[i] != max_path[i]:
+            common_path = common_path[:i]
+            break
+
+    return "/".join(common_path)
 
 def fetch_cmd(jq, io, args):
-    fetch_cmd_(jq, io, _resolve_jobid(jq, args.jobid), args.dest)
-
+    jobid = _resolve_jobid(jq, args.jobid)
+    if args.dest is None:
+        dest = jobid
+    else:
+        dest = args.dest
+    fetch_cmd_(jq, io, jobid, dest)
 
 def fetch_cmd_(jq, io, jobid, dest_root, force=False):
     def get(src, dst, **kwargs):
@@ -649,9 +673,10 @@ def fetch_cmd_(jq, io, jobid, dest_root, force=False):
             dest = dest_root
 
         # save parameters taken from spec
-        with open(os.path.join(dest, "parameters.json"), "wt") as fd:
-            fd.write(json.dumps(spec['parameters']))
+        # with open(os.path.join(dest, "parameters.json"), "wt") as fd:
+        #     fd.write(json.dumps(spec['parameters']))
         command_result_json = io.get_as_str(spec['command_result_url'], must=False)
+        to_download = []
         if command_result_json is None:
             log.warning("Results did not appear to be written yet at %s", spec['command_result_url'])
         else:
@@ -659,11 +684,16 @@ def fetch_cmd_(jq, io, jobid, dest_root, force=False):
             command_result = json.loads(command_result_json)
             log.debug("command_result: %s", json.dumps(command_result))
             for ul in command_result['files']:
-                assert not (ul['src'].startswith("/")), "Source must be a relative path"
-                assert not (ul['src'].startswith("../")), "Source must not refer to parent dir"
-                localpath = os.path.join(dest, ul['src'])
-                log.info("Downloading to %s", localpath)
-                get(ul['dst_url'], localpath)
+                to_download.append((ul['src'], ul['dst_url']))
+
+        # figure out the common path
+        common_prefix = _commonprefix([src for src, _ in to_download])
+        for src, dst_url in to_download:
+            localpath = os.path.join(dest, os.path.relpath(src, common_prefix))
+                # assert not (ul['src'].startswith("/")), "Source must be a relative path: {}".format(repr(ul))
+                # assert not (ul['src'].startswith("../")), "Source must not refer to parent dir"
+                # localpath = os.path.join(dest, ul['src'])
+            get(dst_url, localpath)
 
 
 def _is_terminal_status(status):
@@ -700,7 +730,7 @@ def watch(jq, jobid, cluster, refresh_delay=5, min_check_time=10):
         with _exception_guard(lambda: "summarizing status of job {} threw exception".format(jobid)):
             status, complete = _summarize_task_statuses(jq.get_tasks(jobid))
             if status != prev_status:
-                log.info("task status: %s", status)
+                log.info("Tasks: %s", status)
             if complete:
                 break
             prev_status = status
@@ -709,7 +739,7 @@ def watch(jq, jobid, cluster, refresh_delay=5, min_check_time=10):
             with _exception_guard(lambda: "summarizing cluster threw exception".format(jobid)):
                 cluster_status = cluster.get_cluster_status(cluster_name)
                 if last_cluster_status is None or cluster_status != last_cluster_status:
-                    log.info("cluster status: %s", cluster_status.as_string())
+                    log.info("Nodes: %s", cluster_status.as_string())
                 if cluster_status.is_running():
                     last_good_state_time = time.time()
                 else:
@@ -868,7 +898,7 @@ def main(argv=None):
     parser = subparser.add_parser("fetch", help="Download results from a completed job")
     parser.set_defaults(func=fetch_cmd)
     parser.add_argument("jobid")
-    parser.add_argument("dest", help="The path to the directory where the results will be downloaded")
+    parser.add_argument("--dest", help="The path to the directory where the results will be downloaded. If omitted a directory will be created with the job id")
 
     parser = subparser.add_parser("version", help="print the version and exit")
     parser.set_defaults(func=version_cmd)
@@ -878,7 +908,7 @@ def main(argv=None):
     if args.debug:
         logging.basicConfig(level=logging.DEBUG, format="%(asctime)s:%(levelname)s:%(name)s:%(message)s")
     else:
-        logging.basicConfig(level=logging.INFO, format="%(asctime)s:%(levelname)s:%(name)s %(message)s")
+        logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
         logging.getLogger("googleapiclient.discovery").setLevel(logging.WARN)
 
     if not hasattr(args, 'func'):
