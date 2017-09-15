@@ -186,7 +186,7 @@ def submit(jq, io, cluster, job_id, spec, dry_run, config, skip_kube_submit, met
         kubeque_exe_in_container = stage_dir + "/kubequeconsume"
         kubeque_command = [kubeque_exe_in_container, "consume", "--cluster", cluster_name, "--projectId", project,
                            "--cacheDir", stage_dir + "/cache",
-                           "--tasksDir", stage_dir + "/tasks"]
+                           "--tasksDir", stage_dir + "/tasks", "--zones", ",".join(config['zones'])]
         kubeque_command = "chmod +x {} && {}".format(kubeque_exe_in_container, " ".join(kubeque_command))
 
         logging_url = config["default_url_prefix"] + "/node-logs"
@@ -276,7 +276,7 @@ def load_config(config_file, gcloud_config_file="~/.config/gcloud/configurations
         assert os.path.exists(merged_config["kubequeconsume_exe_path"])
 
     if "cas_url_prefix" not in merged_config:
-        merged_config["cas_url_prefix"] = merged_config["default_url_prefix"] + "/CAS"
+        merged_config["cas_url_prefix"] = merged_config["default_url_prefix"] + "/CAS/"
 
     assert isinstance(merged_config['zones'], list)
 

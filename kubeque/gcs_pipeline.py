@@ -100,9 +100,6 @@ class Cluster:
         log_prefix = operation['name'].replace("operations/", "")
         log.info("Node's log will be written to: %s/%s", logging_url, log_prefix)
 
-        # Emit the result of the pipeline run submission
-        #pp = pprint.PrettyPrinter(indent=2)
-        #pp.pprint(operation)
 
     def create_pipeline_spec(self,
                              docker_image,
@@ -218,12 +215,6 @@ class Cluster:
                     'email' : 'default',
                     'scopes': [
                         'https://www.googleapis.com/auth/cloud-platform',
-#                        'https://www.googleapis.com/auth/userinfo.email',
-#                        'https://www.googleapis.com/auth/compute',
-#                        'https://www.googleapis.com/auth/devstorage.full_control',
-#                        'https://www.googleapis.com/auth/datastore',
-#                        'https://www.googleapis.com/auth/pubsub',
-#                        'https://www.googleapis.com/auth/bigquery'
                     ]
                 }
             }

@@ -380,7 +380,6 @@ Maybe status should show both a task view and pod view of what's running?
 
 TODO: 
     - essential
-        - to test: OOM
         - to test: kill
     - productivity
         - new feature: reservation
