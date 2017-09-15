@@ -7,4 +7,5 @@ timeout or task count agrees.
 TODO: 
     - add support for reserved capacity
     - add support for honoring job killed flag
+    - test what happens when OOM occurs
     

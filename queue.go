@@ -52,10 +52,10 @@ type Job struct {
 const INITIAL_CLAIM_RETRY_DELAY = 1000
 
 type Options struct {
-	MinTryTime        int
-	ClaimTimeout      int
-	InitialClaimRetry int
 	Owner             string
+	InitialClaimRetry time.Duration
+	SleepOnEmpty      time.Duration
+	ClaimTimeout      time.Duration
 }
 
 type Executor func(taskId string, taskParam string) (string, error)
@@ -82,10 +82,10 @@ func getTasks(ctx context.Context, client *datastore.Client, cluster string, sta
 	return tasks, nil
 }
 
-func claimTask(ctx context.Context, client *datastore.Client, cluster string, newOwner string, initialClaimRetry int, minTryTime int, claimTimeout int) (*Task, error) {
+func claimTask(ctx context.Context, client *datastore.Client, cluster string, newOwner string, initialClaimRetry time.Duration, claimTimeout time.Duration) (*Task, error) {
 	//     "Returns None if no unclaimed ready tasks. Otherwise returns instance of Task"
-	claimStart := getTimestampMillis()
 	maxSleepTime := initialClaimRetry
+	claimStart := time.Now()
 	for {
 		// log.Println("getTask of pending")
 		tasks, err := getTasks(ctx, client, cluster, STATUS_PENDING, 20)
@@ -93,17 +93,7 @@ func claimTask(ctx context.Context, client *datastore.Client, cluster string, ne
 			return nil, err
 		}
 		if len(tasks) == 0 {
-			// We might have tasks we can't see yet.
-			log.Printf("Time since start of claim: %v\n", getTimestampMillis()-claimStart)
-			if getTimestampMillis()-claimStart < int64(minTryTime) {
-				log.Println("no tasks, sleeping...")
-				time.Sleep(time.Second)
-				log.Println("awake")
-				continue
-			} else {
-				log.Println("no tasks and timeout expired")
-				return nil, nil
-			}
+			return nil, nil
 		}
 
 		//log.Println("Picking from possible tasks")
@@ -117,8 +107,8 @@ func claimTask(ctx context.Context, client *datastore.Client, cluster string, ne
 		}
 
 		// failed to claim task.
-		claimEnd := getTimestampMillis()
-		if claimEnd-claimStart > int64(claimTimeout) {
+		claimEnd := time.Now()
+		if claimEnd.Sub(claimStart) > claimTimeout {
 			return nil, errors.New("Timed out trying to get task")
 		}
 
@@ -144,20 +134,28 @@ func isJobKilled(ctx context.Context, client *datastore.Client, jobID string) (b
 	return job.Status == JOB_STATUS_KILLED, nil
 }
 
-func ConsumerRunLoop(ctx context.Context, client *datastore.Client, cluster string, executor Executor, options *Options) error {
+func ConsumerRunLoop(ctx context.Context, client *datastore.Client, cluster string, executor Executor, timeout Timeout, options *Options) error {
 	for {
-		claimed, err := claimTask(ctx, client, cluster, options.Owner, options.InitialClaimRetry, options.MinTryTime, options.ClaimTimeout)
+		claimed, err := claimTask(ctx, client, cluster, options.Owner, options.InitialClaimRetry, options.ClaimTimeout)
 		if err != nil {
 			return err
 		}
+
+		now := time.Now()
 		if claimed == nil {
-			break
+			if timeout.HasTimeoutExpired(now) {
+				return nil
+			}
+			time.Sleep(options.SleepOnEmpty)
+			continue
 		}
+		timeout.Reset(now)
 
 		log.Printf("Claimed task %s", claimed.TaskID)
 
 		jobKilled, err := isJobKilled(ctx, client, claimed.JobID)
 		if err != nil {
+			log.Printf("Got error in isJobKilled for %s: %v", claimed.JobID, err)
 			return err
 		}
 

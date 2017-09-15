@@ -143,7 +143,9 @@ func (ioc *GCSIOClient) Download(srcUrl string, destPath string) error {
 func GetInstanceName() (string, error) {
 	url := "http://metadata.google.internal/computeMetadata/v1/instance/name"
 	var client http.Client
-	resp, err := client.Get(url)
+	req, _ := http.NewRequest("GET", url, nil)
+	req.Header.Set("Metadata-Flavor", "Google")
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -154,6 +156,6 @@ func GetInstanceName() (string, error) {
 		return "", errors.New("fetching instance name failed")
 	}
 
-	bodyBytes, err2 := ioutil.ReadAll(resp.Body)
-	return string(bodyBytes), nil
+	bodyBytes, err := ioutil.ReadAll(resp.Body)
+	return string(bodyBytes), err
 }
