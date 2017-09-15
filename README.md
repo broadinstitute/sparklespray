@@ -120,6 +120,20 @@ Note at 9:51 it recognizes there's already a worker running, so the task
 gets picked up right away at 09:51:20 and the whole process takes only 7
 seconds.
 
+## A note on resource requirements
+
+The CPUs and memory required are used as minimums and will determine the
+smallest machine type which satisfies the requirements. (The machine types are listed 
+here https://cloud.google.com/compute/docs/machine-types)
+The actual machine type chosen may have more memory/cpus than was required,
+and your process is free to use the additional resources. 
+
+Expect that larger requirements will require more expensive instances in
+order to run. 
+
+If you are interested in how much memory your process actually used, you can
+see that information in the results.json file saved for each task.
+
 # Submitting along with multiple files that are needed by job
 
 Files can automatically be uploaded from your local host on submission, and will be downloaded to the working directory before your job starts.  You can specify what files you'd like uploaded with the "-u" option.
@@ -194,6 +208,33 @@ If there were jobs that got stuck with some "claimed" tasks, you can reset the c
 ```
 kubeque reset "*"
 ```
+
+## Killing a job
+
+``
+
+``
+
+## Resubmitting failures
+
+You may have some of your jobs fail (not enough memory, or some data
+specific bug) and you want to rerun only those that failed. To do this, you
+can query for only those jobs which did not complete, and get their
+parameters. Once you have those parameters, you can resubmit only those
+parameters which had problems.
+
+```
+# The first submission submits everything
+> kubeque sub --params parameters.csv process_file.py '{^filename}'
+
+# but, oh no! some of the jobs failed. After you've made your fix to
+# process_file.py, you can resubmit the failures:
+> kubeque listparams --incomplete missing-tasks.csv
+> kubeque sub --params missing-tasks.csv process_file.py '{^filename}'
+```
+
+(If you want to see which parameters were associated with which task, that
+information is contained within results.json in the output directory for each task.)
 
 # Development notes (Not useful for users)
 
