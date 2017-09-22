@@ -2,7 +2,7 @@
 
 # need python3 or gcloud stores bad values into datastore
 import sys
-assert sys.version_info >= (3,)
+assert sys.version_info >= (3,5), "This package requires at least python 3.5"
 import ast
 import re
 from setuptools import setup, find_packages
