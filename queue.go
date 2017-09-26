@@ -87,6 +87,7 @@ func claimTask(ctx context.Context, client *datastore.Client, cluster string, ne
 	maxSleepTime := initialClaimRetry
 	claimStart := time.Now()
 	for {
+		NotifyWatchdog()
 		// log.Println("getTask of pending")
 		tasks, err := getTasks(ctx, client, cluster, STATUS_PENDING, 20)
 		if err != nil {
@@ -112,15 +113,11 @@ func claimTask(ctx context.Context, client *datastore.Client, cluster string, ne
 			return nil, errors.New("Timed out trying to get task")
 		}
 
-		log.Printf("Got error claiming task: %s, will rety", err)
-
 		maxSleepTime *= 2
-		sleepMillis(rand.Int31n(int32(maxSleepTime)))
+		timeUntilNextTry := time.Duration(rand.Int63n(int64(maxSleepTime)))
+		log.Printf("Got error claiming task: %s, will retry after %d milliseconds", err, timeUntilNextTry/time.Millisecond)
+		time.Sleep(timeUntilNextTry)
 	}
-}
-
-func sleepMillis(milliseconds int32) {
-	time.Sleep(time.Duration(milliseconds) * time.Millisecond)
 }
 
 func isJobKilled(ctx context.Context, client *datastore.Client, jobID string) (bool, error) {
@@ -134,7 +131,14 @@ func isJobKilled(ctx context.Context, client *datastore.Client, jobID string) (b
 	return job.Status == JOB_STATUS_KILLED, nil
 }
 
+// func SleepUntilNotify() {
+
+// }
+
 func ConsumerRunLoop(ctx context.Context, client *datastore.Client, cluster string, executor Executor, timeout Timeout, options *Options) error {
+	// sub, err := pubsubClient.CreateSubscription(context.Background(), "sub-name",
+	// pubsub.SubscriptionConfig{Topic: topic})
+
 	for {
 		claimed, err := claimTask(ctx, client, cluster, options.Owner, options.InitialClaimRetry, options.ClaimTimeout)
 		if err != nil {

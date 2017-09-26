@@ -76,7 +76,7 @@ func copyFile(src, dst string) error {
 		return err
 	}
 
-	_, err = io.Copy(out, in)
+	_, err = io.Copy(NotifyOnWrite(out), in)
 	if err != nil {
 		out.Close()
 		return err
@@ -108,7 +108,12 @@ func downloadAll(ioc IOClient, workdir string, downloads []*TaskDownload, cacheD
 			} else {
 				log.Printf("No download, %s already exists", cacheDest)
 			}
-			copyFile(cacheDest, destination)
+
+			err := copyFile(cacheDest, destination)
+			if err != nil {
+				// this should not be possible
+				panic(fmt.Sprintf("Error calling proc.Wait(): %s", err))
+			}
 		} else {
 			err := ioc.Download(srcURL, destination)
 			if err != nil {
@@ -134,9 +139,15 @@ func execCommand(command, workdir, stdoutPath string) (*syscall.Rusage, string, 
 		return nil, "", err
 	}
 
-	procState, err := proc.Wait()
+	var procState *os.ProcessState
+	err = NotifyUntilComplete(func() error {
+		var err2 error
+		procState, err2 = proc.Wait()
+		return err2
+	})
 	if err != nil {
-		return nil, "", err
+		// this should not be possible
+		panic(fmt.Sprintf("Error calling proc.Wait(): %s", err))
 	}
 
 	rusage := procState.SysUsage().(*syscall.Rusage)

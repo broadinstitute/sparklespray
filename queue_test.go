@@ -5,6 +5,7 @@ import (
 	"log"
 	"sync"
 	"testing"
+	"time"
 
 	"cloud.google.com/go/datastore"
 	"golang.org/x/net/context"
@@ -12,14 +13,25 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+type MockTimeout struct {
+}
+
+func (t *MockTimeout) Reset(timestamp time.Time) {
+
+}
+
+func (t *MockTimeout) HasTimeoutExpired(timestamp time.Time) bool {
+	return true
+}
+
 func spawnExecuteTasks(t *testing.T, projectID string, jobID string, index int, ready *sync.WaitGroup, done *sync.WaitGroup, taskParamPerClient [][]string) {
 	ctx := context.Background()
 	client, err := datastore.NewClient(ctx, projectID)
 	assert.Nil(t, err)
 
-	options := &Options{MinTryTime: 1000,
-		ClaimTimeout:      60 * 1000,
-		InitialClaimRetry: 1000,
+	options := &Options{
+		ClaimTimeout:      60 * time.Second,
+		InitialClaimRetry: 1 * time.Second,
 		Owner:             fmt.Sprintf("thread-%d", index)}
 
 	run := func() {
@@ -30,7 +42,8 @@ func spawnExecuteTasks(t *testing.T, projectID string, jobID string, index int, 
 			log.Printf("client %d executed %s\n", index, taskParam)
 			return "0", nil
 		}
-		err := ConsumerRunLoop(ctx, client, jobID, executor, options)
+		cluster := "c"
+		err := ConsumerRunLoop(ctx, client, cluster, executor, &MockTimeout{}, options)
 		if err != nil {
 			log.Printf("consumerRunLoop returned error: %v\n", err)
 		}
@@ -79,7 +92,7 @@ func newTask(jobID string, index int) *Task {
 		Args:      fmt.Sprintf("param-%d", index),
 		History: []*TaskHistory{
 			&TaskHistory{
-				Timestamp: getTimestampMillis(),
+				Timestamp: float64(getTimestampMillis()) / 1000.0,
 				Status:    STATUS_PENDING}},
 		Version: 0}
 	return &task

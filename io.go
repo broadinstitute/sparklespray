@@ -50,7 +50,7 @@ func (ioc *GCSIOClient) Upload(src string, destURL string) error {
 	w := obj.NewWriter(ioc.ctx)
 	defer w.Close()
 
-	if _, err := io.Copy(w, r); err != nil {
+	if _, err := io.Copy(NotifyOnWrite(w), r); err != nil {
 		return err
 	}
 
@@ -128,7 +128,7 @@ func (ioc *GCSIOClient) Download(srcUrl string, destPath string) error {
 	defer r.Close()
 
 	log.Printf("Copying...\n")
-	if _, err := io.Copy(w, r); err != nil {
+	if _, err := io.Copy(NotifyOnWrite(w), r); err != nil {
 		return err
 	}
 
