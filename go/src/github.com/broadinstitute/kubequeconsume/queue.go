@@ -281,7 +281,7 @@ func updateTaskKilled(ctx context.Context, client *datastore.Client, task_id str
 }
 
 func notifyTaskStatusChanged(task *Task) {
-	notification := TaskStatusNotification{TaskID = task.TaskID, Status = task.Status, ExitCode = task.ExitCode, FailureReason = task.FailureReason, Version = task.Version}
+	// notification := TaskStatusNotification{TaskID = task.TaskID, Status = task.Status, ExitCode = task.ExitCode, FailureReason = task.FailureReason, Version = task.Version}
 }
 
 func atomicUpdateTask(ctx context.Context, client *datastore.Client, task_id string, mutateTaskCallback func(task *Task) bool) (*Task, error) {

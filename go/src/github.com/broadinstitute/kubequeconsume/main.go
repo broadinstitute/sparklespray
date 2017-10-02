@@ -112,6 +112,7 @@ func consume(c *cli.Context) error {
 	timeout := NewClusterTimeout(service, cluster, zones, projectID, owner, Timeout,
 		ReservationSize, ReservationTimeout)
 
+	var sleepUntilNotify func(sleepTime time.Duration)
 	if usePubSub {
 		// set up notify
 		topic := pubsubClient.Topic("kubeque-global")
@@ -141,7 +142,7 @@ func consume(c *cli.Context) error {
 		}
 		defer deleteSubscription()
 
-		sleepUntilNotify := func(sleepTime time.Duration) {
+		sleepUntilNotify = func(sleepTime time.Duration) {
 			log.Printf("Going to sleep (max: %d milliseconds)", sleepTime/time.Millisecond)
 			select {
 			case <-notifyChannel:
@@ -151,7 +152,7 @@ func consume(c *cli.Context) error {
 			}
 		}
 	} else {
-		sleepUntilNotify := func(sleepTime time.Duration) {
+		sleepUntilNotify = func(sleepTime time.Duration) {
 			log.Printf("Going to sleep (max: %d milliseconds)", sleepTime/time.Millisecond)
 			time.Sleep(sleepTime)
 		}
