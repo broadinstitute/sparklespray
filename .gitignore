@@ -14,3 +14,4 @@ dist
 examples/sample-job/dest
 build
 run-*-locally.sh
+go/pkg
