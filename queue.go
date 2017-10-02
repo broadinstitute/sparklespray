@@ -39,6 +39,14 @@ type Task struct {
 	Cluster          string         `datastore:"cluster"`
 }
 
+type TaskStatusNotification struct {
+	TaskID        string `json:"task_id"`
+	Status        string `json:"status"`
+	ExitCode      string `json:"exit_code"`
+	FailureReason string `json:"failure_reason"`
+	Version       int32  `json:"version"`
+}
+
 type Job struct {
 	JobID       int      `datastore:"job_id"`
 	Tasks       []string `datastore:"tasks"`
@@ -131,14 +139,7 @@ func isJobKilled(ctx context.Context, client *datastore.Client, jobID string) (b
 	return job.Status == JOB_STATUS_KILLED, nil
 }
 
-// func SleepUntilNotify() {
-
-// }
-
-func ConsumerRunLoop(ctx context.Context, client *datastore.Client, cluster string, executor Executor, timeout Timeout, options *Options) error {
-	// sub, err := pubsubClient.CreateSubscription(context.Background(), "sub-name",
-	// pubsub.SubscriptionConfig{Topic: topic})
-
+func ConsumerRunLoop(ctx context.Context, client *datastore.Client, sleepUntilNotify func(sleepTime time.Duration), cluster string, executor Executor, timeout Timeout, options *Options) error {
 	for {
 		claimed, err := claimTask(ctx, client, cluster, options.Owner, options.InitialClaimRetry, options.ClaimTimeout)
 		if err != nil {
@@ -150,7 +151,7 @@ func ConsumerRunLoop(ctx context.Context, client *datastore.Client, cluster stri
 			if timeout.HasTimeoutExpired(now) {
 				return nil
 			}
-			time.Sleep(options.SleepOnEmpty)
+			sleepUntilNotify(options.SleepOnEmpty)
 			continue
 		}
 		timeout.Reset(now)
@@ -213,6 +214,8 @@ func updateTaskClaimed(ctx context.Context, client *datastore.Client, task_id st
 		return nil, err
 	}
 
+	notifyTaskStatusChanged(updatedTask)
+
 	return updatedTask, nil
 }
 
@@ -236,13 +239,15 @@ func updateTaskCompleted(ctx context.Context, client *datastore.Client, task_id 
 		return true
 	}
 
-	task, err := atomicUpdateTask(ctx, client, task_id, mutate)
+	updatedTask, err := atomicUpdateTask(ctx, client, task_id, mutate)
 	if err != nil {
 		// I suppose this is not technically correct. Could be a simultaneous update of "success" or "failed" and "lost"
 		return nil, err
 	}
 
-	return task, nil
+	notifyTaskStatusChanged(updatedTask)
+
+	return updatedTask, nil
 }
 
 func updateTaskKilled(ctx context.Context, client *datastore.Client, task_id string) (*Task, error) {
@@ -264,13 +269,19 @@ func updateTaskKilled(ctx context.Context, client *datastore.Client, task_id str
 		return true
 	}
 
-	task, err := atomicUpdateTask(ctx, client, task_id, mutate)
+	updatedTask, err := atomicUpdateTask(ctx, client, task_id, mutate)
 	if err != nil {
 		// I suppose this is not technically correct. Could be a simultaneous update of "success" or "failed" and "lost"
 		return nil, err
 	}
 
-	return task, nil
+	notifyTaskStatusChanged(updatedTask)
+
+	return updatedTask, nil
+}
+
+func notifyTaskStatusChanged(task *Task) {
+	notification := TaskStatusNotification{TaskID = task.TaskID, Status = task.Status, ExitCode = task.ExitCode, FailureReason = task.FailureReason, Version = task.Version}
 }
 
 func atomicUpdateTask(ctx context.Context, client *datastore.Client, task_id string, mutateTaskCallback func(task *Task) bool) (*Task, error) {

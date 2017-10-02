@@ -61,11 +61,12 @@ func (ct *ClusterTimeout) UpdateIsReservedHost() {
 		return
 	}
 
-	// sort the names
 	names := make([]string, len(instances))
 	for i, instance := range instances {
 		names[i] = instance.Name
 	}
+
+	log.Printf("Found %d instances: %v", len(instances), names)
 
 	ct.IsReservedHost = isNameInTopN(names, ct.MyName, ct.ReservationSize)
 }

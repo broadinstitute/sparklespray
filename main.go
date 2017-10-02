@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/datastore"
+	"cloud.google.com/go/pubsub"
 	"golang.org/x/net/context"
 	"golang.org/x/oauth2/google"
 
@@ -52,6 +53,7 @@ func consume(c *cli.Context) error {
 	zones := strings.Split(c.String("zones"), ",")
 	ReservationTimeout := time.Duration(c.Int("restimeout")) * time.Minute
 	watchdogTimeout := time.Duration(c.Int("timeout")) * time.Minute
+	usePubSub := true
 
 	EnableWatchdog(watchdogTimeout)
 
@@ -100,10 +102,62 @@ func consume(c *cli.Context) error {
 		log.Printf("Could not create compute service: %v", err)
 		return err
 	}
+
+	pubsubClient, err := pubsub.NewClient(ctx, projectID)
+	if err != nil {
+		log.Printf("Could not create pubsub client: %v", err)
+		return err
+	}
+
 	timeout := NewClusterTimeout(service, cluster, zones, projectID, owner, Timeout,
 		ReservationSize, ReservationTimeout)
 
-	err = ConsumerRunLoop(ctx, client, cluster, executor, timeout, options)
+	if usePubSub {
+		// set up notify
+		topic := pubsubClient.Topic("kubeque-global")
+		subCtx, subCancel := context.WithCancel(ctx)
+		sub, err := pubsubClient.CreateSubscription(subCtx, "sub-name",
+			pubsub.SubscriptionConfig{Topic: topic})
+
+		notifyChannel := make(chan bool, 100)
+		go (func() {
+			err := sub.Receive(ctx, func(ctx context.Context, m *pubsub.Message) {
+				log.Printf("Got message: %s", m.Data)
+				m.Ack()
+				notifyChannel <- true
+			})
+			if err != nil {
+				log.Printf("Subscription receive failed: %v", err)
+			}
+		})()
+
+		deleteSubscription := func() {
+			log.Printf("Deleting subscription")
+			subCancel()
+			err = sub.Delete(ctx)
+			if err != nil {
+				log.Printf("Got error while deleting subscription: %v", err)
+			}
+		}
+		defer deleteSubscription()
+
+		sleepUntilNotify := func(sleepTime time.Duration) {
+			log.Printf("Going to sleep (max: %d milliseconds)", sleepTime/time.Millisecond)
+			select {
+			case <-notifyChannel:
+				log.Printf("Woke up due to pubsub notification")
+			case <-time.After(sleepTime):
+				log.Printf("Woke up due to timeout")
+			}
+		}
+	} else {
+		sleepUntilNotify := func(sleepTime time.Duration) {
+			log.Printf("Going to sleep (max: %d milliseconds)", sleepTime/time.Millisecond)
+			time.Sleep(sleepTime)
+		}
+	}
+
+	err = ConsumerRunLoop(ctx, client, sleepUntilNotify, cluster, executor, timeout, options)
 	if err != nil {
 		log.Printf("consumerRunLoop exited with: %v\n", err)
 		return err
