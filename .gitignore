@@ -1,2 +1,8 @@
 cli/kubequeconsume
 vendor
+.*
+kubequeconsume/kubeque/__pycache__
+
+*~
+kubequeconsume/kubeque.egg-info
+
