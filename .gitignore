@@ -1,5 +1,12 @@
+cli/kubequeconsume
+vendor
 *~
 .*
+kubequeconsume/kubeque/__pycache__
+
+*~
+kubequeconsume/kubeque.egg-info
+
 *.tar.gz
 __pycache__
 *.egg-info
