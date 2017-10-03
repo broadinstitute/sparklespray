@@ -145,7 +145,7 @@ def _make_cluster_name(image, cpu_request, mem_limit, unique_name):
     import hashlib
     if unique_name:
         return 'l-' + _random_string(10)
-    return "c-" + hashlib.md5("{}-{}-{}".format(image, cpu_request, mem_limit).encode("utf8")).hexdigest()[:10]
+    return "c-" + hashlib.md5("{}-{}-{}-{}".format(image, cpu_request, mem_limit, kubeque.__version__).encode("utf8")).hexdigest()[:10]
 
 
 def submit(jq, io, cluster, job_id, spec, dry_run, config, skip_kube_submit, metadata, kubequeconsume_url,
