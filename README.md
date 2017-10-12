@@ -34,13 +34,30 @@ gcloud init
 
 ## Setting up
 
-Check out the kubeque repo and install by running:
+People have reported a lot of trouble getting the python libraries that
+kubeque depends on installed. In addition, there is a large dependency chain
+from using google's python client libs, which may collide with other libs
+you have, so it really seems to need to be installed in an isolated python 
+environment.
+
+Currently, I've had success with the following sequence of steps:
 
 ```
+# Create a conda environment with python 3.5
+conda create -n kubeque python=3.5
+# activate that environment so all packages get installed under it
+source activate kubeque
+# install the list of dependencies via pip, because that seems to be most
+# reliable.
+pip install -r requirements.txt
+# now install the "kubeque" command into the environment
 python setup.py install
+# verify the kubeque command is working by asking it to print out the
+# version installed.
+kubueque version
 ```
 
-This will add the `kubeque` command which is used for all operations.
+Once that is done you will have the `kubeque` command which is used for all operations.
 
 Then to configure kubeque, create a config file "~/.kubeque" or in the current directory containing the following
 (change the values of zone, region, and account to match what you used when
