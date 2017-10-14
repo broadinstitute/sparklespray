@@ -687,12 +687,19 @@ def fetch_cmd_(jq, io, jobid, dest_root, force=False):
                 to_download.append((ul['src'], ul['dst_url']))
 
         # figure out the common path
-        common_prefix = _commonprefix([src for src, _ in to_download])
+        # common_prefix = _commonprefix([src for src, _ in to_download])
+        assert spec['command_result_url'][-len("/result.json"):] == "/result.json"
+        common_prefix = spec['command_result_url'][:-len("/result.json")]
+        common_prefix = os.path.dirname(common_prefix)
         for src, dst_url in to_download:
-            localpath = os.path.join(dest, os.path.relpath(src, common_prefix))
+            dest_filename = dst_url[len(common_prefix)+1:]
+            localpath = os.path.join(dest, dest_filename)
                 # assert not (ul['src'].startswith("/")), "Source must be a relative path: {}".format(repr(ul))
                 # assert not (ul['src'].startswith("../")), "Source must not refer to parent dir"
                 # localpath = os.path.join(dest, ul['src'])
+            pdir = os.path.dirname(localpath)
+            if not os.path.exists(pdir):
+                os.makedirs(pdir)
             get(dst_url, localpath)
 
 
