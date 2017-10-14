@@ -183,10 +183,20 @@ func resolveUploads(workdir string, uploads []*TaskUpload, downloaded stringset)
 		log.Printf("pathWithGlob=%v, matches=%v\n", pathWithGlob, matches)
 
 		for _, match := range matches {
+			// skip any directories that match
+			fi, err := os.Stat(match)
+			if err != nil {
+				return nil, err
+			}
+			if fi.IsDir() {
+				continue
+			}
+
 			match, err = filepath.Abs(match)
 			if err != nil {
 				return nil, err
 			}
+
 			if downloaded[match] {
 				continue
 			}

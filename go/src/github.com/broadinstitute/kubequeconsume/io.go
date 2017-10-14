@@ -102,19 +102,23 @@ func (ioc *GCSIOClient) DownloadAsBytes(srcUrl string) ([]byte, error) {
 }
 
 func (ioc *GCSIOClient) Download(srcUrl string, destPath string) error {
+	log.Printf("Downloading %s -> %s\n", srcUrl, destPath)
+
 	obj, err := ioc.getObj(srcUrl)
 	if err != nil {
 		return err
 	}
 
-	tf, err := ioutil.TempFile(path.Dir(destPath), "downloading")
+	parentDir := path.Dir(destPath)
+	os.MkdirAll(parentDir, os.ModePerm)
+
+	tf, err := ioutil.TempFile(parentDir, "downloading")
 	if err != nil {
 		return err
 	}
 	defer tf.Close()
 	tmpDestPath := tf.Name()
 
-	log.Printf("Opening...\n")
 	w, err := os.OpenFile(tmpDestPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0700)
 	if err != nil {
 		return err
@@ -127,7 +131,6 @@ func (ioc *GCSIOClient) Download(srcUrl string, destPath string) error {
 	}
 	defer r.Close()
 
-	log.Printf("Copying...\n")
 	if _, err := io.Copy(NotifyOnWrite(w), r); err != nil {
 		return err
 	}
