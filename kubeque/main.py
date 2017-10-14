@@ -199,7 +199,7 @@ def submit(jq, io, cluster, job_id, spec, dry_run, config, skip_kube_submit, met
         resources = spec["resources"]
         cpu_request = _parse_cpu_request(resources.get(CPU_REQUEST, config['default_resource_cpu']))
         mem_limit = _parse_mem_limit(resources.get(MEMORY_REQUEST, config["default_resource_memory"]))
-        cluster_name = _make_cluster_name(image, cpu_request, mem_limit, unique_name=skip_kube_submit)
+        cluster_name = _make_cluster_name(image, cpu_request, mem_limit, unique_name=exec_local)
 
         stage_dir = config.get("mount", "/mnt/kubeque-data")
         project = config['project']
@@ -631,9 +631,10 @@ def status_cmd(jq, io, cluster, args):
                     log.info("task_id: %s\n"
                              "  status: %s, exit_code: %s, failure_reason: %s\n"
                              "  started on pod: %s\n"
-                             "  args: %s, history: %s%s", task.task_id,
+                             "  args: %s, history: %s%s\n"
+                             "  cluster: %s", task.task_id,
                              task.status, task.exit_code, task.failure_reason, task.owner, task.args, task.history,
-                             command_result_block)
+                             command_result_block, task.cluster)
 
                     if _was_oom_killed(task):
                         print("Was OOM killed")
@@ -681,7 +682,7 @@ def fetch_cmd_(jq, io, jobid, dest_root, force=False):
     if not os.path.exists(dest_root):
         os.mkdir(dest_root)
 
-    include_index = len(tasks) > 1
+    include_index = True #len(tasks) > 1
 
     for task in tasks:
         spec = json.loads(io.get_as_str(task.args))
@@ -715,7 +716,7 @@ def fetch_cmd_(jq, io, jobid, dest_root, force=False):
         common_prefix = os.path.dirname(common_prefix)
         for src, dst_url in to_download:
             dest_filename = dst_url[len(common_prefix)+1:]
-            localpath = os.path.join(dest, dest_filename)
+            localpath = os.path.join(dest_root, dest_filename)
                 # assert not (ul['src'].startswith("/")), "Source must be a relative path: {}".format(repr(ul))
                 # assert not (ul['src'].startswith("../")), "Source must not refer to parent dir"
                 # localpath = os.path.join(dest, ul['src'])
