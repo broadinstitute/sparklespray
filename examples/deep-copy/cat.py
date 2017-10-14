@@ -2,7 +2,7 @@ import sys
 
 x = ""
 
-for fn in sys.args[1:]:
+for fn in sys.argv[1:]:
     with open(fn, "rt") as fd:
         x += fd.read()
 
