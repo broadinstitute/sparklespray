@@ -45,6 +45,8 @@ func Main() {
 }
 
 func consume(c *cli.Context) error {
+	log.Printf("Starting consume")
+
 	owner := c.String("owner")
 	projectID := c.String("projectId")
 	cacheDir := c.String("cacheDir")
@@ -53,7 +55,7 @@ func consume(c *cli.Context) error {
 	zones := strings.Split(c.String("zones"), ",")
 	ReservationTimeout := time.Duration(c.Int("restimeout")) * time.Minute
 	watchdogTimeout := time.Duration(c.Int("timeout")) * time.Minute
-	usePubSub := true
+	usePubSub := false
 
 	EnableWatchdog(watchdogTimeout)
 
@@ -76,6 +78,8 @@ func consume(c *cli.Context) error {
 		if err != nil {
 			log.Printf("Creating io client failed: %v", err)
 			return err
+		} else {
+			log.Printf("Got hostname: %s", owner)
 		}
 	}
 
@@ -103,44 +107,50 @@ func consume(c *cli.Context) error {
 		return err
 	}
 
-	pubsubClient, err := pubsub.NewClient(ctx, projectID)
-	if err != nil {
-		log.Printf("Could not create pubsub client: %v", err)
-		return err
-	}
-
 	timeout := NewClusterTimeout(service, cluster, zones, projectID, owner, Timeout,
 		ReservationSize, ReservationTimeout)
 
 	var sleepUntilNotify func(sleepTime time.Duration)
 	if usePubSub {
 		// set up notify
+		notifyChannel := make(chan bool, 100)
+		log.Printf("Creating pubsub client...")
+		pubsubClient, err := pubsub.NewClient(ctx, projectID)
+
+		if err != nil {
+			log.Printf("Could not create pubsub client: %v", err)
+			return err
+		}
+		log.Printf("pubsub client err=%v", err)
+
 		topic := pubsubClient.Topic("kubeque-global")
 		subCtx, subCancel := context.WithCancel(ctx)
 		sub, err := pubsubClient.CreateSubscription(subCtx, "sub-name",
 			pubsub.SubscriptionConfig{Topic: topic})
+		if err != nil {
+			log.Printf("CreateSubscription failed: %v", err)
+		} else {
+			go (func() {
+				err := sub.Receive(ctx, func(ctx context.Context, m *pubsub.Message) {
+					log.Printf("Got message: %s", m.Data)
+					m.Ack()
+					notifyChannel <- true
+				})
+				if err != nil {
+					log.Printf("Subscription receive failed: %v", err)
+				}
+			})()
 
-		notifyChannel := make(chan bool, 100)
-		go (func() {
-			err := sub.Receive(ctx, func(ctx context.Context, m *pubsub.Message) {
-				log.Printf("Got message: %s", m.Data)
-				m.Ack()
-				notifyChannel <- true
-			})
-			if err != nil {
-				log.Printf("Subscription receive failed: %v", err)
+			deleteSubscription := func() {
+				log.Printf("Deleting subscription")
+				subCancel()
+				err = sub.Delete(ctx)
+				if err != nil {
+					log.Printf("Got error while deleting subscription: %v", err)
+				}
 			}
-		})()
-
-		deleteSubscription := func() {
-			log.Printf("Deleting subscription")
-			subCancel()
-			err = sub.Delete(ctx)
-			if err != nil {
-				log.Printf("Got error while deleting subscription: %v", err)
-			}
+			defer deleteSubscription()
 		}
-		defer deleteSubscription()
 
 		sleepUntilNotify = func(sleepTime time.Duration) {
 			log.Printf("Going to sleep (max: %d milliseconds)", sleepTime/time.Millisecond)

@@ -140,6 +140,7 @@ func isJobKilled(ctx context.Context, client *datastore.Client, jobID string) (b
 }
 
 func ConsumerRunLoop(ctx context.Context, client *datastore.Client, sleepUntilNotify func(sleepTime time.Duration), cluster string, executor Executor, timeout Timeout, options *Options) error {
+	log.Printf("Starting ConsumerRunLoop, sleeping %v once queue drains", options.SleepOnEmpty)
 	for {
 		claimed, err := claimTask(ctx, client, cluster, options.Owner, options.InitialClaimRetry, options.ClaimTimeout)
 		if err != nil {
