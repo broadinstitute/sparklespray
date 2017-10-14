@@ -141,6 +141,7 @@ func isJobKilled(ctx context.Context, client *datastore.Client, jobID string) (b
 }
 
 func ConsumerRunLoop(ctx context.Context, client *datastore.Client, sleepUntilNotify func(sleepTime time.Duration), cluster string, executor Executor, timeout Timeout, options *Options) error {
+	firstClaim := true
 	log.Printf("Starting ConsumerRunLoop, sleeping %v once queue drains", options.SleepOnEmpty)
 	for {
 		claimed, err := claimTask(ctx, client, cluster, options.Owner, options.InitialClaimRetry, options.ClaimTimeout)
@@ -150,6 +151,13 @@ func ConsumerRunLoop(ctx context.Context, client *datastore.Client, sleepUntilNo
 
 		now := time.Now()
 		if claimed == nil {
+			if firstClaim {
+				firstClaim = false
+				log.Printf("Special case: first poll returned no results. May be due to newly created tasks are not yet visible. Waiting a few seconds and trying again")
+				sleepUntilNotify(time.Second * 5)
+				continue
+			}
+
 			if timeout.HasTimeoutExpired(now) {
 				return nil
 			}
@@ -159,6 +167,7 @@ func ConsumerRunLoop(ctx context.Context, client *datastore.Client, sleepUntilNo
 		timeout.Reset(now)
 
 		log.Printf("Claimed task %s", claimed.TaskID)
+		firstClaim = false
 
 		jobKilled, err := isJobKilled(ctx, client, claimed.JobID)
 		if err != nil {
