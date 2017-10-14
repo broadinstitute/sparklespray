@@ -15,6 +15,7 @@ const STATUS_PENDING = "pending"
 const STATUS_COMPLETE = "complete"
 const STATUS_KILLED = "killed"
 const JOB_STATUS_KILLED = "killed"
+const STATUS_FAILED = "failed"
 
 type TaskHistory struct {
 	Timestamp     float64 `datastore:"timestamp,noindex"`
@@ -168,14 +169,19 @@ func ConsumerRunLoop(ctx context.Context, client *datastore.Client, sleepUntilNo
 		if !jobKilled {
 			retcode, err := executor(claimed.TaskID, claimed.Args)
 			if err != nil {
-				log.Printf("Got error executing task %s: %v", claimed.TaskID, err)
-				return err
-			}
+				log.Printf("Got error executing task %s: %v, marking task as failed", claimed.TaskID, err)
 
-			_, err = updateTaskCompleted(ctx, client, claimed.TaskID, retcode)
-			if err != nil {
-				log.Printf("Got error updating task %s is complete: %v", claimed.TaskID, err)
-				return err
+				_, err = updateTaskFailed(ctx, client, claimed.TaskID, err.Error())
+				if err != nil {
+					log.Printf("Got error updating task %s failed: %v", claimed.TaskID, err)
+					return err
+				}
+			} else {
+				_, err = updateTaskCompleted(ctx, client, claimed.TaskID, retcode)
+				if err != nil {
+					log.Printf("Got error updating task %s is complete: %v", claimed.TaskID, err)
+					return err
+				}
 			}
 		} else {
 			_, err = updateTaskKilled(ctx, client, claimed.TaskID)
@@ -236,6 +242,37 @@ func updateTaskCompleted(ctx context.Context, client *datastore.Client, task_id 
 		task.History = append(task.History, taskHistory)
 		task.Status = STATUS_COMPLETE
 		task.ExitCode = retcode
+
+		return true
+	}
+
+	updatedTask, err := atomicUpdateTask(ctx, client, task_id, mutate)
+	if err != nil {
+		// I suppose this is not technically correct. Could be a simultaneous update of "success" or "failed" and "lost"
+		return nil, err
+	}
+
+	notifyTaskStatusChanged(updatedTask)
+
+	return updatedTask, nil
+}
+
+func updateTaskFailed(ctx context.Context, client *datastore.Client, task_id string, failure string) (*Task, error) {
+	log.Printf("updateTaskFailed of task %v, failure=%s", task_id, failure)
+
+	now := getTimestampMillis()
+	taskHistory := &TaskHistory{Timestamp: float64(now) / 1000.0,
+		Status: STATUS_FAILED}
+
+	mutate := func(task *Task) bool {
+		if task.Status != STATUS_CLAIMED {
+			log.Printf("While attempting to mark task %v as complete, found task had status %v. Aborting", task.Status)
+			return false
+		}
+
+		task.History = append(task.History, taskHistory)
+		task.Status = STATUS_FAILED
+		task.FailureReason = failure
 
 		return true
 	}
