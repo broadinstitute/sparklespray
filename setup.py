@@ -18,6 +18,7 @@ setup(name='kubeque',
       description='batch job submission front to kubernettes',
       author='Philip Montgomery',
       author_email='pmontgom@broadinstitute.org',
+      include_package_data=True,
       install_requires=[
           ],
       packages=find_packages(),
