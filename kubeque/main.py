@@ -148,6 +148,25 @@ def _make_cluster_name(image, cpu_request, mem_limit, unique_name):
     return "c-" + hashlib.md5("{}-{}-{}-{}".format(image, cpu_request, mem_limit, kubeque.__version__).encode("utf8")).hexdigest()[:10]
 
 
+def validate_cmd(jq, io, cluster, config):
+    log.info("Verifying we can access google cloud storage")
+    sample_value = new_job_id()
+    sample_url = io.write_str_to_cas(sample_value)
+    fetched_value = io.get_as_str(sample_url)
+    assert sample_value == fetched_value
+
+    log.info("Verifying we can read/write from the google datastore service and google pubsub")
+    jq.test_datastore_api(sample_value)
+
+    log.info("Verifying we can access google genomics apis")
+    cluster.test_api()
+
+    log.info("Verifying google genomics can launch image \"%s\"", config['default_image'])
+    logging_url = config["default_url_prefix"] + "/node-logs"
+    cluster.test_image(config['default_image'], sample_url, logging_url)
+
+    log.info("Verification successful!")
+
 def submit(jq, io, cluster, job_id, spec, dry_run, config, skip_kube_submit, metadata, kubequeconsume_url,
            exec_local=False):
     log.info("Submitting job with id: %s", job_id)
@@ -209,6 +228,9 @@ def submit(jq, io, cluster, job_id, spec, dry_run, config, skip_kube_submit, met
                 cluster.add_node(pipeline_spec)
             else:
                 log.info("Cluster already exists, not adding node. Cluster status: %s", existing_nodes.as_string())
+            existing_tasks = jq.get_tasks_for_cluster(cluster_name, STATUS_PENDING)
+            if len(existing_tasks) > 0:
+                log.warning("%d tasks already exist queued up to run on this cluster. If this is not intentional, delete the jobs via 'kubeque clean' and resubmit this job.", len(existing_tasks))
         elif exec_local:
             cmd = _write_local_script(job_id, spec, kubeque_command, config['kubequeconsume_exe_path'],
                                       kubeque_exe_in_container)
@@ -820,6 +842,9 @@ def main(argv=None):
     parse.add_argument("--config", default=None)
     parse.add_argument("--debug", action="store_true", help="If set, debug messages will be output")
     subparser = parse.add_subparsers()
+
+    parser = subparser.add_parser("validate", help="Run a series of tests to confirm the configuration is valid")
+    parser.set_defaults(func=validate_cmd)
 
     parser = subparser.add_parser("sub", help="Submit a command (or batch of commands) for execution")
     parser.set_defaults(func=submit_cmd)

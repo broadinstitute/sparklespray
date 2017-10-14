@@ -2,8 +2,13 @@ import time
 from oauth2client.client import GoogleCredentials
 from apiclient.discovery import build
 import logging
+import random
+import string
 
 log = logging.getLogger(__name__)
+
+def get_random_string(length):
+    return "".join([random.choice(string.ascii_lowercase) for x in range(length)])
 
 def safe_job_name(job_id):
     return "job-"+job_id
@@ -99,7 +104,23 @@ class Cluster:
         operation = self.service.pipelines().run(body=pipeline_def).execute()
         log_prefix = operation['name'].replace("operations/", "")
         log.info("Node's log will be written to: %s/%s", logging_url, log_prefix)
+        return operation
 
+    def test_api(self):
+        """Simple api call used to verify the service is enabled"""
+        result = self.service.pipelines().list(projectId=self.project).execute()
+        assert "pipelines" in result
+
+    def test_image(self, docker_image, sample_url, logging_url):
+        pipeline_def = self.create_pipeline_spec(docker_image, "bash -c 'echo hello'", "/mnt/kubequeconsume", logging_url, sample_url, 1, 1, get_random_string(20))
+        operation = self.add_node(pipeline_def)
+        operation_name = operation['name']
+        while not operation['done']:
+            operation = self.service.operations().get(name=operation_name).execute()
+            time.sleep(5)
+        if "error" in operation:
+            raise Exception("Got error: {}".format(operation['error']))
+        log.info("execution completed successfully")
 
     def create_pipeline_spec(self,
                              docker_image,

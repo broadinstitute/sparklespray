@@ -171,9 +171,9 @@ def entity_to_task(entity):
 def entity_to_job(entity):
     metadata = entity.get('metadata', [])
     return Job(job_id=entity.key.name,
-               tasks=entity['tasks'],
+               tasks=entity.get('tasks',[]),
                cluster=entity['cluster'],
-               kube_job_spec=entity['kube_job_spec'],
+               kube_job_spec=entity.get('kube_job_spec'),
                metadata=dict([(m['name'],m['value']) for m in metadata]),
                status=entity['status'],
                submit_time=entity.get('submit_time'))
@@ -223,7 +223,7 @@ class JobStorage:
         job_key = self.client.key("Job", job_id)
         entity_job = self.client.get(job_key)
 
-        task_keys = [self.client.key("Task", taskid) for taskid in set(entity_job["tasks"])] + [job_key]
+        task_keys = [self.client.key("Task", taskid) for taskid in set(entity_job.get("tasks",[]))] + [job_key]
         BATCH_SIZE = 300
         for chunk_start in range(0, len(task_keys), BATCH_SIZE):
             key_batch = task_keys[chunk_start:chunk_start+BATCH_SIZE]
@@ -261,6 +261,21 @@ class JobStorage:
                 if entity_task["status"] != status:
                     log.warning("Query returned something that did not match query: %s", entity_task)
                     continue
+            tasks.append(entity_to_task(entity_task))
+            if max_fetch is not None and len(tasks) >= max_fetch:
+                break
+        end_time = time.time()
+        log.debug("get_tasks took %s seconds", end_time-start_time)
+        return tasks
+
+    def get_tasks_for_cluster(self, cluster_name, status, max_fetch=None):
+        query = self.client.query(kind="Task")
+        query.add_filter("cluster", "=", cluster_name)
+        query.add_filter("status", "=", status)
+        start_time = time.time()
+        tasks_it = query.fetch(limit=max_fetch)
+        tasks = []
+        for entity_task in tasks_it:
             tasks.append(entity_to_task(entity_task))
             if max_fetch is not None and len(tasks) >= max_fetch:
                 break
@@ -380,6 +395,15 @@ class JobQueue:
         job = Job(job_id=job_id, tasks=[t.task_id for t in tasks], kube_job_spec=kube_job_spec, metadata=metadata, cluster=cluster, status=JOB_STATUS_SUBMITTED,
                   submit_time=time.time())
         self.storage.store_job(job)
+
+    def test_datastore_api(self, job_id):
+        """Test we the datastore api is enabled by writing a value and deleting a value."""
+        job = Job(job_id=job_id, tasks=[], kube_job_spec=None, metadata={}, cluster=job_id, status=JOB_STATUS_KILLED,
+                  submit_time=time.time())
+        self.storage.store_job(job)
+        fetched_job = self.storage.get_job(job_id)
+        assert fetched_job.job_id == job_id
+        self.storage.delete_job(job_id)
 
     def _update_task_status(self, task_id, new_status, failure_reason, retcode):
         task = self.storage.get_task(task_id)
