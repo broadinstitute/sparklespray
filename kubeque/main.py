@@ -719,22 +719,6 @@ def fetch_cmd_(jq, io, jobid, dest_root, force=False):
                 os.makedirs(pdir)
             get(dst_url, localpath)
 
-        # # figure out the common path
-        # # common_prefix = _commonprefix([src for src, _ in to_download])
-        # assert spec['command_result_url'][-len("/result.json"):] == "/result.json"
-        # common_prefix = spec['command_result_url'][:-len("/result.json")]
-        # common_prefix = os.path.dirname(common_prefix)
-        # for src, dst_url in to_download:
-        #     dest_filename = dst_url[len(common_prefix)+1:]
-        #     localpath = os.path.join(dest_root, dest_filename)
-        #         # assert not (ul['src'].startswith("/")), "Source must be a relative path: {}".format(repr(ul))
-        #         # assert not (ul['src'].startswith("../")), "Source must not refer to parent dir"
-        #         # localpath = os.path.join(dest, ul['src'])
-        #     pdir = os.path.dirname(localpath)
-        #     if not os.path.exists(pdir):
-        #         os.makedirs(pdir)
-        #     get(dst_url, localpath)
-
 
 def _is_terminal_status(status):
     return status in [STATUS_FAILED, STATUS_COMPLETE]
