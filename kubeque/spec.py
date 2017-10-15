@@ -145,7 +145,7 @@ def make_spec_from_command(argv,
     working_dir="."):
 
     if src_wildcards is None:
-        src_wildcards = ["*"]
+        src_wildcards = ["**"]
 
     list_of_argvs = rewrite_argv_with_parameters(argv, parameters)
 
@@ -160,11 +160,7 @@ def make_spec_from_command(argv,
         tasks.append(dict(
             downloads=[dict(d._asdict()) for d in dl_and_command.downloads], 
             command=dl_and_command.command,
-            uploads=[
-                dict(src_wildcard=src_wildcard,
-                    dst_url="".format(dest_url, task_i))
-                for src_wildcard in src_wildcards
-                ],
+            uploads=dict(include_patterns=src_wildcards, exclude_patterns=[], dst_url="{}/{}".format(dest_url, task_i)),
             parameters=parameters[task_i]
         ))
 

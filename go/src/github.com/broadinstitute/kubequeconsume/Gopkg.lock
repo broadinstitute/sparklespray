@@ -8,6 +8,12 @@
   version = "v0.13.0"
 
 [[projects]]
+  name = "github.com/bmatcuk/doublestar"
+  packages = ["."]
+  revision = "b3608229437ba4dc33dae64d56a79a2a73f1f6b2"
+  version = "v1.0.9"
+
+[[projects]]
   name = "github.com/davecgh/go-spew"
   packages = ["spew"]
   revision = "346938d642f2ec3594ed81d874461961cd0faa76"
@@ -94,6 +100,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "21a35c182f9db3627b19333cc9c34568697baadb374e1544d0b0c08d04d76b20"
+  inputs-digest = "377d12b1c7719b24a012061c42c6beb73a477ab4aa5fbb7825848083d947f73b"
   solver-name = "gps-cdcl"
   solver-version = 1

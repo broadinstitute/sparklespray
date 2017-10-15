@@ -41,10 +41,9 @@ def expand_task_spec(common, task):
     "returns a list of task specs"
     # merge the common attrs and the per task attrs
     task_spec = copy.deepcopy(common)
-    for attr in ['helper_log', 'command']:
+    for attr in ['helper_log', 'command', "uploads"]:
         if attr in task:
             task_spec[attr] = task[attr]
-    task_spec['uploads'].extend(task.get('uploads', []))
     task_spec['downloads'].extend(task.get('downloads', []))
     return task_spec
 
@@ -73,11 +72,6 @@ def rewrite_url_in_dict(d, prop_name, default_url_prefix):
     d[prop_name] = rewrite_url_with_prefix(url, default_url_prefix)
     return d
 
-
-def rewrite_uploads(uploads, default_url_prefix):
-    return [rewrite_url_in_dict(x, 'dst_url', default_url_prefix) for x in uploads]
-
-
 def rewrite_downloads(io, downloads, default_url_prefix):
     def rewrite_download(url):
         if "src" in url:
@@ -98,17 +92,21 @@ def rewrite_downloads(io, downloads, default_url_prefix):
     return [rewrite_url_in_dict(x, "src_url", default_url_prefix) for x in src_expanded]
 
 
+# include_patterns"`
+# 	ExcludePatterns []string `json:"exclude_patterns"`
+# 	UploadDstURL     string   `json:"dst_url"`
+
 def expand_tasks(spec, io, default_url_prefix, default_job_url_prefix):
     common = spec['common']
     common['downloads'] = rewrite_downloads(io, common.get('downloads', []), default_url_prefix)
-    common['uploads'] = rewrite_uploads(common.get('uploads', []), default_job_url_prefix)
+    #common['uploads'] = rewrite_uploads(common.get('uploads', []), default_job_url_prefix)
 
     tasks = []
     for task_i, spec_task in enumerate(spec['tasks']):
         task_url_prefix = "{}/{}".format(default_job_url_prefix, task_i + 1)
         task = expand_task_spec(common, spec_task)
         task['downloads'] = rewrite_downloads(io, task['downloads'], default_url_prefix)
-        task['uploads'] = rewrite_uploads(task['uploads'], task_url_prefix)
+        #task['uploads'] = rewrite_uploads(task['uploads'], task_url_prefix)
         task['stdout_url'] = rewrite_url_with_prefix(task['stdout_url'], task_url_prefix)
         task['command_result_url'] = rewrite_url_with_prefix(task['command_result_url'], task_url_prefix)
         task['parameters'] = spec_task['parameters']
@@ -149,6 +147,11 @@ def _make_cluster_name(image, cpu_request, mem_limit, unique_name):
 
 
 def validate_cmd(jq, io, cluster, config):
+    log.info("Validating config, using kubeque %s", kubeque.__version__)
+    log.info("Printing config:")
+    import pprint
+    pprint.pprint(config)
+
     log.info("Verifying we can access google cloud storage")
     sample_value = new_job_id()
     sample_url = io.write_str_to_cas(sample_value)
@@ -709,21 +712,28 @@ def fetch_cmd_(jq, io, jobid, dest_root, force=False):
             for ul in command_result['files']:
                 to_download.append((ul['src'], ul['dst_url']))
 
-        # figure out the common path
-        # common_prefix = _commonprefix([src for src, _ in to_download])
-        assert spec['command_result_url'][-len("/result.json"):] == "/result.json"
-        common_prefix = spec['command_result_url'][:-len("/result.json")]
-        common_prefix = os.path.dirname(common_prefix)
         for src, dst_url in to_download:
-            dest_filename = dst_url[len(common_prefix)+1:]
-            localpath = os.path.join(dest_root, dest_filename)
-                # assert not (ul['src'].startswith("/")), "Source must be a relative path: {}".format(repr(ul))
-                # assert not (ul['src'].startswith("../")), "Source must not refer to parent dir"
-                # localpath = os.path.join(dest, ul['src'])
+            localpath = os.path.join(dest_root, str(task.task_index + 1), src)
             pdir = os.path.dirname(localpath)
             if not os.path.exists(pdir):
                 os.makedirs(pdir)
             get(dst_url, localpath)
+
+        # # figure out the common path
+        # # common_prefix = _commonprefix([src for src, _ in to_download])
+        # assert spec['command_result_url'][-len("/result.json"):] == "/result.json"
+        # common_prefix = spec['command_result_url'][:-len("/result.json")]
+        # common_prefix = os.path.dirname(common_prefix)
+        # for src, dst_url in to_download:
+        #     dest_filename = dst_url[len(common_prefix)+1:]
+        #     localpath = os.path.join(dest_root, dest_filename)
+        #         # assert not (ul['src'].startswith("/")), "Source must be a relative path: {}".format(repr(ul))
+        #         # assert not (ul['src'].startswith("../")), "Source must not refer to parent dir"
+        #         # localpath = os.path.join(dest, ul['src'])
+        #     pdir = os.path.dirname(localpath)
+        #     if not os.path.exists(pdir):
+        #         os.makedirs(pdir)
+        #     get(dst_url, localpath)
 
 
 def _is_terminal_status(status):

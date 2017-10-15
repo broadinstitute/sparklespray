@@ -11,18 +11,21 @@ import (
 	"path"
 	"path/filepath"
 	"syscall"
-)
 
-type TaskUpload struct {
-	SrcWildcard string `json:"src_wildcard"`
-	DstURL      string `json:"dst_url"`
-}
+	"github.com/bmatcuk/doublestar"
+)
 
 type TaskDownload struct {
 	IsCASKey   bool   `json:"is_cas_key"`
 	Executable bool   `json:"executable"`
 	Dst        string `json:"dst"`
 	SrcURL     string `json:"src_url"`
+}
+
+type UploadSpec struct {
+	IncludePatterns []string `json:"include_patterns"`
+	ExcludePatterns []string `json:"exclude_patterns"`
+	DstURL          string   `json:"dst_url"`
 }
 
 type TaskSpec struct {
@@ -32,7 +35,7 @@ type TaskSpec struct {
 	PostExecScript     string            `json:"post-exec-script,omitempty"`
 	PreExecScript      string            `json:"pre-exec-script,omitempty"`
 	Parameters         map[string]string `json:"parameters,omitempty"`
-	Uploads            []*TaskUpload     `json:"uploads"`
+	Uploads            *UploadSpec       `json:"uploads"`
 	Downloads          []*TaskDownload   `json:"downloads"`
 	Command            string            `json:"command"`
 	CommandResultURL   string            `json:"command_result_url"`
@@ -62,7 +65,7 @@ type ResultStruct struct {
 	Usage      *ResourceUsage    `json:"resource_usage"`
 }
 
-type stringset map[interface{}]bool
+type stringset map[string]bool
 
 func copyFile(src, dst string) error {
 	in, err := os.Open(src)
@@ -172,42 +175,58 @@ func addUpload(mapping UploadMapping, filename string, destURL string) {
 	mapping[filename] = destURL
 }
 
-func resolveUploads(workdir string, uploads []*TaskUpload, downloaded stringset) (UploadMapping, error) {
+func addFilesToStringSet(workdir string, pattern string, dest stringset) error {
+	pathWithGlob := path.Join(workdir, pattern)
+	matches, err := doublestar.Glob(pathWithGlob)
+	if err != nil {
+		return err
+	}
+	log.Printf("pathWithGlob=%v, matches=%v\n", pathWithGlob, matches)
+
+	for _, match := range matches {
+		// skip any directories that match
+		fi, err := os.Stat(match)
+		if err != nil {
+			return err
+		}
+		if fi.IsDir() {
+			continue
+		}
+
+		match, err = filepath.Abs(match)
+		if err != nil {
+			return err
+		}
+
+		dest[match] = true
+	}
+
+	return nil
+}
+
+func resolveUploads(workdir string, uploads *UploadSpec, toExclude stringset) (UploadMapping, error) {
+	included := make(stringset)
+
+	for _, pattern := range uploads.IncludePatterns {
+		addFilesToStringSet(workdir, pattern, included)
+	}
+	for _, pattern := range uploads.ExcludePatterns {
+		addFilesToStringSet(workdir, pattern, toExclude)
+	}
+
 	m := newUploadMapping()
-	for _, upload := range uploads {
-		pathWithGlob := path.Join(workdir, upload.SrcWildcard)
-		matches, err := filepath.Glob(pathWithGlob)
+	for match, _ := range included {
+
+		if toExclude[match] {
+			continue
+		}
+
+		relpath, err := filepath.Rel(workdir, match)
 		if err != nil {
 			return nil, err
 		}
-		log.Printf("pathWithGlob=%v, matches=%v\n", pathWithGlob, matches)
-
-		for _, match := range matches {
-			// skip any directories that match
-			fi, err := os.Stat(match)
-			if err != nil {
-				return nil, err
-			}
-			if fi.IsDir() {
-				continue
-			}
-
-			match, err = filepath.Abs(match)
-			if err != nil {
-				return nil, err
-			}
-
-			if downloaded[match] {
-				continue
-			}
-
-			relpath, err := filepath.Rel(workdir, match)
-			if err != nil {
-				return nil, err
-			}
-			dest := upload.DstURL + "/" + relpath
-			addUpload(m, match, dest)
-		}
+		dest := uploads.DstURL + "/" + relpath
+		addUpload(m, match, dest)
 	}
 	return m, nil
 }
@@ -339,7 +358,12 @@ func writeResultFile(ioc IOClient,
 
 	files := make([]*ResultFile, 0, 100)
 	for src, dstURL := range filesToUpload {
-		files = append(files, &ResultFile{Src: src, DstURL: dstURL})
+		rel_src, err := filepath.Rel(workdir, src)
+		if err != nil {
+			log.Printf("Got error in relpath(%s, %s): %v", workdir, src, err)
+			return err
+		}
+		files = append(files, &ResultFile{Src: rel_src, DstURL: dstURL})
 	}
 
 	result := &ResultStruct{
