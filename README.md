@@ -17,6 +17,11 @@ To run a process or batch of processes via kubeque, you will need to:
 ## Prereqs
 Create a google project.  In the below, we'll assume the project name is PROJECT_NAME.
 
+You'll need the following APIs enabled: "Google Cloud Pub/Sub API", "Google
+Cloud Datastore API", "google cloud
+storage" and "Genomics API". You can enable these through the google console API library:
+https://console.cloud.google.com/apis/library. 
+
 Create a bucket for holding results and uploads.  In the following example, we'll assume the name of the bucket is BUCKET_NAME.
 
 Google's cloud SDK installed and in your path: https://cloud.google.com/sdk/
@@ -34,30 +39,13 @@ gcloud init
 
 ## Setting up
 
-People have reported a lot of trouble getting the python libraries that
-kubeque depends on installed. In addition, there is a large dependency chain
-from using google's python client libs, which may collide with other libs
-you have, so it really seems to need to be installed in an isolated python 
-environment.
-
-Currently, I've had success with the following sequence of steps:
+Check out the kubeque repo and install by running:
 
 ```
-# Create a conda environment with python 3.5
-conda create -n kubeque python=3.5
-# activate that environment so all packages get installed under it
-source activate kubeque
-# install the list of dependencies via pip, because that seems to be most
-# reliable.
-pip install -r requirements.txt
-# now install the "kubeque" command into the environment
 python setup.py install
-# verify the kubeque command is working by asking it to print out the
-# version installed.
-kubueque version
 ```
 
-Once that is done you will have the `kubeque` command which is used for all operations.
+This will add the `kubeque` command which is used for all operations.
 
 Then to configure kubeque, create a config file "~/.kubeque" or in the current directory containing the following
 (change the values of zone, region, and account to match what you used when
@@ -72,6 +60,15 @@ default_resource_cpu=1
 default_resource_memory=100M
 zones=us-east1-b
 ```
+
+Once you have a config file you can test to see if your account and config
+are set up correctly by running:
+
+```
+kubeque validate
+```
+
+If this completes without errors, you are good to go!
 
 ## Running jobs
 
@@ -296,3 +293,18 @@ TODO:
 done:
     - new feature: generate a csv file of parameters of tasks which did not complete successfully
     - new feature: LAST as an alias for last submitted job when invoking kill, reset, status, etc
+
+
+## lua workflow executor
+
+Supports checkpointing and full control of job definitions.
+
+todo:
+    JobBuilder:
+        setCommandTemplate
+        createTasksFor
+        (see incomplete test)
+    Make an example which creates a job submission based on a csv file
+    update kubeque to allow programatic:
+        job submission via json file
+        job wait (Automatically download all results.json to dest location?)
