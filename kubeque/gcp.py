@@ -299,6 +299,9 @@ class JobQueue:
     def __init__(self, storage):
         self.storage = storage
 
+    def get_tasks_for_cluster(self, cluster_name, status, max_fetch=None):
+        return self.storage.get_tasks_for_cluster(cluster_name, status, max_fetch)
+
     def get_claimed_task_ids(self):
         tasks = self.storage.get_tasks(status=STATUS_CLAIMED)
         tasks = [t for t in tasks if t.status == STATUS_CLAIMED]
