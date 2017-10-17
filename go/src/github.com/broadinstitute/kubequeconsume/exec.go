@@ -123,6 +123,12 @@ func downloadAll(ioc IOClient, workdir string, downloads []*TaskDownload, cacheD
 				return err, downloaded
 			}
 		}
+		if dl.Executable {
+			err := os.Chmod(destination, 0777)
+			if err != nil {
+				return err, downloaded
+			}
+		}
 		downloaded[destination] = true
 	}
 

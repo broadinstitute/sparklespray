@@ -1,3 +1,5 @@
+import os
+
 from kubeque.main import main
 CONFIG = """[config]
 default_url_prefix=gs://broad-achilles-kubeque/test/kube
@@ -8,7 +10,7 @@ default_resource_memory=100M
 zone=us-east1-b
 """
 
-SCRIPT = """
+SCRIPT = """#!/usr/bin/python
 import sys, os
 
 x = ""
@@ -37,6 +39,7 @@ def test_end_to_end(tmpdir):
 
     script = work_dir.join("cat.py")
     script.write(SCRIPT)
+    os.chmod(str(script), 0o744)
 
     one_deep = work_dir.join("subdir")
     one_deep.mkdir()
@@ -53,11 +56,17 @@ def test_end_to_end(tmpdir):
     file3 = work_dir.join("file3")
     file3.write("file3")
 
-    import os
     cwd = os.getcwd()
     os.chdir(str(work_dir))
+    
+    use_cluster = False
+    
+    sub_opts = ["--fetch", str(dest_dir)]
+    if not use_cluster:
+        sub_opts += ['--local']
+    
     try:
-        main(["--config", str(config_file), "sub",  "--fetch", str(dest_dir), "--local", "python", '^cat.py',
+        main(["--config", str(config_file), "sub"] +sub_opts+ ['^./cat.py',
               '^subdir/subdir/file', '^subdir2/file2', '^file3'])
     finally:
         os.chdir(cwd)
