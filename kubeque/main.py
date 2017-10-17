@@ -238,6 +238,7 @@ def submit(jq, io, cluster, job_id, spec, dry_run, config, skip_kube_submit, met
             cmd = _write_local_script(job_id, spec, kubeque_command, config['kubequeconsume_exe_path'],
                                       kubeque_exe_in_container)
             log.info("Running job locally via executing: ./%s", cmd)
+            log.warning("CPU and memory requirements are not honored when running locally. Will use whatever the docker host is configured for by default")
             os.system(os.path.abspath(cmd))
         else:
             cmd = _write_local_script(job_id, spec, kubeque_command, config['kubequeconsume_exe_path'],
