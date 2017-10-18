@@ -206,7 +206,7 @@ Add additional machines to be used for a job:
 # job submitted. Instead of the word "LAST" you can use a job id. Most
 # commands which accept a jobid also understand "LAST" as a synonym for the
 # last submitted job.
-kubeque addnodes 2 LAST
+kubeque addnodes LAST 2
 ```
 
 ## Cleaning up
@@ -308,3 +308,9 @@ todo:
     update kubeque to allow programatic:
         job submission via json file
         job wait (Automatically download all results.json to dest location?)
+
+## Todo
+Fix warning about jobs queued up to list job ids of other jobs.
+
+Add peek output (somehow)
+
