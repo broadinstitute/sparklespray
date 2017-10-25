@@ -295,10 +295,13 @@ on) and enter the container where the command is running.
 ```
 # ssh into the host
 gcloud compute ssh --zone us-east1-d ggp-5598619720951178934
+
 # run bash inside the container
 docker exec -it `docker ps | tail -1 | cut -f 1 -d ' '` bash
+
 # change to the directory where the current task is running
 cd `ls -td /mnt/kubeque-data/tasks/* | head -1`/work
+
 # This is the directory the task is running from. You can see here all the
 # files that have been downloaded or written. To watch the output from the
 # command you can run 'tail -f'
