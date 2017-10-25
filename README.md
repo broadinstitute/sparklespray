@@ -39,9 +39,27 @@ gcloud init
 
 ## Setting up
 
-Check out the kubeque repo and install by running:
+### Set up a python 3.5 virtual environment
+
+kubeque uses google's services python client libraries, which in turn have a
+fair number of their own dependencies, so it's really best to create virtual
+environment to install kubeque into. One can probably use virtualenv do
+this, but I'm including conda because that's what I personally use and have
+tested with.
+
+Create the conda environment and activate it:
+```
+conda create -n kubeque python=3.5
+source activate kubeque
+```
+
+### Installing into virtual environment
+
+Check out the kubeque repo and install by running in a python 3.5 virtual
+environment:
 
 ```
+pip install -r requirements.txt
 python setup.py install
 ```
 
