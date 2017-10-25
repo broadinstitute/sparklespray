@@ -332,51 +332,44 @@ def read_parameters_from_csv(filename):
         return list(csv.DictReader(fd))
 
 
+def _split_source_dest(file):
+    if file.startswith("gs://"):
+        index = file.find(":", 5)
+    else:
+        index = file.find(":")
+
+    if index >= 0:
+        source, dest = file[:index], file[index+1:]
+    else:
+        source = dest = file
+    return source, dest
+
+def _add_name_pair_to_list(file):
+    if file.startswith('@'):
+        # if filename starts with @, read this file for the actual files to include
+        included_files = []
+        with open(file[1:], "rt") as fd:
+            for line in fd:
+                line = line.strip()
+                included_files.extend(_add_name_pair_to_list(line))
+        return included_files
+    else:
+        return [_split_source_dest(file)]
+
+def _parse_push(files):
+    filenames = []
+    for file in files:
+        filenames.extend(_add_name_pair_to_list(file))
+    return filenames
+
+
 def expand_files_to_upload(filenames):
-    def split_into_src_dst_pairs(filename):
-        if ":" in filename:
-            src_dst = filename.split(":")
-            assert len(src_dst) == 2, "Could not split {} into a source and destination path".format(repr(filename))
-            src, dst = src_dst
-            # assert os.path.exists(src)
-
-            return make_src_dst_pairs(src, dst)
-        else:
-            return make_src_dst_pairs(filename, ".")
-
-    def make_src_dst_pairs(src, dst):
-        if os.path.isdir(src):
-            files_in_dir = [os.path.join(src, x) for x in os.listdir(src)]
-            files_in_dir = [x for x in files_in_dir if not os.path.isdir(x)]
-            return [SrcDstPair(fn, os.path.normpath(os.path.join(dst, os.path.basename(fn)))) for fn in files_in_dir]
-        else:
-            if dst == ".":
-                return [SrcDstPair(src, os.path.basename(src))]
-            else:
-                return [SrcDstPair(src, dst)]
-
-    # preprocess list of files to handle those that are actual a file containing list of more files
-    expanded = []
-    for filename in filenames:
-        if filename.startswith("@"):
-            with open(filename[1:], "rt") as fd:
-                file_list = [x.strip() for x in fd.readlines() if x.strip() != ""]
-                expanded.extend(file_list)
-        else:
-            expanded.append(filename)
-
-    fully_expanded = []
-    for x in expanded:
-        fully_expanded.extend(split_into_src_dst_pairs(x))
-
-    return fully_expanded
-
+    return [SrcDstPair(src, dst) for src, dst in _parse_push(filenames)]
 
 MEMORY_REQUEST = "memory"
 CPU_REQUEST = "cpu"
 
 import re
-
 
 def _parse_resources(resources_str):
     # not robust parsing at all
@@ -813,7 +806,7 @@ def kill_cmd(jq, cluster, args):
 def dumpjob_cmd(jq, io, args):
     import attr
     tasks_as_dicts = []
-    tasks = jq.get_tasks(args.jobid)
+    tasks = jq.get_tasks(_resolve_jobid(jq, args.jobid))
     for task in tasks:
         t = attr.asdict(task)
 

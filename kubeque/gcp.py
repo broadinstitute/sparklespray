@@ -435,8 +435,23 @@ def create_gcs_job_queue(project_id, credentials, use_pubsub):
     storage = JobStorage(client, pubsub_client)
     return JobQueue(storage)
 
+def _compute_hash(filename):
+    m = hashlib.sha256()
+    with open(filename, "rb") as fd:
+        for chunk in iter(lambda: fd.read(10000), b""):
+            m.update(chunk)
+    return m.hexdigest()
+
+def _join(*args):
+    concated = args[0]
+    for x in args[1:]:
+        if concated[-1] == "/":
+            concated = concated[:-1]
+        concated += "/" + x
+    return concated
+
 class IO:
-    def __init__(self, project, cas_url_prefix, credentials=None):
+    def __init__(self, project, cas_url_prefix, credentials=None, compute_hash=_compute_hash):
         assert project is not None
 
         self.buckets = {}
@@ -444,6 +459,7 @@ class IO:
         if cas_url_prefix[-1] == "/":
             cas_url_prefix = cas_url_prefix[:-1]
         self.cas_url_prefix = cas_url_prefix
+        self.compute_hash = compute_hash
 
     def _get_bucket_and_path(self, path):
         m = re.match("^gs://([^/]+)/(.*)$", path)
@@ -485,7 +501,12 @@ class IO:
             log.debug("skipping put %s -> %s", src_filename, dst_url)
         else:
             log.info("put %s -> %s", src_filename, dst_url)
-            blob.upload_from_filename(src_filename)
+            # if greater than 10MB ask gsutil to upload for us
+            if os.path.getsize(src_filename) > 10 * 1024 * 1024:
+                import subprocess
+                subprocess.check_call(['gsutil', 'cp', src_filename, dst_url])
+            else:
+                blob.upload_from_filename(src_filename)
 
     def _get_url_prefix(self):
         return "gs://"
