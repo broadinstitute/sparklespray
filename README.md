@@ -242,9 +242,12 @@ kubeque reset "*"
 ```
 
 ## Killing a job
+The following will kill the last job (change LAST to a specific job id if
+you wish to kill a different job) and stop the nodes associated with that
+job.
 
 ``
-
+kubeque kill -k LAST 
 ``
 
 ## Resubmitting failures
@@ -256,6 +259,7 @@ parameters. Once you have those parameters, you can resubmit only those
 parameters which had problems.
 
 ```
+
 # The first submission submits everything
 > kubeque sub --params parameters.csv process_file.py '{^filename}'
 
@@ -267,6 +271,39 @@ parameters which had problems.
 
 (If you want to see which parameters were associated with which task, that
 information is contained within results.json in the output directory for each task.)
+
+# The crazy steps neccessary to view progress
+
+In a future version, we will have a 'kubeque peek' command for viewing
+stdout live. However, there are several technical hurdles to overcome to
+implement that. 
+
+In the mean time, viewing logs live is complicated, but can be done as
+follows (assuming JOB_ID is the name of your job):
+
+```
+kubeque status JOB_ID --detailed
+```
+
+In the output look for a statement like `started on pod: ggp-5598619720951178934`
+This will give you the name of the host the task is running on. (In this
+case ggp-5598619720951178934).
+
+Now, ssh into this host (and you may need to specify the zone this host is
+on) and enter the container where the command is running.
+
+```
+# ssh into the host
+gcloud compute ssh --zone us-east1-d ggp-5598619720951178934
+# run bash inside the container
+docker exec -it `docker ps | tail -1 | cut -f 1 -d ' '` bash
+# change to the directory where the current task is running
+cd `ls -td /mnt/kubeque-data/tasks/* | head -1`/work
+# This is the directory the task is running from. You can see here all the
+# files that have been downloaded or written. To watch the output from the
+# command you can run 'tail -f'
+tail -f stdout.txt
+```
 
 # Development notes (Not useful for users)
 
