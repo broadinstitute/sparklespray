@@ -681,9 +681,9 @@ def fetch_cmd(jq, io, args):
         dest = jobid
     else:
         dest = args.dest
-    fetch_cmd_(jq, io, jobid, dest)
+    fetch_cmd_(jq, io, jobid, dest, flat=args.flat)
 
-def fetch_cmd_(jq, io, jobid, dest_root, force=False):
+def fetch_cmd_(jq, io, jobid, dest_root, force=False, flat=False):
     def get(src, dst, **kwargs):
         if os.path.exists(dst) and not force:
             log.warning("%s exists, skipping download", dst)
@@ -694,7 +694,7 @@ def fetch_cmd_(jq, io, jobid, dest_root, force=False):
     if not os.path.exists(dest_root):
         os.mkdir(dest_root)
 
-    include_index = True #len(tasks) > 1
+    include_index = not flat
 
     for task in tasks:
         spec = json.loads(io.get_as_str(task.args))
@@ -722,7 +722,10 @@ def fetch_cmd_(jq, io, jobid, dest_root, force=False):
                 to_download.append((ul['src'], ul['dst_url']))
 
         for src, dst_url in to_download:
-            localpath = os.path.join(dest_root, str(task.task_index + 1), src)
+            if include_index:
+                localpath = os.path.join(dest_root, str(task.task_index + 1), src)
+            else:
+                localpath = os.path.join(dest_root, src)
             pdir = os.path.dirname(localpath)
             if not os.path.exists(pdir):
                 os.makedirs(pdir)
@@ -966,6 +969,7 @@ def main(argv=None):
     parser = subparser.add_parser("fetch", help="Download results from a completed job")
     parser.set_defaults(func=fetch_cmd)
     parser.add_argument("jobid")
+    parser.add_argument("--flat", action="store_true", help="Instead of writing each task into a seperate directory, write all files into the destination directory")
     parser.add_argument("--dest", help="The path to the directory where the results will be downloaded. If omitted a directory will be created with the job id")
 
     parser = subparser.add_parser("version", help="print the version and exit")
