@@ -165,7 +165,7 @@ def make_spec_from_command(argv,
         tasks.append(dict(
             downloads=[dict(d._asdict()) for d in dl_and_command.downloads], 
             command=dl_and_command.command,
-            uploads=dict(include_patterns=src_wildcards, exclude_patterns=[], dst_url="{}/{}".format(dest_url, task_i)),
+            uploads=dict(include_patterns=src_wildcards, exclude_patterns=[], dst_url="{}/{}".format(dest_url, task_i+1)),
             parameters=parameters[task_i]
         ))
 
