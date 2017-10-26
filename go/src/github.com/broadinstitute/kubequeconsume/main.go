@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/datastore"
+	"cloud.google.com/go/logging"
 	"cloud.google.com/go/pubsub"
 	"golang.org/x/net/context"
 	"golang.org/x/oauth2/google"
@@ -31,6 +32,7 @@ func Main() {
 			Name: "consume",
 			Flags: []cli.Flag{
 				cli.StringFlag{Name: "owner"},
+				cli.BoolFlag{Name: "loglive"},
 				cli.StringFlag{Name: "projectId"},
 				cli.StringFlag{Name: "cacheDir"},
 				cli.StringFlag{Name: "cluster"},
@@ -56,10 +58,24 @@ func consume(c *cli.Context) error {
 	ReservationTimeout := time.Duration(c.Int("restimeout")) * time.Minute
 	watchdogTimeout := time.Duration(c.Int("timeout")) * time.Minute
 	usePubSub := false
+	logLive := c.Bool("loglive")
 
 	EnableWatchdog(watchdogTimeout)
 
 	ctx := context.Background()
+
+	var loggingClient *logging.Client
+	var err error
+	if logLive {
+		log.Printf("Creating log client")
+		ctx := context.Background()
+		loggingClient, err = logging.NewClient(ctx, projectID)
+		if err != nil {
+			log.Printf("Creating log client failed: %v", err)
+			return err
+		}
+	}
+
 	client, err := datastore.NewClient(ctx, projectID)
 	if err != nil {
 		log.Printf("Creating datastore client failed: %v", err)
@@ -100,7 +116,7 @@ func consume(c *cli.Context) error {
 		Owner:             owner}
 
 	executor := func(taskId string, taskParam string) (string, error) {
-		return ExecuteTaskFromUrl(ioc, taskId, taskParam, cacheDir, tasksDir)
+		return ExecuteTaskFromUrl(ioc, taskId, taskParam, cacheDir, tasksDir, loggingClient)
 	}
 
 	Timeout := 1 * time.Second
@@ -184,5 +200,11 @@ func consume(c *cli.Context) error {
 		return err
 	}
 
+	if loggingClient != nil {
+		err = loggingClient.Close()
+		if err != nil {
+			log.Printf("loggingClient Close returned: %v", err)
+		}
+	}
 	return nil
 }

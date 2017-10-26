@@ -266,6 +266,26 @@ parameters which had problems.
 (If you want to see which parameters were associated with which task, that
 information is contained within results.json in the output directory for each task.)
 
+# Viewing output of tasks
+
+IF you submit a task with the "--loglive" option, the output of your tasks
+will be written to StackDriver (https://cloud.google.com/logging/) where you
+can view the output as its written.
+
+For example if you submit a command such as:
+```
+kubeque sub --loglive -n myjob my-executable
+```
+
+You can go the google cloud console, under "StackDriver" select "logging".
+Here you should see a list of log messages from across your entire project
+with a search box at the top.
+
+For this example, entering "label:kubeque-task-id:myjob.0" will show you
+only the feed from task "0" (the first one) of the job submitted with id
+"myjob".
+
+
 # The crazy steps neccessary to view progress
 
 In a future version, we will have a 'kubeque peek' command for viewing

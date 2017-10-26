@@ -11,7 +11,9 @@ import (
 	"path"
 	"path/filepath"
 	"syscall"
+	"time"
 
+	"cloud.google.com/go/logging"
 	"github.com/bmatcuk/doublestar"
 )
 
@@ -135,12 +137,7 @@ func downloadAll(ioc IOClient, workdir string, downloads []*TaskDownload, cacheD
 	return nil, downloaded
 }
 
-func execCommand(command, workdir, stdoutPath string) (*syscall.Rusage, string, error) {
-	stdout, err := os.OpenFile(stdoutPath, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0766)
-	if err != nil {
-		return nil, "", err
-	}
-
+func execCommand(command string, workdir string, stdout *os.File) (*syscall.Rusage, string, error) {
 	attr := &os.ProcAttr{Dir: workdir, Env: nil, Files: []*os.File{nil, stdout, stdout}}
 	exePath := "/bin/sh"
 	proc, err := os.StartProcess(exePath, []string{exePath, "-c", command}, attr)
@@ -253,7 +250,49 @@ func execLifecycleScript(label string, workdir string, script string) {
 	}
 }
 
-func executeTaskInDir(ioc IOClient, workdir string, spec *TaskSpec, cachedir string) (string, error) {
+func startWatchingLog(loggingClient *logging.Client, taskID string, stdoutPath string) (chan bool, error) {
+	log.Printf("Starting watch of logfile: %s", stdoutPath)
+
+	buffer := make([]byte, 50000)
+	shutdownChan := make(chan bool)
+	labels := make(map[string]string)
+	labels["kubeque-task-id"] = taskID
+	logger := loggingClient.Logger(taskID, logging.CommonLabels(labels))
+
+	stdout, err := os.Open(stdoutPath)
+	if err != nil {
+		log.Printf("Could not open %s for reading: %v", stdoutPath, err)
+		return shutdownChan, err
+	}
+
+	poll := func() {
+		watching := true
+		for watching {
+			n, err := stdout.Read(buffer)
+			if err != nil && err != io.EOF {
+				log.Printf("Got error reading %s: %v", stdoutPath, err)
+				break
+			}
+
+			if n > 0 {
+				logger.Log(logging.Entry{Payload: string(buffer[0:n])})
+				//				continue
+			}
+
+			select {
+			case <-shutdownChan:
+				watching = false
+			case <-time.After(time.Second):
+			}
+		}
+		stdout.Close()
+	}
+
+	go poll()
+	return shutdownChan, nil
+}
+
+func executeTaskInDir(ioc IOClient, workdir string, taskId string, spec *TaskSpec, cachedir string, loggingClient *logging.Client) (string, error) {
 	stdoutPath := path.Join(workdir, "stdout.txt")
 	execLifecycleScript("PreDownloadScript", workdir, spec.PreDownloadScript)
 
@@ -272,9 +311,22 @@ func executeTaskInDir(ioc IOClient, workdir string, spec *TaskSpec, cachedir str
 		panic("bad commandWorkingDir")
 	}
 
+	stdout, err := os.OpenFile(stdoutPath, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0766)
+	if err != nil {
+		return "", err
+	}
+
+	if loggingClient != nil {
+		shutdownChan, err := startWatchingLog(loggingClient, taskId, stdoutPath)
+		if err != nil {
+			log.Printf("Could not start log watch: %v", err)
+		}
+		defer close(shutdownChan)
+	}
+
 	cwdDir := path.Join(workdir, commandWorkingDir)
 	log.Printf("Executing (working dir: %s, output written to: %s): %s", cwdDir, stdoutPath, spec.Command)
-	resourceUsage, retcode, err := execCommand(spec.Command, cwdDir, stdoutPath)
+	resourceUsage, retcode, err := execCommand(spec.Command, cwdDir, stdout)
 	if err != nil {
 		return retcode, err
 	}
@@ -298,7 +350,7 @@ func executeTaskInDir(ioc IOClient, workdir string, spec *TaskSpec, cachedir str
 	return retcode, err
 }
 
-func executeTask(ioc IOClient, taskId string, taskSpec *TaskSpec, cacheDir string, tasksDir string) (string, error) {
+func executeTask(ioc IOClient, taskId string, taskSpec *TaskSpec, cacheDir string, tasksDir string, loggingClient *logging.Client) (string, error) {
 	//	log.Printf("Job spec (%s) of claimed task: %s", json_url, json.dumps(spec, indent=2))
 
 	mode := os.FileMode(0700)
@@ -334,7 +386,7 @@ func executeTask(ioc IOClient, taskId string, taskSpec *TaskSpec, cacheDir strin
 		return "", err
 	}
 
-	retcode, err := executeTaskInDir(ioc, workDir, taskSpec, cacheDir)
+	retcode, err := executeTaskInDir(ioc, workDir, taskId, taskSpec, cacheDir, loggingClient)
 	if err != nil {
 		return retcode, err
 	}
@@ -409,11 +461,11 @@ func loadTaskSpec(ioc IOClient, taskURL string) (*TaskSpec, error) {
 	return &taskSpec, nil
 }
 
-func ExecuteTaskFromUrl(ioc IOClient, taskId string, taskURL string, cacheDir string, tasksDir string) (string, error) {
+func ExecuteTaskFromUrl(ioc IOClient, taskId string, taskURL string, cacheDir string, tasksDir string, loggingClient *logging.Client) (string, error) {
 	taskSpec, err := loadTaskSpec(ioc, taskURL)
 	if err != nil {
 		return "", err
 	}
 
-	return executeTask(ioc, taskId, taskSpec, cacheDir, tasksDir)
+	return executeTask(ioc, taskId, taskSpec, cacheDir, tasksDir, loggingClient)
 }

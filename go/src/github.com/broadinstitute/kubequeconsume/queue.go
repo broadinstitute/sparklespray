@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/datastore"
+	"cloud.google.com/go/logging"
 	"golang.org/x/net/context"
 )
 
@@ -65,6 +66,7 @@ type Options struct {
 	InitialClaimRetry time.Duration
 	SleepOnEmpty      time.Duration
 	ClaimTimeout      time.Duration
+	LoggingClient     *logging.Client
 }
 
 type Executor func(taskId string, taskParam string) (string, error)

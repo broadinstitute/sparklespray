@@ -172,7 +172,7 @@ def validate_cmd(jq, io, cluster, config):
     log.info("Verification successful!")
 
 def submit(jq, io, cluster, job_id, spec, dry_run, config, skip_kube_submit, metadata, kubequeconsume_url,
-           exec_local=False):
+           exec_local=False, loglive=False):
     log.info("Submitting job with id: %s", job_id)
 
     # where to take this from? arg with a default of 1?
@@ -211,6 +211,8 @@ def submit(jq, io, cluster, job_id, spec, dry_run, config, skip_kube_submit, met
         kubeque_command = [kubeque_exe_in_container, "consume", "--cluster", cluster_name, "--projectId", project,
                            "--cacheDir", stage_dir + "/cache",
                            "--tasksDir", stage_dir + "/tasks", "--zones", ",".join(config['zones'])]
+        if loglive:
+            kubeque_command.append("--loglive")
         kubeque_command = "chmod +x {} && {}".format(kubeque_exe_in_container, " ".join(kubeque_command))
 
         logging_url = config["default_url_prefix"] + "/node-logs"
@@ -257,7 +259,7 @@ def _write_local_script(job_id, spec, kubeque_command, kubequeconsume_exe_path, 
          "-v", os.path.expanduser("~/.config/gcloud") + ":/google-creds",
          "-e", "GOOGLE_APPLICATION_CREDENTIALS=/google-creds/application_default_credentials.json",
          "-v", kubequeconsume_exe_path + ":" + kubeque_exe_in_container,
-         image, 'bash -c "' + kubeque_command + ' --owner local"', ])
+         image, 'bash -c "' + kubeque_command + ' --owner localhost"', ])
     script_name = "run-{}-locally.sh".format(job_id)
     with open(script_name, "wt") as fd:
         fd.write("#!/usr/bin/env bash\n")
@@ -452,7 +454,7 @@ def submit_cmd(jq, io, cluster, args, config):
 
     log.debug("spec: %s", json.dumps(spec, indent=2))
     submit(jq, io, cluster, job_id, spec, args.dryrun, config, args.skip_kube_submit, metadata, kubequeconsume_exe_url,
-           args.local)
+           args.local, args.loglive)
 
     finished = False
     if args.local:
@@ -808,6 +810,7 @@ def _clean(cluster, jq, jobid, force=False):
     jq.delete_job(jobid)
 
 def clean_cmd(cluster, jq, args):
+    log.info("jobid_pattern: %s", args.jobid_pattern)
     jobids = _get_jobids_from_pattern(jq, args.jobid_pattern)
     for jobid in jobids:
         _clean(cluster, jq, jobid, args.force)
@@ -885,6 +888,7 @@ def main(argv=None):
     parser.add_argument("--name", "-n", help="The name to assign to the job")
     parser.add_argument("--seq", type=int,
                         help="Parameterize the command by index.  Submitting with --seq=10 will submit 10 commands with a parameter index varied from 1 to 10")
+    parser.add_argument("--loglive", action="store_true", help="If set, will write stdout from tasks to StackDriver logging")
     parser.add_argument("--params", "-p",
                         help="Parameterize the command by the rows in the specified CSV file.  If the CSV file has 5 rows, then 5 commands will be submitted.")
     parser.add_argument("--fetch", help="After run is complete, automatically download the results")
