@@ -235,19 +235,13 @@ Kubeque remembers jobs until you explicitly remove them.   To remove all non-run
 kubeque clean
 ```
 
-If there were jobs that got stuck with some "claimed" tasks, you can reset the claimed status to pending via:
-
-```
-kubeque reset "*"
-```
-
 ## Killing a job
 The following will kill the last job (change LAST to a specific job id if
 you wish to kill a different job) and stop the nodes associated with that
 job.
 
 ``
-kubeque kill -k LAST 
+kubeque kill LAST 
 ``
 
 ## Resubmitting failures
