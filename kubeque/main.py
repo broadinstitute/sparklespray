@@ -407,7 +407,10 @@ def submit_cmd(jq, io, cluster, args, config):
     if existing_job is not None:
         if args.clean:
             log.info("Cleaning existing job with id \"{}\"".format(job_id))
-            _clean(cluster, jq, job_id)
+            success = _clean(cluster, jq, job_id)
+            if not success:
+                log.error("Could not remove \"{}\", aborting!".format(job_id))
+                return
         else:
             log.error("Existing job with id \"{}\", aborting!".format(job_id))
             return
@@ -804,10 +807,11 @@ def _clean(cluster, jq, jobid, force=False):
             status_counts = jq.get_status_counts(jobid)
             if STATUS_CLAIMED in status_counts:
                 log.warning("job %s is still running (%s), cannot remove", jobid, status_counts)
-                return
+                return False
 
     log.info("deleting %s", jobid)
     jq.delete_job(jobid)
+    return True
 
 def clean_cmd(cluster, jq, args):
     log.info("jobid_pattern: %s", args.jobid_pattern)
