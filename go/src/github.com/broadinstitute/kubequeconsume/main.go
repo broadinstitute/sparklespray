@@ -74,13 +74,23 @@ func consume(c *cli.Context) error {
 
 	if owner == "" {
 		log.Printf("Querying metadata to get host instance name")
-		owner, err = GetInstanceName()
+		instanceName, err := GetInstanceName()
 		if err != nil {
-			log.Printf("Creating io client failed: %v", err)
+			log.Printf("GetInstanceName failed: %v", err)
 			return err
 		} else {
-			log.Printf("Got hostname: %s", owner)
+			log.Printf("Got instance name: %s", instanceName)
 		}
+
+		zone, err := GetInstanceZone()
+		if err != nil {
+			log.Printf("GetInstanceZone failed: %v", err)
+			return err
+		} else {
+			log.Printf("Got zone: %s", zone)
+		}
+
+		owner = zone + "/" + instanceName
 	}
 
 	options := &Options{

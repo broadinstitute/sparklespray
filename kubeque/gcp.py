@@ -199,6 +199,10 @@ class JobStorage:
         return "job-"+job_id
 
     def store_job(self, job):
+        existing_job = self.get_job(job.job_id, must=False)
+        if existing_job is not None:
+            raise Exception("Cannot create job \"{}\", ID is already used".format(job.job_id))
+
         with self.batch_write() as batch:
            batch.save(job)
            log.info("Saved job definition with %d tasks", len(job.tasks))
@@ -235,9 +239,15 @@ class JobStorage:
             if topic.exists():
                 topic.delete()
 
-    def get_job(self, job_id):
+    def get_job(self, job_id, must = True):
         job_key = self.client.key("Job", job_id)
-        return entity_to_job(self.client.get(job_key))
+        job_entity = self.client.get(job_key)
+        if job_entity is None:
+            if must:
+                raise Exception("Could not find job with id {}".format(job_id))
+            else:
+                return None
+        return entity_to_job(job_entity)
 
     def get_last_job(self):
         query = self.client.query(kind="Job")
@@ -312,8 +322,8 @@ class JobQueue:
     def get_tasks(self, job_id, status=None):
         return self.storage.get_tasks(job_id, status=status)
 
-    def get_job(self, job_id):
-        return self.storage.get_job(job_id)
+    def get_job(self, job_id, must=True):
+        return self.storage.get_job(job_id, must=must)
 
     def get_last_job(self):
         return self.storage.get_last_job()
@@ -348,15 +358,11 @@ class JobQueue:
         for status_to_clear in statuses_to_clear:
             tasks.extend(self.storage.get_tasks(jobid, status=status_to_clear))
 
-        now = time.time()
         updated = 0
         for task in tasks:
             if owner is not None and owner != task.owner:
                 continue
-            task.owner = None
-            task.status = STATUS_PENDING
-            task.history.append( TaskHistory(timestamp=now, status="reset") )
-            self.storage.update_task(task)
+            self._reset_task(task)
             updated += 1
 
         def mark_not_killed(job):
@@ -366,6 +372,17 @@ class JobQueue:
         self.storage.update_job(jobid, mark_not_killed)
 
         return updated
+
+    def _reset_task(self, task, status):
+        now = time.time()
+        task.owner = None
+        task.status = status
+        task.history.append( TaskHistory(timestamp=now, status="reset") )
+        self.storage.update_task(task)
+
+    def reset_task(self, task_id, status=STATUS_PENDING):
+        task = self.storage.get_task(task_id)
+        self._reset_task(task, status)
 
     def submit(self, job_id, args, kube_job_spec, metadata, cluster):
         import json

@@ -4,6 +4,8 @@ from apiclient.discovery import build
 import logging
 import random
 import string
+import sys
+from googleapiclient.errors import HttpError
 
 log = logging.getLogger(__name__)
 
@@ -92,11 +94,46 @@ class Cluster:
         return ClusterStatus(instances)
 
     def stop_cluster(self, cluster_name):
-        log.info("Deleting instances in cluster %s", cluster_name)
         instances = self._get_cluster_instances(cluster_name)
-        for instance in instances:
-            log.info("deleting instance %s", instance['name'])
-            self.compute.instances().delete(project=self.project, zone=instance['zone'], instance=instance['name'])
+        if len(instances) == 0:
+            log.warning("Attempted to delete instances in cluster %s but no instances found!", cluster_name)
+        else:
+            for instance in instances:
+                zone = instance['zone'].split('/')[-1]
+                log.info("deleting instance %s associated with cluster %s", instance['name'], cluster_name)
+                self.compute.instances().delete(project=self.project, zone=zone, instance=instance['name']).execute()
+
+            for instance in instances:
+                zone = instance['zone'].split('/')[-1]
+                self._wait_for_instance_status(self.project, zone, instance['name'], "TERMINATED")
+
+    def _get_instance_status(self, project, zone, instance_name):
+        try:
+            instance = self.compute.instances().get(project=project, zone=zone, instance=instance_name).execute()
+            return instance['status']
+        except HttpError as error:
+            if error.resp.status == 404:
+                return "TERMINATED"
+            else:
+                raise Exception("Got HttpError but status was: {}".format(error.resp.status))
+
+    def _wait_for_instance_status(self, project, zone, instance_name, desired_status):
+        def p(msg):
+            sys.stdout.write(msg)
+            sys.stdout.flush()
+
+        p("Waiting for {} to become {}...".format(instance_name, desired_status))
+        prev_status = None
+        while True:
+            instance_status = self._get_instance_status(project, zone, instance_name)
+            if instance_status != prev_status:
+                prev_status = instance_status
+                p("(now {})".format(instance_status))
+            if instance_status == desired_status:
+                break
+            time.sleep(5)
+            p(".")
+        p("\n")
 
     def add_node(self, pipeline_def):
         # Run the pipeline
@@ -121,6 +158,16 @@ class Cluster:
         if "error" in operation:
             raise Exception("Got error: {}".format(operation['error']))
         log.info("execution completed successfully")
+
+    def is_owner_running(self, owner):
+        if owner == "localhost":
+            return False
+
+        import re
+        m = re.match("projects/([^/]+)/zones/([^/]+)/([^/]+)", owner)
+        assert m is not None, "Expected a instance name with zone but got owner={}".format(owner)
+        project_id, zone, instance_name = m.groups()
+        return self._get_instance_status(project_id, zone, instance_name) == 'RUNNING'
 
     def create_pipeline_spec(self,
                              docker_image,

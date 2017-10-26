@@ -6,7 +6,7 @@ import sys
 
 import kubeque
 from kubeque.gcp import create_gcs_job_queue, IO, STATUS_PENDING, STATUS_FAILED, STATUS_COMPLETE, STATUS_CLAIMED, \
-    STATUS_KILLED
+    STATUS_KILLED, JOB_STATUS_KILLED
 from kubeque.hasher import CachingHashFunction
 
 from kubeque.spec import make_spec_from_command, SrcDstPair, add_file_to_upload_map
@@ -141,9 +141,10 @@ def _random_string(length):
 
 def _make_cluster_name(image, cpu_request, mem_limit, unique_name):
     import hashlib
+    import os
     if unique_name:
-        return 'l-' + _random_string(10)
-    return "c-" + hashlib.md5("{}-{}-{}-{}".format(image, cpu_request, mem_limit, kubeque.__version__).encode("utf8")).hexdigest()[:10]
+        return 'l-' + _random_string(20)
+    return "c-" + hashlib.md5("{}-{}-{}-{}-{}".format(image, cpu_request, mem_limit, kubeque.__version__, os.getlogin()).encode("utf8")).hexdigest()[:20]
 
 
 def validate_cmd(jq, io, cluster, config):
@@ -399,6 +400,15 @@ def submit_cmd(jq, io, cluster, args, config):
     job_id = args.name
     if job_id is None:
         job_id = new_job_id()
+
+    existing_job = jq.get_job(job_id, must = False)
+    if existing_job is not None:
+        if args.clean:
+            log.info("Cleaning existing job with id \"{}\"".format(job_id))
+            _clean(cluster, jq, job_id)
+        else:
+            log.error("Existing job with id \"{}\", aborting!".format(job_id))
+            return
 
     cas_url_prefix = config['cas_url_prefix']
     default_url_prefix = config['default_url_prefix']
@@ -778,17 +788,41 @@ def addnodes_cmd(jq, cluster, args):
     for i in range(args.count):
         cluster.add_node(spec)
 
+def _clean(cluster, jq, jobid, force=False):
+    if not force:
+        status_counts = jq.get_status_counts(jobid)
+        log.debug("job %s has status %s", jobid, status_counts)
+        if STATUS_CLAIMED in status_counts:
+            # if some tasks are still marked 'claimed' verify that the owner is still running
+            tasks = jq.get_tasks(jobid, STATUS_CLAIMED)
+            for task in tasks:
+                _update_if_owner_missing(cluster, jq, task)
 
-def clean_cmd(jq, args):
+            # now that we may have changed some tasks from claimed -> pending, check again
+            status_counts = jq.get_status_counts(jobid)
+            if STATUS_CLAIMED in status_counts:
+                log.warning("job %s is still running (%s), cannot remove", jobid, status_counts)
+                return
+
+    log.info("deleting %s", jobid)
+    jq.delete_job(jobid)
+
+def clean_cmd(cluster, jq, args):
     jobids = _get_jobids_from_pattern(jq, args.jobid_pattern)
     for jobid in jobids:
-        status_counts = jq.get_status_counts(jobid)
-        if not _is_complete(status_counts) and not ("pending" in status_counts and len(status_counts) == 1):
-            log.warning("job %s is still running (%s), cannot remove", jobid, status_counts)
-        else:
-            log.info("deleting %s", jobid)
-            jq.delete_job(jobid)
+        _clean(cluster, jq, jobid, args.force)
 
+def _update_if_owner_missing(cluster, jq, task):
+    if task.status != STATUS_CLAIMED:
+        return
+    if not cluster.is_owner_running(task.owner):
+        job = jq.get_job(task.job_id)
+        if job.status == JOB_STATUS_KILLED:
+            new_status = STATUS_KILLED
+        else:
+            new_status = STATUS_PENDING
+        log.info("Task %s is owned by %s which does not appear to be running, resetting status from 'claimed' to '%s'", task.task_id, task.owner, new_status)
+        jq.reset_task(task.task_id, status= new_status)
 
 def kill_cmd(jq, cluster, args):
     jobids = _get_jobids_from_pattern(jq, args.jobid_pattern)
@@ -799,8 +833,11 @@ def kill_cmd(jq, cluster, args):
         log.info("Marking %s as killed", jobid)
         ok, job = jq.kill_job(jobid)
         assert ok
-        if args.killcluster:
+        if not args.keepcluster:
             cluster.stop_cluster(job.cluster)
+            tasks = jq.get_tasks_for_cluster(job.cluster, STATUS_CLAIMED)
+            for task in tasks:
+                _update_if_owner_missing(cluster, jq, task)
 
 
 def dumpjob_cmd(jq, io, args):
@@ -863,6 +900,7 @@ def main(argv=None):
     parser.add_argument("--cd", help="The directory to change to before executing the command", default=".",
                         dest="working_dir")
     parser.add_argument("--local", help="Run the tasks inside of docker on the local machine", action="store_true")
+    parser.add_argument("--clean", help="If the job id already exists, 'clean' it first to avoid an error about the job already existing", action="store_true")
     parser.add_argument("command", nargs=argparse.REMAINDER)
 
     parser = subparser.add_parser("addnodes", help="Add nodes to be used for executing a specific job")
@@ -905,14 +943,15 @@ def main(argv=None):
                         help="If set, will periodically poll and print the status until all tasks terminate")
     parser.add_argument("jobid_pattern", nargs="?")
 
-    parser = subparser.add_parser("clean", help="Remove completed jobs from the database of jobs")
+    parser = subparser.add_parser("clean", help="Remove jobs which are not currently running from the database of jobs")
     parser.set_defaults(func=clean_cmd)
     parser.add_argument("jobid_pattern", nargs="?",
                         help="If specified will only attempt to remove jobs that match this pattern")
+    parser.add_argument("--force", "-f", help="If set, will delete job regardless of whether it is running or not")
 
     parser = subparser.add_parser("kill", help="Terminate the specified job")
     parser.set_defaults(func=kill_cmd)
-    parser.add_argument("--killcluster", "-k", action="store_true",
+    parser.add_argument("--keepcluster", action="store_true",
                         help="If set will also terminate the nodes that the job is using to run. (This could impact other running jobs that use the same docker image)")
     parser.add_argument("jobid_pattern")
 

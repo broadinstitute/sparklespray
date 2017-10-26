@@ -162,3 +162,23 @@ func GetInstanceName() (string, error) {
 	bodyBytes, err := ioutil.ReadAll(resp.Body)
 	return string(bodyBytes), err
 }
+
+func GetInstanceZone() (string, error) {
+	url := "http://metadata.google.internal/computeMetadata/v1/instance/zone"
+	var client http.Client
+	req, _ := http.NewRequest("GET", url, nil)
+	req.Header.Set("Metadata-Flavor", "Google")
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		log.Printf("Got status=%d from fetching instance zone", resp.StatusCode)
+		return "", errors.New("fetching instance zone failed")
+	}
+
+	bodyBytes, err := ioutil.ReadAll(resp.Body)
+	return string(bodyBytes), err
+}
