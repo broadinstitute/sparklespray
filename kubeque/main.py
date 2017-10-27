@@ -990,6 +990,7 @@ def main(argv=None):
     func_param_names = get_func_parameters(args.func)
     if len(set(["config", "jq", "io"]).intersection(func_param_names)) > 0:
         config_path = get_config_path(args.config)
+        log.info("Using config: %s", config_path)
         config, jq, io, cluster = load_config(config_path)
     func_params = {}
     if "args" in func_param_names:
@@ -1016,7 +1017,7 @@ def get_config_path(config_path):
             config_path = os.path.expanduser("~/.kubeque")
             if not os.path.exists(config_path):
                 raise Exception("Could not find config file at neither ./.kubeque nor ~/.kubeque")
-    return config_path
+    return os.path.abspath(config_path)
 
 
 if __name__ == "__main__":
