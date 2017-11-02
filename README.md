@@ -278,13 +278,14 @@ kubeque sub --loglive -n myjob my-executable
 ```
 
 You can go the google cloud console, under "StackDriver" select "logging".
-Here you should see a list of log messages from across your entire project
-with a search box at the top.
+Then, make sure that "GCE VM Instance" and "All logs" are selected in the
+first and seconds dropdowns under the search box. Here you should see a 
+list of log messages from all VMs within your project. To limit the output 
+to that from a single task, use the search box. 
 
-For this example, entering "label:kubeque-task-id:myjob.0" will show you
+For example, entering "label:kubeque-task-id:myjob.0" will show you
 only the feed from task "0" (the first one) of the job submitted with id
 "myjob".
-
 
 # The crazy steps neccessary to view progress
 
