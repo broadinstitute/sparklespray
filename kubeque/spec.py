@@ -134,6 +134,7 @@ def rewrite_argvs_files_to_upload(list_of_argvs, cas_url, hash_function, is_exec
 def is_executable(filename):
     return os.access(filename, os.X_OK)
 
+from kubeque.gcp import _join
 
 def make_spec_from_command(argv,
     docker_image,
@@ -165,7 +166,7 @@ def make_spec_from_command(argv,
         tasks.append(dict(
             downloads=[dict(d._asdict()) for d in dl_and_command.downloads], 
             command=dl_and_command.command,
-            uploads=dict(include_patterns=src_wildcards, exclude_patterns=[], dst_url="{}/{}".format(dest_url, task_i+1)),
+            uploads=dict(include_patterns=src_wildcards, exclude_patterns=[], dst_url=_join(dest_url, str(task_i+1))),
             parameters=parameters[task_i]
         ))
 

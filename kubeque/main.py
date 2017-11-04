@@ -373,6 +373,7 @@ MEMORY_REQUEST = "memory"
 CPU_REQUEST = "cpu"
 
 import re
+from kubeque.gcp import _join
 
 def _parse_resources(resources_str):
     # not robust parsing at all
@@ -423,7 +424,7 @@ def submit_cmd(jq, io, cluster, args, config):
         spec = json.load(open(args.file, "rt"))
     else:
         if args.seq is not None:
-            parameters = [{"i": str(i)} for i in range(args.seq)]
+            parameters = [{"index": str(i)} for i in range(args.seq)]
         elif args.params is not None:
             parameters = read_parameters_from_csv(args.params)
         else:
@@ -436,7 +437,7 @@ def submit_cmd(jq, io, cluster, args, config):
         hash_db = CachingHashFunction(config.get("cache_db_path", ".kubeque-cached-file-hashes"))
         upload_map, spec = make_spec_from_command(args.command,
                                                   image,
-                                                  dest_url=default_url_prefix + job_id,
+                                                  dest_url=_join(default_url_prefix, job_id),
                                                   cas_url=cas_url_prefix,
                                                   parameters=parameters,
                                                   resource_spec=resource_spec,
@@ -853,7 +854,10 @@ def kill_cmd(jq, cluster, args):
 def dumpjob_cmd(jq, io, args):
     import attr
     tasks_as_dicts = []
-    tasks = jq.get_tasks(_resolve_jobid(jq, args.jobid))
+    jobid = _resolve_jobid(jq, args.jobid)
+    job = jq.get_job(jobid)
+    job = attr.asdict(job)
+    tasks = jq.get_tasks(jobid)
     for task in tasks:
         t = attr.asdict(task)
 
@@ -861,7 +865,7 @@ def dumpjob_cmd(jq, io, args):
         t['args_url'] = t['args']
         t['args'] = json.loads(task_args)
         tasks_as_dicts.append(t)
-    print(json.dumps(dict(tasks=tasks_as_dicts), indent=2, sort_keys=True))
+    print(json.dumps(dict(job=job, tasks=tasks_as_dicts), indent=2, sort_keys=True))
 
 
 def version_cmd():
@@ -894,7 +898,7 @@ def main(argv=None):
                         help="Name of docker image to run job within.  Defaults to value from kubeque config file.")
     parser.add_argument("--name", "-n", help="The name to assign to the job")
     parser.add_argument("--seq", type=int,
-                        help="Parameterize the command by index.  Submitting with --seq=10 will submit 10 commands with a parameter index varied from 1 to 10")
+                        help="Parameterize the command by 'index'.  Submitting with --seq=10 will submit 10 commands with a parameter 'index' varied from 1 to 10")
     parser.add_argument("--loglive", action="store_true", help="If set, will write stdout from tasks to StackDriver logging")
     parser.add_argument("--params", "-p",
                         help="Parameterize the command by the rows in the specified CSV file.  If the CSV file has 5 rows, then 5 commands will be submitted.")
