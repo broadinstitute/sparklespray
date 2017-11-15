@@ -179,9 +179,10 @@ def entity_to_job(entity):
                submit_time=entity.get('submit_time'))
 
 class JobStorage:
-    def __init__(self, client, pubsub):
+    def __init__(self, client, pubsub, log_client):
         self.client = client
         self.pubsub = pubsub
+        self.log_client = log_client
 
     def get_task(self, task_id):
         task_key = self.client.key("Task", task_id)
@@ -227,7 +228,8 @@ class JobStorage:
         job_key = self.client.key("Job", job_id)
         entity_job = self.client.get(job_key)
 
-        task_keys = [self.client.key("Task", taskid) for taskid in set(entity_job.get("tasks",[]))] + [job_key]
+        task_ids = entity_job.get("tasks",[])
+        task_keys = [self.client.key("Task", taskid) for taskid in set(task_ids)] + [job_key]
         BATCH_SIZE = 300
         for chunk_start in range(0, len(task_keys), BATCH_SIZE):
             key_batch = task_keys[chunk_start:chunk_start+BATCH_SIZE]
@@ -238,6 +240,12 @@ class JobStorage:
             topic = self.pubsub.topic(topic_name)
             if topic.exists():
                 topic.delete()
+
+        # probably kind of a slow op. For now, only try to clean up if there are fewer than 5 tasks
+        # in the future, put a flag on the job so we know whether we need to clean up logs
+        if self.log_client and len(task_ids) <= 5:
+            for task_id in task_ids:
+                self.log_client.logger(task_id).delete()
 
     def get_job(self, job_id, must = True):
         job_key = self.client.key("Job", job_id)
@@ -449,7 +457,11 @@ def create_gcs_job_queue(project_id, credentials, use_pubsub):
         pubsub_client = pubsub.Client(project_id, credentials=credentials)
     else:
         pubsub_client = None
-    storage = JobStorage(client, pubsub_client)
+
+    from google.cloud import logging as gcp_logging
+    log_client = gcp_logging.Client()
+
+    storage = JobStorage(client, pubsub_client, log_client)
     return JobQueue(storage)
 
 def _compute_hash(filename):

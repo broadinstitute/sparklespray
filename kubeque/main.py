@@ -467,7 +467,7 @@ def submit_cmd(jq, io, cluster, args, config):
     else:
         if not (args.dryrun or args.skip_kube_submit) and args.wait_for_completion:
             log.info("Waiting for job to terminate")
-            watch(jq, job_id, cluster)
+            watch(jq, job_id, cluster, loglive=args.loglive)
             finished = True
 
     if finished:
@@ -624,7 +624,7 @@ def status_cmd(jq, io, cluster, args):
         assert len(jobids) == 1, "When watching, only one jobid allowed, but the following matched wildcard: {}".format(
             jobids)
         jobid = jobids[0]
-        watch(jq, jobid, cluster)
+        watch(jq, jobid, cluster, loglive=args.loglive)
     else:
         for jobid in jobids:
             if args.detailed or args.failures:
@@ -755,9 +755,17 @@ def _exception_guard(deferred_msg):
         log.exception(msg)
         log.warning("Ignoring exception and continuing...")
 
+from kubeque.logclient import LogMonitor
 
-def watch(jq, jobid, cluster, refresh_delay=5, min_check_time=10):
+def watch(jq, jobid, cluster, refresh_delay=5, min_check_time=10, loglive=False):
     job = jq.get_job(jobid)
+    log_monitor = None
+    if loglive:
+        if len(job.tasks) != 1:
+            log.warning("Could not tail logs because there are %d tasks, and we can only watch one task at a time", len(job.tasks))
+        else:
+            log_monitor = LogMonitor(cluster.project, job.tasks[0])
+
     cluster_name = job.cluster
     prev_status = None
     last_cluster_update = None
@@ -785,6 +793,9 @@ def watch(jq, jobid, cluster, refresh_delay=5, min_check_time=10):
                         raise Exception("Cluster prematurely stopped")
                 last_cluster_status = cluster_status
                 last_cluster_update = time.time()
+
+        if log_monitor is not None:
+            log_monitor.poll()
 
         time.sleep(refresh_delay)
 
@@ -956,6 +967,7 @@ def main(argv=None):
     parser.add_argument("--failures", action="store_true", help="List attributes of each task (only for failures)")
     parser.add_argument("--wait", action="store_true",
                         help="If set, will periodically poll and print the status until all tasks terminate")
+    parser.add_argument("--loglive", action="store_true", help="If set, will read stdout from tasks from StackDriver logging")
     parser.add_argument("jobid_pattern", nargs="?")
 
     parser = subparser.add_parser("clean", help="Remove jobs which are not currently running from the database of jobs")
