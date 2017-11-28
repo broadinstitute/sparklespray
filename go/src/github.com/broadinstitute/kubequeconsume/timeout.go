@@ -3,6 +3,7 @@ package kubequeconsume
 import (
 	"log"
 	"sort"
+	"strings"
 	"time"
 
 	compute "google.golang.org/api/compute/v1"
@@ -36,15 +37,19 @@ type ClusterTimeout struct {
 	IsReservedHost   bool
 }
 
-func NewClusterTimeout(service *compute.Service, clusterName string, zones []string, project string, myname string, timeout time.Duration,
-	ReservationSize int, ReservationTimeout time.Duration) *ClusterTimeout {
+func NewClusterTimeout(service *compute.Service, clusterName string, zones []string, project string, myname string,
+	timeout time.Duration, ReservationSize int, ReservationTimeout time.Duration) *ClusterTimeout {
+
+	// The instance name may have zone included in the path. Drop everything but the final name
+	nameComponents := strings.Split(myname, "/")
+
 	t := &ClusterTimeout{
 		ClusterName:        clusterName,
 		Timeout:            timeout,
 		Service:            service,
 		Zones:              zones,
 		Project:            project,
-		MyName:             myname,
+		MyName:             nameComponents[len(nameComponents)-1],
 		ReservationSize:    ReservationSize,
 		ReservationTimeout: ReservationTimeout}
 	t.UpdateIsReservedHost()
