@@ -16,7 +16,7 @@ def _get_log_stream(client, project_id, task_id, time_between_polls=2):
     # so when I fetch the next page a second time, keep track of how many records into it to skip.
     # perhaps changing the iterator into an explict fetch by page token might make the logic clearer
     while True:
-        iterator = client.list_entries(filter_="logName=\"projects/broad-achilles/logs/log-test.0\"", page_token=next_token, page_size=50)
+        iterator = client.list_entries(filter_="logName=\"projects/{}/logs/{}\"".format(project_id, task_id), page_token=next_token, page_size=50)
         for page in iterator.pages:
             entries = list(page)
             if iterator.next_page_token is not None:
