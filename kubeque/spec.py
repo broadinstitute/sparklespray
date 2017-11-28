@@ -96,6 +96,7 @@ def add_file_to_pull_to_wd(src_dst_pair, upload_map, hash_function, is_executabl
         if src_dst_pair.src in upload_map:
             url = upload_map[src_dst_pair.src]
         else:
+            assert len(src_dst_pair.src) > 0
             url = add_file_to_upload_map(upload_map, hash_function, cas_url, src_dst_pair.src, src_dst_pair.src)
 
     files_to_dl.append( Download(url, src_dst_pair.dst, executable_flag) )

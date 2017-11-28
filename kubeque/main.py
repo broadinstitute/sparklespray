@@ -354,6 +354,8 @@ def _add_name_pair_to_list(file):
         with open(file[1:], "rt") as fd:
             for line in fd:
                 line = line.strip()
+                if len(line) == 0:
+                    continue
                 included_files.extend(_add_name_pair_to_list(line))
         return included_files
     else:
