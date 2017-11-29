@@ -1029,13 +1029,26 @@ def get_config_path(config_path):
     if config_path is not None:
         if not os.path.exists(config_path):
             raise Exception("Could not find config at {}".format(config_path))
+        return config_path
     else:
-        config_path = ".kubeque"
-        if not os.path.exists(config_path):
-            config_path = os.path.expanduser("~/.kubeque")
-            if not os.path.exists(config_path):
-                raise Exception("Could not find config file at neither ./.kubeque nor ~/.kubeque")
-    return os.path.abspath(config_path)
+        def possible_config_names():
+            for config_name in [".sparkles", ".kubeque"]:
+                dirname = os.path.abspath(".")
+                while True:
+                    yield os.path.join(dirname, config_name)
+                    next_dirname = os.path.dirname(dirname)
+                    if dirname == next_dirname:
+                        break
+                    dirname = next_dirname
+            return
+
+        checked_paths = []
+        for config_path in possible_config_names():
+            if os.path.exists(config_path):
+                return config_path
+            checked_paths.append(config_path)
+
+        raise Exception("Could not find config file at any of locations: {}".format(checked_paths))
 
 
 if __name__ == "__main__":

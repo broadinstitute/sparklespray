@@ -1,18 +1,18 @@
-# Kubeque: Easy submission of batch jobs to google compute engine
+# Sparkle Spray: Easy submission of batch jobs to google compute engine
 
-kubeque is a command line tool to make it easy to submit adhoc batch jobs that
-GCE instances.
+Sparkle spray, or "sparkles" for short, is a command line tool to make it easy to submit adhoc batch jobs
+for execution on GCE instances.
 
 # Getting started:
 
 ## Overview
 
-To run a process or batch of processes via kubeque, you will need to:
+To run a process or batch of processes via sparkles, you will need to:
 
 1. Create a docker image and upload into a repository that the cluster can access.
 (or use an existing image)
-2. Submit the actual job (kubeque sub ...)
-3. You then may optionally download the output or leave it in google storage for later.  (kubeque fetch ...) 
+2. Submit the actual job (sparkles sub ...)
+3. You then may optionally download the output or leave it in google storage for later.  (sparkles fetch ...) 
 
 ## Prereqs
 Create a google project.  In the below, we'll assume the project name is PROJECT_NAME.
@@ -41,21 +41,21 @@ gcloud init
 
 ### Set up a python 3.5 virtual environment
 
-kubeque uses google's services python client libraries, which in turn have a
+sparkles uses google's services python client libraries, which in turn have a
 fair number of their own dependencies, so it's really best to create virtual
-environment to install kubeque into. One can probably use virtualenv do
+environment to install sparkles into. One can probably use virtualenv do
 this, but I'm including conda because that's what I personally use and have
 tested with.
 
 Create the conda environment and activate it:
 ```
-conda create -n kubeque python=3.5
-source activate kubeque
+conda create -n sparkles python=3.5
+source activate sparkles
 ```
 
 ### Installing into virtual environment
 
-Check out the kubeque repo and install by running in a python 3.5 virtual
+Check out the sparkles repo and install by running in a python 3.5 virtual
 environment:
 
 ```
@@ -63,9 +63,9 @@ pip install -r requirements.txt
 python setup.py install
 ```
 
-This will add the `kubeque` command which is used for all operations.
+This will add the `sparkles` command which is used for all operations.
 
-Then to configure kubeque, create a config file "~/.kubeque" or in the current directory containing the following
+Then to configure sparkles, create a config file "~/.sparkles" or in the current directory containing the following
 (change the values of zone, region, and account to match what you used when
 running gcloud init):
 
@@ -83,7 +83,7 @@ Once you have a config file you can test to see if your account and config
 are set up correctly by running:
 
 ```
-kubeque validate
+sparkles validate
 ```
 
 If this completes without errors, you are good to go!
@@ -93,7 +93,7 @@ If this completes without errors, you are good to go!
 Submitting a sample job
 
 There's a sample script in the examples/sample-job directory. In order to
-run, you will need to make a '.kubeque' file in that directory with the
+run, you will need to make a '.sparkles' file in that directory with the
 following content:
 
 ```
@@ -109,21 +109,21 @@ zones=us-east1-b
 To run:
 
 ```
-> kubeque sub python '^mandelbrot.py' 0 0 0.5
+> sparkles sub python '^mandelbrot.py' 0 0 0.5
 2017-09-15 09:49:48,062 Already in CAS cache, skipping upload of mandelbrot.py
-2017-09-15 09:49:48,171 Already in CAS cache, skipping upload of /Users/pmontgom/dev/kubeque/kubeque/bin/kubequeconsume
+2017-09-15 09:49:48,171 Already in CAS cache, skipping upload of /Users/pmontgom/dev/sparkles/sparkles/bin/sparklesconsume
 2017-09-15 09:49:48,171 Submitting job with id: 20170915-094947-1fb5
 2017-09-15 09:49:48,386 Saved task definition batch containing 1 tasks
 2017-09-15 09:49:49,195 Saved job definition with 1 tasks
 2017-09-15 09:49:49,891 Adding initial node for cluster
-2017-09-15 09:49:50,554 Node's log will be written to: gs://broad-achilles-kubeque/test/kube/node-logs/EJCHtq7oKxjbzq-lrdL-xg8gtubt_vUYKg9wcm9kdWN0aW9uUXVldWU
+2017-09-15 09:49:50,554 Node's log will be written to: gs://broad-achilles-sparkles/test/kube/node-logs/EJCHtq7oKxjbzq-lrdL-xg8gtubt_vUYKg9wcm9kdWN0aW9uUXVldWU
 2017-09-15 09:49:50,554 Waiting for job to terminate
 2017-09-15 09:49:50,805 Tasks: pending: 1
 2017-09-15 09:49:50,976 Nodes: (no nodes)
 2017-09-15 09:50:01,603 Nodes: RUNNING: 1
 2017-09-15 09:51:04,076 Tasks: complete(code=0): 1
-2017-09-15 09:51:04,076 Done waiting for job to complete, results written to gs://broad-achilles-kubeque/test/kube/20170915-094947-1fb5
-2017-09-15 09:51:04,076 You can download results via 'gsutil rsync -r gs://broad-achilles-kubeque/test/kube/20170915-094947-1fb5 DEST_DIR'
+2017-09-15 09:51:04,076 Done waiting for job to complete, results written to gs://broad-achilles-sparkles/test/kube/20170915-094947-1fb5
+2017-09-15 09:51:04,076 You can download results via 'gsutil rsync -r gs://broad-achilles-sparkles/test/kube/20170915-094947-1fb5 DEST_DIR'
 ```
 
 Note, it took about 10 seconds to get the first worker node started (@
@@ -133,9 +133,9 @@ running the task. (The task itself, took less than a second and completed @ 9:51
 can use the worker that is still running from this last invocation.
 
 ```
-> kubeque sub python '^mandelbrot.py' 0 0 0.4
+> sparkles sub python '^mandelbrot.py' 0 0 0.4
 2017-09-15 09:51:18,430 Already in CAS cache, skipping upload of mandelbrot.py
-2017-09-15 09:51:18,538 Already in CAS cache, skipping upload of /Users/pmontgom/dev/kubeque/kubeque/bin/kubequeconsume
+2017-09-15 09:51:18,538 Already in CAS cache, skipping upload of /Users/pmontgom/dev/sparkles/sparkles/bin/sparklesconsume
 2017-09-15 09:51:18,538 Submitting job with id: 20170915-095118-af10
 2017-09-15 09:51:18,735 Saved task definition batch containing 1 tasks
 2017-09-15 09:51:19,439 Saved job definition with 1 tasks
@@ -144,8 +144,8 @@ can use the worker that is still running from this last invocation.
 2017-09-15 09:51:20,361 Tasks: claimed: 1
 2017-09-15 09:51:20,524 Nodes: RUNNING: 1
 2017-09-15 09:51:25,632 Tasks: complete(code=0): 1
-2017-09-15 09:51:25,632 Done waiting for job to complete, results written to gs://broad-achilles-kubeque/test/kube/20170915-095118-af10
-2017-09-15 09:51:25,632 You can download results via 'gsutil rsync -r gs://broad-achilles-kubeque/test/kube/20170915-095118-af10 DEST_DIR'
+2017-09-15 09:51:25,632 Done waiting for job to complete, results written to gs://broad-achilles-sparkles/test/kube/20170915-095118-af10
+2017-09-15 09:51:25,632 You can download results via 'gsutil rsync -r gs://broad-achilles-sparkles/test/kube/20170915-095118-af10 DEST_DIR'
 ```
 
 Note at 9:51 it recognizes there's already a worker running, so the task
@@ -173,12 +173,12 @@ Files can automatically be uploaded from your local host on submission, and will
 For example:
 
 ```
-kubeque sub -n sample-job -u mandelbrot.py python3 mandelbrot.py 0 0 0.5
+sparkles sub -n sample-job -u mandelbrot.py python3 mandelbrot.py 0 0 0.5
 ```
 
 will upload the latest mandelbrot.py and download it onto the remote machine before execution starts.   It's worth noting that this is equvilient to:
 ```
-kubeque sub -n sample-job python3 '^mandelbrot.py' 0 0 0.5
+sparkles sub -n sample-job python3 '^mandelbrot.py' 0 0 0.5
 ```
 
 If you have many files that your job depends on, it may be easier to list the files in a seperate file (one filename per line) and upload all of the files by specifying '-u @file_list'
@@ -194,27 +194,27 @@ The following will do all the upload data and bookkeeping normally done for jobs
 all data is uploaded, it will run the equivilent docker command locally to simulate execution.  This can be helpful for debugging issues.
 
 ```
-kubeque sub --local python3 '^mandelbrot.py' 0 0 0.5
+sparkles sub --local python3 '^mandelbrot.py' 0 0 0.5
 ```
 
 Submit a sample job reserving 1G of memory (or you can update the memory
-settings in .kubeque)
+settings in .sparkles)
 
 ```
-kubeque sub -r memory=1G -n sample-job python3 '^mandelbrot.py' 0 0 0.5
+sparkles sub -r memory=1G -n sample-job python3 '^mandelbrot.py' 0 0 0.5
 ```
 
 Download the results
 
 ```
-kubeque fetch sample-job
+sparkles fetch sample-job
 ```
 
 Submit multiple parameterized by csv file
 
 ```
-kubeque sub --params params.csv python3 '^mandelbrot.py' '{x_scale}' '{y_scale}' '{zoom}'
-kubeque sub --fetch results --params params.csv python3 '^mandelbrot.py' '{x_scale}' '{y_scale}' '{zoom}'
+sparkles sub --params params.csv python3 '^mandelbrot.py' '{x_scale}' '{y_scale}' '{zoom}'
+sparkles sub --fetch results --params params.csv python3 '^mandelbrot.py' '{x_scale}' '{y_scale}' '{zoom}'
 ```
 
 Add additional machines to be used for a job:
@@ -224,7 +224,7 @@ Add additional machines to be used for a job:
 # job submitted. Instead of the word "LAST" you can use a job id. Most
 # commands which accept a jobid also understand "LAST" as a synonym for the
 # last submitted job.
-kubeque addnodes LAST 2
+sparkles addnodes LAST 2
 ```
 
 ## Cleaning up
@@ -232,7 +232,7 @@ kubeque addnodes LAST 2
 Kubeque remembers jobs until you explicitly remove them.   To remove all non-running jobs:
 
 ```
-kubeque clean
+sparkles clean
 ```
 
 ## Killing a job
@@ -241,7 +241,7 @@ you wish to kill a different job) and stop the nodes associated with that
 job.
 
 ``
-kubeque kill LAST 
+sparkles kill LAST 
 ``
 
 ## Resubmitting failures
@@ -255,12 +255,12 @@ parameters which had problems.
 ```
 
 # The first submission submits everything
-> kubeque sub --params parameters.csv process_file.py '{^filename}'
+> sparkles sub --params parameters.csv process_file.py '{^filename}'
 
 # but, oh no! some of the jobs failed. After you've made your fix to
 # process_file.py, you can resubmit the failures:
-> kubeque listparams --incomplete missing-tasks.csv
-> kubeque sub --params missing-tasks.csv process_file.py '{^filename}'
+> sparkles listparams --incomplete missing-tasks.csv
+> sparkles sub --params missing-tasks.csv process_file.py '{^filename}'
 ```
 
 (If you want to see which parameters were associated with which task, that
@@ -274,7 +274,7 @@ can view the output as its written.
 
 For example if you submit a command such as:
 ```
-kubeque sub --loglive -n myjob my-executable
+sparkles sub --loglive -n myjob my-executable
 ```
 
 You can go the google cloud console, under "StackDriver" select "logging".
@@ -283,13 +283,13 @@ first and seconds dropdowns under the search box. Here you should see a
 list of log messages from all VMs within your project. To limit the output 
 to that from a single task, use the search box. 
 
-For example, entering "label:kubeque-task-id:myjob.0" will show you
+For example, entering "label:sparkles-task-id:myjob.0" will show you
 only the feed from task "0" (the first one) of the job submitted with id
 "myjob".
 
 # The crazy steps neccessary to view progress
 
-In a future version, we will have a 'kubeque peek' command for viewing
+In a future version, we will have a 'sparkles peek' command for viewing
 stdout live. However, there are several technical hurdles to overcome to
 implement that. 
 
@@ -297,7 +297,7 @@ In the mean time, viewing logs live is complicated, but can be done as
 follows (assuming JOB_ID is the name of your job):
 
 ```
-kubeque status JOB_ID --detailed
+sparkles status JOB_ID --detailed
 ```
 
 In the output look for a statement like `started on pod: ggp-5598619720951178934`
@@ -315,7 +315,7 @@ gcloud compute ssh --zone us-east1-d ggp-5598619720951178934
 docker exec -it `docker ps | tail -1 | cut -f 1 -d ' '` bash
 
 # change to the directory where the current task is running
-cd `ls -td /mnt/kubeque-data/tasks/* | head -1`/work
+cd `ls -td /mnt/sparkles-data/tasks/* | head -1`/work
 
 # This is the directory the task is running from. You can see here all the
 # files that have been downloaded or written. To watch the output from the
@@ -341,11 +341,11 @@ Write a props somewhere in GCS output directory?
 Show props in status output
 Set up configuration for all gcloud ops to simplify setup (x)
     - update instructions 
-    - have kubeque detect whether login is needed. (x)
+    - have sparkles detect whether login is needed. (x)
 Status should report where kubernetes job exists
-Reaper should look for example of lots of failed pods (sign of kubeque-consume failing)
+Reaper should look for example of lots of failed pods (sign of sparkles-consume failing)
 Something should clean out dead pods
-statically linked version of kubeque-consume
+statically linked version of sparkles-consume
 
 Lower hanging fruit: Reaper suffered from incorrectly believing that jobs
 were failing. However, common failure is container being incorrectly
@@ -378,7 +378,7 @@ todo:
         createTasksFor
         (see incomplete test)
     Make an example which creates a job submission based on a csv file
-    update kubeque to allow programatic:
+    update sparkles to allow programatic:
         job submission via json file
         job wait (Automatically download all results.json to dest location?)
 

@@ -24,6 +24,7 @@ setup(name='kubeque',
       packages=find_packages(),
       entry_points={'console_scripts': [
         "kubeque = kubeque.main:main",
+        "sparkles = kubeque.main:main",
         ]}
      )
 
