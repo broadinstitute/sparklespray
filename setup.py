@@ -20,6 +20,9 @@ setup(name='kubeque',
       author_email='pmontgom@broadinstitute.org',
       include_package_data=True,
       install_requires=[
+#      'google-api-python-client==1.6.4',
+      'google-cloud==0.31.0',
+      'attrs'
           ],
       packages=find_packages(),
       entry_points={'console_scripts': [
