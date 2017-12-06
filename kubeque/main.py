@@ -139,7 +139,7 @@ def _random_string(length):
     return (''.join(random.choice(alphabet) for _ in range(length)))
 
 
-def _make_cluster_name(image, cpu_request, mem_limit, unique_name):
+def _make_cluster_name(job_name, image, cpu_request, mem_limit, unique_name):
     import hashlib
     import os
     if unique_name:
@@ -203,7 +203,7 @@ def submit(jq, io, cluster, job_id, spec, dry_run, config, skip_kube_submit, met
         resources = spec["resources"]
         cpu_request = _parse_cpu_request(resources.get(CPU_REQUEST, config['default_resource_cpu']))
         mem_limit = _parse_mem_limit(resources.get(MEMORY_REQUEST, config["default_resource_memory"]))
-        cluster_name = _make_cluster_name(image, cpu_request, mem_limit, unique_name=exec_local)
+        cluster_name = _make_cluster_name(job_id, image, cpu_request, mem_limit, unique_name=exec_local)
 
         stage_dir = config.get("mount", "/mnt/kubeque-data")
         project = config['project']
@@ -382,11 +382,9 @@ def expand_files_to_upload(io, filenames):
                 child_keys = io.get_child_keys(src)
                 assert len(child_keys) > 0, "The object {} does not exist".format(src)
                 for child_key in child_keys:
-                    print("childkey", child_key, dst, dst + child_key[len(src):])
                     pairs.append(SrcDstPair(child_key, dst + child_key[len(src):]))
         else:
             pairs.append(SrcDstPair(src, dst))
-    assert False
     return pairs
 
 MEMORY_REQUEST = "memory"
