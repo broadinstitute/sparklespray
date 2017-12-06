@@ -273,6 +273,7 @@ def _write_local_script(job_id, spec, kubeque_command, kubequeconsume_exe_path, 
 def load_config(config_file, gcloud_config_file="~/.config/gcloud/configurations/config_default"):
     # first load defaults from gcloud config
     gcloud_config_file = os.path.expanduser(gcloud_config_file)
+    defaults = {}
     if os.path.exists(gcloud_config_file):
         gcloud_config = ConfigParser()
         gcloud_config.read(gcloud_config_file)
@@ -280,7 +281,7 @@ def load_config(config_file, gcloud_config_file="~/.config/gcloud/configurations
                         project=gcloud_config.get("core", "project"),
                         zones=[gcloud_config.get("compute", "zone")],
                         region=gcloud_config.get("compute", "region"))
-
+                        
     config_file = os.path.expanduser(config_file)
 
     config = ConfigParser()
@@ -300,6 +301,7 @@ def load_config(config_file, gcloud_config_file="~/.config/gcloud/configurations
 
     if len(missing_values) > 0:
         print("Missing the following parameters in {}: {}".format(config_file, ", ".join(missing_values)))
+        sys.exit(1)
 
     if "kubequeconsume_exe_path" not in merged_config:
         merged_config["kubequeconsume_exe_path"] = os.path.join(os.path.dirname(__file__), "bin/kubequeconsume")

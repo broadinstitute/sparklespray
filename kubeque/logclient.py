@@ -1,4 +1,5 @@
 import time
+from termcolor import colored, cprint
 from google.cloud import logging
 
 def print_entry(entry):
@@ -6,7 +7,16 @@ def print_entry(entry):
     if payload[-1] == "\n":
         payload = payload[:-1]
     timestamp = entry.timestamp.astimezone()
-    print("[out] {} {}".format(timestamp.strftime("%H:%M:%S"), payload))
+    payload_lines = payload.split("\n")
+    if payload_lines[-1] == "":
+        del payload_lines[-1]
+    prefix = None
+    for line in payload_lines:
+        if prefix is None:
+            prefix = "[{}]".format(timestamp.strftime("%H:%M:%S"))
+            print(colored(prefix, "green"), colored(line, "yellow"))
+        else:
+            print(colored(" "*len(prefix), "white"), colored(line, "yellow"))
 
 def _get_log_stream(client, project_id, task_id, time_between_polls=2):
     next_token = None
