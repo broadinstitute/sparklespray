@@ -256,7 +256,8 @@ func startWatchingLog(loggingClient *logging.Client, taskID string, stdoutPath s
 	buffer := make([]byte, 50000)
 	shutdownChan := make(chan bool)
 	labels := make(map[string]string)
-	labels["kubeque-task-id"] = taskID
+	labels["sparkles-job-id"] = strings.Split(taskID, ".")[0]
+	labels["sparkles-task-id"] = taskID
 	logger := loggingClient.Logger(taskID, logging.CommonLabels(labels))
 
 	stdout, err := os.Open(stdoutPath)
