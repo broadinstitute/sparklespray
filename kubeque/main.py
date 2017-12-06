@@ -301,6 +301,7 @@ def load_config(config_file, gcloud_config_file="~/.config/gcloud/configurations
 
     if len(missing_values) > 0:
         print("Missing the following parameters in {}: {}".format(config_file, ", ".join(missing_values)))
+        sys.exit(1)
 
     if "kubequeconsume_exe_path" not in merged_config:
         merged_config["kubequeconsume_exe_path"] = os.path.join(os.path.dirname(__file__), "bin/kubequeconsume")
