@@ -191,6 +191,7 @@ class Cluster:
                     'preemptible': False,
                     'minimum_ram_gb': mem_limit,
                     'zones': self.zones,
+                    'bootDiskSizeGb': 20,
                     # Create a data disk that is attached to the VM and destroyed when the
                     # pipeline terminates.
                     'disks': [{
