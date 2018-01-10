@@ -139,7 +139,7 @@ def _random_string(length):
     return (''.join(random.choice(alphabet) for _ in range(length)))
 
 
-def _make_cluster_name(image, cpu_request, mem_limit, unique_name):
+def _make_cluster_name(job_name, image, cpu_request, mem_limit, unique_name):
     import hashlib
     import os
     if unique_name:
@@ -203,7 +203,7 @@ def submit(jq, io, cluster, job_id, spec, dry_run, config, skip_kube_submit, met
         resources = spec["resources"]
         cpu_request = _parse_cpu_request(resources.get(CPU_REQUEST, config['default_resource_cpu']))
         mem_limit = _parse_mem_limit(resources.get(MEMORY_REQUEST, config["default_resource_memory"]))
-        cluster_name = _make_cluster_name(image, cpu_request, mem_limit, unique_name=exec_local)
+        cluster_name = _make_cluster_name(job_id, image, cpu_request, mem_limit, unique_name=exec_local)
 
         stage_dir = config.get("mount", "/mnt/kubeque-data")
         project = config['project']
@@ -347,6 +347,10 @@ def _split_source_dest(file):
         source, dest = file[:index], file[index+1:]
     else:
         source = dest = file
+
+    if dest.startswith("/") or dest.startswith("gs://"):
+        dest = os.path.basename(dest)
+
     return source, dest
 
 def _add_name_pair_to_list(file):
@@ -370,8 +374,20 @@ def _parse_push(files):
     return filenames
 
 
-def expand_files_to_upload(filenames):
-    return [SrcDstPair(src, dst) for src, dst in _parse_push(filenames)]
+def expand_files_to_upload(io, filenames):
+    pairs = []
+    for src, dst in _parse_push(filenames):
+        if src.startswith("gs://"):
+            if io.exists(src):
+                pairs.append(SrcDstPair(src, dst))
+            else:
+                child_keys = io.get_child_keys(src)
+                assert len(child_keys) > 0, "The object {} does not exist".format(src)
+                for child_key in child_keys:
+                    pairs.append(SrcDstPair(child_key, dst + child_key[len(src):]))
+        else:
+            pairs.append(SrcDstPair(src, dst))
+    return pairs
 
 MEMORY_REQUEST = "memory"
 CPU_REQUEST = "cpu"
@@ -447,7 +463,7 @@ def submit_cmd(jq, io, cluster, args, config):
                                                   resource_spec=resource_spec,
                                                   hash_function=hash_db.hash_filename,
                                                   src_wildcards=args.results_wildcards,
-                                                  extra_files=expand_files_to_upload(args.push),
+                                                  extra_files=expand_files_to_upload(io, args.push),
                                                   working_dir=args.working_dir)
 
         kubequeconsume_exe_path = config['kubequeconsume_exe_path']
@@ -775,34 +791,36 @@ def watch(jq, jobid, cluster, refresh_delay=5, min_check_time=10, loglive=False)
     last_cluster_update = None
     last_cluster_status = None
     last_good_state_time = time.time()
-    while True:
-        with _exception_guard(lambda: "summarizing status of job {} threw exception".format(jobid)):
-            status, complete = _summarize_task_statuses(jq.get_tasks(jobid))
-            if status != prev_status:
-                log.info("Tasks: %s", status)
-            if complete:
-                break
-            prev_status = status
+    try:
+        while True:
+            with _exception_guard(lambda: "summarizing status of job {} threw exception".format(jobid)):
+                status, complete = _summarize_task_statuses(jq.get_tasks(jobid))
+                if status != prev_status:
+                    log.info("Tasks: %s", status)
+                if complete:
+                    break
+                prev_status = status
 
-        if last_cluster_update is None or time.time() - last_cluster_update > 10:
-            with _exception_guard(lambda: "summarizing cluster threw exception".format(jobid)):
-                cluster_status = cluster.get_cluster_status(cluster_name)
-                if last_cluster_status is None or cluster_status != last_cluster_status:
-                    log.info("Nodes: %s", cluster_status.as_string())
-                if cluster_status.is_running():
-                    last_good_state_time = time.time()
-                else:
-                    if time.time() - last_good_state_time > min_check_time:
-                        log.error("Tasks haven't completed, but cluster is now offline. Aborting!")
-                        raise Exception("Cluster prematurely stopped")
-                last_cluster_status = cluster_status
-                last_cluster_update = time.time()
+            if last_cluster_update is None or time.time() - last_cluster_update > 10:
+                with _exception_guard(lambda: "summarizing cluster threw exception".format(jobid)):
+                    cluster_status = cluster.get_cluster_status(cluster_name)
+                    if last_cluster_status is None or cluster_status != last_cluster_status:
+                        log.info("Nodes: %s", cluster_status.as_string())
+                    if cluster_status.is_running():
+                        last_good_state_time = time.time()
+                    else:
+                        if time.time() - last_good_state_time > min_check_time:
+                            log.error("Tasks haven't completed, but cluster is now offline. Aborting!")
+                            raise Exception("Cluster prematurely stopped")
+                    last_cluster_status = cluster_status
+                    last_cluster_update = time.time()
 
-        if log_monitor is not None:
-            log_monitor.poll()
+            if log_monitor is not None:
+                log_monitor.poll()
 
-        time.sleep(refresh_delay)
-
+            time.sleep(refresh_delay)
+    except KeyboardInterrupt:
+        print("Interrupted -- Exiting, but your job will continue to run unaffected.")
 
 def addnodes_cmd(jq, cluster, args):
     job_id = _resolve_jobid(jq, args.job_id)

@@ -1,5 +1,6 @@
 # Authorize server-to-server interactions from Google Compute Engine.
 from google.cloud import datastore, pubsub
+import google.cloud.exceptions
 import logging
 
 from google.cloud.storage.client import Client as GSClient
@@ -245,7 +246,10 @@ class JobStorage:
         # in the future, put a flag on the job so we know whether we need to clean up logs
         if self.log_client and len(task_ids) <= 5:
             for task_id in task_ids:
-                self.log_client.logger(task_id).delete()
+                try:
+                    self.log_client.logger(task_id).delete()
+                except google.cloud.exceptions.NotFound:
+                    pass
 
     def get_job(self, job_id, must = True):
         job_key = self.client.key("Job", job_id)
@@ -501,6 +505,21 @@ class IO:
         else:
             bucket = self.client.bucket(bucket_name)
         return bucket, path
+
+    def exists(self, src_url):
+        bucket, path = self._get_bucket_and_path(src_url)
+        blob = bucket.blob(path)
+        return blob.exists()
+
+    def get_child_keys(self, src_url):
+        bucket, path = self._get_bucket_and_path(src_url)
+        keys = []
+
+        # I'm unclear if _I_ am responsible for requesting the next page or whether iterator does it for me.
+        for blob in bucket.list_blobs(prefix=path+"/"):
+            keys.append("gs://"+bucket.name+"/"+blob.name)
+
+        return keys
 
     def get(self, src_url, dst_filename, must=True):
         log.info("Downloading %s -> %s", src_url, dst_filename)
