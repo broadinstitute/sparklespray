@@ -172,12 +172,22 @@ def validate_cmd(jq, io, cluster, config):
     log.info("Verification successful!")
 
 def submit(jq, io, cluster, job_id, spec, dry_run, config, skip_kube_submit, metadata, kubequeconsume_url,
-           exec_local=False, loglive=False):
+           exec_local=False, loglive=False, ):
     log.info("Submitting job with id: %s", job_id)
 
     # where to take this from? arg with a default of 1?
     if dry_run:
         skip_kube_submit = True
+
+    preemptible_flag = config.get("preemptible", "n").lower()
+    if preemptible_flag not in ['y', 'n']:
+        raise Exception("setting 'preemptable' in config must either by 'y' or 'n' but was: {}".format(preemptible_flag))
+
+    preemptible = preemptible_flag == 'y'
+
+    bootDiskSizeGb_flag = config.get("bootDiskSizeGb", "20")
+    bootDiskSizeGb = int(bootDiskSizeGb_flag)
+    assert bootDiskSizeGb >= 10
 
     default_url_prefix = config.get("default_url_prefix", "")
     if default_url_prefix.endswith("/"):
@@ -224,7 +234,10 @@ def submit(jq, io, cluster, job_id, spec, dry_run, config, skip_kube_submit, met
             kubequeconsume_url,
             cpu_request,
             mem_limit,
-            cluster_name)
+            cluster_name,
+            bootDiskSizeGb,
+            preemptible
+        )
 
         jq.submit(job_id, list(zip(task_spec_urls, command_result_urls)), pipeline_spec, metadata, cluster_name)
         if not skip_kube_submit and not exec_local:
@@ -821,6 +834,7 @@ def watch(jq, jobid, cluster, refresh_delay=5, min_check_time=10, loglive=False)
             time.sleep(refresh_delay)
     except KeyboardInterrupt:
         print("Interrupted -- Exiting, but your job will continue to run unaffected.")
+        sys.exit(1)
 
 def addnodes_cmd(jq, cluster, args):
     job_id = _resolve_jobid(jq, args.job_id)

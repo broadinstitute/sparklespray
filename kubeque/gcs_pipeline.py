@@ -149,7 +149,7 @@ class Cluster:
         assert "pipelines" in result
 
     def test_image(self, docker_image, sample_url, logging_url):
-        pipeline_def = self.create_pipeline_spec(docker_image, "bash -c 'echo hello'", "/mnt/kubequeconsume", logging_url, sample_url, 1, 1, get_random_string(20))
+        pipeline_def = self.create_pipeline_spec(docker_image, "bash -c 'echo hello'", "/mnt/kubequeconsume", logging_url, sample_url, 1, 1, get_random_string(20), 10, False)
         operation = self.add_node(pipeline_def)
         operation_name = operation['name']
         while not operation['done']:
@@ -177,7 +177,10 @@ class Cluster:
                              kubequeconsume_url,
                              cpu_request,
                              mem_limit,
-                             cluster_name):
+                             cluster_name,
+                             bootDiskSizeGb,
+                             preemptible
+                             ):
 
         pipeline_def = {
 
@@ -188,10 +191,10 @@ class Cluster:
                 # Define the resources needed for this pipeline.
                 'resources': {
                     'minimum_cpu_cores': cpu_request,
-                    'preemptible': False,
+                    'preemptible': preemptible,
                     'minimum_ram_gb': mem_limit,
                     'zones': self.zones,
-                    'bootDiskSizeGb': 20,
+                    'bootDiskSizeGb': bootDiskSizeGb,
                     # Create a data disk that is attached to the VM and destroyed when the
                     # pipeline terminates.
                     'disks': [{
