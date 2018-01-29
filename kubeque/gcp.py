@@ -17,6 +17,7 @@ import collections
 import attr
 import time 
 from collections import namedtuple
+import sys
 
 STATUS_CLAIMED = "claimed"
 STATUS_PENDING = "pending"
@@ -250,6 +251,8 @@ class JobStorage:
                     self.log_client.logger(task_id).delete()
                 except google.cloud.exceptions.NotFound:
                     pass
+                except:
+                    print("Unexpected error deleting client log:", sys.exc_info()[0])
 
     def get_job(self, job_id, must = True):
         job_key = self.client.key("Job", job_id)
