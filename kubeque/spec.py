@@ -86,18 +86,28 @@ class Download:
 DownloadsAndCommand = collections.namedtuple("DownloadsAndCommand", "downloads command")
 SrcDstPair = collections.namedtuple("SrcDstPair", "src dst")
 
+def _add_files_in_dir_to_pull_to_wd(src_dst_pair, upload_map, hash_function, is_executable_function, cas_url, files_to_dl):
+    for filename in os.listdir(src_dst_pair.src):
+        src_filename = os.path.join(src_dst_pair.src, filename)
+        dst_filename = os.path.join(src_dst_pair.dst, filename)
+        add_file_to_pull_to_wd(SrcDstPair(src=src_filename, dst=dst_filename), upload_map, hash_function, is_executable_function, cas_url, files_to_dl)
+
 def add_file_to_pull_to_wd(src_dst_pair, upload_map, hash_function, is_executable_function, cas_url, files_to_dl):
     assert isinstance(src_dst_pair, SrcDstPair)
     if src_dst_pair.src.startswith("gs://"):
         url = src_dst_pair.src
         executable_flag = False
     else:
-        executable_flag = is_executable_function(src_dst_pair.src)
-        if src_dst_pair.src in upload_map:
-            url = upload_map[src_dst_pair.src]
+        if os.path.isdir(src_dst_pair.src):
+            _add_files_in_dir_to_pull_to_wd(src_dst_pair, upload_map, hash_function, is_executable_function, cas_url, files_to_dl)
+            return
         else:
-            assert len(src_dst_pair.src) > 0
-            url = add_file_to_upload_map(upload_map, hash_function, cas_url, src_dst_pair.src, src_dst_pair.src)
+            executable_flag = is_executable_function(src_dst_pair.src)
+            if src_dst_pair.src in upload_map:
+                url = upload_map[src_dst_pair.src]
+            else:
+                assert len(src_dst_pair.src) > 0
+                url = add_file_to_upload_map(upload_map, hash_function, cas_url, src_dst_pair.src, src_dst_pair.src)
 
     files_to_dl.append( Download(url, src_dst_pair.dst, executable_flag) )
 
