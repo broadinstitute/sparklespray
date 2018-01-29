@@ -374,7 +374,7 @@ class JobQueue:
         for task in tasks:
             if owner is not None and owner != task.owner:
                 continue
-            self._reset_task(task)
+            self._reset_task(task, STATUS_PENDING)
             updated += 1
 
         def mark_not_killed(job):
