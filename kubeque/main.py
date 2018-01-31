@@ -144,7 +144,7 @@ def _make_cluster_name(job_name, image, cpu_request, mem_limit, unique_name):
     import os
     if unique_name:
         return 'l-' + _random_string(20)
-    return "c-" + hashlib.md5("{}-{}-{}-{}-{}".format(image, cpu_request, mem_limit, kubeque.__version__, os.getlogin()).encode("utf8")).hexdigest()[:20]
+    return "c-" + hashlib.md5("{}-{}-{}-{}-{}-{}".format(job_name, image, cpu_request, mem_limit, kubeque.__version__, os.getlogin()).encode("utf8")).hexdigest()[:20]
 
 
 def validate_cmd(jq, io, cluster, config):
