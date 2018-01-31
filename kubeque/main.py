@@ -897,6 +897,11 @@ def kill_cmd(jq, cluster, args):
             for task in tasks:
                 _update_if_owner_missing(cluster, jq, task)
 
+        # if there are any sit sitting at pending, mark them as killed
+        tasks = jq.get_tasks(jobid, status=STATUS_PENDING)
+        for task in tasks:
+            jq.reset_task(task.task_id, status=STATUS_KILLED)
+
 
 def dumpjob_cmd(jq, io, args):
     import attr
