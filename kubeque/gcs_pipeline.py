@@ -75,6 +75,15 @@ class ClusterStatus:
     def is_running(self):
         return self.running_count > 0
 
+import re
+
+def _normalize_label(label):
+    label = label.lower()
+    label = re.sub("[^a-z0-9]+", "-", label)
+    if re.match("[^a-z].*", label) is not None:
+        label = "x-"+label
+    return label
+
 class Cluster:
     def __init__(self, project, zones, credentials=None):
         self.compute = build('compute', 'v1', credentials=credentials)
@@ -183,6 +192,8 @@ class Cluster:
                              bootDiskSizeGb,
                              preemptible
                              ):
+        # labels have a few restrictions
+        normalized_jobid = _normalize_label(jobid)
 
         pipeline_def = {
 
@@ -282,7 +293,7 @@ class Cluster:
                 },
                 'labels': {
                     'kubeque-cluster': cluster_name,
-                    'sparkles-job': jobid
+                    'sparkles-job': normalized_jobid
                 },
                 'inputs' : {
                 'kubequeconsume': kubequeconsume_url
