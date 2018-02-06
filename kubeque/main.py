@@ -227,6 +227,7 @@ def submit(jq, io, cluster, job_id, spec, dry_run, config, skip_kube_submit, met
 
         logging_url = config["default_url_prefix"] + "/node-logs"
         pipeline_spec = cluster.create_pipeline_spec(
+            job_id,
             image,
             kubeque_command,
             stage_dir,
@@ -804,6 +805,8 @@ def watch(jq, jobid, cluster, refresh_delay=5, min_check_time=10, loglive=False)
     last_cluster_update = None
     last_cluster_status = None
     last_good_state_time = time.time()
+
+    last_owner_checks = None
     try:
         while True:
             with _exception_guard(lambda: "summarizing status of job {} threw exception".format(jobid)):
@@ -813,6 +816,10 @@ def watch(jq, jobid, cluster, refresh_delay=5, min_check_time=10, loglive=False)
                 if complete:
                     break
                 prev_status = status
+
+            if last_owner_checks is None or time.time() - last_owner_checks > 60:
+                _resub_preempted(cluster, jq, jobid)
+                last_owner_checks = time.time()
 
             if last_cluster_update is None or time.time() - last_cluster_update > 10:
                 with _exception_guard(lambda: "summarizing cluster threw exception".format(jobid)):
@@ -839,10 +846,15 @@ def watch(jq, jobid, cluster, refresh_delay=5, min_check_time=10, loglive=False)
 def addnodes_cmd(jq, cluster, args):
     job_id = _resolve_jobid(jq, args.job_id)
     job = jq.get_job(job_id)
-
+    log.info("Adding %d nodes to cluster %s", args.count, job.cluster)
     spec = json.loads(job.kube_job_spec)
     for i in range(args.count):
         cluster.add_node(spec)
+
+def _resub_preempted(cluster, jq, jobid):
+    tasks = jq.get_tasks(jobid, STATUS_CLAIMED)
+    for task in tasks:
+        _update_if_owner_missing(cluster, jq, task)
 
 def _clean(cluster, jq, jobid, force=False):
     if not force:

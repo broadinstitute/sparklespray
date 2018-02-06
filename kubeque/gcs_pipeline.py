@@ -85,6 +85,7 @@ class Cluster:
     def _get_cluster_instances(self, cluster_name):
         instances = []
         for zone in self.zones:
+            #print(dict(project=self.project, zone=zone, filter="labels.kubeque-cluster=" + cluster_name))
             i = self.compute.instances().list(project=self.project, zone=zone, filter="labels.kubeque-cluster="+cluster_name).execute().get('items', [])
             instances.extend(i)
         return instances
@@ -149,7 +150,7 @@ class Cluster:
         assert "pipelines" in result
 
     def test_image(self, docker_image, sample_url, logging_url):
-        pipeline_def = self.create_pipeline_spec(docker_image, "bash -c 'echo hello'", "/mnt/kubequeconsume", logging_url, sample_url, 1, 1, get_random_string(20), 10, False)
+        pipeline_def = self.create_pipeline_spec("test-image", docker_image, "bash -c 'echo hello'", "/mnt/kubequeconsume", logging_url, sample_url, 1, 1, get_random_string(20), 10, False)
         operation = self.add_node(pipeline_def)
         operation_name = operation['name']
         while not operation['done']:
@@ -170,6 +171,7 @@ class Cluster:
         return self._get_instance_status(project_id, zone, instance_name) == 'RUNNING'
 
     def create_pipeline_spec(self,
+                             jobid,
                              docker_image,
                              docker_command,
                              data_mount_point,
@@ -279,7 +281,8 @@ class Cluster:
                     'gcsPath': logging_url
                 },
                 'labels': {
-                    'kubeque-cluster': cluster_name
+                    'kubeque-cluster': cluster_name,
+                    'sparkles-job': jobid
                 },
                 'inputs' : {
                 'kubequeconsume': kubequeconsume_url
