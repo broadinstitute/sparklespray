@@ -555,6 +555,8 @@ def retry_cmd(jq, cluster, io, args):
 
 def list_params_cmd(jq, io, args):
     jobid = _resolve_jobid(jq, args.jobid)
+    retcode = args.exitcode
+    include_id = args.id
 
     if args.incomplete:
         tasks = []
@@ -563,6 +565,14 @@ def list_params_cmd(jq, io, args):
     else:
         tasks = jq.get_tasks(jobid)
 
+    if retcode is not None:
+        def retcode_matches(exit_code):
+            return exit_code is not None and int(exit_code) == retcode
+
+        before_count = len(tasks)
+        tasks = [task for task in tasks if retcode_matches(task.exit_code)]
+        print("Filtered {} tasks to {} tasks with exit code {}".format(before_count, len(tasks), retcode))
+
     if len(tasks) == 0:
         print("No tasks found")
     else:
@@ -570,7 +580,10 @@ def list_params_cmd(jq, io, args):
         parameters = []
         for task in tasks:
             task_spec = json.loads(io.get_as_str(task.args))
-            parameters.append(task_spec.get('parameters', {}))
+            task_parameters = task_spec.get('parameters', {})
+            if include_id:
+                task_parameters['task_id'] = task.task_id
+            parameters.append(task_parameters)
 
         # find the union of all keys
         keys = set()
@@ -1001,6 +1014,10 @@ def main(argv=None):
     parser.add_argument("filename", help="The filename to write the csv file containing the parameters")
     parser.add_argument("--incomplete", "-i",
                         help="By default, will list all parameters. If this flag is present, only those tasks which are not complete will be written to the csv",
+                        action="store_true")
+    parser.add_argument("--exitcode", "-e", help="Only include those tasks with this return code", type=int)
+    parser.add_argument("--id",
+                        help="Add a column named 'task_id' with the id of each task",
                         action="store_true")
 
     #    parser = subparser.add_parser("retry", help="Resubmit any 'failed' jobs for execution again. (often after increasing memory required)")
