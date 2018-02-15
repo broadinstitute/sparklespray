@@ -385,5 +385,20 @@ todo:
 ## Todo
 Fix warning about jobs queued up to list job ids of other jobs.
 
-Add peek output (somehow)
+Add zones to job entity in datastore so that we know which zones to look for nodes
+in.
+
+When adding nodes, wait until operation reaches provisioning and print
+description if it's not.
+for example:
+  events:
+  - description: 'Warning: Creating VM and disk(s) would exceed "LOCAL_SSD_TOTAL_GB"
+      in region us-east1, will try again'
+    startTime: '2018-02-06T03:17:39.655426353Z'
+
+- A mode for watch which keeps cluster size stable. If pool shrinks add
+  nodes back.
+
+- bring back pipeline code. Make it such that function runs on a fetched
+  tree to make it easier to debug
 

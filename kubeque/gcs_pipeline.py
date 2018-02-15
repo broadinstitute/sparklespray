@@ -145,12 +145,21 @@ class Cluster:
             p(".")
         p("\n")
 
-    def add_node(self, pipeline_def):
-        # Run the pipeline
+    def add_node(self, pipeline_def, preemptible):
+        # make a deep copy
+        import json
+        pipeline_def = json.loads(json.dumps(pipeline_def))
+
+        # mutate the pipeline as needed
+        if preemptible is not None:
+            pipeline_def['ephemeralPipeline']['resources']['preemptible'] = preemptible
         logging_url = pipeline_def['pipelineArgs']['logging']['gcsPath']
+
+        # Run the pipeline
         operation = self.service.pipelines().run(body=pipeline_def).execute()
         log_prefix = operation['name'].replace("operations/", "")
         log.info("Node's log will be written to: %s/%s", logging_url, log_prefix)
+
         return operation
 
     def test_api(self):
@@ -160,7 +169,7 @@ class Cluster:
 
     def test_image(self, docker_image, sample_url, logging_url):
         pipeline_def = self.create_pipeline_spec("test-image", docker_image, "bash -c 'echo hello'", "/mnt/kubequeconsume", logging_url, sample_url, 1, 1, get_random_string(20), 10, False)
-        operation = self.add_node(pipeline_def)
+        operation = self.add_node(pipeline_def, False)
         operation_name = operation['name']
         while not operation['done']:
             operation = self.service.operations().get(name=operation_name).execute()
@@ -309,3 +318,5 @@ class Cluster:
         assert kubequeconsume_url
 
         return pipeline_def
+
+

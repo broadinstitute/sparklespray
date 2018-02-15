@@ -245,7 +245,7 @@ def submit(jq, io, cluster, job_id, spec, dry_run, config, skip_kube_submit, met
             existing_nodes = cluster.get_cluster_status(cluster_name)
             if not existing_nodes.is_running():
                 log.info("Adding initial node for cluster")
-                cluster.add_node(pipeline_spec)
+                cluster.add_node(pipeline_spec, None)
             else:
                 log.info("Cluster already exists, not adding node. Cluster status: %s", existing_nodes.as_string())
             existing_tasks = jq.get_tasks_for_cluster(cluster_name, STATUS_PENDING)
@@ -556,7 +556,7 @@ def retry_cmd(jq, cluster, io, args):
 def list_params_cmd(jq, io, args):
     jobid = _resolve_jobid(jq, args.jobid)
     retcode = args.exitcode
-    include_id = args.id
+    include_extra = args.extra
 
     if args.incomplete:
         tasks = []
@@ -581,8 +581,9 @@ def list_params_cmd(jq, io, args):
         for task in tasks:
             task_spec = json.loads(io.get_as_str(task.args))
             task_parameters = task_spec.get('parameters', {})
-            if include_id:
+            if include_extra:
                 task_parameters['task_id'] = task.task_id
+                task_parameters['exit_code'] = task.exit_code
             parameters.append(task_parameters)
 
         # find the union of all keys
@@ -597,7 +598,7 @@ def list_params_cmd(jq, io, args):
             w = csv.writer(fd)
             w.writerow(columns)
             for p in parameters:
-                row = [p.get(column, "") for column in columns]
+                row = [str(p.get(column, "")) for column in columns]
                 w.writerow(row)
 
 
@@ -663,6 +664,10 @@ def _resolve_jobid(jq, jobid):
     else:
         return jobid
 
+
+def saturate_cmd(jq, io, cluster, args):
+    jobid = _resolve_jobid(jq, args.jobid)
+    watch(jq, jobid, cluster, saturate=True)
 
 def status_cmd(jq, io, cluster, args):
     jobids = _get_jobids_from_pattern(jq, args.jobid_pattern)
@@ -804,8 +809,75 @@ def _exception_guard(deferred_msg):
 
 from kubeque.logclient import LogMonitor
 
-def watch(jq, jobid, cluster, refresh_delay=5, min_check_time=10, loglive=False):
+class NodeRespawn:
+    def __init__(self, cluster_status_fn, tasks_status_fn):
+        self.max_restarts = tasks_status_fn().active_tasks
+        self.cluster_status_fn = cluster_status_fn
+        self.tasks_status_fn = tasks_status_fn
+        self.last_cluster_status = None
+        self.nodes_added = 0
+
+    def reset_added_count(self):
+        self.nodes_added = 0
+
+    def reconcile_node_count(self, add_node_callback):
+        # get latest status
+        cluster_status = self.tasks_status_fn()
+        if cluster_status == self.last_cluster_status:
+            # don't try to reconcile if we see the identical as last time we polled. We might not
+            # be able to see newly spawned nodes yet, so wait for the next poll
+            return
+
+        needed_nodes = cluster_status.active_tasks
+        running_count = self.cluster_status_fn().running_count
+        self.last_cluster_status = cluster_status
+
+        # see if we're short and add nodes of the appropriate type
+        if needed_nodes > running_count:
+            nodes_to_add = needed_nodes - running_count
+            capped_nodes_to_add = min(nodes_to_add, self.max_restarts - self.nodes_added)
+            if capped_nodes_to_add == 0:
+                raise Exception("Wanted to add {} nodes, but we have reached our limit on how many nodes can be restarted ({})".format(nodes_to_add, self.max_restarts))
+            else:
+                add_node_callback(capped_nodes_to_add)
+                self.nodes_added += capped_nodes_to_add
+                log.info("Added {} nodes (total: {}/{})".format(capped_nodes_to_add, self.nodes_added, self.max_restarts))
+
+class TasksStatus:
+    def __init__(self, tasks):
+        self.tasks = tasks
+
+    @property
+    def active_tasks(self):
+        # compute how many nodes are needed to run everything in parallel
+        last_needed_nodes = 0
+        for task in self.tasks:
+            if task.status in [STATUS_CLAIMED, STATUS_PENDING]:
+                last_needed_nodes += 1
+        return last_needed_nodes
+
+    @property
+    def summary(self):
+        return _summarize_task_statuses(self.tasks)
+
+class TasksStatusWrapper:
+    def __init__(self, jq, jobid):
+        self.jq = jq
+        self.jobid = jobid
+        self.last_fetch_timestamp = None
+        self.last_status = None
+
+    def get_status(self, max_age=10):
+        if self.last_fetch_timestamp is None or time.time() - self.last_fetch_timestamp > max_age:
+            self.last_status = TasksStatus(self.jq.get_tasks(self.jobid))
+            self.last_fetch_timestamp = time.time()
+
+        return self.last_status
+
+def watch(jq, jobid, cluster, refresh_delay=5, min_check_time=10, loglive=False, saturate=False):
+    tsw = TasksStatusWrapper(jq, jobid)
     job = jq.get_job(jobid)
+
     log_monitor = None
     if loglive:
         if len(job.tasks) != 1:
@@ -820,10 +892,17 @@ def watch(jq, jobid, cluster, refresh_delay=5, min_check_time=10, loglive=False)
     last_good_state_time = time.time()
 
     last_owner_checks = None
+
+    respawn = NodeRespawn(lambda: cluster.get_cluster_status(cluster_name), tsw.get_status)
+    if saturate:
+        log.info("Creating nodes for any jobs which will not current fit onto an existing node")
+        respawn.reconcile_node_count(lambda count: _addnodes(jobid, jq, cluster, count, True))
+        respawn.reset_added_count()
+
     try:
         while True:
             with _exception_guard(lambda: "summarizing status of job {} threw exception".format(jobid)):
-                status, complete = _summarize_task_statuses(jq.get_tasks(jobid))
+                status, complete = tsw.get_status().summary
                 if status != prev_status:
                     log.info("Tasks: %s", status)
                 if complete:
@@ -842,14 +921,18 @@ def watch(jq, jobid, cluster, refresh_delay=5, min_check_time=10, loglive=False)
                     if cluster_status.is_running():
                         last_good_state_time = time.time()
                     else:
-                        if time.time() - last_good_state_time > min_check_time:
+                        if time.time() - last_good_state_time > min_check_time and not saturate:
                             log.error("Tasks haven't completed, but cluster is now offline. Aborting!")
                             raise Exception("Cluster prematurely stopped")
                     last_cluster_status = cluster_status
                     last_cluster_update = time.time()
 
+                    if saturate:
+                        respawn.reconcile_node_count(lambda count: _addnodes(jobid, jq, cluster, count, False))
+
             if log_monitor is not None:
-                log_monitor.poll()
+                with _exception_guard(lambda: "polling log monitor threw exception"):
+                    log_monitor.poll()
 
             time.sleep(refresh_delay)
     except KeyboardInterrupt:
@@ -858,11 +941,14 @@ def watch(jq, jobid, cluster, refresh_delay=5, min_check_time=10, loglive=False)
 
 def addnodes_cmd(jq, cluster, args):
     job_id = _resolve_jobid(jq, args.job_id)
+    return _addnodes(job_id, jq, cluster, args.count, None)
+
+def _addnodes(job_id, jq, cluster, count, preemptible):
     job = jq.get_job(job_id)
-    log.info("Adding %d nodes to cluster %s", args.count, job.cluster)
+    log.info("Adding %d nodes to cluster %s", count, job.cluster)
     spec = json.loads(job.kube_job_spec)
-    for i in range(args.count):
-        cluster.add_node(spec)
+    for i in range(count):
+        cluster.add_node(spec, preemptible)
 
 def _resub_preempted(cluster, jq, jobid):
     tasks = jq.get_tasks(jobid, STATUS_CLAIMED)
@@ -1016,8 +1102,8 @@ def main(argv=None):
                         help="By default, will list all parameters. If this flag is present, only those tasks which are not complete will be written to the csv",
                         action="store_true")
     parser.add_argument("--exitcode", "-e", help="Only include those tasks with this return code", type=int)
-    parser.add_argument("--id",
-                        help="Add a column named 'task_id' with the id of each task",
+    parser.add_argument("--extra",
+                        help="Add columns 'task_id' and 'exit_code' for each task",
                         action="store_true")
 
     #    parser = subparser.add_parser("retry", help="Resubmit any 'failed' jobs for execution again. (often after increasing memory required)")
@@ -1039,6 +1125,10 @@ def main(argv=None):
                         help="If set, will periodically poll and print the status until all tasks terminate")
     parser.add_argument("--loglive", action="store_true", help="If set, will read stdout from tasks from StackDriver logging")
     parser.add_argument("jobid_pattern", nargs="?")
+
+    parser = subparser.add_parser("saturate", help="Monitor the job, automatically adding nodes equal to the number of tasks, and re-add nodes when one is preempted")
+    parser.set_defaults(func=saturate_cmd)
+    parser.add_argument("jobid")
 
     parser = subparser.add_parser("clean", help="Remove jobs which are not currently running from the database of jobs")
     parser.set_defaults(func=clean_cmd)
