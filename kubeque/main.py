@@ -1132,7 +1132,7 @@ def main(argv=None):
     parser = subparser.add_parser("saturate", help="Monitor the job, automatically adding nodes equal to the number of tasks, and re-add nodes when one is preempted")
     parser.set_defaults(func=saturate_cmd)
     parser.add_argument("jobid")
-    parser.add_argument("--nodes", "-n", help="By default, saturate will try to create nodes equal to the number of tasks. This will allow you to override the number of nodes we will want to create")
+    parser.add_argument("--nodes", "-n", type=int, help="By default, saturate will try to create nodes equal to the number of tasks. This will allow you to override the number of nodes we will want to create")
 
     parser = subparser.add_parser("clean", help="Remove jobs which are not currently running from the database of jobs")
     parser.set_defaults(func=clean_cmd)
