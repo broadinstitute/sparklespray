@@ -667,7 +667,7 @@ def _resolve_jobid(jq, jobid):
 
 def saturate_cmd(jq, io, cluster, args):
     jobid = _resolve_jobid(jq, args.jobid)
-    watch(jq, jobid, cluster, saturate=True)
+    watch(jq, jobid, cluster, saturate=True, saturate_nodes=args.nodes)
 
 def status_cmd(jq, io, cluster, args):
     jobids = _get_jobids_from_pattern(jq, args.jobid_pattern)
@@ -810,12 +810,13 @@ def _exception_guard(deferred_msg):
 from kubeque.logclient import LogMonitor
 
 class NodeRespawn:
-    def __init__(self, cluster_status_fn, tasks_status_fn):
+    def __init__(self, cluster_status_fn, tasks_status_fn, max_nodes):
         self.max_restarts = tasks_status_fn().active_tasks
         self.cluster_status_fn = cluster_status_fn
         self.tasks_status_fn = tasks_status_fn
         self.last_cluster_status = None
         self.nodes_added = 0
+        self.max_nodes = max_nodes
 
     def reset_added_count(self):
         self.nodes_added = 0
@@ -829,6 +830,8 @@ class NodeRespawn:
             return
 
         needed_nodes = cluster_status.active_tasks
+        if self.max_nodes is not None:
+            needed_nodes = min(self.max_nodes, needed_nodes)
         running_count = self.cluster_status_fn().running_count
         self.last_cluster_status = cluster_status
 
@@ -874,7 +877,7 @@ class TasksStatusWrapper:
 
         return self.last_status
 
-def watch(jq, jobid, cluster, refresh_delay=5, min_check_time=10, loglive=False, saturate=False):
+def watch(jq, jobid, cluster, refresh_delay=5, min_check_time=10, loglive=False, saturate=False, saturate_nodes=None):
     tsw = TasksStatusWrapper(jq, jobid)
     job = jq.get_job(jobid)
 
@@ -893,7 +896,7 @@ def watch(jq, jobid, cluster, refresh_delay=5, min_check_time=10, loglive=False,
 
     last_owner_checks = None
 
-    respawn = NodeRespawn(lambda: cluster.get_cluster_status(cluster_name), tsw.get_status)
+    respawn = NodeRespawn(lambda: cluster.get_cluster_status(cluster_name), tsw.get_status, saturate_nodes)
     if saturate:
         log.info("Creating nodes for any jobs which will not current fit onto an existing node")
         respawn.reconcile_node_count(lambda count: _addnodes(jobid, jq, cluster, count, True))
@@ -1129,6 +1132,7 @@ def main(argv=None):
     parser = subparser.add_parser("saturate", help="Monitor the job, automatically adding nodes equal to the number of tasks, and re-add nodes when one is preempted")
     parser.set_defaults(func=saturate_cmd)
     parser.add_argument("jobid")
+    parser.add_argument("--nodes", "-n", help="By default, saturate will try to create nodes equal to the number of tasks. This will allow you to override the number of nodes we will want to create")
 
     parser = subparser.add_parser("clean", help="Remove jobs which are not currently running from the database of jobs")
     parser.set_defaults(func=clean_cmd)
