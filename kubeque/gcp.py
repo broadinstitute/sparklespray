@@ -260,17 +260,21 @@ class JobStorage:
         entity_job = self.client.get(job_key)
 
         task_ids = entity_job.get("tasks",[])
-        task_keys = [self.client.key("Task", taskid) for taskid in set(task_ids)] + [job_key]
-        BATCH_SIZE = 300
-        for chunk_start in range(0, len(task_keys), BATCH_SIZE):
-            key_batch = task_keys[chunk_start:chunk_start+BATCH_SIZE]
-            self.client.delete_multi(key_batch)
-
+        # delete tasks
+        keys = [self.client.key("Task", taskid) for taskid in set(task_ids)]
         # clean up associated node requests
         node_reqs = self.get_node_reqs(job_id)
+        # log.info("Deleting records about %d node requests", len(node_reqs))
         node_req_keys = [self.client.key("NodeReq", x.operation_id) for x in node_reqs ]
-        for chunk_start in range(0, len(node_req_keys), BATCH_SIZE):
-            key_batch = node_req_keys[chunk_start:chunk_start+BATCH_SIZE]
+        keys += node_req_keys
+        # delete job
+        keys += [job_key]
+        # log.info("Deleting %s", repr(keys))
+
+        # perform the delete
+        BATCH_SIZE = 300
+        for chunk_start in range(0, len(keys), BATCH_SIZE):
+            key_batch = keys[chunk_start:chunk_start+BATCH_SIZE]
             self.client.delete_multi(key_batch)
 
         topic_name = self._job_id_to_topic(job_id)
