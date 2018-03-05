@@ -23,6 +23,8 @@ try:
 except:
     from ConfigParser import ConfigParser
 
+from google.gax.errors import RetryError
+
 
 # spec should have three rough components:
 #   common: keys shared by everything
@@ -245,7 +247,7 @@ def submit(jq, io, cluster, job_id, spec, dry_run, config, skip_kube_submit, met
             existing_nodes = cluster.get_cluster_status(cluster_name)
             if not existing_nodes.is_running():
                 log.info("Adding initial node for cluster")
-                cluster.add_node(pipeline_spec, None)
+                jq.add_node(job_id, cluster, preemptible=None)
             else:
                 log.info("Cluster already exists, not adding node. Cluster status: %s", existing_nodes.as_string())
             existing_tasks = jq.get_tasks_for_cluster(cluster_name, STATUS_PENDING)
@@ -806,17 +808,24 @@ def _exception_guard(deferred_msg):
         msg = deferred_msg()
         log.exception(msg)
         log.warning("Ignoring exception and continuing...")
+    except RetryError as ex:
+        msg = deferred_msg()
+        log.exception(msg)
+        log.warning("Ignoring exception and continuing...")
+
+
 
 from kubeque.logclient import LogMonitor
 
 class NodeRespawn:
-    def __init__(self, cluster_status_fn, tasks_status_fn, max_nodes):
+    def __init__(self, cluster_status_fn, tasks_status_fn, get_pending_fn, max_nodes):
         self.max_restarts = tasks_status_fn().active_tasks
         self.cluster_status_fn = cluster_status_fn
         self.tasks_status_fn = tasks_status_fn
         self.last_cluster_status = None
         self.nodes_added = 0
         self.max_nodes = max_nodes
+        self.get_pending_fn = get_pending_fn
 
     def reset_added_count(self):
         self.nodes_added = 0
@@ -833,6 +842,9 @@ class NodeRespawn:
         if self.max_nodes is not None:
             needed_nodes = min(self.max_nodes, needed_nodes)
         running_count = self.cluster_status_fn().running_count
+        # for now, count pending requests as "running" because they eventually will
+        print("calling get_pending_fn")
+        running_count += self.get_pending_fn()
         self.last_cluster_status = cluster_status
 
         # see if we're short and add nodes of the appropriate type
@@ -896,7 +908,11 @@ def watch(jq, jobid, cluster, refresh_delay=5, min_check_time=10, loglive=False,
 
     last_owner_checks = None
 
-    respawn = NodeRespawn(lambda: cluster.get_cluster_status(cluster_name), tsw.get_status, saturate_nodes)
+    def get_pending_count():
+        jq.update_node_reqs(jobid, cluster)
+        return jq.get_pending_node_req_count(jobid)
+
+    respawn = NodeRespawn(lambda: cluster.get_cluster_status(cluster_name), tsw.get_status, get_pending_count, saturate_nodes)
     if saturate:
         log.info("Creating nodes for any jobs which will not current fit onto an existing node")
         respawn.reconcile_node_count(lambda count: _addnodes(jobid, jq, cluster, count, True))
@@ -913,8 +929,9 @@ def watch(jq, jobid, cluster, refresh_delay=5, min_check_time=10, loglive=False,
                 prev_status = status
 
             if last_owner_checks is None or time.time() - last_owner_checks > 60:
-                _resub_preempted(cluster, jq, jobid)
-                last_owner_checks = time.time()
+                with _exception_guard(lambda: "polling cluster status threw exception"):
+                    _resub_preempted(cluster, jq, jobid)
+                    last_owner_checks = time.time()
 
             if last_cluster_update is None or time.time() - last_cluster_update > 10:
                 with _exception_guard(lambda: "summarizing cluster threw exception".format(jobid)):
@@ -949,9 +966,8 @@ def addnodes_cmd(jq, cluster, args):
 def _addnodes(job_id, jq, cluster, count, preemptible):
     job = jq.get_job(job_id)
     log.info("Adding %d nodes to cluster %s", count, job.cluster)
-    spec = json.loads(job.kube_job_spec)
     for i in range(count):
-        cluster.add_node(spec, preemptible)
+        jq.add_node(job_id, cluster, preemptible, job=job)
 
 def _resub_preempted(cluster, jq, jobid):
     tasks = jq.get_tasks(jobid, STATUS_CLAIMED)

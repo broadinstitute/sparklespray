@@ -6,6 +6,7 @@ import random
 import string
 import sys
 from googleapiclient.errors import HttpError
+from kubeque.gcp import NODE_REQ_COMPLETE, NODE_REQ_RUNNING, NODE_REQ_SUBMITTED
 
 log = logging.getLogger(__name__)
 
@@ -144,6 +145,47 @@ class Cluster:
             time.sleep(5)
             p(".")
         p("\n")
+
+    def get_node_req_status(self, operation_id):
+        request = self.service.operations().get(name=operation_id)
+        response = request.execute()
+# sample response
+# done: false
+# metadata:
+#   '@type': type.googleapis.com/google.genomics.v1.OperationMetadata
+#   clientId: ''
+#   createTime: '2018-03-05T04:07:14Z'
+#   events:
+#   - description: start
+#     startTime: '2018-03-05T04:08:02.203108868Z'
+#   - description: pulling-image
+#     startTime: '2018-03-05T04:08:02.203198515Z'
+#   labels:
+#     kubeque-cluster: c-757f3dfbda551dae1580
+#     sparkles-job: test-dir-sub
+#   projectId: broad-achilles
+#   request:
+#     '@type': type.googleapis.com/google.genomics.v1alpha2.RunPipelineRequest
+#     ...
+#   runtimeMetadata:
+#     '@type': type.googleapis.com/google.genomics.v1alpha2.RuntimeMetadata
+#     computeEngine:
+#       diskNames: []
+#       instanceName: ggp-15892891052525656519
+#       machineType: us-east1-b/n1-standard-2
+#       zone: us-east1-b
+#   startTime: '2018-03-05T04:07:17Z'
+# name: operations/ENOc3qKfLBjHs5q-1Ia5x9wBILbm7f71GCoPcHJvZHVjdGlvblF1ZXVl
+        #print("operation", operation_id)
+        #print(response)
+        if "computeEngine" in response["metadata"]["runtimeMetadata"]:
+            if response['done']:
+                return NODE_REQ_COMPLETE
+            else:
+                return NODE_REQ_RUNNING
+        else:
+            log.info("Operation %s is not yet started. Events: %s", operation_id, response["metadata"]["events"])
+            return NODE_REQ_SUBMITTED
 
     def add_node(self, pipeline_def, preemptible):
         # make a deep copy

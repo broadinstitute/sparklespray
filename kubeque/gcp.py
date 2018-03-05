@@ -88,6 +88,20 @@ class Job(object):
     status = attr.ib()
     submit_time = attr.ib()
 
+NODE_REQ_SUBMITTED = "submitted"
+NODE_REQ_RUNNING = "running"
+NODE_REQ_COMPLETE = "complete"
+
+NODE_REQ_CLASS_PREEMPTIVE = "preemptable"
+NODE_REQ_CLASS_NORMAL = "normal"
+
+@attr.s
+class NodeReq(object):
+    operation_id = attr.ib()
+    job_id = attr.ib()
+    status = attr.ib()
+    node_class = attr.ib()
+
 class BatchAdapter:
     def __init__(self, client):
         self.client = client
@@ -106,6 +120,21 @@ class BatchAdapter:
     
     def commit(self):
         self.batch.commit()
+
+def node_req_to_entity(client, o):
+    assert o.operation_id is not None
+    entity_key = client.key("NodeReq", o.operation_id)
+    entity = datastore.Entity(key=entity_key)
+    entity['job_id'] = o.job_id
+    entity['status'] = o.status   
+    entity['node_class'] = o.node_class
+    return entity
+
+def entity_to_node_req(entity):
+    return NodeReq(operation_id=entity.key.name,
+        job_id = entity['job_id'], 
+        status=entity['status'],
+        node_class = entity['node_class'])
 
 def job_to_entity(client, o):
     entity_key = client.key("Job", o.job_id)
@@ -237,6 +266,13 @@ class JobStorage:
             key_batch = task_keys[chunk_start:chunk_start+BATCH_SIZE]
             self.client.delete_multi(key_batch)
 
+        # clean up associated node requests
+        node_reqs = self.get_node_reqs(job_id)
+        node_req_keys = [self.client.key("NodeReq", x.operation_id) for x in node_reqs ]
+        for chunk_start in range(0, len(node_req_keys), BATCH_SIZE):
+            key_batch = node_req_keys[chunk_start:chunk_start+BATCH_SIZE]
+            self.client.delete_multi(key_batch)
+
         topic_name = self._job_id_to_topic(job_id)
         if self.pubsub:
             topic = self.pubsub.topic(topic_name)
@@ -269,6 +305,43 @@ class JobStorage:
         query.order = ["-submit_time"]
         job_entity = list(query.fetch(limit=1))[0]
         return entity_to_job(job_entity)
+
+    def add_node(self, job_id, cluster, preemptible, job):
+        if job is None:
+            job = self.get_job(job_id)
+        pipeline_def = json.loads(job.kube_job_spec)
+        operation = cluster.add_node(pipeline_def, preemptible)
+        req = NodeReq(operation_id = operation['name'],
+            job_id = job_id,
+            status = NODE_REQ_SUBMITTED,
+            node_class = NODE_REQ_CLASS_PREEMPTIVE if preemptible else NODE_REQ_CLASS_NORMAL
+        )
+        self.client.put(node_req_to_entity(self.client, req))
+        return operation
+
+    def get_node_reqs(self, job_id, status=None):
+        query = self.client.query(kind="NodeReq")
+        query.add_filter("job_id", "=", job_id)
+        if status is not None:
+            query.add_filter("status", "=", status)
+        results = []
+        for entity in query.fetch():
+            node_req = entity_to_node_req(entity)
+            results.append(node_req)
+        return results
+
+    def get_pending_node_req_count(self, job_id):
+        return len(self.get_node_reqs(job_id, status=NODE_REQ_SUBMITTED))
+
+    def update_node_reqs(self, job_id, cluster):
+        # only need to worry about things that are submitted and have not yet been fulfilled
+        node_reqs = self.get_node_reqs(job_id, status=NODE_REQ_SUBMITTED)
+        for node_req in node_reqs:
+            new_status = cluster.get_node_req_status(node_req.operation_id)
+            if new_status != node_req.status:
+                log.info("Changing status of node request %s from %s to %s", node_req.operation_id, node_req.status, new_status)
+                node_req.status = new_status
+                self.client.put(node_req_to_entity(self.client, node_req))
 
     def get_tasks(self, job_id = None, status = None, max_fetch=None):
         query = self.client.query(kind="Task")
@@ -323,6 +396,15 @@ class JobStorage:
 class JobQueue:
     def __init__(self, storage):
         self.storage = storage
+
+    def add_node(self, job_id, cluster, preemptible, job=None):
+        return self.storage.add_node(job_id, cluster, preemptible, job)
+
+    def update_node_reqs(self, job_id, cluster):
+        return self.storage.update_node_reqs(job_id, cluster)
+
+    def get_pending_node_req_count(self, job_id):
+        return self.storage.get_pending_node_req_count(job_id)
 
     def get_tasks_for_cluster(self, cluster_name, status, max_fetch=None):
         return self.storage.get_tasks_for_cluster(cluster_name, status, max_fetch)
