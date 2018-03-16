@@ -442,7 +442,7 @@ def submit_cmd(jq, io, cluster, args, config):
 
     existing_job = jq.get_job(job_id, must = False)
     if existing_job is not None:
-        if args.clean:
+        if args.clean or args.rerun:
             log.info("Cleaning existing job with id \"{}\"".format(job_id))
             success = _clean(cluster, jq, job_id)
             if not success:
@@ -470,16 +470,24 @@ def submit_cmd(jq, io, cluster, args, config):
 
         resource_spec = _parse_resources(args.resources)
 
+        dest_url = _join(default_url_prefix, job_id)
+        files_to_push = list(args.push)
+        if args.rerun:
+            assert args.name is not None, "Cannot re-run a job if the name isn't specified"
+            assert len(parameters) == 1, "Cannot re-run a job with more than one task"
+            # Add the existing job directory to the list of files to download to the worker
+            files_to_push.append(_join(dest_url, "1")+":.")
+
         hash_db = CachingHashFunction(config.get("cache_db_path", ".kubeque-cached-file-hashes"))
         upload_map, spec = make_spec_from_command(args.command,
                                                   image,
-                                                  dest_url=_join(default_url_prefix, job_id),
+                                                  dest_url=dest_url,
                                                   cas_url=cas_url_prefix,
                                                   parameters=parameters,
                                                   resource_spec=resource_spec,
                                                   hash_function=hash_db.hash_filename,
                                                   src_wildcards=args.results_wildcards,
-                                                  extra_files=expand_files_to_upload(io, args.push),
+                                                  extra_files=expand_files_to_upload(io, files_to_push),
                                                   working_dir=args.working_dir)
 
         kubequeconsume_exe_path = config['kubequeconsume_exe_path']
@@ -800,7 +808,7 @@ def _is_complete(status_counts):
 
 
 @contextlib.contextmanager
-def _exception_guard(deferred_msg):
+def _exception_guard(deferred_msg, reset=None):
     try:
         yield
     except OSError as ex:
@@ -808,10 +816,14 @@ def _exception_guard(deferred_msg):
         msg = deferred_msg()
         log.exception(msg)
         log.warning("Ignoring exception and continuing...")
+        if self.reset is not None:
+            self.reset()
     except RetryError as ex:
         msg = deferred_msg()
         log.exception(msg)
         log.warning("Ignoring exception and continuing...")
+        if self.reset is not None:
+            self.reset()
 
 
 
@@ -843,7 +855,7 @@ class NodeRespawn:
             needed_nodes = min(self.max_nodes, needed_nodes)
         running_count = self.cluster_status_fn().running_count
         # for now, count pending requests as "running" because they eventually will
-        print("calling get_pending_fn")
+        #print("calling get_pending_fn")
         running_count += self.get_pending_fn()
         self.last_cluster_status = cluster_status
 
@@ -951,7 +963,7 @@ def watch(jq, jobid, cluster, refresh_delay=5, min_check_time=10, loglive=False,
                         respawn.reconcile_node_count(lambda count: _addnodes(jobid, jq, cluster, count, False))
 
             if log_monitor is not None:
-                with _exception_guard(lambda: "polling log monitor threw exception"):
+                with _exception_guard(lambda: "polling log monitor threw exception", reset=log_monitor.reset):
                     log_monitor.poll()
 
             time.sleep(refresh_delay)
@@ -1098,6 +1110,7 @@ def main(argv=None):
                         dest="working_dir")
     parser.add_argument("--local", help="Run the tasks inside of docker on the local machine", action="store_true")
     parser.add_argument("--clean", help="If the job id already exists, 'clean' it first to avoid an error about the job already existing", action="store_true")
+    parser.add_argument("--rerun", help="If set, will download all of the files from previous execution of this job to worker before running", action="store_true")
     parser.add_argument("command", nargs=argparse.REMAINDER)
 
     parser = subparser.add_parser("addnodes", help="Add nodes to be used for executing a specific job")

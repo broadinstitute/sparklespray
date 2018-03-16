@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -293,6 +294,36 @@ func startWatchingLog(loggingClient *logging.Client, taskID string, stdoutPath s
 	return shutdownChan, nil
 }
 
+func getModificationTimes(filenames stringset) map[string]time.Time {
+	mtimes := make(map[string]time.Time)
+	for filename, _ := range filenames {
+		fi, err := os.Stat(filename)
+		if err != nil {
+			log.Printf("Error trying to stat %s to record last modification time, skipping...", err)
+			continue
+		}
+		mtimes[filename] = fi.ModTime()
+	}
+
+	return mtimes
+}
+
+func getFilesWithMatchingMTimes(a map[string]time.Time, b map[string]time.Time) stringset {
+	matching := make(stringset)
+	for key, aTime := range a {
+		bTime, ok := b[key]
+		if !ok {
+			log.Printf("While checking if %s was updated, could not find the file. Skipping...")
+			continue
+		}
+
+		if aTime == bTime {
+			matching[key] = true
+		}
+	}
+	return matching
+}
+
 func executeTaskInDir(ioc IOClient, workdir string, taskId string, spec *TaskSpec, cachedir string, loggingClient *logging.Client) (string, error) {
 	stdoutPath := path.Join(workdir, "stdout.txt")
 	execLifecycleScript("PreDownloadScript", workdir, spec.PreDownloadScript)
@@ -301,6 +332,8 @@ func executeTaskInDir(ioc IOClient, workdir string, taskId string, spec *TaskSpe
 	if err != nil {
 		return "", err
 	}
+
+	downloadedInitialMTimes := getModificationTimes(downloaded)
 
 	execLifecycleScript("PostDownloadScript", workdir, spec.PostDownloadScript)
 
@@ -334,7 +367,11 @@ func executeTaskInDir(ioc IOClient, workdir string, taskId string, spec *TaskSpe
 
 	execLifecycleScript("PostExecScript", workdir, spec.PostExecScript)
 
-	filesToUpload, err := resolveUploads(workdir, spec.Uploads, downloaded)
+	downloadedFinalMTimes := getModificationTimes(downloaded)
+
+	downloadsToExclude := getFilesWithMatchingMTimes(downloadedInitialMTimes, downloadedFinalMTimes)
+
+	filesToUpload, err := resolveUploads(workdir, spec.Uploads, downloadsToExclude)
 	if err != nil {
 		return retcode, err
 	}

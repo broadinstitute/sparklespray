@@ -3,7 +3,7 @@
 
 [[projects]]
   name = "cloud.google.com/go"
-  packages = ["compute/metadata","datastore","iam","internal","internal/atomiccache","internal/fields","internal/optional","internal/version","pubsub","pubsub/apiv1","storage"]
+  packages = ["compute/metadata","datastore","iam","internal","internal/atomiccache","internal/fields","internal/optional","internal/version","logging","logging/apiv2","logging/internal","pubsub","pubsub/apiv1","storage"]
   revision = "5a9e19d4e1e41a734154e44a2132b358afb49a03"
   version = "v0.13.0"
 
@@ -88,7 +88,7 @@
 [[projects]]
   branch = "master"
   name = "google.golang.org/genproto"
-  packages = ["googleapis/api/annotations","googleapis/datastore/v1","googleapis/iam/v1","googleapis/pubsub/v1","googleapis/rpc/status","googleapis/type/latlng","protobuf/field_mask"]
+  packages = ["googleapis/api/annotations","googleapis/api/distribution","googleapis/api/label","googleapis/api/metric","googleapis/api/monitoredres","googleapis/datastore/v1","googleapis/iam/v1","googleapis/logging/type","googleapis/logging/v2","googleapis/pubsub/v1","googleapis/rpc/status","googleapis/type/latlng","protobuf/field_mask"]
   revision = "1e559d0a00eef8a9a43151db4665280bd8dd5886"
 
 [[projects]]
@@ -100,6 +100,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "377d12b1c7719b24a012061c42c6beb73a477ab4aa5fbb7825848083d947f73b"
+  inputs-digest = "621539521bca086d44c3303eccff5e6ef77279d71a232919d805d7dac2f6e3a0"
   solver-name = "gps-cdcl"
   solver-version = 1

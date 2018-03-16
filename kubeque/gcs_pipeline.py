@@ -200,7 +200,7 @@ class Cluster:
         # Run the pipeline
         operation = self.service.pipelines().run(body=pipeline_def).execute()
         log_prefix = operation['name'].replace("operations/", "")
-        log.info("Node's log will be written to: %s/%s", logging_url, log_prefix)
+        log.debug("Node's log will be written to: %s/%s", logging_url, log_prefix)
 
         return operation
 
