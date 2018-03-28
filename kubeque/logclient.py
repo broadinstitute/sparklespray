@@ -2,6 +2,10 @@ import time
 from termcolor import colored, cprint
 from google.cloud import logging
 
+def print_error_lines(lines):
+    for line in lines:
+        print(colored(line, "red"))
+
 def print_entry(entry):
     payload = entry.payload
     if payload[-1] == "\n":

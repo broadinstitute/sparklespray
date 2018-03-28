@@ -505,13 +505,14 @@ def submit_cmd(jq, io, cluster, args, config):
            args.local, args.loglive)
 
     finished = False
+    successful_execution = True
     if args.local:
         # if we ran it within docker, and the docker command completed, then the job is done
         finished = True
     else:
         if not (args.dryrun or args.skip_kube_submit) and args.wait_for_completion:
             log.info("Waiting for job to terminate")
-            watch(jq, job_id, cluster, loglive=args.loglive)
+            successful_execution = watch(io, jq, job_id, cluster, loglive=args.loglive)
             finished = True
 
     if finished:
@@ -522,6 +523,10 @@ def submit_cmd(jq, io, cluster, args, config):
             log.info("Done waiting for job to complete, results written to %s", default_url_prefix + "/" + job_id)
             log.info("You can download results via 'gsutil rsync -r %s DEST_DIR'", default_url_prefix + "/" + job_id)
 
+    if successful_execution:
+        sys.exit(0)
+    else:
+        sys.exit(1)
 
 def _resubmit(jq, jobid, resource_spec={}):
     raise Exception("unimp")
@@ -560,7 +565,7 @@ def retry_cmd(jq, cluster, io, args):
     if args.wait_for_completion:
         log.info("Waiting for job to terminate")
         for job_id in jobids:
-            watch(jq, job_id, cluster)
+            watch(io, jq, job_id, cluster)
 
 
 def list_params_cmd(jq, io, args):
@@ -677,7 +682,7 @@ def _resolve_jobid(jq, jobid):
 
 def saturate_cmd(jq, io, cluster, args):
     jobid = _resolve_jobid(jq, args.jobid)
-    watch(jq, jobid, cluster, saturate=True, saturate_nodes=args.nodes)
+    watch(io, jq, jobid, cluster, saturate=True, saturate_nodes=args.nodes)
 
 def status_cmd(jq, io, cluster, args):
     jobids = _get_jobids_from_pattern(jq, args.jobid_pattern)
@@ -686,7 +691,7 @@ def status_cmd(jq, io, cluster, args):
         assert len(jobids) == 1, "When watching, only one jobid allowed, but the following matched wildcard: {}".format(
             jobids)
         jobid = jobids[0]
-        watch(jq, jobid, cluster, loglive=args.loglive)
+        watch(io, jq, jobid, cluster, loglive=args.loglive)
     else:
         for jobid in jobids:
             if args.detailed or args.failures:
@@ -745,6 +750,16 @@ def fetch_cmd(jq, io, args):
     else:
         dest = args.dest
     fetch_cmd_(jq, io, jobid, dest, flat=args.flat)
+
+def dump_stdout_if_single_task(jq, io, jobid):
+    tasks = jq.get_tasks(jobid)
+    if len(tasks) != 1:
+        return
+    task = list(tasks)[0]
+    spec = json.loads(io.get_as_str(task.args))
+    stdout_lines = io.get_as_str(spec['stdout_url']).split("\n")
+    stdout_lines = stdout_lines[-100:]
+    print_error_lines(stdout_lines)
 
 def fetch_cmd_(jq, io, jobid, dest_root, force=False, flat=False):
     def get(src, dst, **kwargs):
@@ -827,7 +842,7 @@ def _exception_guard(deferred_msg, reset=None):
 
 
 
-from kubeque.logclient import LogMonitor
+from kubeque.logclient import LogMonitor,print_error_lines
 
 class NodeRespawn:
     def __init__(self, cluster_status_fn, tasks_status_fn, get_pending_fn, max_nodes):
@@ -884,6 +899,17 @@ class TasksStatus:
         return last_needed_nodes
 
     @property
+    def failed_tasks(self):
+        failures = 0
+        for task in self.tasks:
+            if task.status in [STATUS_FAILED]:
+                failures += 1
+            elif task.status in [STATUS_COMPLETE]:
+                if str(task.exit_code) != "0":
+                    failures += 1
+        return failures
+
+    @property
     def summary(self):
         return _summarize_task_statuses(self.tasks)
 
@@ -901,7 +927,7 @@ class TasksStatusWrapper:
 
         return self.last_status
 
-def watch(jq, jobid, cluster, refresh_delay=5, min_check_time=10, loglive=False, saturate=False, saturate_nodes=None):
+def watch(io, jq, jobid, cluster, refresh_delay=5, min_check_time=10, loglive=False, saturate=False, saturate_nodes=None):
     tsw = TasksStatusWrapper(jq, jobid)
     job = jq.get_job(jobid)
 
@@ -967,6 +993,13 @@ def watch(jq, jobid, cluster, refresh_delay=5, min_check_time=10, loglive=False,
                     log_monitor.poll()
 
             time.sleep(refresh_delay)
+
+        failures = tsw.get_status().failed_tasks
+        if failures > 0 and len(job.tasks) == 1:
+            log.warning("Job failed, and there was only one task, so dumping the tail of the output from that task")
+            dump_stdout_if_single_task(jq, io, jobid)
+        return failures == 0
+
     except KeyboardInterrupt:
         print("Interrupted -- Exiting, but your job will continue to run unaffected.")
         sys.exit(1)
