@@ -1,6 +1,7 @@
 import time
 from termcolor import colored, cprint
 from google.cloud import logging
+import datetime
 
 def print_error_lines(lines):
     for line in lines:
@@ -23,13 +24,14 @@ def print_entry(entry):
             print(colored(" "*len(prefix), "white"), colored(line, "yellow"))
 
 def _get_log_stream(client, project_id, task_id, next_token_ref, time_between_polls=2):
+    timestamp_str = ( datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=0))) - datetime.timedelta(minutes=10) ).isoformat('T')
     last_batch_size = 0
     start_index = 0
     # this feels very complicated, but seems to work with the API that I've been given. The issue is I've only got the previous page,
     # so when I fetch the next page a second time, keep track of how many records into it to skip.
     # perhaps changing the iterator into an explict fetch by page token might make the logic clearer
     while True:
-        iterator = client.list_entries(filter_="logName=\"projects/{}/logs/{}\"".format(project_id, task_id), page_token=next_token_ref[0], page_size=50)
+        iterator = client.list_entries(filter_="logName=\"projects/{}/logs/{}\" AND Timestamp > \"{}\"".format(project_id, task_id, timestamp_str), page_token=next_token_ref[0], page_size=50)
         for page in iterator.pages:
             entries = list(page)
             if iterator.next_page_token is not None:
