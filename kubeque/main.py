@@ -831,14 +831,14 @@ def _exception_guard(deferred_msg, reset=None):
         msg = deferred_msg()
         log.exception(msg)
         log.warning("Ignoring exception and continuing...")
-        if self.reset is not None:
-            self.reset()
+        if reset is not None:
+            reset()
     except RetryError as ex:
         msg = deferred_msg()
         log.exception(msg)
         log.warning("Ignoring exception and continuing...")
-        if self.reset is not None:
-            self.reset()
+        if reset is not None:
+            reset()
 
 
 
