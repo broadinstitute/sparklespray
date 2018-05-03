@@ -178,7 +178,9 @@ class Cluster:
 # name: operations/ENOc3qKfLBjHs5q-1Ia5x9wBILbm7f71GCoPcHJvZHVjdGlvblF1ZXVl
         #print("operation", operation_id)
         #print(response)
-        if "computeEngine" in response["metadata"]["runtimeMetadata"]:
+
+        runtimeMetadata = response.get("metadata", {}).get("runtimeMetadata", {})
+        if "computeEngine" in runtimeMetadata:
             if response['done']:
                 return NODE_REQ_COMPLETE
             else:
