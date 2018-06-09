@@ -7,6 +7,7 @@ import string
 import sys
 from googleapiclient.errors import HttpError
 from kubeque.gcp import NODE_REQ_COMPLETE, NODE_REQ_RUNNING, NODE_REQ_SUBMITTED
+import re
 
 log = logging.getLogger(__name__)
 
@@ -76,7 +77,6 @@ class ClusterStatus:
     def is_running(self):
         return self.running_count > 0
 
-import re
 
 def _normalize_label(label):
     label = label.lower()
@@ -88,7 +88,7 @@ def _normalize_label(label):
 class Cluster:
     def __init__(self, project, zones, credentials=None):
         self.compute = build('compute', 'v1', credentials=credentials)
-        self.service = build('genomics', 'v1alpha2', credentials=credentials)
+        self.service = build('genomics', 'v2alpha1', credentials=credentials)
         self.project = project
         self.zones = zones
 
@@ -147,7 +147,7 @@ class Cluster:
         p("\n")
 
     def get_node_req_status(self, operation_id):
-        request = self.service.operations().get(name=operation_id)
+        request = self.service.projects.operations().get(name=operation_id)
         response = request.execute()
 # sample response
 # done: false
@@ -196,27 +196,24 @@ class Cluster:
 
         # mutate the pipeline as needed
         if preemptible is not None:
-            pipeline_def['ephemeralPipeline']['resources']['preemptible'] = preemptible
-        logging_url = pipeline_def['pipelineArgs']['logging']['gcsPath']
+            pipeline_def['pipeline']['resources']['virtualMachine']['preemptible'] = preemptible
 
         # Run the pipeline
         operation = self.service.pipelines().run(body=pipeline_def).execute()
-        log_prefix = operation['name'].replace("operations/", "")
-        log.debug("Node's log will be written to: %s/%s", logging_url, log_prefix)
 
         return operation
 
     def test_api(self):
         """Simple api call used to verify the service is enabled"""
-        result = self.service.pipelines().list(projectId=self.project).execute()
-        assert "pipelines" in result
+        result = self.service.projects().operations().list(name="projects/{}/operations".format(self.project)).execute()
+        assert "operations" in result
 
     def test_image(self, docker_image, sample_url, logging_url):
-        pipeline_def = self.create_pipeline_spec("test-image", docker_image, "bash -c 'echo hello'", "/mnt/kubequeconsume", logging_url, sample_url, 1, 1, get_random_string(20), 10, False)
+        pipeline_def = self.create_pipeline_spec("test-image", docker_image, "bash -c 'echo hello'", "/mnt/kubequeconsume", sample_url, 1, 1, get_random_string(20), 10, False)
         operation = self.add_node(pipeline_def, False)
         operation_name = operation['name']
         while not operation['done']:
-            operation = self.service.operations().get(name=operation_name).execute()
+            operation = self.service.projects().operations().get(name=operation_name).execute()
             time.sleep(5)
         if "error" in operation:
             raise Exception("Got error: {}".format(operation['error']))
@@ -232,130 +229,67 @@ class Cluster:
         project_id, zone, instance_name = m.groups()
         return self._get_instance_status(project_id, zone, instance_name) == 'RUNNING'
 
+    def determine_machine_type(self, cpu_request, mem_limit):
+        log.warning("determine_machine_type is a stub, always returns n1-standard-1")
+        return "n1-standard-1"
+
     def create_pipeline_spec(self,
                              jobid,
                              docker_image,
                              docker_command,
                              data_mount_point,
-                             logging_url,
                              kubequeconsume_url,
                              cpu_request,
                              mem_limit,
                              cluster_name,
                              bootDiskSizeGb,
-                             preemptible
-                             ):
+                             preemptible):
         # labels have a few restrictions
         normalized_jobid = _normalize_label(jobid)
 
+        machine_type = self.determine_machine_type(cpu_request, mem_limit)
+
+        log.warning("Using pd-standard for local storage instead of local ssd")
         pipeline_def = {
-
-            'ephemeralPipeline': {
-                'projectId': self.project,
-                'name': "kubeque-worker",
-
-                # Define the resources needed for this pipeline.
+            'pipeline': {
+                'actions' : [
+                    {'imageUri': docker_image,
+                     'commands': docker_command,
+                     'mounts': [
+                         {
+                             'disk': 'ephemeralssd',
+                             'path': data_mount_point,
+                             'readOnly': False
+                         }
+                     ]
+                     }
+                ],
                 'resources': {
-                    'minimum_cpu_cores': cpu_request,
-                    'preemptible': preemptible,
-                    'minimum_ram_gb': mem_limit,
+                    'projectId': self.project,
                     'zones': self.zones,
-                    'bootDiskSizeGb': bootDiskSizeGb,
-                    # Create a data disk that is attached to the VM and destroyed when the
-                    # pipeline terminates.
-                    'disks': [{
-                        'name': 'ephemeralssd',
-                        'type': "LOCAL_SSD",  # PERSISTENT_SSD, PERSISTENT_HDD
-                        # size_gb: if PERSISTENT_* is selected
-                        'autoDelete': True,
-
-                        # Within the Docker container, specify a mount point for the disk.
-                        # The pipeline input argument below will specify that inputs should be
-                        # written to this disk.
-                        'mountPoint': data_mount_point,
-                    }],
-                },
-
-                # Specify the Docker image to use along with the command
-                'docker': {
-                    'imageName': docker_image,
-                    'cmd': docker_command
-                },
-
-                # The Pipelines API currently supports full GCS paths, along with patterns (globs),
-                # but it doesn't directly support a list of files being passed as a single input
-                # parameter ("gs://bucket/foo.bam gs://bucket/bar.bam").
-                #
-                # We can simply generate a series of inputs (input0, input1, etc.) to support this here.
-                #
-                # 'inputParameters': [ {
-                #   'name': 'inputFile0',
-                #   'description': 'Cloud Storage path to an input file',
-                #   'localCopy': {
-                #     'path': 'workspace/',
-                #     'disk': 'datadisk'
-                #   }
-                # }, {
-                #   'name': 'inputFile1',
-                #   'description': 'Cloud Storage path to an input file',
-                #   'localCopy': {
-                #     'path': 'workspace/',
-                #     'disk': 'datadisk'
-                #   }
-                # <etc>
-                # } ],
-
-                # The inputFile<n> specified in the pipelineArgs (see below) will specify the
-                # Cloud Storage path to copy to /mnt/data/workspace/.
-
-                'inputParameters': [{
-                    'name': 'kubequeconsume',
-                    'description': 'Executable for localization',
-                    'localCopy': {
-                        'path': 'kubequeconsume',
-                        'disk': 'ephemeralssd'
+                    'virtualMachine': {
+                        'machineType': machine_type,
+                        'preemptible': preemptible,
+                        'disks': [
+                            {'name': 'ephemeralssd'} # TODO: figure out type to specify for local_ssd
+                        ],
+                        'serviceAccount': {
+                            'email': 'default',
+                            'scopes': [
+                                'https://www.googleapis.com/auth/cloud-platform',
+                            ]
+                        },
+                        'bootDiskSizeGb': bootDiskSizeGb,
+                        'labels' : {
+                            'kubeque-cluster': cluster_name,
+                            'sparkles-job': normalized_jobid
+                        }
                     }
-                }],
-
-                # By specifying an outputParameter, we instruct the pipelines API to
-                # copy /mnt/data/workspace/* to the Cloud Storage location specified in
-                # the pipelineArgs (see below).
-                #    'outputParameters': [ {
-                #      'name': 'outputPath',
-                #      'description': 'Cloud Storage path for where to FastQC output',
-                #      'localCopy': {
-                #        'path': 'workspace/*',
-                #        'disk': 'datadisk'
-                #      }
-                #    } ]
-            },
-
-            'pipelineArgs': {
-                'projectId': self.project,
-
-                # Pass the user-specified Cloud Storage paths as a map of input files
-                # 'inputs': {
-                #   'inputFile0': 'gs://bucket/foo.bam',
-                #   'inputFile1': 'gs://bucket/bar.bam',
-                #   <etc>
-                # }
-
-                # Pass the user-specified Cloud Storage destination for pipeline logging
-                'logging': {
-                    'gcsPath': logging_url
-                },
-                'labels': {
-                    'kubeque-cluster': cluster_name,
-                    'sparkles-job': normalized_jobid
-                },
-                'inputs' : {
-                'kubequeconsume': kubequeconsume_url
-            }, 'serviceAccount': {
-                    'email' : 'default',
-                    'scopes': [
-                        'https://www.googleapis.com/auth/cloud-platform',
-                    ]
                 }
+            },
+            'labels': {
+                'kubeque-cluster': cluster_name,
+                'sparkles-job': normalized_jobid
             }
         }
 
