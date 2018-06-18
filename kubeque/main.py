@@ -15,6 +15,7 @@ import copy
 import contextlib
 import kubeque.gcs_pipeline as pipeline
 import argparse
+import datetime
 
 log = logging.getLogger(__name__)
 
@@ -168,13 +169,13 @@ def validate_cmd(jq, io, cluster, config):
     cluster.test_api()
 
     log.info("Verifying google genomics can launch image \"%s\"", config['default_image'])
-    logging_url = config["default_url_prefix"] + "/node-logs"
+    logging_url = _join(config["default_url_prefix"], "node-logs")
     cluster.test_image(config['default_image'], sample_url, logging_url)
 
     log.info("Verification successful!")
 
 def submit(jq, io, cluster, job_id, spec, dry_run, config, skip_kube_submit, metadata, kubequeconsume_url,
-           exec_local=False, loglive=False, ):
+           exec_local=False, loglive=False, leave_running_on_failure=False):
     log.info("Submitting job with id: %s", job_id)
 
     # where to take this from? arg with a default of 1?
@@ -226,8 +227,14 @@ def submit(jq, io, cluster, job_id, spec, dry_run, config, skip_kube_submit, met
         if loglive:
             kubeque_command.append("--loglive")
         kubeque_command = "chmod +x {} && {}".format(kubeque_exe_in_container, " ".join(kubeque_command))
+        if leave_running_on_failure:
+            # if kubeconsume returns non-zero exit, sleep for 4 days which should keep
+            # the VM accessible.
+            kubeque_command = "{} || ( echo kubeconsume failed && sleep 345600 )".format(kubeque_command)
 
-        logging_url = config["default_url_prefix"] + "/node-logs"
+        d = datetime.datetime.now()
+        logging_url = _join(config["default_url_prefix"], "node-logs", job_id, d.strftime("%Y%m%d-%H%M%S"))
+
         pipeline_spec = cluster.create_pipeline_spec(
             job_id,
             image,
@@ -255,17 +262,17 @@ def submit(jq, io, cluster, job_id, spec, dry_run, config, skip_kube_submit, met
                 log.warning("%d tasks already exist queued up to run on this cluster. If this is not intentional, delete the jobs via 'kubeque clean' and resubmit this job.", len(existing_tasks))
         elif exec_local:
             cmd = _write_local_script(job_id, spec, kubeque_command, config['kubequeconsume_exe_path'],
-                                      kubeque_exe_in_container)
+                                      kubeque_exe_in_container, kubequeconsume_url)
             log.info("Running job locally via executing: ./%s", cmd)
             log.warning("CPU and memory requirements are not honored when running locally. Will use whatever the docker host is configured for by default")
             os.system(os.path.abspath(cmd))
         else:
             cmd = _write_local_script(job_id, spec, kubeque_command, config['kubequeconsume_exe_path'],
-                                      kubeque_exe_in_container)
+                                      kubeque_exe_in_container, kubequeconsume_url)
             log.info("Skipping submission.  You can execute tasks locally via: ./%s", cmd)
 
 
-def _write_local_script(job_id, spec, kubeque_command, kubequeconsume_exe_path, kubeque_exe_in_container):
+def _write_local_script(job_id, spec, kubeque_command, kubequeconsume_exe_path, kubeque_exe_in_container, kubequeconsume_url):
     from kubeque.gcp import _gcloud_cmd
     import stat
 
@@ -278,7 +285,9 @@ def _write_local_script(job_id, spec, kubeque_command, kubequeconsume_exe_path, 
          image, 'bash -c "' + kubeque_command + ' --owner localhost"', ])
     script_name = "run-{}-locally.sh".format(job_id)
     with open(script_name, "wt") as fd:
-        fd.write("#!/usr/bin/env bash\n")
+        fd.write("#!/usr/bin/env bash\n\n")
+        fd.write("# on linux download kubequeconsume via:\n")
+        fd.write("# gsutil cp {} {}\n\n".format(kubequeconsume_url, kubequeconsume_exe_path))
         fd.write(" ".join(cmd) + "\n")
 
     # make script executable
@@ -502,7 +511,7 @@ def submit_cmd(jq, io, cluster, args, config):
 
     log.debug("spec: %s", json.dumps(spec, indent=2))
     submit(jq, io, cluster, job_id, spec, args.dryrun, config, args.skip_kube_submit, metadata, kubequeconsume_exe_url,
-           args.local, args.loglive)
+           args.local, args.loglive, leave_running_on_failure=args.leave_running_on_failure)
 
     finished = False
     successful_execution = True
@@ -687,7 +696,7 @@ def saturate_cmd(jq, io, cluster, args):
 def status_cmd(jq, io, cluster, args):
     jobids = _get_jobids_from_pattern(jq, args.jobid_pattern)
 
-    if args.wait:
+    if args.wait or args.loglive:
         assert len(jobids) == 1, "When watching, only one jobid allowed, but the following matched wildcard: {}".format(
             jobids)
         jobid = jobids[0]
@@ -1144,6 +1153,7 @@ def main(argv=None):
     parser.add_argument("--local", help="Run the tasks inside of docker on the local machine", action="store_true")
     parser.add_argument("--clean", help="If the job id already exists, 'clean' it first to avoid an error about the job already existing", action="store_true")
     parser.add_argument("--rerun", help="If set, will download all of the files from previous execution of this job to worker before running", action="store_true")
+    parser.add_argument("--leave-running-on-failure", help="if set and the worker has an internal error, don't let the VM automatically after the crash, so that it can be SSHed to and investigated", action="store_true", dest="leave_running_on_failure")
     parser.add_argument("command", nargs=argparse.REMAINDER)
 
     parser = subparser.add_parser("addnodes", help="Add nodes to be used for executing a specific job")

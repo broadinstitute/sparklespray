@@ -14,6 +14,7 @@ import (
 
 	"github.com/urfave/cli"
 	compute "google.golang.org/api/compute/v1"
+	"google.golang.org/api/option"
 )
 
 func Main() {
@@ -43,7 +44,14 @@ func Main() {
 					Value: 10}},
 			Action: consume}}
 
-	app.Run(os.Args)
+	err := app.Run(os.Args)
+	if err != nil {
+		log.Printf("Exiting retcode == 1 because: %s", err)
+		os.Exit(1)
+	} else {
+		log.Println("Exiting cleanly")
+		os.Exit(0)
+	}
 }
 
 func consume(c *cli.Context) error {
@@ -76,17 +84,55 @@ func consume(c *cli.Context) error {
 		}
 	}
 
-	client, err := datastore.NewClient(ctx, projectID)
+	creds, err := google.FindDefaultCredentials(ctx)
+	if err != nil {
+		log.Printf("Could not find default credentials: %v", err)
+		return err
+	}
+
+	client, err := datastore.NewClient(ctx, projectID, option.WithCredentials(creds))
 	if err != nil {
 		log.Printf("Creating datastore client failed: %v", err)
 		return err
 	}
 
-	ioc, err := NewIOClient(ctx)
+	ioc, err := NewIOClient(ctx, creds.TokenSource)
 	if err != nil {
 		log.Printf("Creating io client failed: %v", err)
 		return err
 	}
+
+	// Attempting to work around issue where the metadata server becomes unavailible
+	// when running >8 hr jobs. Work around by proactively trying to always have a valid token
+	// and if we get an error, keep retrying to get a good token.
+	pollTokenForever := func() {
+		errorCount := 0
+		lastAccessToken := ""
+		// loop as long as the process is alive
+		for {
+			token, err := creds.TokenSource.Token()
+			if err != nil {
+				log.Printf("Got error fetching token (attempt %d): %v", errorCount, err)
+				time.Sleep(5 * time.Minute)
+				errorCount += 1
+				if errorCount > 1000 {
+					log.Printf("Giving up")
+					break
+				}
+				continue
+			}
+			errorCount = 0
+
+			if token.AccessToken != lastAccessToken {
+				lastAccessToken = token.AccessToken
+				log.Printf("Got new token with expiry: %v", token.Expiry)
+			}
+
+			time.Sleep(5 * time.Minute)
+		}
+	}
+
+	go pollTokenForever()
 
 	if owner == "" {
 		log.Printf("Querying metadata to get host instance name")

@@ -12,6 +12,8 @@ import (
 
 	"cloud.google.com/go/storage"
 	"golang.org/x/net/context"
+	"golang.org/x/oauth2"
+	"google.golang.org/api/option"
 )
 
 type IOClient interface {
@@ -26,8 +28,8 @@ type GCSIOClient struct {
 	client *storage.Client
 }
 
-func NewIOClient(ctx context.Context) (IOClient, error) {
-	client, err := storage.NewClient(ctx)
+func NewIOClient(ctx context.Context, tokenSource oauth2.TokenSource) (IOClient, error) {
+	client, err := storage.NewClient(ctx, option.WithTokenSource(tokenSource))
 	if err != nil {
 		return nil, err
 	}
