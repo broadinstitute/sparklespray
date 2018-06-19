@@ -15,3 +15,6 @@ examples/sample-job/dest
 build
 run-*-locally.sh
 go/pkg
+*.pyc
+james-failure/long-job-test
+james-failure

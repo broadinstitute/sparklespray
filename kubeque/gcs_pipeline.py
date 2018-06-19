@@ -190,6 +190,7 @@ class Cluster:
             return NODE_REQ_SUBMITTED
 
     def add_node(self, pipeline_def, preemptible):
+        "Returns operation name"
         # make a deep copy
         import json
         pipeline_def = json.loads(json.dumps(pipeline_def))
@@ -201,7 +202,12 @@ class Cluster:
         # Run the pipeline
         operation = self.service.pipelines().run(body=pipeline_def).execute()
 
-        return operation
+        return operation['name']
+
+    def get_add_node_status(self, operation_name):
+        request = self.service.projects().operations().get(name=operation_name)
+        response = request.execute()
+        return response
 
     def test_api(self):
         """Simple api call used to verify the service is enabled"""
@@ -242,8 +248,9 @@ class Cluster:
                              cpu_request,
                              mem_limit,
                              cluster_name,
-                             bootDiskSizeGb,
-                             preemptible):
+                             bootDiskSizeGb):
+        assert kubequeconsume_url
+
         # labels have a few restrictions
         normalized_jobid = _normalize_label(jobid)
 
@@ -269,7 +276,7 @@ class Cluster:
                     'zones': self.zones,
                     'virtualMachine': {
                         'machineType': machine_type,
-                        'preemptible': preemptible,
+                        'preemptible': False,
                         'disks': [
                             {'name': 'ephemeralssd'} # TODO: figure out type to specify for local_ssd
                         ],
@@ -293,7 +300,6 @@ class Cluster:
             }
         }
 
-        assert kubequeconsume_url
 
         return pipeline_def
 
