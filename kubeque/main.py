@@ -1125,8 +1125,6 @@ def tail_cmd(jq,config, args):
     owner = t['owner']
     _ , _ , _,  zone , instance_id = owner.split('/')
     project_id = config['project']
-    zone = "us-central1-a"
-    instance_id = "ggp-7013628981280107329"
     ssh_cmd = ["gcloud", "compute", "ssh", "--project", project_id, "--zone", zone, instance_id, "--"]
     print("Getting container id...")
     output = subprocess.check_output(ssh_cmd + [ "docker", "ps"]).decode("utf8")
