@@ -1113,6 +1113,31 @@ def get_func_parameters(func):
     return inspect.getargspec(func)[0]
 
 
+def tail_cmd(jq,config, args):
+    import subprocess
+    import attr
+
+    tasks_as_dicts = []
+    jobid = _resolve_jobid(jq, args.jobid)
+    tasks = jq.get_tasks(jobid)
+    assert len(tasks) == 1
+    t = attr.asdict(tasks[0])
+    owner = t['owner']
+    _ , _ , _,  zone , instance_id = owner.split('/')
+    project_id = config['project']
+    zone = "us-central1-a"
+    instance_id = "ggp-7013628981280107329"
+    ssh_cmd = ["gcloud", "compute", "ssh", "--project", project_id, "--zone", zone, instance_id, "--"]
+    print("Getting container id...")
+    output = subprocess.check_output(ssh_cmd + [ "docker", "ps"]).decode("utf8")
+    #print("output:{}".format(repr(output)))
+    container_id = output.split("\n")[1].split(" ")[0]
+    print("Container:", container_id)
+    if args.print:
+        print(" ".join(ssh_cmd + ["docker", "exec", container_id, "bash", "-c", "'tail -f /mnt/kubeque-data/tasks/task*/work/stdout.txt'"]))
+    else:
+        subprocess.call(ssh_cmd + ["docker", "exec", container_id, "bash", "-c", "'tail -f /mnt/kubeque-data/tasks/task*/work/stdout.txt'"])
+
 def main(argv=None):
     parse = argparse.ArgumentParser()
     parse.add_argument("--config", default=None)
@@ -1180,6 +1205,13 @@ def main(argv=None):
     parser.add_argument("--extra",
                         help="Add columns 'task_id' and 'exit_code' for each task",
                         action="store_true")
+
+    parser = subparser.add_parser("tail", help="run tail on the stdout.txt file on the remote instance via ssh")
+    parser.set_defaults(func=tail_cmd)
+    parser.add_argument("--print",
+                        help="print the ssh command that would execute instead of running it",
+                        action="store_true")
+    parser.add_argument("jobid")
 
     #    parser = subparser.add_parser("retry", help="Resubmit any 'failed' jobs for execution again. (often after increasing memory required)")
     #    parser.set_defaults(func=retry_cmd)
