@@ -1,16 +1,19 @@
 syntax = "proto3";
 
-service Greeter {
+service Monitor {
   // Sends a greeting
-  rpc SayHello (HelloRequest) returns (HelloReply) {}
+  rpc ReadOutput (ReadOutputRequest) returns (ReadOutputReply) {}
 }
 
 // The request message containing the user's name.
-message HelloRequest {
-  string name = 1;
+message ReadOutputRequest {
+  string taskId = 1;
+  int32 size = 2;
+  int64 offset = 3;
 }
 
 // The response message containing the greetings
-message HelloReply {
-  string message = 1;
+message ReadOutputReply {
+  bytes data = 1;
+  bool endOfFile = 2;
 }

@@ -202,6 +202,7 @@ func consume(c *cli.Context) error {
 		return err
 	}
 
+	var monitor *Monitor
 	if port != "" {
 		lis, err := net.Listen("tcp", port)
 		if err != nil {
@@ -209,10 +210,11 @@ func consume(c *cli.Context) error {
 			return err
 		}
 
-		go StartServer(lis)
+		monitor = NewMonitor()
+		go monitor.StartServer(lis)
 	}
 
-	err = ConsumerRunLoop(ctx, queue, sleepUntilNotify, executor, timeout, options.SleepOnEmpty, monitor)
+	err = ConsumerRunLoop(ctx, queue, sleepUntilNotify, executor, timeout, options.SleepOnEmpty)
 	if err != nil {
 		log.Printf("consumerRunLoop exited with: %v\n", err)
 		return err
