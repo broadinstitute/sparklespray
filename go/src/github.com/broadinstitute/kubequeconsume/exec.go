@@ -485,13 +485,20 @@ func writeResultFile(ioc IOClient,
 }
 
 func loadTaskSpec(ioc IOClient, taskURL string) (*TaskSpec, error) {
-	data, err := ioc.DownloadAsBytes(taskURL)
-	if err != nil {
-		return nil, err
+	var data []byte
+
+	if taskURL[0] == '{' {
+		data = []byte(taskURL)
+	} else {
+		var err error
+		data, err = ioc.DownloadAsBytes(taskURL)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	var taskSpec TaskSpec
-	err = json.Unmarshal(data, &taskSpec)
+	err := json.Unmarshal(data, &taskSpec)
 	if err != nil {
 		return nil, err
 	}

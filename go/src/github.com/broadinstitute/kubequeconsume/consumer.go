@@ -1,12 +1,9 @@
 package kubequeconsume
 
 import (
-	"errors"
 	"log"
-	"math/rand"
 	"time"
 
-	"cloud.google.com/go/datastore"
 	"cloud.google.com/go/logging"
 	"golang.org/x/net/context"
 )
@@ -27,18 +24,18 @@ type TaskHistory struct {
 
 type Task struct {
 	// will be of the form: job_id + task_index
-	TaskID           string         `datastore:"task_id"`
-	TaskIndex        int64          `datastore:"task_index"`
-	JobID            string         `datastore:"job_id"`
-	Status           string         `datastore:"status"`
-	Owner            string         `datastore:"owner"`
-	Args             string         `datastore:"args"`
-	History          []*TaskHistory `datastore:"history"`
-	CommandResultURL string         `datastore:"command_result_url"`
-	FailureReason    string         `datastore:"failure_reason,omitempty"`
-	Version          int32          `datastore:"version"`
-	ExitCode         string         `datastore:"exit_code"`
-	Cluster          string         `datastore:"cluster"`
+	TaskID           string         `datastore:"task_id" json:"task_id"`
+	TaskIndex        int64          `datastore:"task_index" json:"task_index"`
+	JobID            string         `datastore:"job_id" json:"job_id"`
+	Status           string         `datastore:"status" json:"status"`
+	Owner            string         `datastore:"owner" json:"owner"`
+	Args             string         `datastore:"args" json:"args"`
+	History          []*TaskHistory `datastore:"history" json:"history"`
+	CommandResultURL string         `datastore:"command_result_url" json:"command_result_url"`
+	FailureReason    string         `datastore:"failure_reason,omitempty" json:"failure_reason"`
+	Version          int32          `datastore:"version" json:"version"`
+	ExitCode         string         `datastore:"exit_code" json:"exit_code"`
+	Cluster          string         `datastore:"cluster" json:"cluster"`
 }
 
 type TaskStatusNotification struct {
@@ -69,84 +66,23 @@ type Options struct {
 	LoggingClient     *logging.Client
 }
 
+type Queue interface {
+	claimTask(ctx context.Context) (*Task, error)
+	isJobKilled(ctx context.Context, JobID string) (bool, error)
+	atomicUpdateTask(ctx context.Context, task_id string, mutateTaskCallback func(task *Task) bool) (*Task, error)
+}
+
 type Executor func(taskId string, taskParam string) (string, error)
 
 func getTimestampMillis() int64 {
 	return int64(time.Now().UnixNano()) / int64(time.Millisecond)
 }
 
-func getTasks(ctx context.Context, client *datastore.Client, cluster string, status string, maxFetch int) ([]*Task, error) {
-	q := datastore.NewQuery("Task").Filter("cluster =", cluster).Filter("status =", status).Limit(maxFetch)
-	var tasks []*Task
-	keys, err := client.GetAll(ctx, q, &tasks)
-
-	//log.Printf("getTasks got: %v\n", tasks)
-	if err != nil {
-		return nil, err
-	}
-
-	for i, key := range keys {
-		tasks[i].TaskID = key.Name
-	}
-
-	// TODO: check state and job because saw in python sometimes getting tasks with wrong state
-	return tasks, nil
-}
-
-func claimTask(ctx context.Context, client *datastore.Client, cluster string, newOwner string, initialClaimRetry time.Duration, claimTimeout time.Duration) (*Task, error) {
-	//     "Returns None if no unclaimed ready tasks. Otherwise returns instance of Task"
-	maxSleepTime := initialClaimRetry
-	claimStart := time.Now()
-	for {
-		NotifyWatchdog()
-		// log.Println("getTask of pending")
-		tasks, err := getTasks(ctx, client, cluster, STATUS_PENDING, 20)
-		if err != nil {
-			return nil, err
-		}
-		if len(tasks) == 0 {
-			return nil, nil
-		}
-
-		//log.Println("Picking from possible tasks")
-		// pick a random task to avoid contention
-		task := tasks[rand.Int31n(int32(len(tasks)))]
-
-		finalTask, err := updateTaskClaimed(ctx, client, task.TaskID, newOwner)
-		if err == nil {
-			maxSleepTime = INITIAL_CLAIM_RETRY_DELAY
-			return finalTask, nil
-		}
-
-		// failed to claim task.
-		claimEnd := time.Now()
-		if claimEnd.Sub(claimStart) > claimTimeout {
-			return nil, errors.New("Timed out trying to get task")
-		}
-
-		maxSleepTime *= 2
-		timeUntilNextTry := time.Duration(rand.Int63n(int64(maxSleepTime)))
-		log.Printf("Got error claiming task: %s, will retry after %d milliseconds", err, timeUntilNextTry/time.Millisecond)
-		time.Sleep(timeUntilNextTry)
-	}
-}
-
-func isJobKilled(ctx context.Context, client *datastore.Client, jobID string) (bool, error) {
-	jobKey := datastore.NameKey("Job", jobID, nil)
-	var job Job
-	err := client.Get(ctx, jobKey, &job)
-	if err != nil {
-		return false, err
-	}
-
-	return job.Status == JOB_STATUS_KILLED, nil
-}
-
-func ConsumerRunLoop(ctx context.Context, client *datastore.Client, sleepUntilNotify func(sleepTime time.Duration), cluster string, executor Executor, timeout Timeout, options *Options) error {
+func ConsumerRunLoop(ctx context.Context, queue Queue, sleepUntilNotify func(sleepTime time.Duration), executor Executor, timeout Timeout, SleepOnEmpty time.Duration) error {
 	firstClaim := true
-	log.Printf("Starting ConsumerRunLoop, sleeping %v once queue drains", options.SleepOnEmpty)
+	log.Printf("Starting ConsumerRunLoop, sleeping %v once queue drains", SleepOnEmpty)
 	for {
-		claimed, err := claimTask(ctx, client, cluster, options.Owner, options.InitialClaimRetry, options.ClaimTimeout)
+		claimed, err := queue.claimTask(ctx)
 		if err != nil {
 			return err
 		}
@@ -163,7 +99,7 @@ func ConsumerRunLoop(ctx context.Context, client *datastore.Client, sleepUntilNo
 			if timeout.HasTimeoutExpired(now) {
 				return nil
 			}
-			sleepUntilNotify(options.SleepOnEmpty)
+			sleepUntilNotify(SleepOnEmpty)
 			continue
 		}
 		timeout.Reset(now)
@@ -171,7 +107,7 @@ func ConsumerRunLoop(ctx context.Context, client *datastore.Client, sleepUntilNo
 		log.Printf("Claimed task %s", claimed.TaskID)
 		firstClaim = false
 
-		jobKilled, err := isJobKilled(ctx, client, claimed.JobID)
+		jobKilled, err := queue.isJobKilled(ctx, claimed.JobID)
 		if err != nil {
 			log.Printf("Got error in isJobKilled for %s: %v", claimed.JobID, err)
 			return err
@@ -182,20 +118,20 @@ func ConsumerRunLoop(ctx context.Context, client *datastore.Client, sleepUntilNo
 			if err != nil {
 				log.Printf("Got error executing task %s: %v, marking task as failed", claimed.TaskID, err)
 
-				_, err = updateTaskFailed(ctx, client, claimed.TaskID, err.Error())
+				_, err = updateTaskFailed(ctx, queue, claimed.TaskID, err.Error())
 				if err != nil {
 					log.Printf("Got error updating task %s failed: %v", claimed.TaskID, err)
 					return err
 				}
 			} else {
-				_, err = updateTaskCompleted(ctx, client, claimed.TaskID, retcode)
+				_, err = updateTaskCompleted(ctx, queue, claimed.TaskID, retcode)
 				if err != nil {
 					log.Printf("Got error updating task %s is complete: %v", claimed.TaskID, err)
 					return err
 				}
 			}
 		} else {
-			_, err = updateTaskKilled(ctx, client, claimed.TaskID)
+			_, err = updateTaskKilled(ctx, queue, claimed.TaskID)
 			if err != nil {
 				log.Printf("Got error updating task %s was killed: %v", claimed.TaskID, err)
 				return err
@@ -208,7 +144,7 @@ func ConsumerRunLoop(ctx context.Context, client *datastore.Client, sleepUntilNo
 	return nil
 }
 
-func updateTaskClaimed(ctx context.Context, client *datastore.Client, task_id string, newOwner string) (*Task, error) {
+func updateTaskClaimed(ctx context.Context, q *DataStoreQueue, task_id string, newOwner string) (*Task, error) {
 	now := getTimestampMillis()
 	event := TaskHistory{Timestamp: float64(now) / 1000.0,
 		Status: STATUS_CLAIMED,
@@ -227,7 +163,7 @@ func updateTaskClaimed(ctx context.Context, client *datastore.Client, task_id st
 		return true
 	}
 
-	updatedTask, err := atomicUpdateTask(ctx, client, task_id, mutate)
+	updatedTask, err := q.atomicUpdateTask(ctx, task_id, mutate)
 	if err != nil {
 		return nil, err
 	}
@@ -237,7 +173,7 @@ func updateTaskClaimed(ctx context.Context, client *datastore.Client, task_id st
 	return updatedTask, nil
 }
 
-func updateTaskCompleted(ctx context.Context, client *datastore.Client, task_id string, retcode string) (*Task, error) {
+func updateTaskCompleted(ctx context.Context, q Queue, task_id string, retcode string) (*Task, error) {
 	log.Printf("updateTaskCompleted of task %v, retcode=%s", task_id, retcode)
 
 	now := getTimestampMillis()
@@ -257,7 +193,7 @@ func updateTaskCompleted(ctx context.Context, client *datastore.Client, task_id 
 		return true
 	}
 
-	updatedTask, err := atomicUpdateTask(ctx, client, task_id, mutate)
+	updatedTask, err := q.atomicUpdateTask(ctx, task_id, mutate)
 	if err != nil {
 		// I suppose this is not technically correct. Could be a simultaneous update of "success" or "failed" and "lost"
 		return nil, err
@@ -268,7 +204,7 @@ func updateTaskCompleted(ctx context.Context, client *datastore.Client, task_id 
 	return updatedTask, nil
 }
 
-func updateTaskFailed(ctx context.Context, client *datastore.Client, task_id string, failure string) (*Task, error) {
+func updateTaskFailed(ctx context.Context, q Queue, task_id string, failure string) (*Task, error) {
 	log.Printf("updateTaskFailed of task %v, failure=%s", task_id, failure)
 
 	now := getTimestampMillis()
@@ -288,7 +224,7 @@ func updateTaskFailed(ctx context.Context, client *datastore.Client, task_id str
 		return true
 	}
 
-	updatedTask, err := atomicUpdateTask(ctx, client, task_id, mutate)
+	updatedTask, err := q.atomicUpdateTask(ctx, task_id, mutate)
 	if err != nil {
 		// I suppose this is not technically correct. Could be a simultaneous update of "success" or "failed" and "lost"
 		return nil, err
@@ -299,7 +235,7 @@ func updateTaskFailed(ctx context.Context, client *datastore.Client, task_id str
 	return updatedTask, nil
 }
 
-func updateTaskKilled(ctx context.Context, client *datastore.Client, task_id string) (*Task, error) {
+func updateTaskKilled(ctx context.Context, q Queue, task_id string) (*Task, error) {
 	log.Printf("updateTaskKilled of task %v", task_id)
 
 	now := getTimestampMillis()
@@ -318,7 +254,7 @@ func updateTaskKilled(ctx context.Context, client *datastore.Client, task_id str
 		return true
 	}
 
-	updatedTask, err := atomicUpdateTask(ctx, client, task_id, mutate)
+	updatedTask, err := q.atomicUpdateTask(ctx, task_id, mutate)
 	if err != nil {
 		// I suppose this is not technically correct. Could be a simultaneous update of "success" or "failed" and "lost"
 		return nil, err
@@ -331,49 +267,4 @@ func updateTaskKilled(ctx context.Context, client *datastore.Client, task_id str
 
 func notifyTaskStatusChanged(task *Task) {
 	// notification := TaskStatusNotification{TaskID = task.TaskID, Status = task.Status, ExitCode = task.ExitCode, FailureReason = task.FailureReason, Version = task.Version}
-}
-
-func atomicUpdateTask(ctx context.Context, client *datastore.Client, task_id string, mutateTaskCallback func(task *Task) bool) (*Task, error) {
-	var task Task
-
-	log.Printf("atomicUpdateTask of task %v", task_id)
-	_, err := client.RunInTransaction(ctx, func(tx *datastore.Transaction) error {
-		log.Printf("attempting update of task %s start", task_id)
-
-		taskKey := datastore.NameKey("Task", task_id, nil)
-		err := tx.Get(taskKey, &task)
-		if err != nil {
-			return err
-		}
-		task.TaskID = task_id
-
-		log.Printf("Calling mutate on task %s with version %d", task.TaskID, task.Version)
-		successfulUpdate := mutateTaskCallback(&task)
-		if !successfulUpdate {
-			log.Printf("Update failed on task %s", task.TaskID)
-			return errors.New("Update failed")
-		}
-
-		task.Version = task.Version + 1
-		log.Printf("Calling put on task %s with version %d", task.TaskID, task.Version)
-		_, err = tx.Put(taskKey, &task)
-		if err != nil {
-			return err
-		}
-
-		log.Printf("Returning atomicUpdateTask success")
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	// task_as_json = json.dumps(attr.asdict(task)).encode("utf8")
-
-	// topic_name = self._job_id_to_topic(task.job_id)
-	// topic = self.pubsub.topic(topic_name)
-	// topic.publish(task_as_json)
-
-	//	log.Printf("atomic update of task %s success", task_id)
-	return &task, nil
 }

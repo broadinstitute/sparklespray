@@ -7,9 +7,10 @@ import sys
 import kubeque
 from kubeque.gcp import create_gcs_job_queue, IO, STATUS_PENDING, STATUS_FAILED, STATUS_COMPLETE, STATUS_CLAIMED, \
     STATUS_KILLED, JOB_STATUS_KILLED
+from kubeque.gcs_pipeline import MachineSpec
 from kubeque.hasher import CachingHashFunction
 
-from kubeque.spec import make_spec_from_command, SrcDstPair, add_file_to_upload_map
+from kubeque.spec import make_spec_from_command, SrcDstPair
 import csv
 import copy
 import contextlib
@@ -217,37 +218,32 @@ def submit(jq, io, cluster, job_id, spec, dry_run, config, skip_kube_submit, met
         mem_limit = _parse_mem_limit(resources.get(MEMORY_REQUEST, config["default_resource_memory"]))
         cluster_name = _make_cluster_name(job_id, image, cpu_request, mem_limit, unique_name=exec_local)
 
-        stage_dir = config.get("mount", "/mnt/kubeque-data")
-        project = config['project']
-        kubeque_exe_in_container = stage_dir + "/kubequeconsume"
-        kubeque_command = [kubeque_exe_in_container, "consume", "--cluster", cluster_name, "--projectId", project,
-                           "--cacheDir", stage_dir + "/cache",
-                           "--tasksDir", stage_dir + "/tasks", "--zones", ",".join(config['zones'])]
-        if loglive:
-            kubeque_command.append("--loglive")
-        kubeque_command = "chmod +x {} && {}".format(kubeque_exe_in_container, " ".join(kubeque_command))
+        assert mem_limit <= 5
+        assert cpu_request < 2
 
-        logging_url = config["default_url_prefix"] + "/node-logs"
+        project = config['project']
+        consume_exe_args = ["--cluster", cluster_name, "--projectId", project, "--zones", ",".join(config['zones'])]
+        if loglive:
+            consume_exe_args.append("--loglive")
+
+        machine_specs = MachineSpec(boot_volume_in_gb = bootDiskSizeGb,
+            mount_point = config.get("mount", "/mnt/"),
+            machine_type = "n1-standard-1")
+
         pipeline_spec = cluster.create_pipeline_spec(
-            job_id,
-            image,
-            kubeque_command,
-            stage_dir,
-            logging_url,
-            kubequeconsume_url,
-            cpu_request,
-            mem_limit,
-            cluster_name,
-            bootDiskSizeGb,
-            preemptible
-        )
+            jobid=job_id,
+            cluster_name=cluster_name,
+            consume_exe_url=kubequeconsume_url,
+            docker_image=image,
+            consume_exe_args=consume_exe_args,
+            machine_specs=machine_specs)
 
         jq.submit(job_id, list(zip(task_spec_urls, command_result_urls)), pipeline_spec, metadata, cluster_name)
         if not skip_kube_submit and not exec_local:
             existing_nodes = cluster.get_cluster_status(cluster_name)
             if not existing_nodes.is_running():
-                log.info("Adding initial node for cluster")
-                jq.add_node(job_id, cluster, preemptible=None)
+                operation_ids = _addnodes(job_id, jq, cluster, 1, preemptible, config['default_url_prefix'])
+                log.info("Adding initial node for cluster (operation %s)", operation_ids[0])
             else:
                 log.info("Cluster already exists, not adding node. Cluster status: %s", existing_nodes.as_string())
             existing_tasks = jq.get_tasks_for_cluster(cluster_name, STATUS_PENDING)
@@ -341,11 +337,14 @@ def load_config_from_dict(config):
     return jq, io, cluster
 
 
-def new_job_id():
-    import uuid
+def get_timestamp():
     import datetime
     d = datetime.datetime.now()
-    return d.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:4]
+    return d.strftime("%Y%m%d-%H%M%S")
+
+def new_job_id():
+    import uuid
+    return get_timestamp() + "-" + uuid.uuid4().hex[:4]
 
 
 def read_parameters_from_csv(filename):
@@ -427,6 +426,12 @@ def _parse_resources(resources_str):
         spec[name] = value
     return spec
 
+def _obj_path_to_url(path):
+    m = re.match("gs://([^/]+)/(.+)$", path)
+    assert m is not None
+    bucket, key = m.groups()
+    return "https://{}.storage.googleapis.com/{}".format(bucket, key)
+
 
 def submit_cmd(jq, io, cluster, args, config):
     metadata = {}
@@ -491,14 +496,16 @@ def submit_cmd(jq, io, cluster, args, config):
                                                   working_dir=args.working_dir)
 
         kubequeconsume_exe_path = config['kubequeconsume_exe_path']
-        kubequeconsume_exe_url = add_file_to_upload_map(upload_map, hash_db.hash_filename, cas_url_prefix,
-                                                        kubequeconsume_exe_path, "!KUBEQUECONSUME")
-
+        kubequeconsume_exe_obj_path = upload_map.add(hash_db.hash_filename, cas_url_prefix,
+                                                        kubequeconsume_exe_path, is_public=True)
+        kubequeconsume_exe_url = _obj_path_to_url(kubequeconsume_exe_obj_path)
         hash_db.persist()
 
         log.debug("upload_map = %s", upload_map)
-        for filename, dest in upload_map.items():
-            io.put(filename, dest, skip_if_exists=True)
+        log.info("kubeconsume at %s", kubequeconsume_exe_url)
+        for filename, dest, is_public in upload_map.uploads():
+            print("filename={}, dest={}, is_public={}".format(filename, dest, is_public))
+            io.put(filename, dest, skip_if_exists=True, is_public=is_public)
 
     log.debug("spec: %s", json.dumps(spec, indent=2))
     submit(jq, io, cluster, job_id, spec, args.dryrun, config, args.skip_kube_submit, metadata, kubequeconsume_exe_url,
@@ -981,6 +988,12 @@ def watch(io, jq, jobid, cluster, refresh_delay=5, min_check_time=10, loglive=Fa
                     else:
                         if time.time() - last_good_state_time > min_check_time and not saturate:
                             log.error("Tasks haven't completed, but cluster is now offline. Aborting!")
+                            node_reqs = jq.get_node_reqs(jobid)
+                            for i, node_req in enumerate(node_reqs):
+                                log.info("Dumping node request %d", i)
+
+                                status = cluster.get_add_node_status(node_req.operation_id)
+                                print(json.dumps(status.status, indent=2))
                             raise Exception("Cluster prematurely stopped")
                     last_cluster_status = cluster_status
                     last_cluster_update = time.time()
@@ -1004,15 +1017,21 @@ def watch(io, jq, jobid, cluster, refresh_delay=5, min_check_time=10, loglive=Fa
         print("Interrupted -- Exiting, but your job will continue to run unaffected.")
         sys.exit(1)
 
-def addnodes_cmd(jq, cluster, args):
+def addnodes_cmd(jq, cluster, args, config):
     job_id = _resolve_jobid(jq, args.job_id)
-    return _addnodes(job_id, jq, cluster, args.count, None)
+    return _addnodes(job_id, jq, cluster, args.count, None, config['default_url_prefix'])
 
-def _addnodes(job_id, jq, cluster, count, preemptible):
+def _addnodes(job_id, jq, cluster, count, preemptible, default_url_prefix):
     job = jq.get_job(job_id)
     log.info("Adding %d nodes to cluster %s", count, job.cluster)
+    operation_ids = []
+    timestamp = get_timestamp()
     for i in range(count):
-        jq.add_node(job_id, cluster, preemptible, job=job)
+        debug_log_url = _join(default_url_prefix, "node-logs", job_id, timestamp, "output-{}.log".format(i))
+        operation_id = jq.add_node(job_id, cluster, preemptible, debug_log_url, job=job)
+        log.info("adding node via operation %s, logs will be written to %s", operation_id, debug_log_url)
+        operation_ids.append(operation_id)
+    return operation_ids
 
 def _resub_preempted(cluster, jq, jobid):
     tasks = jq.get_tasks(jobid, STATUS_CLAIMED)

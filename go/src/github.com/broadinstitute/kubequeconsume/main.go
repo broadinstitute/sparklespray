@@ -2,11 +2,11 @@ package kubequeconsume
 
 import (
 	"log"
+	"net"
 	"os"
 	"strings"
 	"time"
 
-	"cloud.google.com/go/datastore"
 	"cloud.google.com/go/logging"
 	"cloud.google.com/go/pubsub"
 	"golang.org/x/net/context"
@@ -37,6 +37,7 @@ func Main() {
 				cli.StringFlag{Name: "cacheDir"},
 				cli.StringFlag{Name: "cluster"},
 				cli.StringFlag{Name: "tasksDir"},
+				cli.StringFlag{Name: "tasksFile"},
 				cli.StringFlag{Name: "zones"},
 				cli.IntFlag{Name: "timeout", Value: 5}, // 5 minutes means the process will be killed after 10 minutes
 				cli.IntFlag{Name: "restimeout",
@@ -54,6 +55,7 @@ func consume(c *cli.Context) error {
 	cacheDir := c.String("cacheDir")
 	cluster := c.String("cluster")
 	tasksDir := c.String("tasksDir")
+	tasksFile := c.String("tasksFile")
 	zones := strings.Split(c.String("zones"), ",")
 	ReservationTimeout := time.Duration(c.Int("restimeout")) * time.Minute
 	watchdogTimeout := time.Duration(c.Int("timeout")) * time.Minute
@@ -74,12 +76,6 @@ func consume(c *cli.Context) error {
 			log.Printf("Creating log client failed: %v", err)
 			return err
 		}
-	}
-
-	client, err := datastore.NewClient(ctx, projectID)
-	if err != nil {
-		log.Printf("Creating datastore client failed: %v", err)
-		return err
 	}
 
 	ioc, err := NewIOClient(ctx)
@@ -194,7 +190,29 @@ func consume(c *cli.Context) error {
 		}
 	}
 
-	err = ConsumerRunLoop(ctx, client, sleepUntilNotify, cluster, executor, timeout, options)
+	//	func ConsumerRunLoop(ctx context.Context, queue *Queue, sleepUntilNotify func(sleepTime time.Duration), executor Executor, timeout Timeout, SleepOnEmpty time.Duration) error {
+	var queue Queue
+	if tasksFile != "" {
+		queue, err = CreatePreloadedQueue(tasksFile)
+	} else {
+		queue, err = CreateDataStoreQueue(ctx, projectID, cluster, owner, options.InitialClaimRetry, options.ClaimTimeout)
+	}
+	if err != nil {
+		log.Printf("failed to initialize queue: %v\n", err)
+		return err
+	}
+
+	if port != "" {
+		lis, err := net.Listen("tcp", port)
+		if err != nil {
+			log.Printf("could not listen on %s: %v\n", port, err)
+			return err
+		}
+
+		go StartServer(lis)
+	}
+
+	err = ConsumerRunLoop(ctx, queue, sleepUntilNotify, executor, timeout, options.SleepOnEmpty, monitor)
 	if err != nil {
 		log.Printf("consumerRunLoop exited with: %v\n", err)
 		return err

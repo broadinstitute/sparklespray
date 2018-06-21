@@ -1,6 +1,7 @@
 import re
 import collections
 import os
+from kubeque.gcp import _join
 
 # def expand_specs(spec, default_url_prefix, default_job_url_prefix):
 #     image = spec['image']
@@ -17,6 +18,30 @@ import os
 #         tasks.append(task)
 
 #     return tasks
+
+class UploadMap:
+    def __init__(self):
+        self.map = {}
+
+    def get_dst_url(self, filename, must=False):
+        if filename in self.map:
+            return self.map[filename][0]
+        else:
+            if must:
+                raise Exception("no path for {}".format(filename))
+            else:
+                return None
+
+    def uploads(self):
+        return [(k, v[0], v[1]) for k, v in self.map.items()]
+
+    def add(self, hash_function, cas_url, filename, is_public=False):
+        assert isinstance(is_public, bool)
+        h = hash_function(filename)
+        url = _join(cas_url, h)
+        self.map[filename] = (url, is_public)
+        return url
+
 
 def check_types(d, prop_types, required=False):
     errors = []
@@ -103,19 +128,13 @@ def add_file_to_pull_to_wd(src_dst_pair, upload_map, hash_function, is_executabl
             return
         else:
             executable_flag = is_executable_function(src_dst_pair.src)
-            if src_dst_pair.src in upload_map:
-                url = upload_map[src_dst_pair.src]
-            else:
+            url = upload_map.get_dst_url(src_dst_pair.src, must=False)
+            if url is None:
                 assert len(src_dst_pair.src) > 0
-                url = add_file_to_upload_map(upload_map, hash_function, cas_url, src_dst_pair.src, src_dst_pair.src)
+                url = upload_map.add(hash_function, cas_url, src_dst_pair.src)
 
     files_to_dl.append( Download(url, src_dst_pair.dst, executable_flag) )
 
-def add_file_to_upload_map(upload_map, hash_function, cas_url, filename, upload_map_key):
-    h = hash_function(filename)
-    url = cas_url + h
-    upload_map[filename] = url
-    return url
 
 def rewrite_argvs_files_to_upload(list_of_argvs, cas_url, hash_function, is_executable_function, extra_files):
     assert cas_url is not None
@@ -123,7 +142,7 @@ def rewrite_argvs_files_to_upload(list_of_argvs, cas_url, hash_function, is_exec
         cas_url += "/"
 
     l = []
-    upload_map = {}
+    upload_map = UploadMap()
     for argv in list_of_argvs:
         files_to_dl = []
         def rewrite_filenames(x):
@@ -145,7 +164,6 @@ def rewrite_argvs_files_to_upload(list_of_argvs, cas_url, hash_function, is_exec
 def is_executable(filename):
     return os.access(filename, os.X_OK)
 
-from kubeque.gcp import _join
 
 def make_spec_from_command(argv,
     docker_image,

@@ -310,18 +310,18 @@ class JobStorage:
         job_entity = list(query.fetch(limit=1))[0]
         return entity_to_job(job_entity)
 
-    def add_node(self, job_id, cluster, preemptible, job):
+    def add_node(self, job_id, cluster, preemptible, job, debug_log_url):
         if job is None:
             job = self.get_job(job_id)
         pipeline_def = json.loads(job.kube_job_spec)
-        operation = cluster.add_node(pipeline_def, preemptible)
-        req = NodeReq(operation_id = operation['name'],
+        operation_id = cluster.add_node(pipeline_def, preemptible, debug_log_url)
+        req = NodeReq(operation_id = operation_id,
             job_id = job_id,
             status = NODE_REQ_SUBMITTED,
             node_class = NODE_REQ_CLASS_PREEMPTIVE if preemptible else NODE_REQ_CLASS_NORMAL
         )
         self.client.put(node_req_to_entity(self.client, req))
-        return operation
+        return operation_id
 
     def get_node_reqs(self, job_id, status=None):
         query = self.client.query(kind="NodeReq")
@@ -401,8 +401,11 @@ class JobQueue:
     def __init__(self, storage):
         self.storage = storage
 
-    def add_node(self, job_id, cluster, preemptible, job=None):
-        return self.storage.add_node(job_id, cluster, preemptible, job)
+    def add_node(self, job_id, cluster, preemptible, debug_log_url, job=None):
+        return self.storage.add_node(job_id, cluster, preemptible, job, debug_log_url)
+
+    def get_node_reqs(self, job_id, status=None):
+        return self.storage.get_node_reqs(job_id, status=status)
 
     def update_node_reqs(self, job_id, cluster):
         return self.storage.update_node_reqs(job_id, cluster)
@@ -627,23 +630,34 @@ class IO:
         else:
             assert not must, "Could not find {}".format(path)
 
-    def put(self, src_filename, dst_url, must=True, skip_if_exists=False):
+    def put(self, src_filename, dst_url, must=True, skip_if_exists=False, is_public=False):
         if must:
             assert os.path.exists(src_filename), "{} does not exist".format(src_filename)
 
         bucket, path = self._get_bucket_and_path(dst_url)
         blob = bucket.blob(path)
         if skip_if_exists and blob.exists():
+            if is_public:
+                acl = blob.acl
+                if not acl.has_entity(acl.all()):
+                    log.info("Marking %s (%s) as publicly accessible", src_filename, dst_url)
+                    acl.save_predefined("publicRead")
             log.info("Already in CAS cache, skipping upload of %s", src_filename)
             log.debug("skipping put %s -> %s", src_filename, dst_url)
         else:
-            log.info("put %s -> %s", src_filename, dst_url)
+            if is_public:
+                canned_acl = "publicRead"
+                acl_params = ["-a", "public-read"]
+            else:
+                canned_acl = None
+                acl_params = []
+            log.info("put %s -> %s (acl: %s)", src_filename, dst_url, canned_acl)
             # if greater than 10MB ask gsutil to upload for us
             if os.path.getsize(src_filename) > 10 * 1024 * 1024:
                 import subprocess
-                subprocess.check_call(['gsutil', 'cp', src_filename, dst_url])
+                subprocess.check_call(['gsutil', 'cp'] + acl_params + [src_filename, dst_url])
             else:
-                blob.upload_from_filename(src_filename)
+                blob.upload_from_filename(src_filename, predefined_acl=canned_acl)
 
     def _get_url_prefix(self):
         return "gs://"
