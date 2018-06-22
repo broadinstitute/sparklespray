@@ -1,0 +1,13 @@
+[{"task_id":"testjob.0", 
+"task_index":0, 
+"job_id":"testjob",
+"status":"pending",
+"owner":null,
+"args":"{\"command\": \"sh -c 'echo started && sleep 60 && echo done'\", \"command_result_url\": \"gs://broad-achilles-kubeque/kubetest/test-out/result.json\", \"stdout_url\":\"gs://broad-achilles-kubeque/kubetest/test-out/stdout.txt\", \"uploads\":{\"include_patterns\":[\"**/*\"], \"exclude_patterns\":[], \"dst_url\":\"gs://broad-achilles-kubeque/kubetest/test-out\"}}",
+"history":[],
+"command_result_url":"gs://broad-achilles-kubeque/kubetest/test-out/result.json",
+"failure_reason":"",
+"version":1,
+"exit_code": null,
+"cluster":"test-cluster"
+}]

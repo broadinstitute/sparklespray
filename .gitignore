@@ -18,3 +18,4 @@ go/pkg
 *.pyc
 james-failure/long-job-test
 james-failure
+kubeque/bin/kubequeconsume

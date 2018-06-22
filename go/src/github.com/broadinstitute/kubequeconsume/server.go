@@ -2,6 +2,7 @@ package kubequeconsume
 
 import (
 	"errors"
+	"io"
 	"log"
 	"net"
 	"os"
@@ -39,14 +40,14 @@ func (m *Monitor) ReadOutput(ctx context.Context, in *pb.ReadOutputRequest) (*pb
 
 	defer f.Close()
 
+	log.Printf("reading %d bytes from %s (offset %d)", in.Size, stdoutPath, in.Offset)
 	buffer := make([]byte, in.Size)
 	n, err := f.ReadAt(buffer, in.Offset)
-	if err != nil {
-		return &pb.ReadOutputReply{EndOfFile: true}, nil
-	}
 	buffer = buffer[:n]
-
-	return &pb.ReadOutputReply{Data: buffer, EndOfFile: false}, nil
+	if err != nil && err != io.EOF {
+		return nil, err
+	}
+	return &pb.ReadOutputReply{Data: buffer, EndOfFile: err == io.EOF}, nil
 }
 
 // Returns error or blocks

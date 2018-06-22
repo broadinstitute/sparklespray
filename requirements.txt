@@ -3,3 +3,4 @@ attrs==17.2.0
 google-cloud==0.31.0
 google-api-python-client==1.6.4
 google-auth-httplib2==0.0.3
+grpcio-tools

@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+service Monitor {
+  // Sends a greeting
+  rpc ReadOutput (ReadOutputRequest) returns (ReadOutputReply) {}
+}
+
+// The request message containing the user's name.
+message ReadOutputRequest {
+  string taskId = 1;
+  int32 size = 2;
+  int64 offset = 3;
+}
+
+// The response message containing the greetings
+message ReadOutputReply {
+  bytes data = 1;
+  bool endOfFile = 2;
+}
