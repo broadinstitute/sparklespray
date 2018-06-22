@@ -350,7 +350,7 @@ func executeTaskInDir(ioc IOClient, workdir string, taskId string, spec *TaskSpe
 		return "", err
 	}
 
-	if loggingClient != nil {
+	if monitor != nil {
 		monitor.StartWatchingLog(taskId, stdoutPath)
 	}
 

@@ -10,6 +10,8 @@ import (
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
+
+	"github.com/broadinstitute/kubequeconsume/pb"
 )
 
 type Monitor struct {
@@ -23,7 +25,7 @@ func NewMonitor() *Monitor {
 
 func (m *Monitor) ReadOutput(ctx context.Context, in *pb.ReadOutputRequest) (*pb.ReadOutputReply, error) {
 	m.mutex.Lock()
-	stdoutPath, ok := m.mutex[in.TaskId]
+	stdoutPath, ok := m.logPerTaskId[in.TaskId]
 	m.mutex.Unlock()
 
 	if !ok {
@@ -48,9 +50,9 @@ func (m *Monitor) ReadOutput(ctx context.Context, in *pb.ReadOutputRequest) (*pb
 }
 
 // Returns error or blocks
-func (monitor *Monitor) StartServer(lis net.Listener) error {
+func (m *Monitor) StartServer(lis net.Listener) error {
 	s := grpc.NewServer()
-	pb.RegisterGreeterServer(s, monitor)
+	pb.RegisterMonitorServer(s, m)
 
 	// Register reflection service on gRPC server.
 	reflection.Register(s)
@@ -61,7 +63,7 @@ func (monitor *Monitor) StartServer(lis net.Listener) error {
 	return nil
 }
 
-func (monitor *Monitor) StartWatchingLog(taskId, stdoutPath) {
+func (m *Monitor) StartWatchingLog(taskId string, stdoutPath string) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 

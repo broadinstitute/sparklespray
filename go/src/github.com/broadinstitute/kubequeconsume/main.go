@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"cloud.google.com/go/logging"
 	"cloud.google.com/go/pubsub"
 	"golang.org/x/net/context"
 	"golang.org/x/oauth2/google"
@@ -39,6 +38,7 @@ func Main() {
 				cli.StringFlag{Name: "tasksDir"},
 				cli.StringFlag{Name: "tasksFile"},
 				cli.StringFlag{Name: "zones"},
+				cli.StringFlag{Name: "port"},
 				cli.IntFlag{Name: "timeout", Value: 5}, // 5 minutes means the process will be killed after 10 minutes
 				cli.IntFlag{Name: "restimeout",
 					Value: 10}},
@@ -56,27 +56,17 @@ func consume(c *cli.Context) error {
 	cluster := c.String("cluster")
 	tasksDir := c.String("tasksDir")
 	tasksFile := c.String("tasksFile")
+	port := c.String("port")
 	zones := strings.Split(c.String("zones"), ",")
 	ReservationTimeout := time.Duration(c.Int("restimeout")) * time.Minute
 	watchdogTimeout := time.Duration(c.Int("timeout")) * time.Minute
 	usePubSub := false
-	logLive := c.Bool("loglive")
 
 	EnableWatchdog(watchdogTimeout)
 
 	ctx := context.Background()
 
-	var loggingClient *logging.Client
 	var err error
-	if logLive {
-		log.Printf("Creating log client")
-		ctx := context.Background()
-		loggingClient, err = logging.NewClient(ctx, projectID)
-		if err != nil {
-			log.Printf("Creating log client failed: %v", err)
-			return err
-		}
-	}
 
 	ioc, err := NewIOClient(ctx)
 	if err != nil {
@@ -105,6 +95,18 @@ func consume(c *cli.Context) error {
 		owner = zone + "/" + instanceName
 	}
 
+	var monitor *Monitor
+	if port != "" {
+		lis, err := net.Listen("tcp", port)
+		if err != nil {
+			log.Printf("could not listen on %s: %v\n", port, err)
+			return err
+		}
+
+		monitor = NewMonitor()
+		go monitor.StartServer(lis)
+	}
+
 	options := &Options{
 		ClaimTimeout:      30 * time.Second, // how long do we keep trying if we get an error claiming a task
 		InitialClaimRetry: 1 * time.Second,  // if we get an error claiming, how long until we try again?
@@ -112,7 +114,7 @@ func consume(c *cli.Context) error {
 		Owner:             owner}
 
 	executor := func(taskId string, taskParam string) (string, error) {
-		return ExecuteTaskFromUrl(ioc, taskId, taskParam, cacheDir, tasksDir, loggingClient)
+		return ExecuteTaskFromUrl(ioc, taskId, taskParam, cacheDir, tasksDir, monitor)
 	}
 
 	Timeout := 1 * time.Second
@@ -202,29 +204,11 @@ func consume(c *cli.Context) error {
 		return err
 	}
 
-	var monitor *Monitor
-	if port != "" {
-		lis, err := net.Listen("tcp", port)
-		if err != nil {
-			log.Printf("could not listen on %s: %v\n", port, err)
-			return err
-		}
-
-		monitor = NewMonitor()
-		go monitor.StartServer(lis)
-	}
-
 	err = ConsumerRunLoop(ctx, queue, sleepUntilNotify, executor, timeout, options.SleepOnEmpty)
 	if err != nil {
 		log.Printf("consumerRunLoop exited with: %v\n", err)
 		return err
 	}
 
-	if loggingClient != nil {
-		err = loggingClient.Close()
-		if err != nil {
-			log.Printf("loggingClient Close returned: %v", err)
-		}
-	}
 	return nil
 }
