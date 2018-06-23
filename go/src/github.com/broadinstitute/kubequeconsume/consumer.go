@@ -56,6 +56,12 @@ type Job struct {
 	SubmitTime  float64  `datastore:"submit_time"`
 }
 
+type ClusterKeys struct {
+	Cert         []byte `datastore:"cert"`
+	PrivateKey   []byte `datastore:"private_key"`
+	SharedSecret string `datastore:"shared_secret"`
+}
+
 const INITIAL_CLAIM_RETRY_DELAY = 1000
 
 type Options struct {

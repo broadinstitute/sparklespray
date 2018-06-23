@@ -1,6 +1,7 @@
 package kubequeconsume
 
 import (
+	"crypto/tls"
 	"errors"
 	"io"
 	"log"
@@ -10,6 +11,9 @@ import (
 
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/reflection"
 
 	"github.com/broadinstitute/kubequeconsume/pb"
@@ -51,16 +55,55 @@ func (m *Monitor) ReadOutput(ctx context.Context, in *pb.ReadOutputRequest) (*pb
 }
 
 // Returns error or blocks
-func (m *Monitor) StartServer(lis net.Listener) error {
-	s := grpc.NewServer()
+func (m *Monitor) StartServer(port string, certPEMBlock []byte, keyPEMBlock []byte, sharedSecret string) error {
+	lis, err := net.Listen("tcp", port)
+	if err != nil {
+		log.Printf("could not listen on %s: %v\n", port, err)
+		return err
+	}
+
+	tlsCert, err := tls.X509KeyPair(certPEMBlock, keyPEMBlock)
+	if err != nil {
+		return err
+	}
+
+	creds := credentials.NewServerTLSFromCert(&tlsCert)
+
+	AuthInterceptor := func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+		keys, ok := metadata.FromIncomingContext(ctx)
+		if !ok {
+			log.Printf("no meta")
+			return nil, errors.New("missing meta")
+		}
+		log.Printf("keys=%v", keys)
+		t := keys.Get("shared-secret")[0]
+		log.Printf("t=%v", t)
+		//		t := ctx.Value("shared-secret")
+		log.Printf("Token: %v", t)
+		if t == "" {
+			return nil, grpc.Errorf(codes.Unauthenticated, "missing shared-secret")
+		}
+		secretFromClient := t //.(string)
+		if sharedSecret != secretFromClient {
+			return nil, grpc.Errorf(codes.Unauthenticated, "incorrect shared-secret")
+		}
+		return handler(ctx, req)
+	}
+
+	s := grpc.NewServer(grpc.Creds(creds), grpc.UnaryInterceptor(AuthInterceptor))
 	pb.RegisterMonitorServer(s, m)
 
 	// Register reflection service on gRPC server.
 	reflection.Register(s)
-	if err := s.Serve(lis); err != nil {
-		log.Printf("failed to serve: %v", err)
-		return err
+
+	start := func() {
+		if err := s.Serve(lis); err != nil {
+			log.Printf("failed to serve: %v", err)
+		}
 	}
+
+	go start()
+
 	return nil
 }
 

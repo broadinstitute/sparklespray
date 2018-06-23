@@ -176,6 +176,13 @@ def validate_cmd(jq, io, cluster, config):
 
 def submit(jq, io, cluster, job_id, spec, dry_run, config, skip_kube_submit, metadata, kubequeconsume_url,
            exec_local=False, loglive=False, ):
+    cert, key = jq.storage.get_cert_and_key()
+    if cert is None:
+        log.info("No cert and key for cluster found -- generating now")
+        import kubeque.certgen
+        cert, key = kubeque.certgen.create_self_signed_cert()
+        jq.storage.set_cert_and_key(cert, key)
+
     log.info("Submitting job with id: %s", job_id)
 
     # where to take this from? arg with a default of 1?

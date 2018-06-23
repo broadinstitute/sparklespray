@@ -2,11 +2,11 @@ package kubequeconsume
 
 import (
 	"log"
-	"net"
 	"os"
 	"strings"
 	"time"
 
+	"cloud.google.com/go/datastore"
 	"cloud.google.com/go/pubsub"
 	"golang.org/x/net/context"
 	"golang.org/x/oauth2/google"
@@ -95,17 +95,7 @@ func consume(c *cli.Context) error {
 		owner = zone + "/" + instanceName
 	}
 
-	var monitor *Monitor
-	if port != "" {
-		lis, err := net.Listen("tcp", port)
-		if err != nil {
-			log.Printf("could not listen on %s: %v\n", port, err)
-			return err
-		}
-
-		monitor = NewMonitor()
-		go monitor.StartServer(lis)
-	}
+	monitor := NewMonitor()
 
 	options := &Options{
 		ClaimTimeout:      30 * time.Second, // how long do we keep trying if we get an error claiming a task
@@ -192,16 +182,37 @@ func consume(c *cli.Context) error {
 		}
 	}
 
-	//	func ConsumerRunLoop(ctx context.Context, queue *Queue, sleepUntilNotify func(sleepTime time.Duration), executor Executor, timeout Timeout, SleepOnEmpty time.Duration) error {
+	client, err := datastore.NewClient(ctx, projectID)
+	if err != nil {
+		log.Printf("Creating datastore client failed: %v", err)
+		return err
+	}
+
 	var queue Queue
 	if tasksFile != "" {
 		queue, err = CreatePreloadedQueue(tasksFile)
 	} else {
-		queue, err = CreateDataStoreQueue(ctx, projectID, cluster, owner, options.InitialClaimRetry, options.ClaimTimeout)
+		queue, err = CreateDataStoreQueue(client, cluster, owner, options.InitialClaimRetry, options.ClaimTimeout)
 	}
 	if err != nil {
 		log.Printf("failed to initialize queue: %v\n", err)
 		return err
+	}
+
+	if port != "" {
+		entityKey := datastore.NameKey("ClusterKeys", "sparklespray", nil)
+		var clusterKeys ClusterKeys
+		err := client.Get(ctx, entityKey, &clusterKeys)
+		if err != nil {
+			log.Printf("failed to get cluster keys: %v\n", err)
+			return err
+		}
+
+		err = monitor.StartServer(port, clusterKeys.Cert, clusterKeys.PrivateKey, clusterKeys.SharedSecret)
+		if err != nil {
+			log.Printf("Failed to start grpc server: %v", err)
+			return err
+		}
 	}
 
 	err = ConsumerRunLoop(ctx, queue, sleepUntilNotify, executor, timeout, options.SleepOnEmpty)

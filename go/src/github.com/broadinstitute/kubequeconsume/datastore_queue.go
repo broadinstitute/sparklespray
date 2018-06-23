@@ -18,13 +18,7 @@ type DataStoreQueue struct {
 	ClaimTimeout      time.Duration
 }
 
-func CreateDataStoreQueue(ctx context.Context, projectID string, cluster string, owner string, InitialClaimRetry time.Duration, ClaimTimeout time.Duration) (*DataStoreQueue, error) {
-	client, err := datastore.NewClient(ctx, projectID)
-	if err != nil {
-		log.Printf("Creating datastore client failed: %v", err)
-		return nil, err
-	}
-
+func CreateDataStoreQueue(client *datastore.Client, cluster string, owner string, InitialClaimRetry time.Duration, ClaimTimeout time.Duration) (*DataStoreQueue, error) {
 	return &DataStoreQueue{client: client, cluster: cluster, owner: owner, InitialClaimRetry: InitialClaimRetry, ClaimTimeout: ClaimTimeout}, nil
 }
 
