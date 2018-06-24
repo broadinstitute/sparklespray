@@ -268,6 +268,9 @@ information is contained within results.json in the output directory for each ta
 
 # Viewing output of tasks
 
+TODO: Write docs about setting up firewall rule to allow traffic on port
+6032
+
 IF you submit a task with the "--loglive" option, the output of your tasks
 will be written to StackDriver (https://cloud.google.com/logging/) where you
 can view the output as its written.

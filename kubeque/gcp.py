@@ -70,6 +70,7 @@ class Task(object):
     job_id = attr.ib()
     status = attr.ib() # one of: pending, claimed, success, failed, lost
     owner = attr.ib()
+    monitor_address = attr.ib()
     args = attr.ib()
     history = attr.ib() # list of TaskHistory
     command_result_url = attr.ib()
@@ -87,6 +88,14 @@ class Job(object):
     cluster = attr.ib()
     status = attr.ib()
     submit_time = attr.ib()
+
+@attr.s
+class TaskStatus(object):
+    node_status = attr.ib()
+    node = attr.ib()
+    task = attr.ib()
+    operation_id = attr.ib()
+
 
 NODE_REQ_SUBMITTED = "submitted"
 NODE_REQ_RUNNING = "running"
@@ -165,6 +174,7 @@ def task_to_entity(client, o):
     entity['args'] = o.args
     entity['failure_reason'] = o.failure_reason
     entity['cluster'] = o.cluster
+    entity['monitor_address'] = o.monitor_address
     entity['command_result_url'] = o.command_result_url
     history = []
     for h in o.history:
@@ -196,7 +206,8 @@ def entity_to_task(entity):
         failure_reason = entity.get('failure_reason'),
         command_result_url = entity.get('command_result_url'),
         exit_code = entity.get('exit_code'),
-        cluster = entity.get("cluster")
+        cluster = entity.get("cluster"),
+        monitor_address = entity.get('monitor_address')
     )
 
 def entity_to_job(entity):
@@ -526,7 +537,8 @@ class JobQueue:
                         history=[ TaskHistory(timestamp=now, status="pending")],
                         owner=None,
                         command_result_url=command_result_url,
-                                cluster=cluster)
+                                cluster=cluster,
+                                monitor_address=None)
                     tasks.append(task)
                     batch.save(task)
                     task_index += 1

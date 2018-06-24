@@ -36,6 +36,7 @@ type Task struct {
 	Version          int32          `datastore:"version" json:"version"`
 	ExitCode         string         `datastore:"exit_code" json:"exit_code"`
 	Cluster          string         `datastore:"cluster" json:"cluster"`
+	MonitorAddress   string         `datastore:"monitor_address" json:"monitor_address"`
 }
 
 type TaskStatusNotification struct {
@@ -150,7 +151,7 @@ func ConsumerRunLoop(ctx context.Context, queue Queue, sleepUntilNotify func(sle
 	return nil
 }
 
-func updateTaskClaimed(ctx context.Context, q *DataStoreQueue, task_id string, newOwner string) (*Task, error) {
+func updateTaskClaimed(ctx context.Context, q *DataStoreQueue, task_id string, newOwner string, monitorAddress string) (*Task, error) {
 	now := getTimestampMillis()
 	event := TaskHistory{Timestamp: float64(now) / 1000.0,
 		Status: STATUS_CLAIMED,
@@ -165,6 +166,7 @@ func updateTaskClaimed(ctx context.Context, q *DataStoreQueue, task_id string, n
 		task.History = append(task.History, &event)
 		task.Status = STATUS_CLAIMED
 		task.Owner = newOwner
+		task.MonitorAddress = monitorAddress
 
 		return true
 	}

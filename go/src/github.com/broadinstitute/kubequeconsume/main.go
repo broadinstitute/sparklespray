@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"cloud.google.com/go/datastore"
-	"cloud.google.com/go/pubsub"
 	"golang.org/x/net/context"
 	"golang.org/x/oauth2/google"
 
@@ -60,7 +59,7 @@ func consume(c *cli.Context) error {
 	zones := strings.Split(c.String("zones"), ",")
 	ReservationTimeout := time.Duration(c.Int("restimeout")) * time.Minute
 	watchdogTimeout := time.Duration(c.Int("timeout")) * time.Minute
-	usePubSub := false
+	// usePubSub := false
 
 	EnableWatchdog(watchdogTimeout)
 
@@ -74,6 +73,7 @@ func consume(c *cli.Context) error {
 		return err
 	}
 
+	externalIP := owner
 	if owner == "" {
 		log.Printf("Querying metadata to get host instance name")
 		instanceName, err := GetInstanceName()
@@ -93,6 +93,13 @@ func consume(c *cli.Context) error {
 		}
 
 		owner = zone + "/" + instanceName
+		externalIP, err = GetExternalIP()
+		if err != nil {
+			log.Printf("GetExternalIP failed: %v", err)
+			return err
+		} else {
+			log.Printf("Got externalIP: %s", externalIP)
+		}
 	}
 
 	monitor := NewMonitor()
@@ -125,62 +132,62 @@ func consume(c *cli.Context) error {
 		ReservationSize, ReservationTimeout)
 
 	var sleepUntilNotify func(sleepTime time.Duration)
-	if usePubSub {
-		// set up notify
-		notifyChannel := make(chan bool, 100)
-		log.Printf("Creating pubsub client...")
-		pubsubClient, err := pubsub.NewClient(ctx, projectID)
+	// if usePubSub {
+	// 	// set up notify
+	// 	notifyChannel := make(chan bool, 100)
+	// 	log.Printf("Creating pubsub client...")
+	// 	pubsubClient, err := pubsub.NewClient(ctx, projectID)
 
-		if err != nil {
-			log.Printf("Could not create pubsub client: %v", err)
-			return err
-		}
-		log.Printf("pubsub client err=%v", err)
+	// 	if err != nil {
+	// 		log.Printf("Could not create pubsub client: %v", err)
+	// 		return err
+	// 	}
+	// 	log.Printf("pubsub client err=%v", err)
 
-		topic := pubsubClient.Topic("kubeque-global")
-		subCtx, subCancel := context.WithCancel(ctx)
-		sub, err := pubsubClient.CreateSubscription(subCtx, "sub-name",
-			pubsub.SubscriptionConfig{Topic: topic})
-		if err != nil {
-			log.Printf("CreateSubscription failed: %v", err)
-		} else {
-			go (func() {
-				err := sub.Receive(ctx, func(ctx context.Context, m *pubsub.Message) {
-					log.Printf("Got message: %s", m.Data)
-					m.Ack()
-					notifyChannel <- true
-				})
-				if err != nil {
-					log.Printf("Subscription receive failed: %v", err)
-				}
-			})()
+	// 	topic := pubsubClient.Topic("kubeque-global")
+	// 	subCtx, subCancel := context.WithCancel(ctx)
+	// 	sub, err := pubsubClient.CreateSubscription(subCtx, "sub-name",
+	// 		pubsub.SubscriptionConfig{Topic: topic})
+	// 	if err != nil {
+	// 		log.Printf("CreateSubscription failed: %v", err)
+	// 	} else {
+	// 		go (func() {
+	// 			err := sub.Receive(ctx, func(ctx context.Context, m *pubsub.Message) {
+	// 				log.Printf("Got message: %s", m.Data)
+	// 				m.Ack()
+	// 				notifyChannel <- true
+	// 			})
+	// 			if err != nil {
+	// 				log.Printf("Subscription receive failed: %v", err)
+	// 			}
+	// 		})()
 
-			deleteSubscription := func() {
-				log.Printf("Deleting subscription")
-				subCancel()
-				err = sub.Delete(ctx)
-				if err != nil {
-					log.Printf("Got error while deleting subscription: %v", err)
-				}
-			}
-			defer deleteSubscription()
-		}
+	// 		deleteSubscription := func() {
+	// 			log.Printf("Deleting subscription")
+	// 			subCancel()
+	// 			err = sub.Delete(ctx)
+	// 			if err != nil {
+	// 				log.Printf("Got error while deleting subscription: %v", err)
+	// 			}
+	// 		}
+	// 		defer deleteSubscription()
+	// 	}
 
-		sleepUntilNotify = func(sleepTime time.Duration) {
-			log.Printf("Going to sleep (max: %d milliseconds)", sleepTime/time.Millisecond)
-			select {
-			case <-notifyChannel:
-				log.Printf("Woke up due to pubsub notification")
-			case <-time.After(sleepTime):
-				log.Printf("Woke up due to timeout")
-			}
-		}
-	} else {
-		sleepUntilNotify = func(sleepTime time.Duration) {
-			log.Printf("Going to sleep (max: %d milliseconds)", sleepTime/time.Millisecond)
-			time.Sleep(sleepTime)
-		}
+	// 	sleepUntilNotify = func(sleepTime time.Duration) {
+	// 		log.Printf("Going to sleep (max: %d milliseconds)", sleepTime/time.Millisecond)
+	// 		select {
+	// 		case <-notifyChannel:
+	// 			log.Printf("Woke up due to pubsub notification")
+	// 		case <-time.After(sleepTime):
+	// 			log.Printf("Woke up due to timeout")
+	// 		}
+	// 	}
+	// } else {
+	sleepUntilNotify = func(sleepTime time.Duration) {
+		log.Printf("Going to sleep (max: %d milliseconds)", sleepTime/time.Millisecond)
+		time.Sleep(sleepTime)
 	}
+	// }
 
 	client, err := datastore.NewClient(ctx, projectID)
 	if err != nil {
@@ -188,17 +195,7 @@ func consume(c *cli.Context) error {
 		return err
 	}
 
-	var queue Queue
-	if tasksFile != "" {
-		queue, err = CreatePreloadedQueue(tasksFile)
-	} else {
-		queue, err = CreateDataStoreQueue(client, cluster, owner, options.InitialClaimRetry, options.ClaimTimeout)
-	}
-	if err != nil {
-		log.Printf("failed to initialize queue: %v\n", err)
-		return err
-	}
-
+	monitorAddress := ""
 	if port != "" {
 		entityKey := datastore.NameKey("ClusterKeys", "sparklespray", nil)
 		var clusterKeys ClusterKeys
@@ -208,11 +205,23 @@ func consume(c *cli.Context) error {
 			return err
 		}
 
-		err = monitor.StartServer(port, clusterKeys.Cert, clusterKeys.PrivateKey, clusterKeys.SharedSecret)
+		err = monitor.StartServer(":"+port, clusterKeys.Cert, clusterKeys.PrivateKey, clusterKeys.SharedSecret)
 		if err != nil {
 			log.Printf("Failed to start grpc server: %v", err)
 			return err
 		}
+		monitorAddress = externalIP + ":" + port
+	}
+
+	var queue Queue
+	if tasksFile != "" {
+		queue, err = CreatePreloadedQueue(tasksFile)
+	} else {
+		queue, err = CreateDataStoreQueue(client, cluster, owner, options.InitialClaimRetry, options.ClaimTimeout, monitorAddress)
+	}
+	if err != nil {
+		log.Printf("failed to initialize queue: %v\n", err)
+		return err
 	}
 
 	err = ConsumerRunLoop(ctx, queue, sleepUntilNotify, executor, timeout, options.SleepOnEmpty)

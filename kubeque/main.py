@@ -16,6 +16,7 @@ import copy
 import contextlib
 import kubeque.gcs_pipeline as pipeline
 import argparse
+from kubeque.logclient import LogMonitor
 
 log = logging.getLogger(__name__)
 
@@ -229,9 +230,8 @@ def submit(jq, io, cluster, job_id, spec, dry_run, config, skip_kube_submit, met
         assert cpu_request < 2
 
         project = config['project']
-        consume_exe_args = ["--cluster", cluster_name, "--projectId", project, "--zones", ",".join(config['zones'])]
-        if loglive:
-            consume_exe_args.append("--loglive")
+        port = config.get('monitor_port', '6032')
+        consume_exe_args = ["--cluster", cluster_name, "--projectId", project, "--zones", ",".join(config['zones']), "--port", port]
 
         machine_specs = MachineSpec(boot_volume_in_gb = bootDiskSizeGb,
             mount_point = config.get("mount", "/mnt/"),
@@ -243,7 +243,8 @@ def submit(jq, io, cluster, job_id, spec, dry_run, config, skip_kube_submit, met
             consume_exe_url=kubequeconsume_url,
             docker_image=image,
             consume_exe_args=consume_exe_args,
-            machine_specs=machine_specs)
+            machine_specs=machine_specs,
+            monitor_port=int(port))
 
         jq.submit(job_id, list(zip(task_spec_urls, command_result_urls)), pipeline_spec, metadata, cluster_name)
         if not skip_kube_submit and not exec_local:
@@ -701,7 +702,7 @@ def saturate_cmd(jq, io, cluster, args):
 def status_cmd(jq, io, cluster, args):
     jobids = _get_jobids_from_pattern(jq, args.jobid_pattern)
 
-    if args.wait:
+    if args.wait or args.loglive:
         assert len(jobids) == 1, "When watching, only one jobid allowed, but the following matched wildcard: {}".format(
             jobids)
         jobid = jobids[0]
@@ -855,8 +856,12 @@ def _exception_guard(deferred_msg, reset=None):
             reset()
 
 
+def print_error_lines(lines):
+    from termcolor import colored, cprint
+    for line in lines:
+        print(colored(line, "red"))
 
-from kubeque.logclient import LogMonitor,print_error_lines
+
 
 class NodeRespawn:
     def __init__(self, cluster_status_fn, tasks_status_fn, get_pending_fn, max_nodes):
@@ -950,7 +955,10 @@ def watch(io, jq, jobid, cluster, refresh_delay=5, min_check_time=10, loglive=Fa
         if len(job.tasks) != 1:
             log.warning("Could not tail logs because there are %d tasks, and we can only watch one task at a time", len(job.tasks))
         else:
-            log_monitor = LogMonitor(cluster.project, job.tasks[0])
+            task_id = job.tasks[0]
+            task = jq.storage.get_task(task_id)
+
+            log_monitor = LogMonitor(jq.storage.client, task.monitor_address, task_id)
 
     cluster_name = job.cluster
     prev_status = None
@@ -1009,7 +1017,7 @@ def watch(io, jq, jobid, cluster, refresh_delay=5, min_check_time=10, loglive=Fa
                         respawn.reconcile_node_count(lambda count: _addnodes(jobid, jq, cluster, count, False))
 
             if log_monitor is not None:
-                with _exception_guard(lambda: "polling log monitor threw exception", reset=log_monitor.reset):
+                with _exception_guard(lambda: "polling log monitor threw exception"):
                     log_monitor.poll()
 
             time.sleep(refresh_delay)

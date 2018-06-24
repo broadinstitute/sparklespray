@@ -266,7 +266,7 @@ class Cluster:
         log.warning("determine_machine_type is a stub, always returns n1-standard-1")
         return "n1-standard-1"
 
-    def create_pipeline_spec(self, jobid, cluster_name, consume_exe_url, docker_image, consume_exe_args, machine_specs):
+    def create_pipeline_spec(self, jobid, cluster_name, consume_exe_url, docker_image, consume_exe_args, machine_specs, monitor_port):
         mount_point = machine_specs.mount_point
 
         consume_exe_path = os.path.join(mount_point, "consume")
@@ -284,7 +284,8 @@ class Cluster:
                                           docker_command=[consume_exe_path, "consume", "--cacheDir",
                                                           os.path.join(consume_data, "cache"), "--tasksDir",
                                                           os.path.join(consume_data, "tasks")] + consume_exe_args,
-                                          machine_specs=machine_specs)
+                                          machine_specs=machine_specs,
+                                          monitor_port=monitor_port)
 
     def _create_pipeline_json(self,
                               jobid,
@@ -293,7 +294,8 @@ class Cluster:
                               setup_parameters,
                               docker_image,
                               docker_command,
-                              machine_specs):
+                              machine_specs,
+                              monitor_port):
         # labels have a few restrictions
         normalized_jobid = _normalize_label(jobid)
 
@@ -315,7 +317,8 @@ class Cluster:
                      },
                     {'imageUri': docker_image,
                      'commands': docker_command,
-                     'mounts': mounts
+                     'mounts': mounts,
+                     'portMappings': {str(monitor_port): monitor_port}
                      }
                 ],
                 'resources': {
@@ -349,5 +352,3 @@ class Cluster:
 
         return pipeline_def
 
-# next task: support consume rpc calls (use gprc?)
-# Write seperate test case for that. (launch consume locally, and try to communicate with it. Maybe make a one-shot mode where job can be read from file instead of pulled from queue?)
