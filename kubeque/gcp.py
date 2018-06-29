@@ -1,5 +1,5 @@
 # Authorize server-to-server interactions from Google Compute Engine.
-from google.cloud import datastore, pubsub
+from google.cloud import datastore
 import google.cloud.exceptions
 import logging
 
@@ -8,6 +8,7 @@ import os
 import re
 import hashlib
 import json
+from .task_store import STATUS_CLAIMED, STATUS_FAILED, STATUS_COMPLETE, STATUS_KILLED, STATUS_PENDING, INCOMPLETE_TASK_STATES
 
 from fnmatch import fnmatch
 
@@ -19,16 +20,9 @@ import time
 from collections import namedtuple
 import sys
 
-STATUS_CLAIMED = "claimed"
-STATUS_PENDING = "pending"
-STATUS_FAILED = "failed"
-STATUS_COMPLETE = "complete"
-STATUS_KILLED = "killed"
 
 CLAIM_TIMEOUT = 5
 
-JOB_STATUS_SUBMITTED = "submitted"
-JOB_STATUS_KILLED = "killed"
 
 log = logging.getLogger(__name__)
 
@@ -54,62 +48,8 @@ def get_credentials(account, cred_file="~/.config/gcloud/credentials"):
     #     token_uri=oauth2client.GOOGLE_TOKEN_URI,
     #     user_agent='Python client library')
 
-@attr.s
-class TaskHistory(object):
-    timestamp = attr.ib()
-    status = attr.ib()
-    owner = attr.ib(default=None)
-    failure_reason = attr.ib(default=None)
-
-@attr.s
-class Task(object):
-    # will be of the form: job_id + task_index
-    task_id = attr.ib()
-
-    task_index = attr.ib()
-    job_id = attr.ib()
-    status = attr.ib() # one of: pending, claimed, success, failed, lost
-    owner = attr.ib()
-    monitor_address = attr.ib()
-    args = attr.ib()
-    history = attr.ib() # list of TaskHistory
-    command_result_url = attr.ib()
-    cluster = attr.ib()
-    failure_reason = attr.ib(default=None)
-    version = attr.ib(default=1)
-    exit_code = attr.ib(default=None)
-
-@attr.s
-class Job(object):
-    job_id = attr.ib()
-    tasks = attr.ib()
-    kube_job_spec = attr.ib()
-    metadata = attr.ib()
-    cluster = attr.ib()
-    status = attr.ib()
-    submit_time = attr.ib()
-
-@attr.s
-class TaskStatus(object):
-    node_status = attr.ib()
-    node = attr.ib()
-    task = attr.ib()
-    operation_id = attr.ib()
 
 
-NODE_REQ_SUBMITTED = "submitted"
-NODE_REQ_RUNNING = "running"
-NODE_REQ_COMPLETE = "complete"
-
-NODE_REQ_CLASS_PREEMPTIVE = "preemptable"
-NODE_REQ_CLASS_NORMAL = "normal"
-
-@attr.s
-class NodeReq(object):
-    operation_id = attr.ib()
-    job_id = attr.ib()
-    status = attr.ib()
-    node_class = attr.ib()
 
 class BatchAdapter:
     def __init__(self, client):
@@ -130,294 +70,17 @@ class BatchAdapter:
     def commit(self):
         self.batch.commit()
 
-def node_req_to_entity(client, o):
-    assert o.operation_id is not None
-    entity_key = client.key("NodeReq", o.operation_id)
-    entity = datastore.Entity(key=entity_key)
-    entity['job_id'] = o.job_id
-    entity['status'] = o.status   
-    entity['node_class'] = o.node_class
-    return entity
 
-def entity_to_node_req(entity):
-    return NodeReq(operation_id=entity.key.name,
-        job_id = entity['job_id'], 
-        status=entity['status'],
-        node_class = entity['node_class'])
 
-def job_to_entity(client, o):
-    entity_key = client.key("Job", o.job_id)
-    entity = datastore.Entity(key=entity_key)
-    entity['tasks'] = o.tasks
-    entity['cluster'] = o.cluster
-    entity['kube_job_spec'] = o.kube_job_spec
-    metadata = []
-    for k, v in o.metadata.items():
-        m = datastore.Entity()
-        m['name'] = k
-        m['value'] = v
-        metadata.append(m)
-    entity['metadata'] = metadata
-    entity['status'] = o.status
-    entity['submit_time'] = o.submit_time
 
-    return entity
-
-def task_to_entity(client, o):
-    entity_key = client.key("Task", o.task_id)
-    entity = datastore.Entity(key=entity_key)
-    entity['task_index'] = o.task_index
-    entity['job_id'] = o.job_id
-    entity['status'] = o.status
-    assert isinstance(o.status, str) 
-    entity['owner'] = o.owner
-    entity['args'] = o.args
-    entity['failure_reason'] = o.failure_reason
-    entity['cluster'] = o.cluster
-    entity['monitor_address'] = o.monitor_address
-    entity['command_result_url'] = o.command_result_url
-    history = []
-    for h in o.history:
-        e = datastore.Entity()
-        e['timestamp'] = h.timestamp
-        e['status'] = h.status
-        history.append(e)
-
-    entity['history'] = history
-    entity['version'] = o.version
-    entity['exit_code'] = o.exit_code
-    return entity
-
-def entity_to_task(entity):
-    assert isinstance(entity['status'], str)
-    history = []
-    for he in entity.get('history',[]):
-        history.append(TaskHistory(timestamp=he['timestamp'], status=he['status'], owner=he.get('owner'), failure_reason=he.get('failure_reason')))
-
-    return Task(
-        task_id = entity.key.name,
-        task_index = entity['task_index'],
-        job_id = entity['job_id'],
-        status = entity['status'],
-        owner = entity['owner'],
-        args = entity['args'],
-        history = history,
-        version = entity['version'],
-        failure_reason = entity.get('failure_reason'),
-        command_result_url = entity.get('command_result_url'),
-        exit_code = entity.get('exit_code'),
-        cluster = entity.get("cluster"),
-        monitor_address = entity.get('monitor_address')
-    )
-
-def entity_to_job(entity):
-    metadata = entity.get('metadata', [])
-    return Job(job_id=entity.key.name,
-               tasks=entity.get('tasks',[]),
-               cluster=entity['cluster'],
-               kube_job_spec=entity.get('kube_job_spec'),
-               metadata=dict([(m['name'],m['value']) for m in metadata]),
-               status=entity['status'],
-               submit_time=entity.get('submit_time'))
 
 class JobStorage:
-    def __init__(self, client, pubsub, log_client):
+    def __init__(self, client):
         self.client = client
-        self.pubsub = pubsub
-        self.log_client = log_client
 
-    def get_cert_and_key(self):
-        entity_key = self.client.key("ClusterKeys", "sparklespray")
-        entity = self.client.get(entity_key)
-        if entity is None:
-            return None, None
-        return entity['cert'], entity['private_key']
 
-    def set_cert_and_key(self, cert, key):
-        entity_key = self.client.key("ClusterKeys", "sparklespray")
-        entity = datastore.Entity(key=entity_key, exclude_from_indexes=('cert', 'private_key', 'shared_secret'))
-        entity['cert'] = cert
-        entity['private_key'] = key
-        import random, string
-        entity['shared_secret'] = ''.join(random.choice(string.ascii_uppercase + string.digits) for _ in range(20))
-        self.client.put(entity)
 
-    def get_task(self, task_id):
-        task_key = self.client.key("Task", task_id)
-        return entity_to_task(self.client.get(task_key))
 
-    def get_jobids(self):
-        query = self.client.query(kind="Job")
-        jobs_it = query.fetch()
-        jobids = []
-        for entity_job in jobs_it:
-            jobids.append(entity_job.key.name)
-        return jobids
-
-    def _job_id_to_topic(self, job_id):
-        return "job-"+job_id
-
-    def store_job(self, job):
-        existing_job = self.get_job(job.job_id, must=False)
-        if existing_job is not None:
-            raise Exception("Cannot create job \"{}\", ID is already used".format(job.job_id))
-
-        with self.batch_write() as batch:
-           batch.save(job)
-           log.info("Saved job definition with %d tasks", len(job.tasks))
-
-        topic_name = self._job_id_to_topic(job.job_id)
-        if self.pubsub:
-            log.info("Creating topic %s", topic_name)
-            topic = self.pubsub.topic(topic_name)
-            topic.create()
-
-    def update_job(self, job_id, mutate_fn):
-        job_key = self.client.key("Job", job_id)
-        entity_job = self.client.get(job_key)
-        job = entity_to_job(entity_job)
-        update_ok = mutate_fn(job)
-        if update_ok:
-            entity_job = job_to_entity(self.client, job)
-            self.client.put(entity_job)
-        return update_ok, job
-
-    def delete_job(self, job_id):
-        job_key = self.client.key("Job", job_id)
-        entity_job = self.client.get(job_key)
-
-        task_ids = entity_job.get("tasks",[])
-        # delete tasks
-        keys = [self.client.key("Task", taskid) for taskid in set(task_ids)]
-        # clean up associated node requests
-        node_reqs = self.get_node_reqs(job_id)
-        # log.info("Deleting records about %d node requests", len(node_reqs))
-        node_req_keys = [self.client.key("NodeReq", x.operation_id) for x in node_reqs ]
-        keys += node_req_keys
-        # delete job
-        keys += [job_key]
-        # log.info("Deleting %s", repr(keys))
-
-        # perform the delete
-        BATCH_SIZE = 300
-        for chunk_start in range(0, len(keys), BATCH_SIZE):
-            key_batch = keys[chunk_start:chunk_start+BATCH_SIZE]
-            self.client.delete_multi(key_batch)
-
-        topic_name = self._job_id_to_topic(job_id)
-        if self.pubsub:
-            topic = self.pubsub.topic(topic_name)
-            if topic.exists():
-                topic.delete()
-
-        # probably kind of a slow op. For now, only try to clean up if there are fewer than 5 tasks
-        # in the future, put a flag on the job so we know whether we need to clean up logs
-        if self.log_client and len(task_ids) <= 5:
-            for task_id in task_ids:
-                try:
-                    self.log_client.logger(task_id).delete()
-                except google.cloud.exceptions.NotFound:
-                    pass
-                except:
-                    print("Unexpected error deleting client log:", sys.exc_info()[0])
-
-    def get_job(self, job_id, must = True):
-        job_key = self.client.key("Job", job_id)
-        job_entity = self.client.get(job_key)
-        if job_entity is None:
-            if must:
-                raise Exception("Could not find job with id {}".format(job_id))
-            else:
-                return None
-        return entity_to_job(job_entity)
-
-    def get_last_job(self):
-        query = self.client.query(kind="Job")
-        query.order = ["-submit_time"]
-        job_entity = list(query.fetch(limit=1))[0]
-        return entity_to_job(job_entity)
-
-    def add_node(self, job_id, cluster, preemptible, job, debug_log_url):
-        if job is None:
-            job = self.get_job(job_id)
-        pipeline_def = json.loads(job.kube_job_spec)
-        operation_id = cluster.add_node(pipeline_def, preemptible, debug_log_url)
-        req = NodeReq(operation_id = operation_id,
-            job_id = job_id,
-            status = NODE_REQ_SUBMITTED,
-            node_class = NODE_REQ_CLASS_PREEMPTIVE if preemptible else NODE_REQ_CLASS_NORMAL
-        )
-        self.client.put(node_req_to_entity(self.client, req))
-        return operation_id
-
-    def get_node_reqs(self, job_id, status=None):
-        query = self.client.query(kind="NodeReq")
-        query.add_filter("job_id", "=", job_id)
-        if status is not None:
-            query.add_filter("status", "=", status)
-        results = []
-        for entity in query.fetch():
-            node_req = entity_to_node_req(entity)
-            results.append(node_req)
-        return results
-
-    def get_pending_node_req_count(self, job_id):
-        return len(self.get_node_reqs(job_id, status=NODE_REQ_SUBMITTED))
-
-    def update_node_reqs(self, job_id, cluster):
-        # only need to worry about things that are submitted and have not yet been fulfilled
-        node_reqs = self.get_node_reqs(job_id, status=NODE_REQ_SUBMITTED)
-        for node_req in node_reqs:
-            new_status = cluster.get_node_req_status(node_req.operation_id)
-            if new_status != node_req.status:
-                log.info("Changing status of node request %s from %s to %s", node_req.operation_id, node_req.status, new_status)
-                node_req.status = new_status
-                self.client.put(node_req_to_entity(self.client, node_req))
-
-    def get_tasks(self, job_id = None, status = None, max_fetch=None):
-        query = self.client.query(kind="Task")
-        if job_id is not None:
-            query.add_filter("job_id", "=", job_id)
-        if status is not None:
-            query.add_filter("status", "=", status)
-        start_time = time.time()
-        tasks_it = query.fetch(limit=max_fetch)
-        # do I need to use next_page?
-        tasks = []
-        for entity_task in tasks_it:
-            #log.info("fetched: %s", entity_task)
-            if status is not None:
-                if entity_task["status"] != status:
-                    log.warning("Query returned something that did not match query: %s", entity_task)
-                    continue
-            tasks.append(entity_to_task(entity_task))
-            if max_fetch is not None and len(tasks) >= max_fetch:
-                break
-        end_time = time.time()
-        log.debug("get_tasks took %s seconds", end_time-start_time)
-        return tasks
-
-    def get_tasks_for_cluster(self, cluster_name, status, max_fetch=None):
-        query = self.client.query(kind="Task")
-        query.add_filter("cluster", "=", cluster_name)
-        query.add_filter("status", "=", status)
-        start_time = time.time()
-        tasks_it = query.fetch(limit=max_fetch)
-        tasks = []
-        for entity_task in tasks_it:
-            tasks.append(entity_to_task(entity_task))
-            if max_fetch is not None and len(tasks) >= max_fetch:
-                break
-        end_time = time.time()
-        log.debug("get_tasks took %s seconds", end_time-start_time)
-        return tasks
-
-    def update_task(self, task):
-        original_version = task.version
-        task.version = original_version + 1
-        self.client.put(task_to_entity(self.client, task))
-        return True
-    
     @contextmanager
     def batch_write(self):
         batch = BatchAdapter(self.client)
@@ -516,7 +179,6 @@ class JobQueue:
         self._reset_task(task, status)
 
     def submit(self, job_id, args, kube_job_spec, metadata, cluster):
-        import json
         kube_job_spec = json.dumps(kube_job_spec)
         tasks = []
         now = time.time()
@@ -575,145 +237,10 @@ class JobQueue:
         for task in tasks:
             self._update_task_status(task.task_id, "lost")
 
-def create_gcs_job_queue(project_id, credentials, use_pubsub):
+def create_gcs_job_queue(project_id, credentials):
     client = datastore.Client(project_id, credentials=credentials)
-    if use_pubsub:
-        pubsub_client = pubsub.Client(project_id, credentials=credentials)
-    else:
-        pubsub_client = None
-
-    from google.cloud import logging as gcp_logging
-    log_client = gcp_logging.Client()
-
-    storage = JobStorage(client, pubsub_client, log_client)
+    storage = JobStorage(client)
     return JobQueue(storage)
-
-def _compute_hash(filename):
-    m = hashlib.sha256()
-    with open(filename, "rb") as fd:
-        for chunk in iter(lambda: fd.read(10000), b""):
-            m.update(chunk)
-    return m.hexdigest()
-
-def _join(*args):
-    concated = args[0]
-    for x in args[1:]:
-        if concated[-1] == "/":
-            concated = concated[:-1]
-        concated += "/" + x
-    return concated
-
-class IO:
-    def __init__(self, project, cas_url_prefix, credentials=None, compute_hash=_compute_hash):
-        assert project is not None
-
-        self.buckets = {}
-        self.client = GSClient(project, credentials=credentials)
-        if cas_url_prefix[-1] == "/":
-            cas_url_prefix = cas_url_prefix[:-1]
-        self.cas_url_prefix = cas_url_prefix
-        self.compute_hash = compute_hash
-
-    def _get_bucket_and_path(self, path):
-        m = re.match("^gs://([^/]+)/(.*)$", path)
-        assert m != None, "invalid remote path: {}".format(path)
-        bucket_name = m.group(1)
-        path = m.group(2)
-
-        if bucket_name in self.buckets:
-            bucket = self.buckets[bucket_name]
-        else:
-            bucket = self.client.bucket(bucket_name)
-        return bucket, path
-
-    def exists(self, src_url):
-        bucket, path = self._get_bucket_and_path(src_url)
-        blob = bucket.blob(path)
-        return blob.exists()
-
-    def get_child_keys(self, src_url):
-        bucket, path = self._get_bucket_and_path(src_url)
-        keys = []
-
-        # I'm unclear if _I_ am responsible for requesting the next page or whether iterator does it for me.
-        for blob in bucket.list_blobs(prefix=path+"/"):
-            keys.append("gs://"+bucket.name+"/"+blob.name)
-
-        return keys
-
-    def get(self, src_url, dst_filename, must=True):
-        log.info("Downloading %s -> %s", src_url, dst_filename)
-        bucket, path = self._get_bucket_and_path(src_url)
-        blob = bucket.blob(path)
-        if blob.exists():
-            blob.download_to_filename(dst_filename)
-        else:
-            assert not must, "Could not find {}".format(path)
-
-    def get_as_str(self, src_url, must=True):
-        bucket, path = self._get_bucket_and_path(src_url)
-        blob = bucket.blob(path)
-        if blob.exists():
-            return blob.download_as_string().decode("utf8")
-        else:
-            assert not must, "Could not find {}".format(path)
-
-    def put(self, src_filename, dst_url, must=True, skip_if_exists=False, is_public=False):
-        if must:
-            assert os.path.exists(src_filename), "{} does not exist".format(src_filename)
-
-        bucket, path = self._get_bucket_and_path(dst_url)
-        blob = bucket.blob(path)
-        if skip_if_exists and blob.exists():
-            if is_public:
-                acl = blob.acl
-                if not acl.has_entity(acl.all()):
-                    log.info("Marking %s (%s) as publicly accessible", src_filename, dst_url)
-                    acl.save_predefined("publicRead")
-            log.info("Already in CAS cache, skipping upload of %s", src_filename)
-            log.debug("skipping put %s -> %s", src_filename, dst_url)
-        else:
-            if is_public:
-                canned_acl = "publicRead"
-                acl_params = ["-a", "public-read"]
-            else:
-                canned_acl = None
-                acl_params = []
-            log.info("put %s -> %s (acl: %s)", src_filename, dst_url, canned_acl)
-            # if greater than 10MB ask gsutil to upload for us
-            if os.path.getsize(src_filename) > 10 * 1024 * 1024:
-                import subprocess
-                subprocess.check_call(['gsutil', 'cp'] + acl_params + [src_filename, dst_url])
-            else:
-                blob.upload_from_filename(src_filename, predefined_acl=canned_acl)
-
-    def _get_url_prefix(self):
-        return "gs://"
-
-    def write_file_to_cas(self, filename):
-        m = hashlib.sha256()
-        with open(filename, "rb") as fd:
-            for chunk in iter(lambda: fd.read(10000), b""):
-                m.update(chunk)
-        hash = m.hexdigest()
-        dst_url = self.cas_url_prefix+hash
-        bucket, path = self._get_bucket_and_path(dst_url)
-        blob = bucket.blob(path)
-        blob.upload_from_filename(filename)
-        return self._get_url_prefix()+bucket.name+"/"+path         
-
-    def write_str_to_cas(self, text):
-        text = text.encode("utf8")
-        hash = hashlib.sha256(text).hexdigest()
-        dst_url = self.cas_url_prefix+"/"+hash
-        bucket, path = self._get_bucket_and_path(dst_url)
-        blob = bucket.blob(path)
-        blob.upload_from_string(text)
-        return self._get_url_prefix()+bucket.name+"/"+path
-        
-    def write_json_to_cas(self, obj):
-        obj_str = json.dumps(obj)
-        return self.write_str_to_cas(obj_str)
 
 def _gcloud_cmd(args):
     return ["gcloud"] + list(args)

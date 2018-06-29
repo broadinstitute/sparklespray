@@ -13,7 +13,6 @@ from kubeque.hasher import CachingHashFunction
 from kubeque.spec import make_spec_from_command, SrcDstPair
 import csv
 import copy
-import contextlib
 import kubeque.gcs_pipeline as pipeline
 import argparse
 from kubeque.logclient import LogMonitor
@@ -25,7 +24,6 @@ try:
 except:
     from ConfigParser import ConfigParser
 
-from google.gax.errors import RetryError
 
 
 # spec should have three rough components:
@@ -258,15 +256,17 @@ def submit(jq, io, cluster, job_id, spec, dry_run, config, skip_kube_submit, met
             if len(existing_tasks) > 0:
                 log.warning("%d tasks already exist queued up to run on this cluster. If this is not intentional, delete the jobs via 'kubeque clean' and resubmit this job.", len(existing_tasks))
         elif exec_local:
-            cmd = _write_local_script(job_id, spec, kubeque_command, config['kubequeconsume_exe_path'],
-                                      kubeque_exe_in_container)
-            log.info("Running job locally via executing: ./%s", cmd)
-            log.warning("CPU and memory requirements are not honored when running locally. Will use whatever the docker host is configured for by default")
-            os.system(os.path.abspath(cmd))
+            raise Exception("unimplemented -- broke when migrated to new version of pipeline API")
+            # cmd = _write_local_script(job_id, spec, kubeque_command, config['kubequeconsume_exe_path'],
+            #                           kubeque_exe_in_container)
+            # log.info("Running job locally via executing: ./%s", cmd)
+            # log.warning("CPU and memory requirements are not honored when running locally. Will use whatever the docker host is configured for by default")
+            # os.system(os.path.abspath(cmd))
         else:
-            cmd = _write_local_script(job_id, spec, kubeque_command, config['kubequeconsume_exe_path'],
-                                      kubeque_exe_in_container)
-            log.info("Skipping submission.  You can execute tasks locally via: ./%s", cmd)
+            raise Exception("unimplemented -- broke when migrated to new version of pipeline API")
+            # cmd = _write_local_script(job_id, spec, kubeque_command, config['kubequeconsume_exe_path'],
+            #                           kubeque_exe_in_container)
+            # log.info("Skipping submission.  You can execute tasks locally via: ./%s", cmd)
 
 
 def _write_local_script(job_id, spec, kubeque_command, kubequeconsume_exe_path, kubeque_exe_in_container):
@@ -766,15 +766,6 @@ def fetch_cmd(jq, io, args):
         dest = args.dest
     fetch_cmd_(jq, io, jobid, dest, flat=args.flat)
 
-def dump_stdout_if_single_task(jq, io, jobid):
-    tasks = jq.get_tasks(jobid)
-    if len(tasks) != 1:
-        return
-    task = list(tasks)[0]
-    spec = json.loads(io.get_as_str(task.args))
-    stdout_lines = io.get_as_str(spec['stdout_url']).split("\n")
-    stdout_lines = stdout_lines[-100:]
-    print_error_lines(stdout_lines)
 
 def fetch_cmd_(jq, io, jobid, dest_root, force=False, flat=False):
     def get(src, dst, **kwargs):
@@ -835,32 +826,6 @@ def _is_complete(status_counts):
         if not _is_terminal_status(status):
             all_terminal = True
     return all_terminal
-
-
-@contextlib.contextmanager
-def _exception_guard(deferred_msg, reset=None):
-    try:
-        yield
-    except OSError as ex:
-        # consider these as non-fatal
-        msg = deferred_msg()
-        log.exception(msg)
-        log.warning("Ignoring exception and continuing...")
-        if reset is not None:
-            reset()
-    except RetryError as ex:
-        msg = deferred_msg()
-        log.exception(msg)
-        log.warning("Ignoring exception and continuing...")
-        if reset is not None:
-            reset()
-
-
-def print_error_lines(lines):
-    from termcolor import colored, cprint
-    for line in lines:
-        print(colored(line, "red"))
-
 
 
 class NodeRespawn:
@@ -932,105 +897,7 @@ class TasksStatus:
     def summary(self):
         return _summarize_task_statuses(self.tasks)
 
-class TasksStatusWrapper:
-    def __init__(self, jq, jobid):
-        self.jq = jq
-        self.jobid = jobid
-        self.last_fetch_timestamp = None
-        self.last_status = None
 
-    def get_status(self, max_age=10):
-        if self.last_fetch_timestamp is None or time.time() - self.last_fetch_timestamp > max_age:
-            self.last_status = TasksStatus(self.jq.get_tasks(self.jobid))
-            self.last_fetch_timestamp = time.time()
-
-        return self.last_status
-
-def watch(io, jq, jobid, cluster, refresh_delay=5, min_check_time=10, loglive=False, saturate=False, saturate_nodes=None):
-    tsw = TasksStatusWrapper(jq, jobid)
-    job = jq.get_job(jobid)
-
-    log_monitor = None
-    if loglive:
-        if len(job.tasks) != 1:
-            log.warning("Could not tail logs because there are %d tasks, and we can only watch one task at a time", len(job.tasks))
-        else:
-            task_id = job.tasks[0]
-            task = jq.storage.get_task(task_id)
-
-            log_monitor = LogMonitor(jq.storage.client, task.monitor_address, task_id)
-
-    cluster_name = job.cluster
-    prev_status = None
-    last_cluster_update = None
-    last_cluster_status = None
-    last_good_state_time = time.time()
-
-    last_owner_checks = None
-
-    def get_pending_count():
-        jq.update_node_reqs(jobid, cluster)
-        return jq.get_pending_node_req_count(jobid)
-
-    respawn = NodeRespawn(lambda: cluster.get_cluster_status(cluster_name), tsw.get_status, get_pending_count, saturate_nodes)
-    if saturate:
-        log.info("Creating nodes for any jobs which will not current fit onto an existing node")
-        respawn.reconcile_node_count(lambda count: _addnodes(jobid, jq, cluster, count, True))
-        respawn.reset_added_count()
-
-    try:
-        while True:
-            with _exception_guard(lambda: "summarizing status of job {} threw exception".format(jobid)):
-                status, complete = tsw.get_status().summary
-                if status != prev_status:
-                    log.info("Tasks: %s", status)
-                if complete:
-                    break
-                prev_status = status
-
-            if last_owner_checks is None or time.time() - last_owner_checks > 60:
-                with _exception_guard(lambda: "polling cluster status threw exception"):
-                    _resub_preempted(cluster, jq, jobid)
-                    last_owner_checks = time.time()
-
-            if last_cluster_update is None or time.time() - last_cluster_update > 10:
-                with _exception_guard(lambda: "summarizing cluster threw exception".format(jobid)):
-                    cluster_status = cluster.get_cluster_status(cluster_name)
-                    if last_cluster_status is None or cluster_status != last_cluster_status:
-                        log.info("Nodes: %s", cluster_status.as_string())
-                    if cluster_status.is_running():
-                        last_good_state_time = time.time()
-                    else:
-                        if time.time() - last_good_state_time > min_check_time and not saturate:
-                            log.error("Tasks haven't completed, but cluster is now offline. Aborting!")
-                            node_reqs = jq.get_node_reqs(jobid)
-                            for i, node_req in enumerate(node_reqs):
-                                log.info("Dumping node request %d", i)
-
-                                status = cluster.get_add_node_status(node_req.operation_id)
-                                print(json.dumps(status.status, indent=2))
-                            raise Exception("Cluster prematurely stopped")
-                    last_cluster_status = cluster_status
-                    last_cluster_update = time.time()
-
-                    if saturate:
-                        respawn.reconcile_node_count(lambda count: _addnodes(jobid, jq, cluster, count, False))
-
-            if log_monitor is not None:
-                with _exception_guard(lambda: "polling log monitor threw exception"):
-                    log_monitor.poll()
-
-            time.sleep(refresh_delay)
-
-        failures = tsw.get_status().failed_tasks
-        if failures > 0 and len(job.tasks) == 1:
-            log.warning("Job failed, and there was only one task, so dumping the tail of the output from that task")
-            dump_stdout_if_single_task(jq, io, jobid)
-        return failures == 0
-
-    except KeyboardInterrupt:
-        print("Interrupted -- Exiting, but your job will continue to run unaffected.")
-        sys.exit(1)
 
 def addnodes_cmd(jq, cluster, args, config):
     job_id = _resolve_jobid(jq, args.job_id)

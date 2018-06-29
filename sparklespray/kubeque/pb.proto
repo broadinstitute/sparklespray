@@ -16,4 +16,5 @@ message ReadOutputRequest {
 message ReadOutputReply {
   bytes data = 1;
   bool endOfFile = 2;
+  int64 newOffset = 3;
 }

@@ -75,11 +75,7 @@ func (m *Monitor) StartServer(port string, certPEMBlock []byte, keyPEMBlock []by
 			log.Printf("no meta")
 			return nil, errors.New("missing meta")
 		}
-		log.Printf("keys=%v", keys)
 		t := keys.Get("shared-secret")[0]
-		log.Printf("t=%v", t)
-		//		t := ctx.Value("shared-secret")
-		log.Printf("Token: %v", t)
 		if t == "" {
 			return nil, grpc.Errorf(codes.Unauthenticated, "missing shared-secret")
 		}

@@ -1,8 +1,9 @@
 from OpenSSL import crypto, SSL
 from socket import gethostname
 from time import gmtime, mktime
+from typing import Tuple
 
-def create_self_signed_cert():
+def create_self_signed_cert() -> Tuple[bytes, bytes]:
     # create a key pair
     k = crypto.PKey()
     k.generate_key(crypto.TYPE_RSA, 2048)
