@@ -3,22 +3,6 @@ import collections
 import os
 from kubeque.gcp import _join
 
-# def expand_specs(spec, default_url_prefix, default_job_url_prefix):
-#     image = spec['image']
-#     common = spec['common']
-#     common['downloads'] = rewrite_downloads(io, common['downloads'], default_url_prefix)
-#     common['uploads'] = rewrite_uploads(common['uploads'], default_job_url_prefix)
-
-#     tasks = []
-#     for task in spec['tasks']:
-#         task = expand_task_spec(common, task)
-#         task = rewrite_url_in_dict(task, "command_result_url", default_job_url_prefix)
-#         task['downloads'] = rewrite_downloads(io, task['downloads'], default_url_prefix)
-#         task['uploads'] = rewrite_uploads(task['uploads'], default_url_prefix)
-#         tasks.append(task)
-
-#     return tasks
-
 class UploadMap:
     def __init__(self):
         self.map = {}
@@ -41,46 +25,6 @@ class UploadMap:
         url = _join(cas_url, h)
         self.map[filename] = (url, is_public)
         return url
-
-
-def check_types(d, prop_types, required=False):
-    errors = []
-    for name, expected_type in prop_types.items():
-        if name in d:
-            v = d[name]
-            if not isinstance(v, expected_type):
-                errors.append("Expected {} to be of type {} but was {}".format(name, expected_type, type(v)))
-        else:
-            if required:
-                errors.append("Missing '{}''".format(name))
-    return errors
-
-def validate_final_spec(spec):
-    errors = check_types(spec, {"image": str, "tasks": list}, required=True)
-    if len(errors) > 0:
-        return errors
-    
-    tasks = spec["tasks"]
-    for task in tasks:
-        errors.extend(check_types(task, {"command": str}, required=True))
-        errors.extend(check_types(task, {"downloads": dict, "uploads": dict}))
-        if "downloads" in task:
-            for dl in task['downloads']:
-                if set(dl.keys()) == set(["src_url", "dst"]):
-                    errors.extend(check_types({"src_url": str, "dst": str}))
-                else:
-                    errors.append( "Expected ('src_url', 'dst') but got ({})".format(", ".join(dl.keys())) )
-
-        if "uploads" in task:
-            for ul in task["uploads"]:
-                if set(dl.keys()) == set(["src_wildcard", "dst_url_prefix"]):
-                    errors.extend(check_types({"src_wildcard": str, "dst_url_prefix": str}))
-                elif set(dl.keys()) == set(["src", "dst_url"]):
-                    errors.extend(check_types({"src": str, dst_url: str}))
-                else:
-                    errors.append( "Expected either ('src_wildcard' and 'dst_url_prefix') or ('src' and 'dst_url') but got ({})".format(", ".join(dl.keys())) )
-
-    return errors
 
 
 def rewrite_argv_with_parameters(argv, parameters):

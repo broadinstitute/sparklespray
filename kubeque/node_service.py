@@ -106,6 +106,10 @@ class NodeService:
         response = request.execute()
         return AddNodeStatus(response)
 
+    def cancel_add_node(self, operation_name : str):
+        request = self.service.projects().operations().cancel(name=operation_name)
+        request.execute()
+
     def add_node(self, pipeline_def : dict, preemptible: bool, debug_log_url : str):
         "Returns operation name"
         # make a deep copy

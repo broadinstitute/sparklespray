@@ -1,6 +1,4 @@
 from google.cloud import datastore
-import google.cloud.exceptions
-import logging
 
 import random, string
 

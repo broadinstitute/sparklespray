@@ -5,7 +5,7 @@ import json
 def hash_from_file(filename):
     h = hashlib.sha256()
     with open(filename, "rb") as fd:
-        for chunk in iter(lambda: fd.read(10000), b''):
+        for chunk in iter(lambda: fd.read(100000), b''):
             h.update(chunk)
     return h.hexdigest()
 

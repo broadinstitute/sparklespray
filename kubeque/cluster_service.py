@@ -67,7 +67,7 @@ class Cluster:
         instances = self.compute.get_cluster_instances(self.zones, cluster_name)
         return ClusterStatus(instances)
 
-    def stop_cluster(self, cluster_name):
+    def stop_cluster(self, cluster_name : str):
         instances = self.compute.get_cluster_instances(cluster_name)
         if len(instances) == 0:
             log.warning("Attempted to delete instances in cluster %s but no instances found!", cluster_name)

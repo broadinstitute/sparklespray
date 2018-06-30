@@ -1,10 +1,13 @@
 import time
 
-from .node_req_store import REQUESTED_NODE_STATES, NODE_REQ_CLASS_PREEMPTIVE
+from .node_req_store import REQUESTED_NODE_STATES, NODE_REQ_CLASS_PREEMPTIVE, NODE_REQ_SUBMITTED
 from .task_store import INCOMPLETE_TASK_STATES
+from .job_queue import JobQueue
+from .node_service import NodeService
+from .cluster_service import Cluster
 
 class ClusterState:
-    def __init__(self, job_id : str, jq, datastore, cluster) -> None:
+    def __init__(self, job_id : str, jq : JobQueue, datastore, cluster) -> None:
         self.job_id = job_id
         self.cluster = cluster
         self.datastore = datastore
@@ -33,16 +36,21 @@ class ClusterState:
         return len([o for o in self.operations.values() if o.node_class == NODE_REQ_CLASS_PREEMPTIVE ])
 
 class ClusterMod:
-    def __init__(self, job_id, cluster, state):
+    def __init__(self, job_id : str, cluster : Cluster):
         self.job_id = job_id
         self.cluster = cluster
 
     def add_node(self, preemptable : bool) -> None:
         self.cluster.add_node(self.job_id, preemptable)
 
-    def cancel_last_node(self) -> None:
-        node_reqs = [x for x in self.state.node_reqs if x.status in REQUESTED_NODE_STATES]
-        self.cluster.cancel_add(..)
+    def cancel_nodes(self, count : int) -> None:
+        pending_node_reqs = [x for x in self.state.node_reqs if x.status == NODE_REQ_SUBMITTED ]
+        pending_node_reqs.sort(key=lambda x: x.sequence)
+        pending_node_reqs = reversed(pending_node_reqs)
+        if count < len(pending_node_reqs):
+            pending_node_reqs = pending_node_reqs[:count]
+        for x in pending_node_reqs:
+            self.cluster.cancel_add_node(x.operation_id)
 
 class ResizeCluster:
     # adjust cluster size
@@ -86,72 +94,3 @@ class ResizeCluster:
             self.last_modification = self.get_time()
 
 
-class MockClusterState:
-    def __init__(self, incomplete_task_count, requested_node_count, preempt_attempt_count):
-        self.incomplete_task_count = incomplete_task_count
-        self.requested_node_count = requested_node_count
-        self.preempt_attempt_count = preempt_attempt_count
-
-    def get_incomplete_task_count(self) -> int:
-        return self.incomplete_task_count
-
-    def get_requested_node_count(self) -> int:
-        return self.requested_node_count
-
-    def get_preempt_attempt_count(self) -> int:
-        return self.preempt_attempt_count
-
-class MockClusterMod:
-    def __init__(self):
-        self.calls = []
-
-    def add_node(self, preemptable : bool) -> None:
-        self.calls.append( ("add",  preemptable) )
-
-    def cancel_last_node(self) -> None:
-        self.calls.append( ("cancel",) )
-
-def test_increase_size():
-    r = ResizeCluster(target_node_count=2, max_preemptable_attempts=0, seconds_between_modifications=0)
-    state = MockClusterState(incomplete_task_count=2, requested_node_count=0, preempt_attempt_count=0)
-    mods = MockClusterMod()
-    r(state, mods)
-    assert mods.calls == [("add", False), ("add", False)]
-
-def test_increase_size_capped_by_tasks():
-    r = ResizeCluster(target_node_count=2, max_preemptable_attempts=0, seconds_between_modifications=0)
-    state = MockClusterState(incomplete_task_count=1, requested_node_count=0, preempt_attempt_count=0)
-    mods = MockClusterMod()
-    r(state, mods)
-    assert mods.calls == [("add", False)]
-
-def test_add_some_preemptable():
-    r = ResizeCluster(target_node_count=3, max_preemptable_attempts=2, seconds_between_modifications=0)
-    state = MockClusterState(incomplete_task_count=3, requested_node_count=0, preempt_attempt_count=0)
-    mods = MockClusterMod()
-    r(state, mods)
-    assert mods.calls == [("add", True), ("add", True), ("add", False)]
-
-def test_decrease_size():
-    r = ResizeCluster(target_node_count=2, max_preemptable_attempts=0, seconds_between_modifications=0)
-    state = MockClusterState(incomplete_task_count=2, requested_node_count=3, preempt_attempt_count=0)
-    mods = MockClusterMod()
-    r(state, mods)
-    assert mods.calls == [("cancel",)]
-
-def test_no_change():
-    r = ResizeCluster(target_node_count=20, max_preemptable_attempts=0, seconds_between_modifications=0)
-    state = MockClusterState(incomplete_task_count=2, requested_node_count=2, preempt_attempt_count=0)
-    mods = MockClusterMod()
-    r(state, mods)
-    assert mods.calls == []
-
-def test_frequent_calls():
-    r = ResizeCluster(target_node_count=2, max_preemptable_attempts=0, seconds_between_modifications=10)
-    state = MockClusterState(incomplete_task_count=1, requested_node_count=0, preempt_attempt_count=0)
-    mods = MockClusterMod()
-    r(state, mods)
-    assert mods.calls == [("add", False)]
-    mods.calls = []
-    r(state, mods)
-    assert mods.calls == []
