@@ -1,17 +1,26 @@
 import re
-from kubeque.node_req_store import AddNodeReqStore, NodeReq, NODE_REQ_SUBMITTED, NODE_REQ_CLASS_PREEMPTIVE, NODE_REQ_CLASS_NORMAL
-from kubeque.compute_service import ComputeService
-from kubeque.node_service import NodeService, MachineSpec
+from .task_store import INCOMPLETE_TASK_STATES, Task
+from .node_req_store import AddNodeReqStore, NodeReq, NODE_REQ_SUBMITTED, NODE_REQ_CLASS_PREEMPTIVE, NODE_REQ_CLASS_NORMAL, REQUESTED_NODE_STATES
+from .compute_service import ComputeService
+from .node_service import NodeService, MachineSpec
+from .job_store import JobStore
+from .task_store import TaskStore
+from .job_queue import JobQueue
 from typing import List, Dict, DefaultDict
 from collections import defaultdict
+from google.cloud import datastore
 import time
 import sys
 import logging
 import os
+from .util import get_timestamp
+from .datastore_batch import Batch
 
 log = logging.getLogger(__name__)
 
 SETUP_IMAGE = "sequenceiq/alpine-curl"  # and image which has curl and sh installed, used to prep the worker node
+
+import json
 
 class ClusterStatus:
     def __init__(self, instances : List[dict]) -> None:
@@ -44,20 +53,83 @@ class ClusterStatus:
     def is_running(self):
         return self.running_count > 0
 
+
+class ClusterState:
+    def __init__(self, job_id : str, jq : JobQueue, datastore, cluster) -> None:
+        self.job_id = job_id
+        self.cluster = cluster
+        self.datastore = datastore
+        self.tasks = [] # type: List[Task]
+        self.node_reqs = [] # type: List[NodeReq]
+        self.operations = [] # type: List[dict]
+
+    def update(self):
+        # update tasks
+        self.tasks = self.jq.get_tasks(self.job_id)
+
+        # poll all the operations which are not marked as dead
+        node_reqs = self.datastore.get_node_reqs(self.job_id)
+        for node_req in node_reqs:
+            if node_req.status in REQUESTED_NODE_STATES:
+                op = self.cluster.get_node_req(node_req.operation_id)
+                if op.status not in REQUESTED_NODE_STATES:
+                    self.datastore.update_node_req_status(node_req.operation_id, op.status)
+
+    def get_incomplete_task_count(self) -> int:
+        return len([t for t in self.tasks if t.status in INCOMPLETE_TASK_STATES])
+
+    def get_requested_node_count(self) -> int:
+        return len([o for o in self.operations if o.status in REQUESTED_NODE_STATES])
+
+    def get_preempt_attempt_count(self) -> int:
+        return len([o for o in self.node_reqs if o.node_class == NODE_REQ_CLASS_PREEMPTIVE ])
+
+    def get_running_tasks_with_invalid_owner(self) -> List[str]:
+        raise Exception("unimp")
+class CachingCaller:
+    def __init__(self, fn, expiry_time=5):
+        self.prev = {}
+        self.expiry_time = expiry_time
+        self.fn = fn
+
+    def __call__(self, *args):
+        now = time.time()
+        immutable_args = tuple(args)
+        if immutable_args in self.prev:
+            value, timestamp = self.prev[immutable_args]
+            if timestamp + self.expiry_time < now:
+                return value
+
+        value = self.fn(*args)
+
+        self.prev[immutable_args] = (value, timestamp)
+
+        return value
+
 class Cluster:
-    def __init__(self, project : str, zones : List[str], node_req_store : AddNodeReqStore, credentials=None) -> None:
+    def __init__(self, project : str, zones : List[str], node_req_store : AddNodeReqStore, job_store : JobStore, task_store : TaskStore, client : datastore.Client, credentials=None) -> None:
         self.compute = ComputeService(project, credentials)
         self.nodes = NodeService(project, zones, credentials)
         self.node_req_store = node_req_store
         self.project = project
         self.zones = zones
+        self.client = client
+        self._get_job = CachingCaller(job_store.get_job)
+        self.job_store = job_store
+        self.task_store = task_store
 
-    def add_node(self, job_id : str, preemptible : bool, pipeline_def : dict, debug_log_url : str):
+    def get_state(self):
+        raise Exception("unimp")
+
+    def add_node(self, job_id : str, preemptible : bool, debug_log_url : str):
+        job = self._get_job(job_id)
+        pipeline_def = json.loads(job.kube_job_spec)
         operation_id = self.nodes.add_node(pipeline_def, preemptible, debug_log_url)
         req = NodeReq(operation_id = operation_id,
             job_id = job_id,
             status = NODE_REQ_SUBMITTED,
-            node_class = NODE_REQ_CLASS_PREEMPTIVE if preemptible else NODE_REQ_CLASS_NORMAL
+            node_class = NODE_REQ_CLASS_PREEMPTIVE if preemptible else NODE_REQ_CLASS_NORMAL,
+            sequence = get_timestamp()
         )
         self.node_req_store.add_node_req(req)
         return operation_id
@@ -68,7 +140,7 @@ class Cluster:
         return ClusterStatus(instances)
 
     def stop_cluster(self, cluster_name : str):
-        instances = self.compute.get_cluster_instances(cluster_name)
+        instances = self.compute.get_cluster_instances(self.zones, cluster_name)
         if len(instances) == 0:
             log.warning("Attempted to delete instances in cluster %s but no instances found!", cluster_name)
         else:
@@ -98,6 +170,31 @@ class Cluster:
             time.sleep(5)
             p(".")
         p("\n")
+
+
+    def delete_job(self, job_id : str):
+        batch = Batch(self.client)
+
+        self.job_store.delete(job_id, batch=batch)
+
+        job_key = self.client.key("Job", job_id)
+        entity_job = self.client.get(job_key)
+
+        task_ids = entity_job.get("tasks",[])
+        # delete tasks
+        for task_id in task_ids:
+            self.task_store.delete(task_id, batch=batch)
+
+        # clean up associated node requests
+        for node_req in self.node_req_store.get_node_reqs(job_id):
+            self.node_req_store.delete(node_req.operation_id, batch=batch)
+
+        self.job_store.delete(job_id, batch=batch)
+
+        batch.flush()
+
+    def cancel_add_node(self, operation_id : str):
+        self.nodes.cancel_add_node(operation_id )
 
     # def get_node_req_status(self, operation_id):
     #     raise Exception("unimp")

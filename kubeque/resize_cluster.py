@@ -1,62 +1,59 @@
 import time
-
+from typing import List
 from .node_req_store import REQUESTED_NODE_STATES, NODE_REQ_CLASS_PREEMPTIVE, NODE_REQ_SUBMITTED
 from .task_store import INCOMPLETE_TASK_STATES
 from .job_queue import JobQueue
 from .node_service import NodeService
-from .cluster_service import Cluster
+from .task_store import Task
+from .node_req_store import NodeReq
+from .cluster_service import Cluster, ClusterState
 
-class ClusterState:
-    def __init__(self, job_id : str, jq : JobQueue, datastore, cluster) -> None:
-        self.job_id = job_id
-        self.cluster = cluster
-        self.datastore = datastore
-        self.tasks = []
-        self.node_reqs = []
-
-    def update(self):
-        # update tasks
-        self.tasks = self.jq.get_tasks(self.job_id)
-
-        # poll all the operations which are not marked as dead
-        node_reqs = self.datastore.get_node_reqs(self.job_id)
-        for node_req in node_reqs:
-            if node_req.status in REQUESTED_NODE_STATES:
-                op = self.cluster.get_node_req(node_req.operation_id)
-                if op.status not in REQUESTED_NODE_STATES:
-                    self.datastore.update_node_req_status(node_req.operation_id, op.status)
-
-    def get_incomplete_task_count(self) -> int:
-        return len([t for t in self.tasks if t.status in INCOMPLETE_TASK_STATES])
-
-    def get_requested_node_count(self) -> int:
-        return len([o for o in self.operations.values() if o.status in REQUESTED_NODE_STATES])
-
-    def get_preempt_attempt_count(self) -> int:
-        return len([o for o in self.operations.values() if o.node_class == NODE_REQ_CLASS_PREEMPTIVE ])
 
 class ClusterMod:
-    def __init__(self, job_id : str, cluster : Cluster):
+    def __init__(self, job_id : str, cluster : Cluster, debug_log_prefix : str) -> None:
         self.job_id = job_id
         self.cluster = cluster
+        self.debug_log_prefix = debug_log_prefix
 
     def add_node(self, preemptable : bool) -> None:
-        self.cluster.add_node(self.job_id, preemptable)
+        self.cluster.add_node(self.job_id, preemptable, self.debug_log_prefix)
 
-    def cancel_nodes(self, count : int) -> None:
-        pending_node_reqs = [x for x in self.state.node_reqs if x.status == NODE_REQ_SUBMITTED ]
+    def cancel_nodes(self, state : ClusterState, count : int) -> None:
+        pending_node_reqs = [x for x in state.node_reqs if x.status == NODE_REQ_SUBMITTED ]
         pending_node_reqs.sort(key=lambda x: x.sequence)
-        pending_node_reqs = reversed(pending_node_reqs)
+        pending_node_reqs = list(reversed(pending_node_reqs))
         if count < len(pending_node_reqs):
             pending_node_reqs = pending_node_reqs[:count]
         for x in pending_node_reqs:
             self.cluster.cancel_add_node(x.operation_id)
 
+class GetPreempted:
+    def __init__(self, get_time=time.time, min_bad_time=30):
+        self.first_time_task_reported_bad = {}
+        self.get_time = get_time
+        self.min_bad_time = min_bad_time
+
+    def __call__(self, state : ClusterState) -> List[str]:
+        tasks_to_reset = []
+        task_ids = state.get_running_tasks_with_invalid_owner()
+        self.first_time_task_reported_bad
+        next_times = {}
+        for task_id in task_ids:
+            first_time = self.first_time_task_reported_bad.get(task_id, self.get_time())
+            if self.get_time() - first_time > self.min_bad_time:
+                tasks_to_reset.append(task_id)
+            else:
+                next_times[task_id] = first_time
+
+        self.first_time_task_reported_bad = next_times
+
+        return tasks_to_reset
+
 class ResizeCluster:
     # adjust cluster size
     # Given a (target size, a restart-preempt budget, current number of outstanding operations, current number of pending tasks)
     # decide whether to add more add_node operations or remove add_node operations.
-    def __init__(self, target_node_count : int, max_preemptable_attempts : int, seconds_between_modifications : int =60, get_time=time.time):
+    def __init__(self, target_node_count : int, max_preemptable_attempts : int, seconds_between_modifications : int =60, get_time=time.time) -> None:
         self.target_node_count = target_node_count
         self.max_preemptable_attempts = max_preemptable_attempts
 
@@ -86,8 +83,9 @@ class ResizeCluster:
 
         elif target_node_count < requested_nodes:
             # We have requested too many. Start cancelling
-            for i in range(requested_nodes - target_node_count):
-                cluster_mod.cancel_last_node()
+            needs_cancel = (requested_nodes - target_node_count)
+            if needs_cancel > 0 :
+                cluster_mod.cancel_nodes(state, needs_cancel)
                 modified = True
 
         if modified:

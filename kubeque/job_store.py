@@ -8,7 +8,8 @@ import re
 import hashlib
 import json
 import attr
-from typing import List, Tuple
+from typing import List, Tuple, Optional
+from .task_store import task_to_entity
 
 log = logging.getLogger(__name__)
 
@@ -53,9 +54,19 @@ def entity_to_job(entity):
                status=entity['status'],
                submit_time=entity.get('submit_time'))
 
+
+
 class JobStore:
     def __init__(self, client : datastore.Client) -> None:
         self.client = client
+
+    def delete(self, job_id, batch=None):
+        key = self.client.key("Job", job_id)
+
+        if batch is None:
+            self.client.delete(key)
+        else:
+            batch.delete(key)
 
     def get_jobids(self) -> List[Job]:
         query = self.client.query(kind="Job")
@@ -69,6 +80,14 @@ class JobStore:
         existing_job = self.get_job(job.job_id, must=False)
         if existing_job is not None:
             raise Exception("Cannot create job \"{}\", ID is already used".format(job.job_id))
+
+        batch = self.client.batch()
+        batch.begin()
+
+        for task in job.tasks:
+            batch.push(task_to_entity(self.client, task))
+        batch.put(job_to_entity(self.client, job))
+        batch.commit()
 
         with self.batch_write() as batch:
            batch.save(job)
@@ -84,29 +103,7 @@ class JobStore:
             self.client.put(entity_job)
         return update_ok, job
 
-    def delete_job(self, job_id : str):
-        job_key = self.client.key("Job", job_id)
-        entity_job = self.client.get(job_key)
-
-        task_ids = entity_job.get("tasks",[])
-        # delete tasks
-        keys = [self.client.key("Task", taskid) for taskid in set(task_ids)]
-        # clean up associated node requests
-        node_reqs = self.get_node_reqs(job_id)
-        # log.info("Deleting records about %d node requests", len(node_reqs))
-        node_req_keys = [self.client.key("NodeReq", x.operation_id) for x in node_reqs ]
-        keys += node_req_keys
-        # delete job
-        keys += [job_key]
-        # log.info("Deleting %s", repr(keys))
-
-        # perform the delete
-        BATCH_SIZE = 300
-        for chunk_start in range(0, len(keys), BATCH_SIZE):
-            key_batch = keys[chunk_start:chunk_start+BATCH_SIZE]
-            self.client.delete_multi(key_batch)
-
-    def get_job(self, job_id : str, must : bool = True) -> Job:
+    def get_job(self, job_id : str, must : bool = True) -> Optional[Job]:
         job_key = self.client.key("Job", job_id)
         job_entity = self.client.get(job_key)
         if job_entity is None:

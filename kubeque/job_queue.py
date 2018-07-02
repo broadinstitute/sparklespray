@@ -51,42 +51,6 @@ def get_credentials(account, cred_file="~/.config/gcloud/credentials"):
 
 
 
-class BatchAdapter:
-    def __init__(self, client):
-        self.client = client
-        self.batch = client.batch()
-        self.batch.begin()
-
-    def save(self, o):
-        if isinstance(o, Task):
-            # The name/ID for the new entity
-            entity = task_to_entity(self.client, o)
-        else:
-            assert isinstance(o, Job)
-            entity = job_to_entity(self.client, o)
-
-        self.batch.put(entity)
-    
-    def commit(self):
-        self.batch.commit()
-
-
-
-
-
-class JobStorage:
-    def __init__(self, client):
-        self.client = client
-
-
-
-
-    @contextmanager
-    def batch_write(self):
-        batch = BatchAdapter(self.client)
-        yield batch
-        batch.commit()
-
 class JobQueue:
     def __init__(self, storage):
         self.storage = storage

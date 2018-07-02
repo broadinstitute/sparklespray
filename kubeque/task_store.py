@@ -6,9 +6,13 @@ from google.cloud.storage.client import Client as GSClient
 import os
 import re
 import hashlib
+import time
 import json
 import attr
 from typing import List
+import logging
+
+log = logging.getLogger(__name__)
 
 STATUS_CLAIMED = "claimed"
 STATUS_PENDING = "pending"
@@ -99,11 +103,22 @@ def entity_to_task(entity):
     )
 
 class TaskStore:
+    def __init__(self, client : datastore.Client) -> None:
+        self.client = client
+
     def get_task(self, task_id):
         task_key = self.client.key("Task", task_id)
         return entity_to_task(self.client.get(task_key))
 
-    def get_tasks(self, job_id = None, status = None, max_fetch=None):
+    def delete(self, task_id, batch=None):
+        key = self.client.key("Task", task_id)
+
+        if batch is None:
+            self.client.delete(key)
+        else:
+            batch.delete(key)
+
+    def get_tasks(self, job_id = None, status = None, max_fetch=None) -> List[Task]:
         query = self.client.query(kind="Task")
         if job_id is not None:
             query.add_filter("job_id", "=", job_id)
