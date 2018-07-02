@@ -60,7 +60,8 @@ def watch(io : IO, jq : JobQueue, job_id :str, cluster: Cluster, initial_poll_de
             task = jq.storage.get_task(task_id)
             log_monitor = LogMonitor(jq.storage.client, task.monitor_address, task_id)
 
-    resize_cluster = ResizeCluster()
+    resize_cluster = ResizeCluster(target_node_count=job.target_node_count,
+                                   max_preemptable_attempts=job.max_preemptable_attempts)
     get_preempted = GetPreempted()
 
     poll_delay = initial_poll_delay
@@ -91,7 +92,7 @@ def watch(io : IO, jq : JobQueue, job_id :str, cluster: Cluster, initial_poll_de
                         jq.reset_task(task_id)
 
             with _exception_guard(lambda: "rescaling cluster threw exception"):
-                resize_cluster(state, cluster)
+                resize_cluster(state, cluster.get_cluster_mod(job_id))
 
             if log_monitor is not None:
                 with _exception_guard(lambda: "polling log file threw exception"):

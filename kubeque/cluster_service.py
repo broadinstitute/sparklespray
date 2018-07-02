@@ -15,6 +15,7 @@ import logging
 import os
 from .util import get_timestamp
 from .datastore_batch import Batch
+from abc import abstractmethod
 
 log = logging.getLogger(__name__)
 
@@ -55,25 +56,28 @@ class ClusterStatus:
 
 
 class ClusterState:
-    def __init__(self, job_id : str, jq : JobQueue, datastore, cluster) -> None:
+    def __init__(self, job_id : str, jq : JobQueue, node_req_store : AddNodeReqStore, cluster : Cluster) -> None:
         self.job_id = job_id
         self.cluster = cluster
         self.datastore = datastore
         self.tasks = [] # type: List[Task]
         self.node_reqs = [] # type: List[NodeReq]
-        self.operations = [] # type: List[dict]
+        #self.add_node_statuses = [] # type: List[AddNodeStatus]
 
     def update(self):
         # update tasks
         self.tasks = self.jq.get_tasks(self.job_id)
 
         # poll all the operations which are not marked as dead
-        node_reqs = self.datastore.get_node_reqs(self.job_id)
-        for node_req in node_reqs:
+        self.node_reqs = self.node_req_store.get_node_reqs(self.job_id)
+
+        # get all the status of each operation
+        for node_req in self.node_reqs:
             if node_req.status in REQUESTED_NODE_STATES:
                 op = self.cluster.get_node_req(node_req.operation_id)
+
                 if op.status not in REQUESTED_NODE_STATES:
-                    self.datastore.update_node_req_status(node_req.operation_id, op.status)
+                    self.node_req_store.update_node_req_status(node_req.operation_id, op.status, op.instance_name)
 
     def get_incomplete_task_count(self) -> int:
         return len([t for t in self.tasks if t.status in INCOMPLETE_TASK_STATES])
@@ -86,6 +90,8 @@ class ClusterState:
 
     def get_running_tasks_with_invalid_owner(self) -> List[str]:
         raise Exception("unimp")
+
+
 class CachingCaller:
     def __init__(self, fn, expiry_time=5):
         self.prev = {}
@@ -106,7 +112,7 @@ class CachingCaller:
 
         return value
 
-class Cluster:
+class Cluster():
     def __init__(self, project : str, zones : List[str], node_req_store : AddNodeReqStore, job_store : JobStore, task_store : TaskStore, client : datastore.Client, credentials=None) -> None:
         self.compute = ComputeService(project, credentials)
         self.nodes = NodeService(project, zones, credentials)
@@ -261,3 +267,24 @@ class Cluster:
                                           machine_specs=machine_specs,
                                           monitor_port=monitor_port)
 
+    def get_cluster_mod(self, job_id):
+        return ClusterMod(job_id, self, self.debug_log_prefix)
+
+class ClusterMod:
+    def __init__(self, job_id : str, cluster : Cluster, debug_log_prefix : str) -> None:
+        self.job_id = job_id
+        self.cluster = cluster
+        self.debug_log_prefix = debug_log_prefix
+
+    def add_node(self, preemptable : bool) -> None:
+        raise
+        self.cluster.add_node(self.job_id, preemptable, self.debug_log_prefix)
+
+    def cancel_nodes(self, state : ClusterState, count : int) -> None:
+        pending_node_reqs = [x for x in state.node_reqs if x.status == NODE_REQ_SUBMITTED ]
+        pending_node_reqs.sort(key=lambda x: x.sequence)
+        pending_node_reqs = list(reversed(pending_node_reqs))
+        if count < len(pending_node_reqs):
+            pending_node_reqs = pending_node_reqs[:count]
+        for x in pending_node_reqs:
+            self.cluster.cancel_add_node(x.operation_id)

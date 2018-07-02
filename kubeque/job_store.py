@@ -22,6 +22,8 @@ class Job(object):
     cluster = attr.ib()
     status = attr.ib()
     submit_time = attr.ib()
+    target_node_count = attr.ib(default=1)
+    max_preemptable_attempts = attr.ib(default=0)
 
 JOB_STATUS_SUBMITTED = "submitted"
 JOB_STATUS_KILLED = "killed"
@@ -76,22 +78,23 @@ class JobStore:
             jobids.append(entity_job.key.name)
         return jobids
 
-    def store_job(self, job : Job) -> None:
-        existing_job = self.get_job(job.job_id, must=False)
-        if existing_job is not None:
-            raise Exception("Cannot create job \"{}\", ID is already used".format(job.job_id))
-
-        batch = self.client.batch()
-        batch.begin()
-
-        for task in job.tasks:
-            batch.push(task_to_entity(self.client, task))
-        batch.put(job_to_entity(self.client, job))
-        batch.commit()
-
-        with self.batch_write() as batch:
-           batch.save(job)
-           log.info("Saved job definition with %d tasks", len(job.tasks))
+    # moved to cluster.store_job
+    # def store_job(self, job : Job) -> None:
+    #     existing_job = self.get_job(job.job_id, must=False)
+    #     if existing_job is not None:
+    #         raise Exception("Cannot create job \"{}\", ID is already used".format(job.job_id))
+    #
+    #     batch = self.client.batch()
+    #     batch.begin()
+    #
+    #     for task in job.tasks:
+    #         batch.push(task_to_entity(self.client, task))
+    #     batch.put(job_to_entity(self.client, job))
+    #     batch.commit()
+    #
+    #     with self.batch_write() as batch:
+    #        batch.save(job)
+    #        log.info("Saved job definition with %d tasks", len(job.tasks))
 
     def update_job(self, job_id : str, mutate_fn) -> Tuple[bool, Job]:
         job_key = self.client.key("Job", job_id)

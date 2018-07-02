@@ -18,7 +18,6 @@ from typing import List, DefaultDict, Tuple
 
 log = logging.getLogger(__name__)
 
-
 @attr.s
 class MachineSpec(object):
     boot_volume_in_gb = attr.ib()
@@ -91,8 +90,6 @@ class AddNodeStatus:
 
     def is_done(self) -> bool:
         return self.status['done']
-
-
 
 
 class NodeService:

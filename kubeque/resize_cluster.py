@@ -6,26 +6,8 @@ from .job_queue import JobQueue
 from .node_service import NodeService
 from .task_store import Task
 from .node_req_store import NodeReq
-from .cluster_service import Cluster, ClusterState
+from .cluster_service import Cluster, ClusterState, ClusterMod
 
-
-class ClusterMod:
-    def __init__(self, job_id : str, cluster : Cluster, debug_log_prefix : str) -> None:
-        self.job_id = job_id
-        self.cluster = cluster
-        self.debug_log_prefix = debug_log_prefix
-
-    def add_node(self, preemptable : bool) -> None:
-        self.cluster.add_node(self.job_id, preemptable, self.debug_log_prefix)
-
-    def cancel_nodes(self, state : ClusterState, count : int) -> None:
-        pending_node_reqs = [x for x in state.node_reqs if x.status == NODE_REQ_SUBMITTED ]
-        pending_node_reqs.sort(key=lambda x: x.sequence)
-        pending_node_reqs = list(reversed(pending_node_reqs))
-        if count < len(pending_node_reqs):
-            pending_node_reqs = pending_node_reqs[:count]
-        for x in pending_node_reqs:
-            self.cluster.cancel_add_node(x.operation_id)
 
 class GetPreempted:
     def __init__(self, get_time=time.time, min_bad_time=30):
