@@ -12,10 +12,10 @@ from .hasher import CachingHashFunction
 from kubeque.spec import make_spec_from_command, SrcDstPair
 import csv
 import copy
-import kubeque.gcs_pipeline as pipeline
 import argparse
 from kubeque.logclient import LogMonitor
 from configparser import ConfigParser
+from .main import clean
 
 log = logging.getLogger(__name__)
 
@@ -138,12 +138,15 @@ def _make_cluster_name(job_name, image, cpu_request, mem_limit, unique_name):
 
 def submit(jq, io, cluster, job_id, spec, dry_run, config, skip_kube_submit, metadata, kubequeconsume_url,
            exec_local=False, loglive=False, ):
-    cert, key = jq.storage.get_cert_and_key()
+    from .key_store import KeyStore
+
+    key_store = KeyStore(cluster.client)
+    cert, key = key_store.get_cert_and_key()
     if cert is None:
         log.info("No cert and key for cluster found -- generating now")
         import kubeque.certgen
         cert, key = kubeque.certgen.create_self_signed_cert()
-        jq.storage.set_cert_and_key(cert, key)
+        key_store.set_cert_and_key(cert, key)
 
     log.info("Submitting job with id: %s", job_id)
 
@@ -357,7 +360,7 @@ def submit_cmd(jq, io, cluster, args, config):
     if existing_job is not None:
         if args.clean or args.rerun:
             log.info("Cleaning existing job with id \"{}\"".format(job_id))
-            success = _clean(cluster, jq, job_id)
+            success = clean(cluster, jq, job_id)
             if not success:
                 log.error("Could not remove \"{}\", aborting!".format(job_id))
                 return

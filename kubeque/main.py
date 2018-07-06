@@ -10,6 +10,8 @@ from .util import get_timestamp, url_join
 import csv
 import argparse
 
+from .config import get_config_path, load_config
+
 log = logging.getLogger(__name__)
 
 def list_params_cmd(jq, io, args):
@@ -337,7 +339,7 @@ def _resub_preempted(cluster, jq, jobid):
     for task in tasks:
         _update_if_owner_missing(cluster, jq, task)
 
-def _clean(cluster, jq, jobid, force=False):
+def clean(cluster, jq, jobid, force=False):
     if not force:
         status_counts = jq.get_status_counts(jobid)
         log.debug("job %s has status %s", jobid, status_counts)
@@ -354,14 +356,14 @@ def _clean(cluster, jq, jobid, force=False):
                 return False
 
     log.info("deleting %s", jobid)
-    jq.delete_job(jobid)
+    cluster.delete_job(jobid)
     return True
 
 def clean_cmd(cluster, jq, args):
     log.info("jobid_pattern: %s", args.jobid_pattern)
     jobids = _get_jobids_from_pattern(jq, args.jobid_pattern)
     for jobid in jobids:
-        _clean(cluster, jq, jobid, args.force)
+        clean(cluster, jq, jobid, args.force)
 
 def _update_if_owner_missing(cluster, jq, task):
     if task.status != STATUS_CLAIMED:
@@ -423,13 +425,15 @@ def get_func_parameters(func):
 
 
 def main(argv=None):
+    from .submit import submit_cmd
+
     parse = argparse.ArgumentParser()
     parse.add_argument("--config", default=None)
     parse.add_argument("--debug", action="store_true", help="If set, debug messages will be output")
     subparser = parse.add_subparsers()
 
-    parser = subparser.add_parser("validate", help="Run a series of tests to confirm the configuration is valid")
-    parser.set_defaults(func=validate_cmd)
+    # parser = subparser.add_parser("validate", help="Run a series of tests to confirm the configuration is valid")
+    # parser.set_defaults(func=validate_cmd)
 
     parser = subparser.add_parser("sub", help="Submit a command (or batch of commands) for execution")
     parser.set_defaults(func=submit_cmd)

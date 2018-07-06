@@ -54,64 +54,6 @@ class ClusterStatus:
     def is_running(self):
         return self.running_count > 0
 
-
-class ClusterState:
-    def __init__(self, job_id : str, jq : JobQueue, node_req_store : AddNodeReqStore, cluster : Cluster) -> None:
-        self.job_id = job_id
-        self.cluster = cluster
-        self.datastore = datastore
-        self.tasks = [] # type: List[Task]
-        self.node_reqs = [] # type: List[NodeReq]
-        #self.add_node_statuses = [] # type: List[AddNodeStatus]
-
-    def update(self):
-        # update tasks
-        self.tasks = self.jq.get_tasks(self.job_id)
-
-        # poll all the operations which are not marked as dead
-        self.node_reqs = self.node_req_store.get_node_reqs(self.job_id)
-
-        # get all the status of each operation
-        for node_req in self.node_reqs:
-            if node_req.status in REQUESTED_NODE_STATES:
-                op = self.cluster.get_node_req(node_req.operation_id)
-
-                if op.status not in REQUESTED_NODE_STATES:
-                    self.node_req_store.update_node_req_status(node_req.operation_id, op.status, op.instance_name)
-
-    def get_incomplete_task_count(self) -> int:
-        return len([t for t in self.tasks if t.status in INCOMPLETE_TASK_STATES])
-
-    def get_requested_node_count(self) -> int:
-        return len([o for o in self.operations if o.status in REQUESTED_NODE_STATES])
-
-    def get_preempt_attempt_count(self) -> int:
-        return len([o for o in self.node_reqs if o.node_class == NODE_REQ_CLASS_PREEMPTIVE ])
-
-    def get_running_tasks_with_invalid_owner(self) -> List[str]:
-        raise Exception("unimp")
-
-
-class CachingCaller:
-    def __init__(self, fn, expiry_time=5):
-        self.prev = {}
-        self.expiry_time = expiry_time
-        self.fn = fn
-
-    def __call__(self, *args):
-        now = time.time()
-        immutable_args = tuple(args)
-        if immutable_args in self.prev:
-            value, timestamp = self.prev[immutable_args]
-            if timestamp + self.expiry_time < now:
-                return value
-
-        value = self.fn(*args)
-
-        self.prev[immutable_args] = (value, timestamp)
-
-        return value
-
 class Cluster():
     def __init__(self, project : str, zones : List[str], node_req_store : AddNodeReqStore, job_store : JobStore, task_store : TaskStore, client : datastore.Client, credentials=None) -> None:
         self.compute = ComputeService(project, credentials)
@@ -269,6 +211,68 @@ class Cluster():
 
     def get_cluster_mod(self, job_id):
         return ClusterMod(job_id, self, self.debug_log_prefix)
+
+
+
+class ClusterState:
+    def __init__(self, job_id : str, jq : JobQueue, node_req_store : AddNodeReqStore, cluster : Cluster) -> None:
+        self.job_id = job_id
+        self.cluster = cluster
+        self.datastore = datastore
+        self.tasks = [] # type: List[Task]
+        self.node_reqs = [] # type: List[NodeReq]
+        self.jq = jq
+        self.node_req_store = node_req_store
+        #self.add_node_statuses = [] # type: List[AddNodeStatus]
+
+    def update(self):
+        # update tasks
+        self.tasks = self.jq.get_tasks(self.job_id)
+
+        # poll all the operations which are not marked as dead
+        self.node_reqs = self.node_req_store.get_node_reqs(self.job_id)
+
+        # get all the status of each operation
+        for node_req in self.node_reqs:
+            if node_req.status in REQUESTED_NODE_STATES:
+                op = self.cluster.get_node_req(node_req.operation_id)
+
+                if op.status not in REQUESTED_NODE_STATES:
+                    self.node_req_store.update_node_req_status(node_req.operation_id, op.status, op.instance_name)
+
+    def get_incomplete_task_count(self) -> int:
+        return len([t for t in self.tasks if t.status in INCOMPLETE_TASK_STATES])
+
+    def get_requested_node_count(self) -> int:
+        return len([o for o in self.node_reqs if o.status in REQUESTED_NODE_STATES])
+
+    def get_preempt_attempt_count(self) -> int:
+        return len([o for o in self.node_reqs if o.node_class == NODE_REQ_CLASS_PREEMPTIVE ])
+
+    def get_running_tasks_with_invalid_owner(self) -> List[str]:
+        raise Exception("unimp")
+
+
+class CachingCaller:
+    def __init__(self, fn, expiry_time=5):
+        self.prev = {}
+        self.expiry_time = expiry_time
+        self.fn = fn
+
+    def __call__(self, *args):
+        now = time.time()
+        immutable_args = tuple(args)
+        if immutable_args in self.prev:
+            value, timestamp = self.prev[immutable_args]
+            if timestamp + self.expiry_time < now:
+                return value
+
+        value = self.fn(*args)
+
+        self.prev[immutable_args] = (value, timestamp)
+
+        return value
+
 
 class ClusterMod:
     def __init__(self, job_id : str, cluster : Cluster, debug_log_prefix : str) -> None:

@@ -1,7 +1,7 @@
 import re
 import collections
 import os
-from kubeque.gcp import _join
+from .util import url_join
 
 class UploadMap:
     def __init__(self):
@@ -22,7 +22,7 @@ class UploadMap:
     def add(self, hash_function, cas_url, filename, is_public=False):
         assert isinstance(is_public, bool)
         h = hash_function(filename)
-        url = _join(cas_url, h)
+        url = url_join(cas_url, h)
         self.map[filename] = (url, is_public)
         return url
 
@@ -139,7 +139,7 @@ def make_spec_from_command(argv,
         tasks.append(dict(
             downloads=[dict(d._asdict()) for d in dl_and_command.downloads], 
             command=dl_and_command.command,
-            uploads=dict(include_patterns=src_wildcards, exclude_patterns=[], dst_url=_join(dest_url, str(task_i+1))),
+            uploads=dict(include_patterns=src_wildcards, exclude_patterns=[], dst_url=url_join(dest_url, str(task_i+1))),
             parameters=parameters[task_i]
         ))
 

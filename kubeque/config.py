@@ -2,8 +2,9 @@ import logging
 import os
 import sys
 
-import kubeque.gcs_pipeline as pipeline
+from .io import IO
 from configparser import ConfigParser
+from .cluster_service import Cluster
 
 log = logging.getLogger(__name__)
 
@@ -52,12 +53,24 @@ def load_config(config_file, gcloud_config_file="~/.config/gcloud/configurations
     jq, io, cluster = load_config_from_dict(merged_config)
     return merged_config, jq, io, cluster
 
+from .node_req_store import AddNodeReqStore
+from .task_store import TaskStore
+from .job_store import JobStore
+from .job_queue import JobQueue
+from google.cloud import datastore
 
 def load_config_from_dict(config):
     credentials = None
-    io = IO(config['project'], config['cas_url_prefix'], credentials)
-    jq = create_gcs_job_queue(config['project'], credentials, use_pubsub=False)
-    cluster = pipeline.Cluster(config['project'], config['zones'], credentials=credentials)
+    project_id = config['project']
+    io = IO(project_id, config['cas_url_prefix'], credentials)
+
+    client = datastore.Client(project_id, credentials=credentials)
+    job_store = JobStore(client)
+    task_store = TaskStore(client)
+    jq = JobQueue(job_store, task_store)
+
+    node_req_store = AddNodeReqStore(client)
+    cluster = Cluster(config['project'], config['zones'], node_req_store=node_req_store, job_store=job_store, task_store=task_store, client=client, credentials=credentials)
 
     return jq, io, cluster
 

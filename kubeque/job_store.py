@@ -56,19 +56,34 @@ def entity_to_job(entity):
                status=entity['status'],
                submit_time=entity.get('submit_time'))
 
+class ImmediateBatch:
+    def __init__(self, client):
+        self.client = client
 
+    def delete(self, key):
+        self.client.delete(key)
+
+    def put(self, entity):
+        self.client.put(entity)
 
 class JobStore:
     def __init__(self, client : datastore.Client) -> None:
         self.client = client
+        self.immediate_batch = ImmediateBatch(client)
 
     def delete(self, job_id, batch=None):
-        key = self.client.key("Job", job_id)
-
         if batch is None:
-            self.client.delete(key)
-        else:
-            batch.delete(key)
+            batch = self.immediate_batch
+
+        key = self.client.key("Job", job_id)
+        batch.delete(key)
+
+    def put(self, job : Job, batch=None) -> None:
+        if batch is None:
+            batch = self.immediate_batch
+
+        entity = job_to_entity(self.client, job)
+        batch.put(entity)
 
     def get_jobids(self) -> List[Job]:
         query = self.client.query(kind="Job")
