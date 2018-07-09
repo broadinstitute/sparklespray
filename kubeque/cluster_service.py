@@ -1,6 +1,6 @@
 import re
 from .task_store import INCOMPLETE_TASK_STATES, Task, STATUS_FAILED, STATUS_COMPLETE
-from .node_req_store import AddNodeReqStore, NodeReq, NODE_REQ_SUBMITTED, NODE_REQ_CLASS_PREEMPTIVE, NODE_REQ_CLASS_NORMAL, REQUESTED_NODE_STATES
+from .node_req_store import AddNodeReqStore, NodeReq, NODE_REQ_SUBMITTED, NODE_REQ_CLASS_PREEMPTIVE, NODE_REQ_CLASS_NORMAL, NODE_REQ_COMPLETE, REQUESTED_NODE_STATES
 from .compute_service import ComputeService
 from .node_service import NodeService, MachineSpec
 from .job_store import JobStore
@@ -55,7 +55,7 @@ class ClusterStatus:
         return self.running_count > 0
 
 class Cluster():
-    def __init__(self, project : str, zones : List[str], node_req_store : AddNodeReqStore, job_store : JobStore, task_store : TaskStore, client : datastore.Client, credentials=None) -> None:
+    def __init__(self, project : str, zones : List[str], node_req_store : AddNodeReqStore, job_store : JobStore, task_store : TaskStore, client : datastore.Client, debug_log_prefix: str, credentials=None) -> None:
         self.compute = ComputeService(project, credentials)
         self.nodes = NodeService(project, zones, credentials)
         self.node_req_store = node_req_store
@@ -65,6 +65,7 @@ class Cluster():
         self._get_job = CachingCaller(job_store.get_job)
         self.job_store = job_store
         self.task_store = task_store
+        self.debug_log_prefix = debug_log_prefix
 
     def get_state(self, job_id):
         return ClusterState(job_id, self.task_store, self.node_req_store, self)
@@ -237,11 +238,27 @@ class ClusterState:
 
         # get all the status of each operation
         for node_req in self.node_reqs:
-            if node_req.status in REQUESTED_NODE_STATES:
+            if node_req.status != NODE_REQ_COMPLETE:
                 op = self.cluster.nodes.get_add_node_status(node_req.operation_id)
-
-                if op.status not in REQUESTED_NODE_STATES:
+                new_status = op.status
+                # print("fetched {} and status was {}".format(node_req.operation_id, new_status))
+                if new_status != node_req.status:
                     self.node_req_store.update_node_req_status(node_req.operation_id, op.status, op.instance_name)
+
+    def get_summary(self) -> str:
+        by_status = defaultdict(lambda: 0)
+        for t in self.tasks:
+            by_status[t.status] += 1
+        statuses = sorted(by_status.keys())
+        task_status = ", ".join(["{} ({})".format(status, by_status[status]) for status in statuses])
+
+        by_status = defaultdict(lambda: 0)
+        for r in self.node_reqs:
+            by_status[r.status] += 1
+        statuses = sorted(by_status.keys())
+        node_status = ", ".join(["{} ({})".format(status, by_status[status]) for status in statuses])
+
+        return "tasks: {}, nodes: {}".format(task_status, node_status)
 
     def get_incomplete_task_count(self) -> int:
         return len([t for t in self.tasks if t.status in INCOMPLETE_TASK_STATES])
@@ -253,7 +270,8 @@ class ClusterState:
         return len([o for o in self.node_reqs if o.node_class == NODE_REQ_CLASS_PREEMPTIVE ])
 
     def get_running_tasks_with_invalid_owner(self) -> List[str]:
-        raise Exception("unimp")
+        log.warning("get_running_tasks_with_invalid_owner is still a stub")
+        return []
 
     def get_successful_task_count(self):
         return len([t for t in self.tasks if (t.status == STATUS_COMPLETE and t.exit_code == "0") ])

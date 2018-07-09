@@ -58,6 +58,7 @@ from .task_store import TaskStore
 from .job_store import JobStore
 from .job_queue import JobQueue
 from google.cloud import datastore
+from .util import url_join
 
 def load_config_from_dict(config):
     credentials = None
@@ -70,7 +71,8 @@ def load_config_from_dict(config):
     jq = JobQueue(client, job_store, task_store)
 
     node_req_store = AddNodeReqStore(client)
-    cluster = Cluster(config['project'], config['zones'], node_req_store=node_req_store, job_store=job_store, task_store=task_store, client=client, credentials=credentials)
+    debug_log_prefix = config.get("debug_log_prefix", url_join(config['default_url_prefix'], "node-logs"))
+    cluster = Cluster(config['project'], config['zones'], node_req_store=node_req_store, job_store=job_store, task_store=task_store, client=client, debug_log_prefix=debug_log_prefix, credentials=credentials)
 
     return jq, io, cluster
 
