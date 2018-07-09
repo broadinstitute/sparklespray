@@ -6,6 +6,11 @@ import sys
 import kubeque
 from .task_store import STATUS_FAILED, STATUS_CLAIMED, STATUS_PENDING, STATUS_KILLED, STATUS_COMPLETE
 from .util import get_timestamp, url_join
+from .job_store import JOB_STATUS_KILLED
+from .job_queue import JobQueue
+from .cluster_service import Cluster
+from .io import IO
+from .watch import watch
 
 import csv
 import argparse
@@ -118,65 +123,41 @@ def _resolve_jobid(jq, jobid):
         return jobid
 
 
-def saturate_cmd(jq, io, cluster, args):
+def watch_cmd(jq : JobQueue, io : IO, cluster : Cluster, args):
     jobid = _resolve_jobid(jq, args.jobid)
-    watch(io, jq, jobid, cluster, saturate=True, saturate_nodes=args.nodes)
+    watch(io, jq, jobid, cluster, target_nodes=args.nodes)
 
-def status_cmd(jq, io, cluster, args):
+def status_cmd(jq : JobQueue, io : IO, cluster : Cluster, args):
     jobids = _get_jobids_from_pattern(jq, args.jobid_pattern)
 
-    if args.wait or args.loglive:
-        assert len(jobids) == 1, "When watching, only one jobid allowed, but the following matched wildcard: {}".format(
-            jobids)
-        jobid = jobids[0]
-        watch(io, jq, jobid, cluster, loglive=args.loglive)
-    else:
-        for jobid in jobids:
-            if args.detailed or args.failures:
-                for task in jq.get_tasks(jobid):
-                    if args.failures and task.status != STATUS_FAILED:
-                        continue
+    for jobid in jobids:
+        # if args.detailed or args.failures:
+        #     for task in jq.get_tasks(jobid):
+        #         if args.failures and task.status != STATUS_FAILED:
+        #             continue
 
-                    command_result_json = None
-                    if task.command_result_url is not None:
-                        command_result_json = io.get_as_str(task.command_result_url, must=False)
-                    if command_result_json is not None:
-                        command_result = json.loads(command_result_json)
-                        command_result_block = "\n  command result: {}".format(json.dumps(command_result, indent=4))
-                    else:
-                        command_result_block = ""
+        #         command_result_json = None
+        #         if task.command_result_url is not None:
+        #             command_result_json = io.get_as_str(task.command_result_url, must=False)
+        #         if command_result_json is not None:
+        #             command_result = json.loads(command_result_json)
+        #             command_result_block = "\n  command result: {}".format(json.dumps(command_result, indent=4))
+        #         else:
+        #             command_result_block = ""
 
-                    log.info("task_id: %s\n"
-                             "  status: %s, exit_code: %s, failure_reason: %s\n"
-                             "  started on pod: %s\n"
-                             "  args: %s, history: %s%s\n"
-                             "  cluster: %s", task.task_id,
-                             task.status, task.exit_code, task.failure_reason, task.owner, task.args, task.history,
-                             command_result_block, task.cluster)
-            else:
-                tasks = jq.get_tasks(jobid)
-                status, complete = _summarize_task_statuses(tasks)
-                log.info("%s: %s", jobid, status)
+        #         log.info("task_id: %s\n"
+        #                     "  status: %s, exit_code: %s, failure_reason: %s\n"
+        #                     "  started on pod: %s\n"
+        #                     "  args: %s, history: %s%s\n"
+        #                     "  cluster: %s", task.task_id,
+        #                     task.status, task.exit_code, task.failure_reason, task.owner, task.args, task.history,
+        #                     command_result_block, task.cluster)
+        # else:
+        tasks = cluster.task_store.get_tasks(jobid)
+        status, complete = _summarize_task_statuses(tasks)
+        log.info("%s: %s", jobid, status)
 
-def _commonprefix(paths):
-    "Given a list of paths, returns the longest common prefix"
-    if not paths:
-        return ()
 
-    # def split(path):
-    #     return [x for x in path.split("/") if x != ""]
-
-    paths = [x.split("/") for x in paths]
-
-    min_path = min(paths)
-    max_path = max(paths)
-    common_path = min_path
-    for i in range(len(min_path)):
-        if min_path[i] != max_path[i]:
-            common_path = common_path[:i]
-            break
-
-    return "/".join(common_path)
 
 def fetch_cmd(jq, io, args):
     jobid = _resolve_jobid(jq, args.jobid)
@@ -248,91 +229,79 @@ def _is_complete(status_counts):
     return all_terminal
 
 
-class NodeRespawn:
-    def __init__(self, cluster_status_fn, tasks_status_fn, get_pending_fn, max_nodes):
-        self.max_restarts = tasks_status_fn().active_tasks
-        self.cluster_status_fn = cluster_status_fn
-        self.tasks_status_fn = tasks_status_fn
-        self.last_cluster_status = None
-        self.nodes_added = 0
-        self.max_nodes = max_nodes
-        self.get_pending_fn = get_pending_fn
+# class NodeRespawn:
+#     def __init__(self, cluster_status_fn, tasks_status_fn, get_pending_fn, max_nodes):
+#         self.max_restarts = tasks_status_fn().active_tasks
+#         self.cluster_status_fn = cluster_status_fn
+#         self.tasks_status_fn = tasks_status_fn
+#         self.last_cluster_status = None
+#         self.nodes_added = 0
+#         self.max_nodes = max_nodes
+#         self.get_pending_fn = get_pending_fn
 
-    def reset_added_count(self):
-        self.nodes_added = 0
+#     def reset_added_count(self):
+#         self.nodes_added = 0
 
-    def reconcile_node_count(self, add_node_callback):
-        # get latest status
-        cluster_status = self.tasks_status_fn()
-        if cluster_status == self.last_cluster_status:
-            # don't try to reconcile if we see the identical as last time we polled. We might not
-            # be able to see newly spawned nodes yet, so wait for the next poll
-            return
+#     def reconcile_node_count(self, add_node_callback):
+#         # get latest status
+#         cluster_status = self.tasks_status_fn()
+#         if cluster_status == self.last_cluster_status:
+#             # don't try to reconcile if we see the identical as last time we polled. We might not
+#             # be able to see newly spawned nodes yet, so wait for the next poll
+#             return
 
-        needed_nodes = cluster_status.active_tasks
-        if self.max_nodes is not None:
-            needed_nodes = min(self.max_nodes, needed_nodes)
-        running_count = self.cluster_status_fn().running_count
-        # for now, count pending requests as "running" because they eventually will
-        #print("calling get_pending_fn")
-        running_count += self.get_pending_fn()
-        self.last_cluster_status = cluster_status
+#         needed_nodes = cluster_status.active_tasks
+#         if self.max_nodes is not None:
+#             needed_nodes = min(self.max_nodes, needed_nodes)
+#         running_count = self.cluster_status_fn().running_count
+#         # for now, count pending requests as "running" because they eventually will
+#         #print("calling get_pending_fn")
+#         running_count += self.get_pending_fn()
+#         self.last_cluster_status = cluster_status
 
-        # see if we're short and add nodes of the appropriate type
-        if needed_nodes > running_count:
-            nodes_to_add = needed_nodes - running_count
-            capped_nodes_to_add = min(nodes_to_add, self.max_restarts - self.nodes_added)
-            if capped_nodes_to_add == 0:
-                raise Exception("Wanted to add {} nodes, but we have reached our limit on how many nodes can be restarted ({})".format(nodes_to_add, self.max_restarts))
-            else:
-                add_node_callback(capped_nodes_to_add)
-                self.nodes_added += capped_nodes_to_add
-                log.info("Added {} nodes (total: {}/{})".format(capped_nodes_to_add, self.nodes_added, self.max_restarts))
+#         # see if we're short and add nodes of the appropriate type
+#         if needed_nodes > running_count:
+#             nodes_to_add = needed_nodes - running_count
+#             capped_nodes_to_add = min(nodes_to_add, self.max_restarts - self.nodes_added)
+#             if capped_nodes_to_add == 0:
+#                 raise Exception("Wanted to add {} nodes, but we have reached our limit on how many nodes can be restarted ({})".format(nodes_to_add, self.max_restarts))
+#             else:
+#                 add_node_callback(capped_nodes_to_add)
+#                 self.nodes_added += capped_nodes_to_add
+#                 log.info("Added {} nodes (total: {}/{})".format(capped_nodes_to_add, self.nodes_added, self.max_restarts))
 
-class TasksStatus:
-    def __init__(self, tasks):
-        self.tasks = tasks
+# class TasksStatus:
+#     def __init__(self, tasks):
+#         self.tasks = tasks
 
-    @property
-    def active_tasks(self):
-        # compute how many nodes are needed to run everything in parallel
-        last_needed_nodes = 0
-        for task in self.tasks:
-            if task.status in [STATUS_CLAIMED, STATUS_PENDING]:
-                last_needed_nodes += 1
-        return last_needed_nodes
+#     @property
+#     def active_tasks(self):
+#         # compute how many nodes are needed to run everything in parallel
+#         last_needed_nodes = 0
+#         for task in self.tasks:
+#             if task.status in [STATUS_CLAIMED, STATUS_PENDING]:
+#                 last_needed_nodes += 1
+#         return last_needed_nodes
 
-    @property
-    def failed_tasks(self):
-        failures = 0
-        for task in self.tasks:
-            if task.status in [STATUS_FAILED]:
-                failures += 1
-            elif task.status in [STATUS_COMPLETE]:
-                if str(task.exit_code) != "0":
-                    failures += 1
-        return failures
+#     @property
+#     def failed_tasks(self):
+#         failures = 0
+#         for task in self.tasks:
+#             if task.status in [STATUS_FAILED]:
+#                 failures += 1
+#             elif task.status in [STATUS_COMPLETE]:
+#                 if str(task.exit_code) != "0":
+#                     failures += 1
+#         return failures
 
-    @property
-    def summary(self):
-        return _summarize_task_statuses(self.tasks)
+#     @property
+#     def summary(self):
+#         return _summarize_task_statuses(self.tasks)
 
 
 def addnodes_cmd(jq, cluster, args, config):
     job_id = _resolve_jobid(jq, args.job_id)
-    return _addnodes(job_id, jq, cluster, args.count, None, config['default_url_prefix'])
-
-def _addnodes(job_id, jq, cluster, count, preemptible, default_url_prefix):
-    job = jq.get_job(job_id)
-    log.info("Adding %d nodes to cluster %s", count, job.cluster)
-    operation_ids = []
-    timestamp = get_timestamp()
-    for i in range(count):
-        debug_log_url = url_join(default_url_prefix, "node-logs", job_id, timestamp, "output-{}.log".format(i))
-        operation_id = jq.add_node(job_id, cluster, preemptible, debug_log_url, job=job)
-        log.info("adding node via operation %s, logs will be written to %s", operation_id, debug_log_url)
-        operation_ids.append(operation_id)
-    return operation_ids
+    return cluster.add_nodes(job_id, jq, cluster, args.count, None, config['default_url_prefix'])
 
 def _resub_preempted(cluster, jq, jobid):
     tasks = jq.get_tasks(jobid, STATUS_CLAIMED)
@@ -421,10 +390,13 @@ def version_cmd():
 
 def get_func_parameters(func):
     import inspect
-    return inspect.getargspec(func)[0]
+    return inspect.getfullargspec(func)[0]
 
 
 def main(argv=None):
+    import warnings
+    warnings.filterwarnings("ignore", "Your application has authenticated using end user credentials")
+
     from .submit import submit_cmd
 
     parse = argparse.ArgumentParser()
@@ -506,17 +478,12 @@ def main(argv=None):
 
     parser = subparser.add_parser("status", help="Print the status for the tasks which make up the specified job")
     parser.set_defaults(func=status_cmd)
-    parser.add_argument("--detailed", action="store_true", help="List attributes of each task")
-    parser.add_argument("--failures", action="store_true", help="List attributes of each task (only for failures)")
-    parser.add_argument("--wait", action="store_true",
-                        help="If set, will periodically poll and print the status until all tasks terminate")
-    parser.add_argument("--loglive", action="store_true", help="If set, will read stdout from tasks from StackDriver logging")
     parser.add_argument("jobid_pattern", nargs="?")
 
-    parser = subparser.add_parser("saturate", help="Monitor the job, automatically adding nodes equal to the number of tasks, and re-add nodes when one is preempted")
-    parser.set_defaults(func=saturate_cmd)
+    parser = subparser.add_parser("watch", help="Monitor the job")
+    parser.set_defaults(func=watch_cmd)
     parser.add_argument("jobid")
-    parser.add_argument("--nodes", "-n", type=int, help="By default, saturate will try to create nodes equal to the number of tasks. This will allow you to override the number of nodes we will want to create")
+    parser.add_argument("--nodes", "-n", type=int, help="The target number of workers")
 
     parser = subparser.add_parser("clean", help="Remove jobs which are not currently running from the database of jobs")
     parser.set_defaults(func=clean_cmd)

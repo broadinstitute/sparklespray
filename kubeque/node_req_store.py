@@ -1,5 +1,6 @@
 from google.cloud import datastore
 import attr
+from .datastore_batch import ImmediateBatch, Batch
 from typing import List
 
 NODE_REQ_SUBMITTED = "submitted"
@@ -35,11 +36,12 @@ def entity_to_node_req(entity : datastore.Entity) -> NodeReq:
         job_id = entity['job_id'],
         status=entity['status'],
         node_class = entity['node_class'],
-                   sequence=entity['sequence'])
+        sequence=entity['sequence'])
 
 class AddNodeReqStore:
     def __init__(self, client : datastore.Client) -> None:
         self.client = client
+        self.immediate_batch = ImmediateBatch(self.client)
 
     def add_node_req(self, req : NodeReq):
         self.client.put(node_req_to_entity(self.client, req))
@@ -55,13 +57,14 @@ class AddNodeReqStore:
             results.append(node_req)
         return results
 
-    def delete(self, operation_id : str, batch=None) -> None:
-        key = self.client.key("NodeReq", operation_id)
-
+    def delete_for_job(self, job_id : str, batch : Batch=None) -> None:
         if batch is None:
-            self.client.delete(key)
-        else:
-            batch.delete(key)
+            batch = self.immediate_batch
+
+        query = self.client.query(kind="NodeReq")
+        query.add_filter("job_id", "=", job_id)
+        for entity in query.fetch():
+            self.client.delete(entity.key)
 
                 # def get_pending_node_req_count(self, job_id):
     #     return len(self.get_node_reqs(job_id, status=NODE_REQ_SUBMITTED))

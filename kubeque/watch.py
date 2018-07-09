@@ -48,17 +48,21 @@ def dump_stdout_if_single_task(jq, io, jobid):
     print_error_lines(stdout_lines)
 
 
-def watch(io : IO, jq : JobQueue, job_id :str, cluster: Cluster, initial_poll_delay=1.0, max_poll_delay=30.0, loglive=False):
+def watch(io : IO, jq : JobQueue, job_id :str, cluster: Cluster, target_nodes=None, initial_poll_delay=1.0, max_poll_delay=30.0, loglive=None):
     job = jq.get_job(job_id)
 
     log_monitor = None
+
+    if loglive is None and len(job.tasks) == 1:
+        loglive = True
+
     if loglive:
         if len(job.tasks) != 1:
             log.warning("Could not tail logs because there are %d tasks, and we can only watch one task at a time", len(job.tasks))
         else:
             task_id = job.tasks[0]
-            task = jq.storage.get_task(task_id)
-            log_monitor = LogMonitor(jq.storage.client, task.monitor_address, task_id)
+            task = cluster.task_store.get_task(task_id) 
+            log_monitor = LogMonitor(cluster.client, task.monitor_address, task_id)
 
     resize_cluster = ResizeCluster(target_node_count=job.target_node_count,
                                    max_preemptable_attempts=job.max_preemptable_attempts)
@@ -66,10 +70,12 @@ def watch(io : IO, jq : JobQueue, job_id :str, cluster: Cluster, initial_poll_de
 
     poll_delay = initial_poll_delay
     prev_summary = None
+    state = cluster.get_state(job_id)
+
     try:
         while True:
             with _exception_guard(lambda: "summarizing status of job {} threw exception".format(job_id)):
-                state = cluster.get_state()
+                state.update()
 
             if state.is_done():
                 break

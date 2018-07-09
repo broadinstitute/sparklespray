@@ -67,7 +67,7 @@ def load_config_from_dict(config):
     client = datastore.Client(project_id, credentials=credentials)
     job_store = JobStore(client)
     task_store = TaskStore(client)
-    jq = JobQueue(job_store, task_store)
+    jq = JobQueue(client, job_store, task_store)
 
     node_req_store = AddNodeReqStore(client)
     cluster = Cluster(config['project'], config['zones'], node_req_store=node_req_store, job_store=job_store, task_store=task_store, client=client, credentials=credentials)

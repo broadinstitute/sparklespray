@@ -16,6 +16,11 @@ import argparse
 from kubeque.logclient import LogMonitor
 from configparser import ConfigParser
 from .main import clean
+from .task_store import STATUS_PENDING
+from .util import get_timestamp
+from .job_queue import JobQueue
+from .cluster_service import Cluster
+from .io import IO
 
 log = logging.getLogger(__name__)
 
@@ -136,7 +141,7 @@ def _make_cluster_name(job_name, image, cpu_request, mem_limit, unique_name):
         return 'l-' + random_string(20)
     return "c-" + hashlib.md5("{}-{}-{}-{}-{}-{}".format(job_name, image, cpu_request, mem_limit, kubeque.__version__, os.getlogin()).encode("utf8")).hexdigest()[:20]
 
-def submit(jq, io, cluster, job_id, spec, dry_run, config, skip_kube_submit, metadata, kubequeconsume_url,
+def submit(jq : JobQueue, io : IO, cluster : Cluster, job_id : str, spec : str, dry_run : bool, config : dict, skip_kube_submit :bool, metadata:dict, kubequeconsume_url:str,
            exec_local=False, loglive=False, ):
     from .key_store import KeyStore
 
@@ -214,8 +219,8 @@ def submit(jq, io, cluster, job_id, spec, dry_run, config, skip_kube_submit, met
         if not skip_kube_submit and not exec_local:
             existing_nodes = cluster.get_cluster_status(cluster_name)
             if not existing_nodes.is_running():
-                operation_ids = _addnodes(job_id, jq, cluster, 1, preemptible, config['default_url_prefix'])
-                log.info("Adding initial node for cluster (operation %s)", operation_ids[0])
+                operation_id = cluster.add_node(job_id, preemptible, url_join(config['default_url_prefix'], get_timestamp()))
+                log.info("Adding initial node for cluster (operation %s)", operation_id)
             else:
                 log.info("Cluster already exists, not adding node. Cluster status: %s", existing_nodes.as_string())
             existing_tasks = jq.get_tasks_for_cluster(cluster_name, STATUS_PENDING)

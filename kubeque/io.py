@@ -90,7 +90,10 @@ class IO:
                 import subprocess
                 subprocess.check_call(['gsutil', 'cp'] + acl_params + [src_filename, dst_url])
             else:
-                blob.upload_from_filename(src_filename, predefined_acl=canned_acl)
+                blob.upload_from_filename(src_filename)
+                acl = blob.acl
+                acl.save_predefined("publicRead")
+
 
     def _get_url_prefix(self):
         return "gs://"

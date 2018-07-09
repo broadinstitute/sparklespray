@@ -10,6 +10,7 @@ import json
 import attr
 from typing import List, Tuple, Optional
 from .task_store import task_to_entity
+from .datastore_batch import ImmediateBatch, Batch
 
 log = logging.getLogger(__name__)
 
@@ -56,15 +57,6 @@ def entity_to_job(entity):
                status=entity['status'],
                submit_time=entity.get('submit_time'))
 
-class ImmediateBatch:
-    def __init__(self, client):
-        self.client = client
-
-    def delete(self, key):
-        self.client.delete(key)
-
-    def put(self, entity):
-        self.client.put(entity)
 
 class JobStore:
     def __init__(self, client : datastore.Client) -> None:
@@ -78,14 +70,14 @@ class JobStore:
         key = self.client.key("Job", job_id)
         batch.delete(key)
 
-    def put(self, job : Job, batch=None) -> None:
+    def insert(self, job : Job, batch=None) -> None:
         if batch is None:
             batch = self.immediate_batch
 
         entity = job_to_entity(self.client, job)
         batch.put(entity)
 
-    def get_jobids(self) -> List[Job]:
+    def get_job_ids(self) -> List[Job]:
         query = self.client.query(kind="Job")
         jobs_it = query.fetch()
         jobids = []

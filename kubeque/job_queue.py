@@ -9,10 +9,11 @@ import re
 import hashlib
 import json
 from .task_store import STATUS_CLAIMED, STATUS_FAILED, STATUS_COMPLETE, STATUS_KILLED, STATUS_PENDING, INCOMPLETE_TASK_STATES
-from .job_store import JobStore, Job
+from .job_store import JobStore, Job, JOB_STATUS_SUBMITTED
 from .task_store import TaskStore, TaskHistory, Task
 
 from fnmatch import fnmatch
+from .datastore_batch import ImmediateBatch, Batch
 
 from contextlib import contextmanager
 import collections
@@ -53,9 +54,10 @@ def get_credentials(account, cred_file="~/.config/gcloud/credentials"):
 
 
 class JobQueue:
-    def __init__(self, job_storage : JobStore, task_storage : TaskStore):
+    def __init__(self, client : datastore.Client, job_storage : JobStore, task_storage : TaskStore):
         self.job_storage = job_storage
         self.task_storage = task_storage
+        self.client = client
 
 #     def add_node(self, job_id, cluster, preemptible, debug_log_url, job=None):
 #         return self.storage.add_node(job_id, cluster, preemptible, job, debug_log_url)
@@ -69,8 +71,8 @@ class JobQueue:
 #     def get_pending_node_req_count(self, job_id):
 #         return self.storage.get_pending_node_req_count(job_id)
 
-#     def get_tasks_for_cluster(self, cluster_name, status, max_fetch=None):
-#         return self.storage.get_tasks_for_cluster(cluster_name, status, max_fetch)
+    def get_tasks_for_cluster(self, cluster_name, status, max_fetch=None):
+        return self.task_storage.get_tasks_for_cluster(cluster_name, status, max_fetch)
 
 #     def get_claimed_task_ids(self):
 #         tasks = self.storage.get_tasks(status=STATUS_CLAIMED)
@@ -88,9 +90,9 @@ class JobQueue:
 #     def get_last_job(self):
 #         return self.storage.get_last_job()
 
-#     def get_jobids(self, jobid_wildcard="*"):
-#         jobids = self.storage.get_jobids()
-#         return [jobid for jobid in jobids if fnmatch(jobid, jobid_wildcard)]
+    def get_jobids(self, job_id_wildcard="*"):
+        job_ids = self.job_storage.get_job_ids()
+        return [job_id for job_id in job_ids if fnmatch(job_id, job_id_wildcard)]
 
 #     def get_kube_job_spec(self, job_id):
 #         job = self.storage.get_job(job_id)
@@ -149,32 +151,28 @@ class JobQueue:
         tasks = []
         now = time.time()
         
-        BATCH_SIZE = 300
+        batch = Batch(self.client)
         task_index = 0
-        for chunk_start in range(0, len(args), BATCH_SIZE):
-            args_batch = args[chunk_start:chunk_start+BATCH_SIZE]
-            
-            with self.storage.batch_write() as batch:
-                for arg, command_result_url in args_batch:
-                    task_id = "{}.{}".format(job_id, task_index)
-                    task = Task(task_id=task_id,
-                        task_index=task_index,
-                        job_id=job_id, 
-                        status="pending", 
-                        args=arg,
-                        history=[ TaskHistory(timestamp=now, status="pending")],
-                        owner=None,
-                        command_result_url=command_result_url,
-                                cluster=cluster,
-                                monitor_address=None)
-                    tasks.append(task)
-                    batch.save(task)
-                    task_index += 1
-                log.info("Saved task definition batch containing %d tasks", len(args_batch))
+        for arg, command_result_url in args:
+            task_id = "{}.{}".format(job_id, task_index)
+            task = Task(task_id=task_id,
+                task_index=task_index,
+                job_id=job_id, 
+                status="pending", 
+                args=arg,
+                history=[ TaskHistory(timestamp=now, status="pending")],
+                owner=None,
+                command_result_url=command_result_url,
+                        cluster=cluster,
+                        monitor_address=None)
+            self.task_storage.insert(task, batch=batch)
+            task_index += 1
 
         job = Job(job_id=job_id, tasks=[t.task_id for t in tasks], kube_job_spec=kube_job_spec, metadata=metadata, cluster=cluster, status=JOB_STATUS_SUBMITTED,
                   submit_time=time.time())
-        self.job_storage.store_job(job)
+        self.job_storage.insert(job, batch=batch)
+        batch.flush()
+        #log.info("Saved task definition batch containing %d tasks", len(batch))
 
 #     def test_datastore_api(self, job_id):
 #         """Test we the datastore api is enabled by writing a value and deleting a value."""

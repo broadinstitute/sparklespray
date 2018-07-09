@@ -66,8 +66,12 @@ class Cluster():
         self.job_store = job_store
         self.task_store = task_store
 
-    def get_state(self):
-        raise Exception("unimp")
+    def get_state(self, job_id):
+        return ClusterState(job_id, self.task_store, self.node_req_store, self)
+
+    def add_nodes(self, job_id : str, preemptible : bool, debug_log_url_prefix : str, count : int):
+        for i in range(count):
+            self.add_node(job_id, preemptible, "{}/{}".format(debug_log_url_prefix, i))
 
     def add_node(self, job_id : str, preemptible : bool, debug_log_url : str):
         job = self._get_job(job_id)
@@ -134,8 +138,7 @@ class Cluster():
             self.task_store.delete(task_id, batch=batch)
 
         # clean up associated node requests
-        for node_req in self.node_req_store.get_node_reqs(job_id):
-            self.node_req_store.delete(node_req.operation_id, batch=batch)
+        self.node_req_store.delete_for_job(job_id, batch=batch)
 
         self.job_store.delete(job_id, batch=batch)
 
@@ -215,19 +218,19 @@ class Cluster():
 
 
 class ClusterState:
-    def __init__(self, job_id : str, jq : JobQueue, node_req_store : AddNodeReqStore, cluster : Cluster) -> None:
+    def __init__(self, job_id : str, task_store : TaskStore, node_req_store : AddNodeReqStore, cluster : Cluster) -> None:
         self.job_id = job_id
         self.cluster = cluster
         self.datastore = datastore
         self.tasks = [] # type: List[Task]
         self.node_reqs = [] # type: List[NodeReq]
-        self.jq = jq
         self.node_req_store = node_req_store
+        self.task_store = task_store
         #self.add_node_statuses = [] # type: List[AddNodeStatus]
 
     def update(self):
         # update tasks
-        self.tasks = self.jq.get_tasks(self.job_id)
+        self.tasks = self.task_store.get_tasks(self.job_id)
 
         # poll all the operations which are not marked as dead
         self.node_reqs = self.node_req_store.get_node_reqs(self.job_id)
@@ -269,7 +272,7 @@ class CachingCaller:
 
         value = self.fn(*args)
 
-        self.prev[immutable_args] = (value, timestamp)
+        self.prev[immutable_args] = (value, now)
 
         return value
 
