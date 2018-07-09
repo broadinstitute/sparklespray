@@ -57,6 +57,12 @@ class AddNodeReqStore:
             results.append(node_req)
         return results
 
+    def update_node_req_status(self, operation_id, status, instance_name):
+        entity = self.client.get(self.client.key("NodeReq", operation_id))
+        entity['status'] = status
+        entity['instance_name'] = instance_name
+        self.client.put(entity)
+
     def delete_for_job(self, job_id : str, batch : Batch=None) -> None:
         if batch is None:
             batch = self.immediate_batch

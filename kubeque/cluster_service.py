@@ -1,5 +1,5 @@
 import re
-from .task_store import INCOMPLETE_TASK_STATES, Task
+from .task_store import INCOMPLETE_TASK_STATES, Task, STATUS_FAILED, STATUS_COMPLETE
 from .node_req_store import AddNodeReqStore, NodeReq, NODE_REQ_SUBMITTED, NODE_REQ_CLASS_PREEMPTIVE, NODE_REQ_CLASS_NORMAL, REQUESTED_NODE_STATES
 from .compute_service import ComputeService
 from .node_service import NodeService, MachineSpec
@@ -238,7 +238,7 @@ class ClusterState:
         # get all the status of each operation
         for node_req in self.node_reqs:
             if node_req.status in REQUESTED_NODE_STATES:
-                op = self.cluster.get_node_req(node_req.operation_id)
+                op = self.cluster.nodes.get_add_node_status(node_req.operation_id)
 
                 if op.status not in REQUESTED_NODE_STATES:
                     self.node_req_store.update_node_req_status(node_req.operation_id, op.status, op.instance_name)
@@ -254,6 +254,15 @@ class ClusterState:
 
     def get_running_tasks_with_invalid_owner(self) -> List[str]:
         raise Exception("unimp")
+
+    def get_successful_task_count(self):
+        return len([t for t in self.tasks if (t.status == STATUS_COMPLETE and t.exit_code == "0") ])
+
+    def get_failed_task_count(self):
+        return len([t for t in self.tasks if t.status == STATUS_FAILED or (t.status == STATUS_COMPLETE and t.exit_code != "0") ])
+
+    def is_done(self):
+        return self.get_incomplete_task_count() == 0
 
 
 class CachingCaller:

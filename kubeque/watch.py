@@ -107,9 +107,12 @@ def watch(io : IO, jq : JobQueue, job_id :str, cluster: Cluster, target_nodes=No
             time.sleep(poll_delay)
 
         failures = state.get_failed_task_count()
+        successes = state.get_successful_task_count()
+        log.info("Job finished. %d tasks completed successfully, %d tasks failed", successes, failures)
         if failures > 0 and len(job.tasks) == 1:
             log.warning("Job failed, and there was only one task, so dumping the tail of the output from that task")
             dump_stdout_if_single_task(jq, io, job_id)
+
 
         return failures == 0
 

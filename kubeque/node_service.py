@@ -10,6 +10,7 @@ import os
 from collections import defaultdict
 import json
 from kubeque.compute_service import ComputeService
+from .node_req_store import NODE_REQ_COMPLETE, NODE_REQ_RUNNING, NODE_REQ_SUBMITTED
 from typing import List, DefaultDict, Tuple
 
 # from oauth2client.client import GoogleCredentials
@@ -63,8 +64,40 @@ def format_table(header, rows):
 
 
 class AddNodeStatus:
-    def __init__(self, status : dict) -> None:
-        self.status = status
+    def __init__(self, response : dict) -> None:
+        self.response = response
+
+    @property
+    def instance_name(self):
+        events = self.response.get('metadata', {}).get('events')
+        for event in events:
+            instance = event.get('details', {}).get('instance')
+            if instance is not None:
+                return instance
+        return None
+
+        # print(self.response)
+        # return self.response['metadata']['runtimeMetadata']['computeEngine']['instanceName']
+
+    @property
+    def status(self):
+        if self.response['done']:
+            return NODE_REQ_COMPLETE
+        else:
+            instance_name = self.instance_name
+            if instance_name is None:
+                return NODE_REQ_SUBMITTED
+            else:
+                return NODE_REQ_RUNNING
+            # events = self.response.get('metadata', {}).get('events')
+            # start_events = [x for x in events if x['description'] == 'pulling-image']
+            # if len(start_events) > 0:
+            #     return NODE_REQ_RUNNING
+            # else:
+            #     return NODE_REQ_SUBMITTED
+
+    # def is_done(self):
+    #     return self.status == NODE_REQ_COMPLETE
 
     def get_event_summary(self, since=None):
         log = []
