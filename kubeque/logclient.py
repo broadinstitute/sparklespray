@@ -3,6 +3,9 @@ from kubeque.pb_pb2_grpc import MonitorStub
 from kubeque.pb_pb2 import ReadOutputRequest
 import grpc
 import datetime
+import logging
+
+log = logging.getLogger(__name__)
 
 def print_log_content(timestamp, payload):
     if payload[-1] == "\n":
@@ -20,7 +23,7 @@ def print_log_content(timestamp, payload):
 
 class LogMonitor:
     def __init__(self, datastore_client, node_address, task_id):
-        print("connecting to {}".format(node_address))
+        log.info("connecting to %s", node_address)
         entity_key = datastore_client.key("ClusterKeys", "sparklespray")
         entity = datastore_client.get(entity_key)
 

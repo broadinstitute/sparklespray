@@ -20,6 +20,7 @@ class NodeReq(object):
     status = attr.ib()
     node_class = attr.ib()
     sequence = attr.ib()
+    instance_name = attr.ib(default=None)
 
 def node_req_to_entity(client :datastore.Client, o : NodeReq) -> datastore.Entity:
     assert o.operation_id is not None
@@ -29,6 +30,7 @@ def node_req_to_entity(client :datastore.Client, o : NodeReq) -> datastore.Entit
     entity['status'] = o.status
     entity['node_class'] = o.node_class
     entity['sequence'] = o.sequence
+    entity['instance_name'] = o.instance_name
     return entity
 
 def entity_to_node_req(entity : datastore.Entity) -> NodeReq:
@@ -36,7 +38,8 @@ def entity_to_node_req(entity : datastore.Entity) -> NodeReq:
         job_id = entity['job_id'],
         status=entity['status'],
         node_class = entity['node_class'],
-        sequence=entity['sequence'])
+        sequence=entity['sequence'],
+        instance_name=entity['instance_name'])
 
 class AddNodeReqStore:
     def __init__(self, client : datastore.Client) -> None:

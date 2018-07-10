@@ -11,6 +11,7 @@ from .job_queue import JobQueue
 from .cluster_service import Cluster
 from .io import IO
 from .watch import watch
+from .resize_cluster import GetPreempted
 
 import csv
 import argparse
@@ -308,24 +309,36 @@ def _resub_preempted(cluster, jq, jobid):
     for task in tasks:
         _update_if_owner_missing(cluster, jq, task)
 
-def clean(cluster, jq, jobid, force=False):
-    if not force:
-        status_counts = jq.get_status_counts(jobid)
-        log.debug("job %s has status %s", jobid, status_counts)
-        if STATUS_CLAIMED in status_counts:
-            # if some tasks are still marked 'claimed' verify that the owner is still running
-            tasks = jq.get_tasks(jobid, STATUS_CLAIMED)
-            for task in tasks:
-                _update_if_owner_missing(cluster, jq, task)
+def _update_claimed_are_still_running(jq, cluster, job_id):
+    get_preempted = GetPreempted()
+    state = cluster.get_state(job_id)
+    state.update()
+    task_ids = get_preempted(state)
+    if len(task_ids) > 0:
+        log.info("Resetting tasks which appear to have been preempted: %s", ", ".join(task_ids))
+        for task_id in task_ids:
+            jq.reset_task(task_id)
+    return task_ids
 
-            # now that we may have changed some tasks from claimed -> pending, check again
-            status_counts = jq.get_status_counts(jobid)
-            if STATUS_CLAIMED in status_counts:
-                log.warning("job %s is still running (%s), cannot remove", jobid, status_counts)
+
+def clean(cluster : Cluster, jq : JobQueue, job_id: str, force : bool=False):
+    if not force:
+        tasks = cluster.task_store.get_tasks(job_id, status=STATUS_CLAIMED)
+        if len(tasks) > 0:
+            # if some tasks are still marked 'claimed' verify that the owner is still running
+            reset_task_ids = _update_claimed_are_still_running(jq, cluster, job_id)
+
+            still_running = []
+            for task in tasks:
+                if task.task_id not in reset_task_ids:
+                    still_running.append(task.task_id)
+
+            if len(still_running) > 0:
+                log.warning("job %s is still running (%d tasks), cannot remove", job_id, len(still_running))
                 return False
 
-    log.info("deleting %s", jobid)
-    cluster.delete_job(jobid)
+    log.info("deleting %s", job_id)
+    cluster.delete_job(job_id)
     return True
 
 def clean_cmd(cluster, jq, args):
@@ -487,9 +500,9 @@ def main(argv=None):
 
     parser = subparser.add_parser("clean", help="Remove jobs which are not currently running from the database of jobs")
     parser.set_defaults(func=clean_cmd)
+    parser.add_argument("--force", "-f", help="If set, will delete job regardless of whether it is running or not", action="store_true")
     parser.add_argument("jobid_pattern", nargs="?",
                         help="If specified will only attempt to remove jobs that match this pattern")
-    parser.add_argument("--force", "-f", help="If set, will delete job regardless of whether it is running or not")
 
     parser = subparser.add_parser("kill", help="Terminate the specified job")
     parser.set_defaults(func=kill_cmd)

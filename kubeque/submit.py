@@ -21,6 +21,7 @@ from .util import get_timestamp
 from .job_queue import JobQueue
 from .cluster_service import Cluster
 from .io import IO
+from .watch import watch
 
 log = logging.getLogger(__name__)
 
@@ -141,8 +142,8 @@ def _make_cluster_name(job_name, image, cpu_request, mem_limit, unique_name):
         return 'l-' + random_string(20)
     return "c-" + hashlib.md5("{}-{}-{}-{}-{}-{}".format(job_name, image, cpu_request, mem_limit, kubeque.__version__, os.getlogin()).encode("utf8")).hexdigest()[:20]
 
-def submit(jq : JobQueue, io : IO, cluster : Cluster, job_id : str, spec : str, dry_run : bool, config : dict, skip_kube_submit :bool, metadata:dict, kubequeconsume_url:str,
-           exec_local=False, loglive=False, ):
+def submit(jq : JobQueue, io : IO, cluster : Cluster, job_id : str, spec : str, dry_run : bool, config : dict, metadata:dict, 
+    kubequeconsume_url:str, loglive=False):
     from .key_store import KeyStore
 
     key_store = KeyStore(cluster.client)
@@ -193,7 +194,7 @@ def submit(jq : JobQueue, io : IO, cluster : Cluster, job_id : str, spec : str, 
         resources = spec["resources"]
         cpu_request = _parse_cpu_request(resources.get(CPU_REQUEST, config['default_resource_cpu']))
         mem_limit = _parse_mem_limit(resources.get(MEMORY_REQUEST, config["default_resource_memory"]))
-        cluster_name = _make_cluster_name(job_id, image, cpu_request, mem_limit, unique_name=exec_local)
+        cluster_name = _make_cluster_name(job_id, image, cpu_request, mem_limit, unique_name=False)
 
         assert mem_limit <= 5
         assert cpu_request < 2
@@ -216,28 +217,28 @@ def submit(jq : JobQueue, io : IO, cluster : Cluster, job_id : str, spec : str, 
             monitor_port=int(port))
 
         jq.submit(job_id, list(zip(task_spec_urls, command_result_urls)), pipeline_spec, metadata, cluster_name)
-        if not skip_kube_submit and not exec_local:
-            existing_nodes = cluster.get_cluster_status(cluster_name)
-            if not existing_nodes.is_running():
-                operation_id = cluster.add_node(job_id, preemptible, url_join(config['default_url_prefix'], get_timestamp()))
-                log.info("Adding initial node for cluster (operation %s)", operation_id)
-            else:
-                log.info("Cluster already exists, not adding node. Cluster status: %s", existing_nodes.as_string())
-            existing_tasks = jq.get_tasks_for_cluster(cluster_name, STATUS_PENDING)
-            if len(existing_tasks) > 0:
-                log.warning("%d tasks already exist queued up to run on this cluster. If this is not intentional, delete the jobs via 'kubeque clean' and resubmit this job.", len(existing_tasks))
-        elif exec_local:
-            raise Exception("unimplemented -- broke when migrated to new version of pipeline API")
-            # cmd = _write_local_script(job_id, spec, kubeque_command, config['kubequeconsume_exe_path'],
-            #                           kubeque_exe_in_container)
-            # log.info("Running job locally via executing: ./%s", cmd)
-            # log.warning("CPU and memory requirements are not honored when running locally. Will use whatever the docker host is configured for by default")
-            # os.system(os.path.abspath(cmd))
-        else:
-            raise Exception("unimplemented -- broke when migrated to new version of pipeline API")
-            # cmd = _write_local_script(job_id, spec, kubeque_command, config['kubequeconsume_exe_path'],
-            #                           kubeque_exe_in_container)
-            # log.info("Skipping submission.  You can execute tasks locally via: ./%s", cmd)
+        # if not skip_kube_submit and not exec_local:
+        #     existing_nodes = cluster.get_cluster_status(cluster_name)
+        #     if not existing_nodes.is_running():
+        #         operation_id = cluster.add_node(job_id, preemptible, url_join(config['default_url_prefix'], get_timestamp()))
+        #         log.info("Adding initial node for cluster (operation %s)", operation_id)
+        #     else:
+        #         log.info("Cluster already exists, not adding node. Cluster status: %s", existing_nodes.as_string())
+        #     existing_tasks = jq.get_tasks_for_cluster(cluster_name, STATUS_PENDING)
+        #     if len(existing_tasks) > 0:
+        #         log.warning("%d tasks already exist queued up to run on this cluster. If this is not intentional, delete the jobs via 'kubeque clean' and resubmit this job.", len(existing_tasks))
+        # elif exec_local:
+        #     raise Exception("unimplemented -- broke when migrated to new version of pipeline API")
+        #     # cmd = _write_local_script(job_id, spec, kubeque_command, config['kubequeconsume_exe_path'],
+        #     #                           kubeque_exe_in_container)
+        #     # log.info("Running job locally via executing: ./%s", cmd)
+        #     # log.warning("CPU and memory requirements are not honored when running locally. Will use whatever the docker host is configured for by default")
+        #     # os.system(os.path.abspath(cmd))
+        # else:
+        #     raise Exception("unimplemented -- broke when migrated to new version of pipeline API")
+        #     # cmd = _write_local_script(job_id, spec, kubeque_command, config['kubequeconsume_exe_path'],
+        #     #                           kubeque_exe_in_container)
+        #     # log.info("Skipping submission.  You can execute tasks locally via: ./%s", cmd)
 
 
 def _write_local_script(job_id, spec, kubeque_command, kubequeconsume_exe_path, kubeque_exe_in_container):
@@ -424,8 +425,8 @@ def submit_cmd(jq, io, cluster, args, config):
             io.put(filename, dest, skip_if_exists=True, is_public=is_public)
 
     log.debug("spec: %s", json.dumps(spec, indent=2))
-    submit(jq, io, cluster, job_id, spec, args.dryrun, config, args.skip_kube_submit, metadata, kubequeconsume_exe_url,
-           args.local, args.loglive)
+    submit(jq, io, cluster, job_id, spec, args.dryrun, config,  metadata, kubequeconsume_exe_url,
+           loglive=args.loglive)
 
     finished = False
     successful_execution = True
@@ -435,7 +436,7 @@ def submit_cmd(jq, io, cluster, args, config):
     else:
         if not (args.dryrun or args.skip_kube_submit) and args.wait_for_completion:
             log.info("Waiting for job to terminate")
-            successful_execution = watch(io, jq, job_id, cluster, loglive=args.loglive)
+            successful_execution = watch(io, jq, job_id, cluster, target_nodes=1)
             finished = True
 
     if finished:

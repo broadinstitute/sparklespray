@@ -48,6 +48,12 @@ class Task(object):
     version = attr.ib(default=1)
     exit_code = attr.ib(default=None)
 
+    def get_instance_name(self):
+        owner = self.owner
+        if owner is None:
+            return None
+        return owner.split("/")[-1]
+
 
 @attr.s
 class TaskStatus(object):

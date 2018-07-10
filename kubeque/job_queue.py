@@ -9,7 +9,7 @@ import re
 import hashlib
 import json
 from .task_store import STATUS_CLAIMED, STATUS_FAILED, STATUS_COMPLETE, STATUS_KILLED, STATUS_PENDING, INCOMPLETE_TASK_STATES
-from .job_store import JobStore, Job, JOB_STATUS_SUBMITTED
+from .job_store import JobStore, Job, JOB_STATUS_SUBMITTED, JOB_STATUS_KILLED
 from .task_store import TaskStore, TaskHistory, Task
 
 from fnmatch import fnmatch
@@ -101,13 +101,13 @@ class JobQueue:
     # def delete_job(self, job_id):
     #     self.job_storage.delete(job_id)
 
-#     def kill_job(self, job_id):
+    def kill_job(self, job_id):
 
-#         def mark_killed(job):
-#             job.status = JOB_STATUS_KILLED
-#             return True
+        def mark_killed(job):
+            job.status = JOB_STATUS_KILLED
+            return True
 
-#         return self.storage.update_job(job_id, mark_killed)
+        return self.job_storage.update_job(job_id, mark_killed)
 
     def get_status_counts(self, job_id):
         counts = collections.defaultdict(lambda: 0)

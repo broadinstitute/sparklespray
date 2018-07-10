@@ -7,7 +7,8 @@ from .node_service import NodeService
 from .task_store import Task
 from .node_req_store import NodeReq
 from .cluster_service import Cluster, ClusterState, ClusterMod
-
+import logging
+log = logging.getLogger(__name__)
 
 class GetPreempted:
     def __init__(self, get_time=time.time, min_bad_time=30):
@@ -55,13 +56,16 @@ class ResizeCluster:
         if target_node_count > requested_nodes:
             # Is our target higher than what we have now? Then add that many nodes
             remaining_preempt_attempts = self.max_preemptable_attempts - state.get_preempt_attempt_count()
-            for i in range(target_node_count - requested_nodes):
-                preemptable = remaining_preempt_attempts > 0
-                if preemptable:
-                    remaining_preempt_attempts -= 1
+            nodes_to_add = target_node_count - requested_nodes
+            if nodes_to_add > 0:
+                log.info("Currently targeting having {} nodes running, but we've only requested {} nodes. Adding {}".format(target_node_count, requested_nodes, nodes_to_add))
+                for i in range(nodes_to_add):
+                    preemptable = remaining_preempt_attempts > 0
+                    if preemptable:
+                        remaining_preempt_attempts -= 1
 
-                cluster_mod.add_node(preemptable=preemptable)
-                modified = True
+                    cluster_mod.add_node(preemptable=preemptable)
+                    modified = True
 
         elif target_node_count < requested_nodes:
             # We have requested too many. Start cancelling

@@ -1,5 +1,5 @@
 import re
-from .task_store import INCOMPLETE_TASK_STATES, Task, STATUS_FAILED, STATUS_COMPLETE
+from .task_store import INCOMPLETE_TASK_STATES, Task, STATUS_FAILED, STATUS_COMPLETE, STATUS_CLAIMED
 from .node_req_store import AddNodeReqStore, NodeReq, NODE_REQ_SUBMITTED, NODE_REQ_CLASS_PREEMPTIVE, NODE_REQ_CLASS_NORMAL, NODE_REQ_COMPLETE, REQUESTED_NODE_STATES
 from .compute_service import ComputeService
 from .node_service import NodeService, MachineSpec
@@ -223,8 +223,8 @@ class ClusterState:
         self.job_id = job_id
         self.cluster = cluster
         self.datastore = datastore
-        self.tasks = [] # type: List[Task]
-        self.node_reqs = [] # type: List[NodeReq]
+        self.tasks = None # type: List[Task]
+        self.node_reqs = None # type: List[NodeReq]
         self.node_req_store = node_req_store
         self.task_store = task_store
         #self.add_node_statuses = [] # type: List[AddNodeStatus]
@@ -233,8 +233,10 @@ class ClusterState:
         # update tasks
         self.tasks = self.task_store.get_tasks(self.job_id)
 
-        # poll all the operations which are not marked as dead
         self.node_reqs = self.node_req_store.get_node_reqs(self.job_id)
+
+        # poll all the operations which are not marked as dead
+        log.debug("fetched %d node_reqs", len(self.node_reqs))
 
         # get all the status of each operation
         for node_req in self.node_reqs:
@@ -244,6 +246,11 @@ class ClusterState:
                 # print("fetched {} and status was {}".format(node_req.operation_id, new_status))
                 if new_status != node_req.status:
                     self.node_req_store.update_node_req_status(node_req.operation_id, op.status, op.instance_name)
+                    # reflect the change in memory as well
+                    node_req.status = new_status
+
+    def get_tasks(self):
+        return self.tasks
 
     def get_summary(self) -> str:
         by_status = defaultdict(lambda: 0)
@@ -270,8 +277,31 @@ class ClusterState:
         return len([o for o in self.node_reqs if o.node_class == NODE_REQ_CLASS_PREEMPTIVE ])
 
     def get_running_tasks_with_invalid_owner(self) -> List[str]:
-        log.warning("get_running_tasks_with_invalid_owner is still a stub")
-        return []
+        node_req_by_instance_name = {}
+        for node_req in self.node_reqs:
+            if node_req.instance_name is not None:
+                assert node_req.instance_name not in node_req_by_instance_name
+                node_req_by_instance_name[node_req.instance_name] = node_req
+
+        task_ids_needing_reset = []
+        for task in self.tasks:
+            if task.status != STATUS_CLAIMED:
+                continue
+
+            instance_name = task.get_instance_name()
+
+            if instance_name not in node_req_by_instance_name:
+                log.warning("instance {} was not listed among {}".format(instance_name, ", ".join(node_req_by_instance_name.keys())))
+            else:
+                node_req = node_req_by_instance_name[instance_name]
+                if node_req.status == NODE_REQ_COMPLETE:
+                    log.warning("task status = {}, but node_req was {}".format(task.status, node_req.status))
+                    if node_req.node_class != NODE_REQ_CLASS_PREEMPTIVE:
+                        raise Exception("instance {} terminated but task {} was reported to still be using instance and the instance was not preemptiable")
+                    task_ids_needing_reset.append(task.task_id)
+
+        return task_ids_needing_reset
+
 
     def get_successful_task_count(self):
         return len([t for t in self.tasks if (t.status == STATUS_COMPLETE and t.exit_code == "0") ])
@@ -311,7 +341,6 @@ class ClusterMod:
         self.debug_log_prefix = debug_log_prefix
 
     def add_node(self, preemptable : bool) -> None:
-        raise
         self.cluster.add_node(self.job_id, preemptable, self.debug_log_prefix)
 
     def cancel_nodes(self, state : ClusterState, count : int) -> None:

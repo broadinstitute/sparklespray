@@ -48,21 +48,11 @@ def dump_stdout_if_single_task(jq, io, jobid):
     print_error_lines(stdout_lines)
 
 
-def watch(io : IO, jq : JobQueue, job_id :str, cluster: Cluster, target_nodes=None, initial_poll_delay=1.0, max_poll_delay=30.0, loglive=None):
+def watch(io : IO, jq : JobQueue, job_id :str, cluster: Cluster, target_nodes=None, initial_poll_delay=1.0, max_poll_delay=30.0):
     job = jq.get_job(job_id)
+    loglive=None
 
     log_monitor = None
-
-    if loglive is None and len(job.tasks) == 1:
-        loglive = True
-
-    if loglive:
-        if len(job.tasks) != 1:
-            log.warning("Could not tail logs because there are %d tasks, and we can only watch one task at a time", len(job.tasks))
-        else:
-            task_id = job.tasks[0]
-            task = cluster.task_store.get_task(task_id) 
-            log_monitor = LogMonitor(cluster.client, task.monitor_address, task_id)
 
     resize_cluster = ResizeCluster(target_node_count=job.target_node_count,
                                    max_preemptable_attempts=job.max_preemptable_attempts)
@@ -71,6 +61,19 @@ def watch(io : IO, jq : JobQueue, job_id :str, cluster: Cluster, target_nodes=No
     poll_delay = initial_poll_delay
     prev_summary = None
     state = cluster.get_state(job_id)
+    state.update()
+
+    task_count = len(state.get_tasks())
+    log.info("loglive=%s, tasks=%s", loglive, task_count)
+
+    if loglive is None and task_count == 1:
+        loglive = True
+        log.info("Only one task, so tailing log")
+
+    if loglive and task_count != 1:
+        log.warning("Could not tail logs because there are %d tasks, and we can only watch one task at a time", len(job.tasks))
+        loglive = False
+
 
     try:
         while True:
@@ -100,7 +103,13 @@ def watch(io : IO, jq : JobQueue, job_id :str, cluster: Cluster, target_nodes=No
             with _exception_guard(lambda: "rescaling cluster threw exception"):
                 resize_cluster(state, cluster.get_cluster_mod(job_id))
 
-            if log_monitor is not None:
+            if log_monitor is None:
+                if loglive:
+                    task = list(state.get_tasks())[0]
+                    if task.monitor_address is not None:
+                        log.info("Obtained monitor address for task %s: %s", task.task_id, task.monitor_address)
+                        log_monitor = LogMonitor(cluster.client, task.monitor_address, task.task_id)
+            else:
                 with _exception_guard(lambda: "polling log file threw exception"):
                     log_monitor.poll()
 
