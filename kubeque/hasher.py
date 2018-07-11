@@ -2,6 +2,7 @@ import os
 import hashlib
 import json
 
+
 def hash_from_file(filename):
     h = hashlib.sha256()
     with open(filename, "rb") as fd:
@@ -29,7 +30,7 @@ class CachingHashFunction:
         h = hash_from_file(filename)
         cache_entry = dict(sha256=h, mtime=mtime)
         self.cache[filename] = cache_entry
-        self.dirty=True
+        self.dirty = True
         return h
 
     def persist(self):
@@ -37,4 +38,3 @@ class CachingHashFunction:
             with open(self.filename, "wt") as fd:
                 json.dump(self.cache, fd, indent=1)
             self.dirty = False
-

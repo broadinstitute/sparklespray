@@ -14,6 +14,7 @@ from .datastore_batch import ImmediateBatch, Batch
 
 log = logging.getLogger(__name__)
 
+
 @attr.s
 class Job(object):
     job_id = attr.ib()
@@ -26,8 +27,10 @@ class Job(object):
     target_node_count = attr.ib(default=1)
     max_preemptable_attempts = attr.ib(default=0)
 
+
 JOB_STATUS_SUBMITTED = "submitted"
 JOB_STATUS_KILLED = "killed"
+
 
 def job_to_entity(client, o):
     entity_key = client.key("Job", o.job_id)
@@ -47,19 +50,20 @@ def job_to_entity(client, o):
 
     return entity
 
+
 def entity_to_job(entity):
     metadata = entity.get('metadata', [])
     return Job(job_id=entity.key.name,
-               tasks=entity.get('tasks',[]),
+               tasks=entity.get('tasks', []),
                cluster=entity['cluster'],
                kube_job_spec=entity.get('kube_job_spec'),
-               metadata=dict([(m['name'],m['value']) for m in metadata]),
+               metadata=dict([(m['name'], m['value']) for m in metadata]),
                status=entity['status'],
                submit_time=entity.get('submit_time'))
 
 
 class JobStore:
-    def __init__(self, client : datastore.Client) -> None:
+    def __init__(self, client: datastore.Client) -> None:
         self.client = client
         self.immediate_batch = ImmediateBatch(client)
 
@@ -70,7 +74,7 @@ class JobStore:
         key = self.client.key("Job", job_id)
         batch.delete(key)
 
-    def insert(self, job : Job, batch=None) -> None:
+    def insert(self, job: Job, batch=None) -> None:
         if batch is None:
             batch = self.immediate_batch
 
@@ -103,7 +107,7 @@ class JobStore:
     #        batch.save(job)
     #        log.info("Saved job definition with %d tasks", len(job.tasks))
 
-    def update_job(self, job_id : str, mutate_fn) -> Tuple[bool, Job]:
+    def update_job(self, job_id: str, mutate_fn) -> Tuple[bool, Job]:
         job_key = self.client.key("Job", job_id)
         entity_job = self.client.get(job_key)
         job = entity_to_job(entity_job)
@@ -113,7 +117,7 @@ class JobStore:
             self.client.put(entity_job)
         return update_ok, job
 
-    def get_job(self, job_id : str, must : bool = True) -> Optional[Job]:
+    def get_job(self, job_id: str, must: bool = True) -> Optional[Job]:
         job_key = self.client.key("Job", job_id)
         job_entity = self.client.get(job_key)
         if job_entity is None:

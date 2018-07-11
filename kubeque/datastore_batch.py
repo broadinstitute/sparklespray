@@ -1,10 +1,11 @@
 from google.cloud import datastore
 from typing import Set, Any, List
 
+
 class Batch:
-    def __init__(self, client: datastore.Client, batch_size : int=300) -> None:
-        self.deletes = set() # type: Set[Any]
-        self.puts = [] # type: List[Any]
+    def __init__(self, client: datastore.Client, batch_size: int=300) -> None:
+        self.deletes = set()  # type: Set[Any]
+        self.puts = []  # type: List[Any]
         self.batch_size = batch_size
         self.client = client
 
@@ -23,7 +24,8 @@ class Batch:
         puts = self.puts
         for chunk_start in range(0, len(puts), self.batch_size):
             batch = puts[chunk_start:chunk_start+self.batch_size]
-            self.client.put_multi(batch)        
+            self.client.put_multi(batch)
+
 
 class ImmediateBatch:
     def __init__(self, client):

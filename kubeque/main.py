@@ -20,6 +20,7 @@ from .config import get_config_path, load_config
 
 log = logging.getLogger(__name__)
 
+
 def list_params_cmd(jq, io, args):
     jobid = _resolve_jobid(jq, args.jobid)
     retcode = args.exitcode
@@ -38,7 +39,8 @@ def list_params_cmd(jq, io, args):
 
         before_count = len(tasks)
         tasks = [task for task in tasks if retcode_matches(task.exit_code)]
-        print("Filtered {} tasks to {} tasks with exit code {}".format(before_count, len(tasks), retcode))
+        print("Filtered {} tasks to {} tasks with exit code {}".format(
+            before_count, len(tasks), retcode))
 
     if len(tasks) == 0:
         print("No tasks found")
@@ -72,12 +74,14 @@ def list_params_cmd(jq, io, args):
 def reset_cmd(jq, io, cluster, args):
     for jobid in _get_jobids_from_pattern(jq, args.jobid_pattern):
         if args.all:
-            statuses_to_clear = [STATUS_CLAIMED, STATUS_FAILED, STATUS_COMPLETE, STATUS_KILLED]
+            statuses_to_clear = [STATUS_CLAIMED,
+                                 STATUS_FAILED, STATUS_COMPLETE, STATUS_KILLED]
         else:
             statuses_to_clear = [STATUS_CLAIMED, STATUS_FAILED, STATUS_KILLED]
         log.info("reseting %s by changing tasks with statuses (%s) -> %s", jobid, ",".join(statuses_to_clear),
                  STATUS_PENDING)
-        updated = jq.reset(jobid, args.owner, statuses_to_clear=statuses_to_clear)
+        updated = jq.reset(jobid, args.owner,
+                           statuses_to_clear=statuses_to_clear)
         log.info("updated %d tasks", updated)
         if args.resubmit:
             watch(io, jq, jobid, cluster, target_nodes=1)
@@ -124,7 +128,7 @@ def _resolve_jobid(jq, jobid):
         return jobid
 
 
-def status_cmd(jq : JobQueue, io : IO, cluster : Cluster, args):
+def status_cmd(jq: JobQueue, io: IO, cluster: Cluster, args):
     jobids = _get_jobids_from_pattern(jq, args.jobid_pattern)
 
     for jobid in jobids:
@@ -153,7 +157,6 @@ def status_cmd(jq : JobQueue, io : IO, cluster : Cluster, args):
         tasks = cluster.task_store.get_tasks(jobid)
         status, complete = _summarize_task_statuses(tasks)
         log.info("%s: %s", jobid, status)
-
 
 
 def fetch_cmd(jq, io, args):
@@ -192,10 +195,12 @@ def fetch_cmd_(jq, io, jobid, dest_root, force=False, flat=False):
         # save parameters taken from spec
         # with open(os.path.join(dest, "parameters.json"), "wt") as fd:
         #     fd.write(json.dumps(spec['parameters']))
-        command_result_json = io.get_as_str(spec['command_result_url'], must=False)
+        command_result_json = io.get_as_str(
+            spec['command_result_url'], must=False)
         to_download = []
         if command_result_json is None:
-            log.warning("Results did not appear to be written yet at %s", spec['command_result_url'])
+            log.warning("Results did not appear to be written yet at %s",
+                        spec['command_result_url'])
         else:
             get(spec['stdout_url'], os.path.join(dest, "stdout.txt"))
             command_result = json.loads(command_result_json)
@@ -205,7 +210,8 @@ def fetch_cmd_(jq, io, jobid, dest_root, force=False, flat=False):
 
         for src, dst_url in to_download:
             if include_index:
-                localpath = os.path.join(dest_root, str(task.task_index + 1), src)
+                localpath = os.path.join(
+                    dest_root, str(task.task_index + 1), src)
             else:
                 localpath = os.path.join(dest_root, src)
             pdir = os.path.dirname(localpath)
@@ -300,10 +306,12 @@ def addnodes_cmd(jq, cluster, args, config):
     job_id = _resolve_jobid(jq, args.job_id)
     return cluster.add_nodes(job_id, jq, cluster, args.count, None, config['default_url_prefix'])
 
+
 def _resub_preempted(cluster, jq, jobid):
     tasks = jq.get_tasks(jobid, STATUS_CLAIMED)
     for task in tasks:
         _update_if_owner_missing(cluster, jq, task)
+
 
 def _update_claimed_are_still_running(jq, cluster, job_id):
     get_preempted = GetPreempted(min_bad_time=0)
@@ -311,37 +319,43 @@ def _update_claimed_are_still_running(jq, cluster, job_id):
     state.update()
     task_ids = get_preempted(state)
     if len(task_ids) > 0:
-        log.info("Resetting tasks which appear to have been preempted: %s", ", ".join(task_ids))
+        log.info(
+            "Resetting tasks which appear to have been preempted: %s", ", ".join(task_ids))
         for task_id in task_ids:
             jq.reset_task(task_id)
     return task_ids
 
 
-def clean(cluster : Cluster, jq : JobQueue, job_id: str, force : bool=False, keep_cluster=None):
+def clean(cluster: Cluster, jq: JobQueue, job_id: str, force: bool=False, keep_cluster=None):
     if not force:
         tasks = cluster.task_store.get_tasks(job_id, status=STATUS_CLAIMED)
         if len(tasks) > 0:
             # if some tasks are still marked 'claimed' verify that the owner is still running
-            reset_task_ids = _update_claimed_are_still_running(jq, cluster, job_id)
+            reset_task_ids = _update_claimed_are_still_running(
+                jq, cluster, job_id)
 
             still_running = []
             for task in tasks:
                 if task.task_id not in reset_task_ids:
                     still_running.append(task.task_id)
 
-            log.info("reset_task_ids=%s, still_running=%s", reset_task_ids, still_running)
+            log.info("reset_task_ids=%s, still_running=%s",
+                     reset_task_ids, still_running)
             if len(still_running) > 0:
-                log.warning("job %s is still running (%d tasks), cannot remove", job_id, len(still_running))
+                log.warning(
+                    "job %s is still running (%d tasks), cannot remove", job_id, len(still_running))
                 return False
 
     cluster.delete_job(job_id, keep_cluster=keep_cluster)
     return True
+
 
 def clean_cmd(cluster, jq, args):
     jobids = _get_jobids_from_pattern(jq, args.jobid_pattern)
     for jobid in jobids:
         log.info("Deleting %s", jobid)
         clean(cluster, jq, jobid, args.force)
+
 
 def _update_if_owner_missing(cluster, jq, task):
     if task.status != STATUS_CLAIMED:
@@ -352,8 +366,10 @@ def _update_if_owner_missing(cluster, jq, task):
             new_status = STATUS_KILLED
         else:
             new_status = STATUS_PENDING
-        log.info("Task %s is owned by %s which does not appear to be running, resetting status from 'claimed' to '%s'", task.task_id, task.owner, new_status)
-        jq.reset_task(task.task_id, status= new_status)
+        log.info("Task %s is owned by %s which does not appear to be running, resetting status from 'claimed' to '%s'",
+                 task.task_id, task.owner, new_status)
+        jq.reset_task(task.task_id, status=new_status)
+
 
 def kill_cmd(jq, cluster, args):
     jobids = _get_jobids_from_pattern(jq, args.jobid_pattern)
@@ -404,14 +420,16 @@ def get_func_parameters(func):
 
 def main(argv=None):
     import warnings
-    warnings.filterwarnings("ignore", "Your application has authenticated using end user credentials")
+    warnings.filterwarnings(
+        "ignore", "Your application has authenticated using end user credentials")
 
     from .submit import add_submit_cmd
     from .watch import add_watch_cmd
 
     parse = argparse.ArgumentParser()
     parse.add_argument("--config", default=None)
-    parse.add_argument("--debug", action="store_true", help="If set, debug messages will be output")
+    parse.add_argument("--debug", action="store_true",
+                       help="If set, debug messages will be output")
     subparser = parse.add_subparsers()
 
     add_submit_cmd(subparser)
@@ -419,10 +437,13 @@ def main(argv=None):
     # parser = subparser.add_parser("validate", help="Run a series of tests to confirm the configuration is valid")
     # parser.set_defaults(func=validate_cmd)
 
-    parser = subparser.add_parser("addnodes", help="Add nodes to be used for executing a specific job")
+    parser = subparser.add_parser(
+        "addnodes", help="Add nodes to be used for executing a specific job")
     parser.set_defaults(func=addnodes_cmd)
-    parser.add_argument("job_id", help="the job id used to determine which cluster node should be added to.")
-    parser.add_argument("count", help="the number of worker nodes to add to the cluster", type=int)
+    parser.add_argument(
+        "job_id", help="the job id used to determine which cluster node should be added to.")
+    parser.add_argument(
+        "count", help="the number of worker nodes to add to the cluster", type=int)
 
     parser = subparser.add_parser("reset",
                                   help="Mark any 'claimed', 'killed' or 'failed' jobs as ready for execution again.  Useful largely only during debugging issues with job submission.")
@@ -432,14 +453,17 @@ def main(argv=None):
     parser.add_argument("--resubmit", action="store_true")
     parser.add_argument("--all", action="store_true")
 
-    parser = subparser.add_parser("listparams", help="Write to a csv file the parameters for each task")
+    parser = subparser.add_parser(
+        "listparams", help="Write to a csv file the parameters for each task")
     parser.set_defaults(func=list_params_cmd)
     parser.add_argument("jobid")
-    parser.add_argument("filename", help="The filename to write the csv file containing the parameters")
+    parser.add_argument(
+        "filename", help="The filename to write the csv file containing the parameters")
     parser.add_argument("--incomplete", "-i",
                         help="By default, will list all parameters. If this flag is present, only those tasks which are not complete will be written to the csv",
                         action="store_true")
-    parser.add_argument("--exitcode", "-e", help="Only include those tasks with this return code", type=int)
+    parser.add_argument(
+        "--exitcode", "-e", help="Only include those tasks with this return code", type=int)
     parser.add_argument("--extra",
                         help="Add columns 'task_id' and 'exit_code' for each task",
                         action="store_true")
@@ -451,19 +475,23 @@ def main(argv=None):
     #    parser.add_argument("--owner", help="if specified, only tasks with this owner will be retried")
     #    parser.add_argument("--no-wait", action="store_false", dest="wait_for_completion", help="Exit immediately after submission instead of waiting for job to complete")
 
-    parser = subparser.add_parser("dumpjob", help="Extract a json description of a submitted job")
+    parser = subparser.add_parser(
+        "dumpjob", help="Extract a json description of a submitted job")
     parser.set_defaults(func=dumpjob_cmd)
     parser.add_argument("jobid")
 
-    parser = subparser.add_parser("status", help="Print the status for the tasks which make up the specified job")
+    parser = subparser.add_parser(
+        "status", help="Print the status for the tasks which make up the specified job")
     parser.set_defaults(func=status_cmd)
     parser.add_argument("jobid_pattern", nargs="?")
 
     add_watch_cmd(subparser)
 
-    parser = subparser.add_parser("clean", help="Remove jobs which are not currently running from the database of jobs")
+    parser = subparser.add_parser(
+        "clean", help="Remove jobs which are not currently running from the database of jobs")
     parser.set_defaults(func=clean_cmd)
-    parser.add_argument("--force", "-f", help="If set, will delete job regardless of whether it is running or not", action="store_true")
+    parser.add_argument(
+        "--force", "-f", help="If set, will delete job regardless of whether it is running or not", action="store_true")
     parser.add_argument("jobid_pattern", nargs="?",
                         help="If specified will only attempt to remove jobs that match this pattern")
 
@@ -473,11 +501,14 @@ def main(argv=None):
                         help="If set will also terminate the nodes that the job is using to run. (This could impact other running jobs that use the same docker image)")
     parser.add_argument("jobid_pattern")
 
-    parser = subparser.add_parser("fetch", help="Download results from a completed job")
+    parser = subparser.add_parser(
+        "fetch", help="Download results from a completed job")
     parser.set_defaults(func=fetch_cmd)
     parser.add_argument("jobid")
-    parser.add_argument("--flat", action="store_true", help="Instead of writing each task into a seperate directory, write all files into the destination directory")
-    parser.add_argument("--dest", help="The path to the directory where the results will be downloaded. If omitted a directory will be created with the job id")
+    parser.add_argument("--flat", action="store_true",
+                        help="Instead of writing each task into a seperate directory, write all files into the destination directory")
+    parser.add_argument(
+        "--dest", help="The path to the directory where the results will be downloaded. If omitted a directory will be created with the job id")
 
     parser = subparser.add_parser("version", help="print the version and exit")
     parser.set_defaults(func=version_cmd)
@@ -485,9 +516,11 @@ def main(argv=None):
     args = parse.parse_args(argv)
 
     if args.debug:
-        logging.basicConfig(level=logging.DEBUG, format="%(asctime)s:%(levelname)s:%(name)s:%(message)s")
+        logging.basicConfig(
+            level=logging.DEBUG, format="%(asctime)s:%(levelname)s:%(name)s:%(message)s")
     else:
-        logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
+        logging.basicConfig(level=logging.INFO,
+                            format="%(asctime)s %(message)s")
         logging.getLogger("googleapiclient.discovery").setLevel(logging.WARN)
 
     if not hasattr(args, 'func'):

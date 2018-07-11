@@ -22,7 +22,8 @@ class NodeReq(object):
     sequence = attr.ib()
     instance_name = attr.ib(default=None)
 
-def node_req_to_entity(client :datastore.Client, o : NodeReq) -> datastore.Entity:
+
+def node_req_to_entity(client: datastore.Client, o: NodeReq) -> datastore.Entity:
     assert o.operation_id is not None
     entity_key = client.key("NodeReq", o.operation_id)
     entity = datastore.Entity(key=entity_key)
@@ -33,23 +34,25 @@ def node_req_to_entity(client :datastore.Client, o : NodeReq) -> datastore.Entit
     entity['instance_name'] = o.instance_name
     return entity
 
-def entity_to_node_req(entity : datastore.Entity) -> NodeReq:
+
+def entity_to_node_req(entity: datastore.Entity) -> NodeReq:
     return NodeReq(operation_id=entity.key.name,
-        cluster_id = entity['cluster_id'],
-        status=entity['status'],
-        node_class = entity['node_class'],
-        sequence=entity['sequence'],
-        instance_name=entity['instance_name'])
+                   cluster_id=entity['cluster_id'],
+                   status=entity['status'],
+                   node_class=entity['node_class'],
+                   sequence=entity['sequence'],
+                   instance_name=entity['instance_name'])
+
 
 class AddNodeReqStore:
-    def __init__(self, client : datastore.Client) -> None:
+    def __init__(self, client: datastore.Client) -> None:
         self.client = client
         self.immediate_batch = ImmediateBatch(self.client)
 
-    def add_node_req(self, req : NodeReq):
+    def add_node_req(self, req: NodeReq):
         self.client.put(node_req_to_entity(self.client, req))
 
-    def get_node_reqs(self, cluster_id : str, status : str = None) -> List[NodeReq]:
+    def get_node_reqs(self, cluster_id: str, status: str = None) -> List[NodeReq]:
         query = self.client.query(kind="NodeReq")
         query.add_filter("cluster_id", "=", cluster_id)
         if status is not None:
@@ -66,7 +69,7 @@ class AddNodeReqStore:
         entity['instance_name'] = instance_name
         self.client.put(entity)
 
-    def delete_for_cluster(self, cluster_id : str, batch : Batch=None) -> None:
+    def delete_for_cluster(self, cluster_id: str, batch: Batch=None) -> None:
         if batch is None:
             batch = self.immediate_batch
 
@@ -75,7 +78,7 @@ class AddNodeReqStore:
         for entity in query.fetch():
             self.client.delete(entity.key)
 
-                # def get_pending_node_req_count(self, job_id):
+            # def get_pending_node_req_count(self, job_id):
     #     return len(self.get_node_reqs(job_id, status=NODE_REQ_SUBMITTED))
     #
     # def update_node_reqs(self, job_id, cluster):

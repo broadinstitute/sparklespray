@@ -19,6 +19,7 @@ from typing import List, DefaultDict, Tuple
 
 log = logging.getLogger(__name__)
 
+
 @attr.s
 class MachineSpec(object):
     boot_volume_in_gb = attr.ib()
@@ -61,10 +62,8 @@ def format_table(header, rows):
     return "".join([x + "\n" for x in lines])
 
 
-
-
 class AddNodeStatus:
-    def __init__(self, response : dict) -> None:
+    def __init__(self, response: dict) -> None:
         self.response = response
 
     @property
@@ -112,9 +111,11 @@ class AddNodeStatus:
             if event['details']['@type'] == "type.googleapis.com/google.genomics.v2alpha1.ContainerStoppedEvent":
                 actionId = event['details']['actionId']
                 action = self.status['metadata']['pipeline']['actions'][actionId - 1]
-                log.append("Completed ({}): {}".format(action['imageUri'], repr(action['commands'])))
+                log.append("Completed ({}): {}".format(
+                    action['imageUri'], repr(action['commands'])))
                 log.append(event['description'])
-                log.append("exitStatus: {}, stderr:".format(event['details']['exitStatus']))
+                log.append("exitStatus: {}, stderr:".format(
+                    event['details']['exitStatus']))
                 log.append(event['details']['stderr'])
             else:
                 # if event['details']['@type'] != 'type.googleapis.com/google.genomics.v2alpha1.ContainerStartedEvent':
@@ -126,21 +127,21 @@ class AddNodeStatus:
 
 
 class NodeService:
-    def __init__(self, project : str, zones : List[str], credentials=None) -> None:
+    def __init__(self, project: str, zones: List[str], credentials=None) -> None:
         self.service = build('genomics', 'v2alpha1', credentials=credentials)
         self.zones = zones
         self.project = project
 
-    def get_add_node_status(self, operation_name : str):
+    def get_add_node_status(self, operation_name: str):
         request = self.service.projects().operations().get(name=operation_name)
         response = request.execute()
         return AddNodeStatus(response)
 
-    def cancel_add_node(self, operation_name : str):
+    def cancel_add_node(self, operation_name: str):
         request = self.service.projects().operations().cancel(name=operation_name)
         request.execute()
 
-    def add_node(self, pipeline_def : dict, preemptible: bool, debug_log_url : str):
+    def add_node(self, pipeline_def: dict, preemptible: bool, debug_log_url: str):
         "Returns operation name"
         # make a deep copy
         pipeline_def = json.loads(json.dumps(pipeline_def))
@@ -164,14 +165,14 @@ class NodeService:
         return operation['name']
 
     def create_pipeline_json(self,
-                              jobid : str,
-                              cluster_name : str,
-                              setup_image : str,
-                              setup_parameters : List[str],
-                              docker_image : str,
-                              docker_command : List[str],
-                              machine_specs : MachineSpec,
-                              monitor_port : int) -> dict:
+                             jobid: str,
+                             cluster_name: str,
+                             setup_image: str,
+                             setup_parameters: List[str],
+                             docker_image: str,
+                             docker_command: List[str],
+                             machine_specs: MachineSpec,
+                             monitor_port: int) -> dict:
         # labels have a few restrictions
         normalized_jobid = _normalize_label(jobid)
 
@@ -204,7 +205,8 @@ class NodeService:
                         'machineType': machine_specs.machine_type,
                         'preemptible': False,
                         'disks': [
-                            {'name': 'ephemeralssd'}  # TODO: figure out type to specify for local_ssd
+                            # TODO: figure out type to specify for local_ssd
+                            {'name': 'ephemeralssd'}
                         ],
                         'serviceAccount': {
                             'email': 'default',
@@ -227,5 +229,3 @@ class NodeService:
         }
 
         return pipeline_def
-
-

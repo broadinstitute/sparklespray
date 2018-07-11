@@ -5,42 +5,42 @@ from kubeque import pb_pb2 as kubeque_dot_pb__pb2
 
 
 class MonitorStub(object):
-  # missing associated documentation comment in .proto file
-  pass
+    # missing associated documentation comment in .proto file
+    pass
 
-  def __init__(self, channel):
-    """Constructor.
+    def __init__(self, channel):
+        """Constructor.
 
-    Args:
-      channel: A grpc.Channel.
-    """
-    self.ReadOutput = channel.unary_unary(
-        '/Monitor/ReadOutput',
-        request_serializer=kubeque_dot_pb__pb2.ReadOutputRequest.SerializeToString,
-        response_deserializer=kubeque_dot_pb__pb2.ReadOutputReply.FromString,
+        Args:
+          channel: A grpc.Channel.
+        """
+        self.ReadOutput = channel.unary_unary(
+            '/Monitor/ReadOutput',
+            request_serializer=kubeque_dot_pb__pb2.ReadOutputRequest.SerializeToString,
+            response_deserializer=kubeque_dot_pb__pb2.ReadOutputReply.FromString,
         )
 
 
 class MonitorServicer(object):
-  # missing associated documentation comment in .proto file
-  pass
+    # missing associated documentation comment in .proto file
+    pass
 
-  def ReadOutput(self, request, context):
-    """Sends a greeting
-    """
-    context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-    context.set_details('Method not implemented!')
-    raise NotImplementedError('Method not implemented!')
+    def ReadOutput(self, request, context):
+        """Sends a greeting
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
 
 
 def add_MonitorServicer_to_server(servicer, server):
-  rpc_method_handlers = {
-      'ReadOutput': grpc.unary_unary_rpc_method_handler(
-          servicer.ReadOutput,
-          request_deserializer=kubeque_dot_pb__pb2.ReadOutputRequest.FromString,
-          response_serializer=kubeque_dot_pb__pb2.ReadOutputReply.SerializeToString,
-      ),
-  }
-  generic_handler = grpc.method_handlers_generic_handler(
-      'Monitor', rpc_method_handlers)
-  server.add_generic_rpc_handlers((generic_handler,))
+    rpc_method_handlers = {
+        'ReadOutput': grpc.unary_unary_rpc_method_handler(
+            servicer.ReadOutput,
+            request_deserializer=kubeque_dot_pb__pb2.ReadOutputRequest.FromString,
+            response_serializer=kubeque_dot_pb__pb2.ReadOutputReply.SerializeToString,
+        ),
+    }
+    generic_handler = grpc.method_handlers_generic_handler(
+        'Monitor', rpc_method_handlers)
+    server.add_generic_rpc_handlers((generic_handler,))

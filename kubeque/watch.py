@@ -14,16 +14,20 @@ from .cluster_service import Cluster
 
 log = logging.getLogger(__name__)
 
+
 def add_watch_cmd(subparser):
     parser = subparser.add_parser("watch", help="Monitor the job")
     parser.set_defaults(func=watch_cmd)
     parser.add_argument("jobid")
-    parser.add_argument("--nodes", "-n", type=int, help="The target number of workers")
+    parser.add_argument("--nodes", "-n", type=int,
+                        help="The target number of workers")
 
-def watch_cmd(jq : JobQueue, io : IO, cluster : Cluster, args):
+
+def watch_cmd(jq: JobQueue, io: IO, cluster: Cluster, args):
     from .main import _resolve_jobid
     jobid = _resolve_jobid(jq, args.jobid)
     watch(io, jq, jobid, cluster, target_nodes=args.nodes)
+
 
 @contextlib.contextmanager
 def _exception_guard(deferred_msg, reset=None):
@@ -43,10 +47,12 @@ def _exception_guard(deferred_msg, reset=None):
         if reset is not None:
             reset()
 
+
 def print_error_lines(lines):
     from termcolor import colored, cprint
     for line in lines:
         print(colored(line, "red"))
+
 
 def dump_stdout_if_single_task(jq, io, jobid):
     tasks = jq.get_tasks(jobid)
@@ -59,9 +65,9 @@ def dump_stdout_if_single_task(jq, io, jobid):
     print_error_lines(stdout_lines)
 
 
-def watch(io : IO, jq : JobQueue, job_id :str, cluster: Cluster, target_nodes=None, initial_poll_delay=1.0, max_poll_delay=30.0):
+def watch(io: IO, jq: JobQueue, job_id: str, cluster: Cluster, target_nodes=None, initial_poll_delay=1.0, max_poll_delay=30.0):
     job = jq.get_job(job_id)
-    loglive=None
+    loglive = None
 
     log_monitor = None
 
@@ -81,9 +87,9 @@ def watch(io : IO, jq : JobQueue, job_id :str, cluster: Cluster, target_nodes=No
         log.info("Only one task, so tailing log")
 
     if loglive and task_count != 1:
-        log.warning("Could not tail logs because there are %d tasks, and we can only watch one task at a time", len(job.tasks))
+        log.warning(
+            "Could not tail logs because there are %d tasks, and we can only watch one task at a time", len(job.tasks))
         loglive = False
-
 
     try:
         while True:
@@ -106,7 +112,8 @@ def watch(io : IO, jq : JobQueue, job_id :str, cluster: Cluster, target_nodes=No
             with _exception_guard(lambda: "restarting preempted nodes threw exception"):
                 task_ids = get_preempted(state)
                 if len(task_ids) > 0:
-                    log.info("Resetting tasks which appear to have been preempted: %s", ", ".join(task_ids))
+                    log.info(
+                        "Resetting tasks which appear to have been preempted: %s", ", ".join(task_ids))
                     for task_id in task_ids:
                         jq.reset_task(task_id)
 
@@ -117,8 +124,10 @@ def watch(io : IO, jq : JobQueue, job_id :str, cluster: Cluster, target_nodes=No
                 if loglive:
                     task = list(state.get_tasks())[0]
                     if task.monitor_address is not None:
-                        log.info("Obtained monitor address for task %s: %s", task.task_id, task.monitor_address)
-                        log_monitor = LogMonitor(cluster.client, task.monitor_address, task.task_id)
+                        log.info("Obtained monitor address for task %s: %s",
+                                 task.task_id, task.monitor_address)
+                        log_monitor = LogMonitor(
+                            cluster.client, task.monitor_address, task.task_id)
             else:
                 with _exception_guard(lambda: "polling log file threw exception"):
                     log_monitor.poll()
@@ -127,11 +136,12 @@ def watch(io : IO, jq : JobQueue, job_id :str, cluster: Cluster, target_nodes=No
 
         failures = state.get_failed_task_count()
         successes = state.get_successful_task_count()
-        log.info("Job finished. %d tasks completed successfully, %d tasks failed", successes, failures)
+        log.info(
+            "Job finished. %d tasks completed successfully, %d tasks failed", successes, failures)
         if failures > 0 and len(job.tasks) == 1:
-            log.warning("Job failed, and there was only one task, so dumping the tail of the output from that task")
+            log.warning(
+                "Job failed, and there was only one task, so dumping the tail of the output from that task")
             dump_stdout_if_single_task(jq, io, job_id)
-
 
         return failures == 0
 

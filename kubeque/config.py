@@ -8,6 +8,7 @@ from .cluster_service import Cluster
 
 log = logging.getLogger(__name__)
 
+
 def load_config(config_file, gcloud_config_file="~/.config/gcloud/configurations/config_default"):
     # first load defaults from gcloud config
     gcloud_config_file = os.path.expanduser(gcloud_config_file)
@@ -26,7 +27,8 @@ def load_config(config_file, gcloud_config_file="~/.config/gcloud/configurations
     config.read(config_file)
     config_from_file = dict(config.items('config'))
     if 'zones' in config_from_file:
-        config_from_file['zones'] = [x.strip() for x in config_from_file['zones'].split(",")]
+        config_from_file['zones'] = [x.strip()
+                                     for x in config_from_file['zones'].split(",")]
 
     merged_config = dict(defaults)
     merged_config.update(config_from_file)
@@ -38,11 +40,13 @@ def load_config(config_file, gcloud_config_file="~/.config/gcloud/configurations
             missing_values.append(property)
 
     if len(missing_values) > 0:
-        print("Missing the following parameters in {}: {}".format(config_file, ", ".join(missing_values)))
+        print("Missing the following parameters in {}: {}".format(
+            config_file, ", ".join(missing_values)))
         sys.exit(1)
 
     if "kubequeconsume_exe_path" not in merged_config:
-        merged_config["kubequeconsume_exe_path"] = os.path.join(os.path.dirname(__file__), "bin/kubequeconsume")
+        merged_config["kubequeconsume_exe_path"] = os.path.join(
+            os.path.dirname(__file__), "bin/kubequeconsume")
         assert os.path.exists(merged_config["kubequeconsume_exe_path"])
 
     if "cas_url_prefix" not in merged_config:
@@ -53,12 +57,14 @@ def load_config(config_file, gcloud_config_file="~/.config/gcloud/configurations
     jq, io, cluster = load_config_from_dict(merged_config)
     return merged_config, jq, io, cluster
 
+
 from .node_req_store import AddNodeReqStore
 from .task_store import TaskStore
 from .job_store import JobStore
 from .job_queue import JobQueue
 from google.cloud import datastore
 from .util import url_join
+
 
 def load_config_from_dict(config):
     credentials = None
@@ -71,10 +77,13 @@ def load_config_from_dict(config):
     jq = JobQueue(client, job_store, task_store)
 
     node_req_store = AddNodeReqStore(client)
-    debug_log_prefix = config.get("debug_log_prefix", url_join(config['default_url_prefix'], "node-logs"))
-    cluster = Cluster(config['project'], config['zones'], node_req_store=node_req_store, job_store=job_store, task_store=task_store, client=client, debug_log_prefix=debug_log_prefix, credentials=credentials)
+    debug_log_prefix = config.get("debug_log_prefix", url_join(
+        config['default_url_prefix'], "node-logs"))
+    cluster = Cluster(config['project'], config['zones'], node_req_store=node_req_store, job_store=job_store,
+                      task_store=task_store, client=client, debug_log_prefix=debug_log_prefix, credentials=credentials)
 
     return jq, io, cluster
+
 
 def get_config_path(config_path):
     if config_path is not None:
@@ -99,6 +108,5 @@ def get_config_path(config_path):
                 return config_path
             checked_paths.append(config_path)
 
-        raise Exception("Could not find config file at any of locations: {}".format(checked_paths))
-
-
+        raise Exception(
+            "Could not find config file at any of locations: {}".format(checked_paths))

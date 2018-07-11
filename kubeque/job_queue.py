@@ -19,7 +19,7 @@ from contextlib import contextmanager
 import collections
 
 import attr
-import time 
+import time
 from collections import namedtuple
 import sys
 
@@ -27,6 +27,7 @@ CLAIM_TIMEOUT = 5
 
 
 log = logging.getLogger(__name__)
+
 
 def get_credentials(account, cred_file="~/.config/gcloud/credentials"):
     return None
@@ -51,10 +52,8 @@ def get_credentials(account, cred_file="~/.config/gcloud/credentials"):
     #     user_agent='Python client library')
 
 
-
-
 class JobQueue:
-    def __init__(self, client : datastore.Client, job_storage : JobStore, task_storage : TaskStore):
+    def __init__(self, client: datastore.Client, job_storage: JobStore, task_storage: TaskStore):
         self.job_storage = job_storage
         self.task_storage = task_storage
         self.client = client
@@ -118,7 +117,8 @@ class JobQueue:
     def reset(self, jobid, owner, statuses_to_clear=[STATUS_CLAIMED, STATUS_FAILED]):
         tasks = []
         for status_to_clear in statuses_to_clear:
-            tasks.extend(self.task_storage.get_tasks(jobid, status=status_to_clear))
+            tasks.extend(self.task_storage.get_tasks(
+                jobid, status=status_to_clear))
 
         updated = 0
         for task in tasks:
@@ -139,7 +139,7 @@ class JobQueue:
         now = time.time()
         task.owner = None
         task.status = status
-        task.history.append( TaskHistory(timestamp=now, status="reset") )
+        task.history.append(TaskHistory(timestamp=now, status="reset"))
         self.task_storage.update_task(task)
 
     def reset_task(self, task_id, status=STATUS_PENDING):
@@ -150,19 +150,19 @@ class JobQueue:
         kube_job_spec = json.dumps(kube_job_spec)
         tasks = []
         now = time.time()
-        
+
         batch = Batch(self.client)
         task_index = 0
         for arg, command_result_url in args:
             task_id = "{}.{}".format(job_id, task_index)
             task = Task(task_id=task_id,
-                task_index=task_index,
-                job_id=job_id, 
-                status="pending", 
-                args=arg,
-                history=[ TaskHistory(timestamp=now, status="pending")],
-                owner=None,
-                command_result_url=command_result_url,
+                        task_index=task_index,
+                        job_id=job_id,
+                        status="pending",
+                        args=arg,
+                        history=[TaskHistory(timestamp=now, status="pending")],
+                        owner=None,
+                        command_result_url=command_result_url,
                         cluster=cluster,
                         monitor_address=None)
             self.task_storage.insert(task, batch=batch)
@@ -204,4 +204,3 @@ class JobQueue:
 
 def _gcloud_cmd(args):
     return ["gcloud"] + list(args)
-

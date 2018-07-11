@@ -7,6 +7,7 @@ import logging
 
 log = logging.getLogger(__name__)
 
+
 def print_log_content(timestamp, payload):
     if payload[-1] == "\n":
         payload = payload[:-1]
@@ -20,6 +21,7 @@ def print_log_content(timestamp, payload):
             print(colored(prefix, "green"), colored(line, "yellow"))
         else:
             print(colored(" "*len(prefix), "white"), colored(line, "yellow"))
+
 
 class LogMonitor:
     def __init__(self, datastore_client, node_address, task_id):
@@ -39,14 +41,13 @@ class LogMonitor:
     def poll(self):
         while True:
             response = self.stub.ReadOutput(ReadOutputRequest(taskId=self.task_id, offset=self.offset, size=100000),
-                                   metadata=[('shared-secret', self.shared_secret)])
+                                            metadata=[('shared-secret', self.shared_secret)])
 
             payload = response.data.decode('utf8')
-            if payload != "" :
+            if payload != "":
                 print_log_content(datetime.datetime.now(), payload)
 
             self.offset += len(response.data)
 
             if response.endOfFile:
                 break
-
