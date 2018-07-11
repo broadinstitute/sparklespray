@@ -43,6 +43,7 @@ class SubmitConfig(BaseModel):
     monitor_port: int
     zones: List[str]
     mount_point: str
+    kubequeconsume_url: str
 
 
 class ExistingJobException(Exception):
@@ -176,8 +177,8 @@ def determine_machine_type(mem_limit: float, cpu_request: float) -> str:
     return "n1-standard-1"
 
 
-def submit(jq: JobQueue, io: IO, cluster: Cluster, job_id: str, spec: dict, dry_run: bool, config: SubmitConfig, metadata: dict,
-           kubequeconsume_url: str, clean_if_exists=False):
+def submit(jq: JobQueue, io: IO, cluster: Cluster, job_id: str, spec: dict, config: SubmitConfig, metadata: dict = {},
+           clean_if_exists: bool=False, dry_run: bool=False):
     from .key_store import KeyStore
 
     key_store = KeyStore(cluster.client)
@@ -246,7 +247,7 @@ def submit(jq: JobQueue, io: IO, cluster: Cluster, job_id: str, spec: dict, dry_
         pipeline_spec = cluster.create_pipeline_spec(
             jobid=job_id,
             cluster_name=cluster_name,
-            consume_exe_url=kubequeconsume_url,
+            consume_exe_url=config.kubequeconsume_url,
             docker_image=image,
             consume_exe_args=consume_exe_args,
             machine_specs=machine_specs,
@@ -254,49 +255,7 @@ def submit(jq: JobQueue, io: IO, cluster: Cluster, job_id: str, spec: dict, dry_
 
         jq.submit(job_id, list(zip(task_spec_urls, command_result_urls)),
                   pipeline_spec, metadata, cluster_name)
-        # if not skip_kube_submit and not exec_local:
-        #     existing_nodes = cluster.get_cluster_status(cluster_name)
-        #     if not existing_nodes.is_running():
-        #         operation_id = cluster.add_node(job_id, preemptible, url_join(config['default_url_prefix'], get_timestamp()))
-        #         log.info("Adding initial node for cluster (operation %s)", operation_id)
-        #     else:
-        #         log.info("Cluster already exists, not adding node. Cluster status: %s", existing_nodes.as_string())
-        #     existing_tasks = jq.get_tasks_for_cluster(cluster_name, STATUS_PENDING)
-        #     if len(existing_tasks) > 0:
-        #         log.warning("%d tasks already exist queued up to run on this cluster. If this is not intentional, delete the jobs via 'kubeque clean' and resubmit this job.", len(existing_tasks))
-        # elif exec_local:
-        #     raise Exception("unimplemented -- broke when migrated to new version of pipeline API")
-        #     # cmd = _write_local_script(job_id, spec, kubeque_command, config['kubequeconsume_exe_path'],
-        #     #                           kubeque_exe_in_container)
-        #     # log.info("Running job locally via executing: ./%s", cmd)
-        #     # log.warning("CPU and memory requirements are not honored when running locally. Will use whatever the docker host is configured for by default")
-        #     # os.system(os.path.abspath(cmd))
-        # else:
-        #     raise Exception("unimplemented -- broke when migrated to new version of pipeline API")
-        #     # cmd = _write_local_script(job_id, spec, kubeque_command, config['kubequeconsume_exe_path'],
-        #     #                           kubeque_exe_in_container)
-        #     # log.info("Skipping submission.  You can execute tasks locally via: ./%s", cmd)
 
-
-# def _write_local_script(job_id, spec, kubeque_command, kubequeconsume_exe_path, kubeque_exe_in_container):
-#     from .gcp import _gcloud_cmd
-#     import stat
-
-#     image = spec['image']
-#     cmd = _gcloud_cmd(
-#         ["docker", "--", "run",
-#          "-v", os.path.expanduser("~/.config/gcloud") + ":/google-creds",
-#          "-e", "GOOGLE_APPLICATION_CREDENTIALS=/google-creds/application_default_credentials.json",
-#          "-v", kubequeconsume_exe_path + ":" + kubeque_exe_in_container,
-#          image, 'bash -c "' + kubeque_command + ' --owner localhost"', ])
-#     script_name = "run-{}-locally.sh".format(job_id)
-#     with open(script_name, "wt") as fd:
-#         fd.write("#!/usr/bin/env bash\n")
-#         fd.write(" ".join(cmd) + "\n")
-
-#     # make script executable
-#     os.chmod(script_name, os.stat(script_name).st_mode | stat.S_IXUSR)
-#     return script_name
 
 def new_job_id():
     import uuid
@@ -521,11 +480,12 @@ def submit_cmd(jq, io, cluster, args, config):
                                  monitor_port=int(config.get(
                                      'monitor_port', '6032')),
                                  zones=config['zones'],
-                                 mount_point=config.get("mount", "/mnt/")
+                                 mount_point=config.get("mount", "/mnt/"),
+                                 kubequeconsume_url=kubequeconsume_exe_url
                                  )
 
-    submit(jq, io, cluster, job_id, spec, args.dryrun, submit_config,  metadata, kubequeconsume_exe_url,
-           clean_if_exists=args.clean or args.rerun)
+    submit(jq, io, cluster, job_id, spec, submit_config, metadata=metadata,
+           clean_if_exists=args.clean or args.rerun, dry_run=args.dryrun)
 
     finished = False
     successful_execution = True
@@ -555,21 +515,3 @@ def submit_cmd(jq, io, cluster, args, config):
         sys.exit(0)
     else:
         sys.exit(1)
-
-# def retry_cmd(jq, cluster, io, args):
-#     resource_spec = _parse_resources(args.resources)
-
-#     jobids = _get_jobids_from_pattern(jq, args.jobid_pattern)
-#     if len(jobids) == 0:
-#         print("No jobs found with name matching {}".format(args.jobid_pattern))
-#         return
-
-#     for jobid in jobids:
-#         log.info("retrying %s", jobid)
-#         jq.reset(jobid, args.owner)
-#         _resubmit(jq, jobid, resource_spec)
-
-#     if args.wait_for_completion:
-#         log.info("Waiting for job to terminate")
-#         for job_id in jobids:
-#             watch(io, jq, job_id, cluster)
