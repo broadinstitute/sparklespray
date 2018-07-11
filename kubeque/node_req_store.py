@@ -16,7 +16,7 @@ NODE_REQ_CLASS_NORMAL = "normal"
 @attr.s
 class NodeReq(object):
     operation_id = attr.ib()
-    job_id = attr.ib()
+    cluster_id = attr.ib()
     status = attr.ib()
     node_class = attr.ib()
     sequence = attr.ib()
@@ -26,7 +26,7 @@ def node_req_to_entity(client :datastore.Client, o : NodeReq) -> datastore.Entit
     assert o.operation_id is not None
     entity_key = client.key("NodeReq", o.operation_id)
     entity = datastore.Entity(key=entity_key)
-    entity['job_id'] = o.job_id
+    entity['cluster_id'] = o.cluster_id
     entity['status'] = o.status
     entity['node_class'] = o.node_class
     entity['sequence'] = o.sequence
@@ -35,7 +35,7 @@ def node_req_to_entity(client :datastore.Client, o : NodeReq) -> datastore.Entit
 
 def entity_to_node_req(entity : datastore.Entity) -> NodeReq:
     return NodeReq(operation_id=entity.key.name,
-        job_id = entity['job_id'],
+        cluster_id = entity['cluster_id'],
         status=entity['status'],
         node_class = entity['node_class'],
         sequence=entity['sequence'],
@@ -49,9 +49,9 @@ class AddNodeReqStore:
     def add_node_req(self, req : NodeReq):
         self.client.put(node_req_to_entity(self.client, req))
 
-    def get_node_reqs(self, job_id : str, status : str = None) -> List[NodeReq]:
+    def get_node_reqs(self, cluster_id : str, status : str = None) -> List[NodeReq]:
         query = self.client.query(kind="NodeReq")
-        query.add_filter("job_id", "=", job_id)
+        query.add_filter("cluster_id", "=", cluster_id)
         if status is not None:
             query.add_filter("status", "=", status)
         results = []
@@ -66,12 +66,12 @@ class AddNodeReqStore:
         entity['instance_name'] = instance_name
         self.client.put(entity)
 
-    def delete_for_job(self, job_id : str, batch : Batch=None) -> None:
+    def delete_for_cluster(self, cluster_id : str, batch : Batch=None) -> None:
         if batch is None:
             batch = self.immediate_batch
 
         query = self.client.query(kind="NodeReq")
-        query.add_filter("job_id", "=", job_id)
+        query.add_filter("cluster_id", "=", cluster_id)
         for entity in query.fetch():
             self.client.delete(entity.key)
 

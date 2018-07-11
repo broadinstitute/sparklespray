@@ -68,7 +68,8 @@ class Cluster():
         self.debug_log_prefix = debug_log_prefix
 
     def get_state(self, job_id):
-        return ClusterState(job_id, self.task_store, self.node_req_store, self)
+        job = self.job_store.get_job(job_id)
+        return ClusterState(job_id, job.cluster, self.task_store, self.node_req_store, self)
 
     def add_nodes(self, job_id : str, preemptible : bool, debug_log_url_prefix : str, count : int):
         for i in range(count):
@@ -79,7 +80,7 @@ class Cluster():
         pipeline_def = json.loads(job.kube_job_spec)
         operation_id = self.nodes.add_node(pipeline_def, preemptible, debug_log_url)
         req = NodeReq(operation_id = operation_id,
-            job_id = job_id,
+            cluster_id = job.cluster,
             status = NODE_REQ_SUBMITTED,
             node_class = NODE_REQ_CLASS_PREEMPTIVE if preemptible else NODE_REQ_CLASS_NORMAL,
             sequence = get_timestamp()
@@ -125,7 +126,7 @@ class Cluster():
         p("\n")
 
 
-    def delete_job(self, job_id : str):
+    def delete_job(self, job_id : str, keep_cluster : str = None):
         batch = Batch(self.client)
 
         self.job_store.delete(job_id, batch=batch)
@@ -138,8 +139,11 @@ class Cluster():
         for task_id in task_ids:
             self.task_store.delete(task_id, batch=batch)
 
-        # clean up associated node requests
-        self.node_req_store.delete_for_job(job_id, batch=batch)
+        job = self.job_store.get_job(job_id)
+
+        if job.cluster != keep_cluster:
+            # clean up associated node requests
+            self.node_req_store.delete_for_cluster(job.cluster, batch=batch)
 
         self.job_store.delete(job_id, batch=batch)
 
@@ -188,7 +192,7 @@ class Cluster():
         m = re.match("projects/([^/]+)/zones/([^/]+)/([^/]+)", owner)
         assert m is not None, "Expected a instance name with zone but got owner={}".format(owner)
         project_id, zone, instance_name = m.groups()
-        assert project_id == self.project
+        #assert project_id == self.project, "project_id ({}) != self.project ({})".format(project_id, self.project)
         return self.compute.get_instance_status(zone, instance_name) == 'RUNNING'
 
 
@@ -219,8 +223,9 @@ class Cluster():
 
 
 class ClusterState:
-    def __init__(self, job_id : str, task_store : TaskStore, node_req_store : AddNodeReqStore, cluster : Cluster) -> None:
+    def __init__(self, job_id : str, cluster_id : str, task_store : TaskStore, node_req_store : AddNodeReqStore, cluster : Cluster) -> None:
         self.job_id = job_id
+        self.cluster_id = cluster_id
         self.cluster = cluster
         self.datastore = datastore
         self.tasks = None # type: List[Task]
@@ -233,7 +238,7 @@ class ClusterState:
         # update tasks
         self.tasks = self.task_store.get_tasks(self.job_id)
 
-        self.node_reqs = self.node_req_store.get_node_reqs(self.job_id)
+        self.node_reqs = self.node_req_store.get_node_reqs(self.cluster_id)
 
         # poll all the operations which are not marked as dead
         log.debug("fetched %d node_reqs", len(self.node_reqs))
@@ -297,7 +302,7 @@ class ClusterState:
                 if node_req.status == NODE_REQ_COMPLETE:
                     log.warning("task status = {}, but node_req was {}".format(task.status, node_req.status))
                     if node_req.node_class != NODE_REQ_CLASS_PREEMPTIVE:
-                        raise Exception("instance {} terminated but task {} was reported to still be using instance and the instance was not preemptiable")
+                        log.error("instance %s terminated but task %s was reported to still be using instance and the instance was not preemptiable", instance_name, task.task_id)
                     task_ids_needing_reset.append(task.task_id)
 
         return task_ids_needing_reset

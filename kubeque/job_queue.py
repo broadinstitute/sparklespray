@@ -115,36 +115,36 @@ class JobQueue:
             counts[task.status] += 1
         return dict(counts)
 
-#     def reset(self, jobid, owner, statuses_to_clear=[STATUS_CLAIMED, STATUS_FAILED]):
-#         tasks = []
-#         for status_to_clear in statuses_to_clear:
-#             tasks.extend(self.storage.get_tasks(jobid, status=status_to_clear))
+    def reset(self, jobid, owner, statuses_to_clear=[STATUS_CLAIMED, STATUS_FAILED]):
+        tasks = []
+        for status_to_clear in statuses_to_clear:
+            tasks.extend(self.task_storage.get_tasks(jobid, status=status_to_clear))
 
-#         updated = 0
-#         for task in tasks:
-#             if owner is not None and owner != task.owner:
-#                 continue
-#             self._reset_task(task, STATUS_PENDING)
-#             updated += 1
+        updated = 0
+        for task in tasks:
+            if owner is not None and owner != task.owner:
+                continue
+            self._reset_task(task, STATUS_PENDING)
+            updated += 1
 
-#         def mark_not_killed(job):
-#             job.status = JOB_STATUS_SUBMITTED
-#             return True
+        def mark_not_killed(job):
+            job.status = JOB_STATUS_SUBMITTED
+            return True
 
-#         self.storage.update_job(jobid, mark_not_killed)
+        self.job_storage.update_job(jobid, mark_not_killed)
 
-#         return updated
+        return updated
 
-#     def _reset_task(self, task, status):
-#         now = time.time()
-#         task.owner = None
-#         task.status = status
-#         task.history.append( TaskHistory(timestamp=now, status="reset") )
-#         self.storage.update_task(task)
+    def _reset_task(self, task, status):
+        now = time.time()
+        task.owner = None
+        task.status = status
+        task.history.append( TaskHistory(timestamp=now, status="reset") )
+        self.task_storage.update_task(task)
 
-#     def reset_task(self, task_id, status=STATUS_PENDING):
-#         task = self.storage.get_task(task_id)
-#         self._reset_task(task, status)
+    def reset_task(self, task_id, status=STATUS_PENDING):
+        task = self.task_storage.get_task(task_id)
+        self._reset_task(task, status)
 
     def submit(self, job_id, args, kube_job_spec, metadata, cluster):
         kube_job_spec = json.dumps(kube_job_spec)

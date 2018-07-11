@@ -143,7 +143,7 @@ def _make_cluster_name(job_name, image, cpu_request, mem_limit, unique_name):
     return "c-" + hashlib.md5("{}-{}-{}-{}-{}-{}".format(job_name, image, cpu_request, mem_limit, kubeque.__version__, os.getlogin()).encode("utf8")).hexdigest()[:20]
 
 def submit(jq : JobQueue, io : IO, cluster : Cluster, job_id : str, spec : str, dry_run : bool, config : dict, metadata:dict, 
-    kubequeconsume_url:str, loglive=False):
+    kubequeconsume_url:str, loglive=False, clean_if_exists=False):
     from .key_store import KeyStore
 
     key_store = KeyStore(cluster.client)
@@ -195,6 +195,18 @@ def submit(jq : JobQueue, io : IO, cluster : Cluster, job_id : str, spec : str, 
         cpu_request = _parse_cpu_request(resources.get(CPU_REQUEST, config['default_resource_cpu']))
         mem_limit = _parse_mem_limit(resources.get(MEMORY_REQUEST, config["default_resource_memory"]))
         cluster_name = _make_cluster_name(job_id, image, cpu_request, mem_limit, unique_name=False)
+
+        existing_job = jq.get_job(job_id, must = False)
+        if existing_job is not None:
+            if clean_if_exists:
+                log.info("Cleaning existing job with id \"{}\"".format(job_id))
+                success = clean(cluster, jq, job_id, keep_cluster=cluster_name)
+                if not success:
+                    log.error("Could not remove \"{}\", aborting!".format(job_id))
+                    return
+            else:
+                log.error("Existing job with id \"{}\", aborting!".format(job_id))
+                return
 
         assert mem_limit <= 5
         assert cpu_request < 2
@@ -362,18 +374,6 @@ def submit_cmd(jq, io, cluster, args, config):
     if job_id is None:
         job_id = new_job_id()
 
-    existing_job = jq.get_job(job_id, must = False)
-    if existing_job is not None:
-        if args.clean or args.rerun:
-            log.info("Cleaning existing job with id \"{}\"".format(job_id))
-            success = clean(cluster, jq, job_id)
-            if not success:
-                log.error("Could not remove \"{}\", aborting!".format(job_id))
-                return
-        else:
-            log.error("Existing job with id \"{}\", aborting!".format(job_id))
-            return
-
     cas_url_prefix = config['cas_url_prefix']
     default_url_prefix = config['default_url_prefix']
 
@@ -426,7 +426,7 @@ def submit_cmd(jq, io, cluster, args, config):
 
     log.debug("spec: %s", json.dumps(spec, indent=2))
     submit(jq, io, cluster, job_id, spec, args.dryrun, config,  metadata, kubequeconsume_exe_url,
-           loglive=args.loglive)
+           loglive=args.loglive, clean_if_exists = args.clean or args.rerun)
 
     finished = False
     successful_execution = True

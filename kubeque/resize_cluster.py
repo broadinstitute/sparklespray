@@ -23,7 +23,7 @@ class GetPreempted:
         next_times = {}
         for task_id in task_ids:
             first_time = self.first_time_task_reported_bad.get(task_id, self.get_time())
-            if self.get_time() - first_time > self.min_bad_time:
+            if self.get_time() - first_time >= self.min_bad_time:
                 tasks_to_reset.append(task_id)
             else:
                 next_times[task_id] = first_time

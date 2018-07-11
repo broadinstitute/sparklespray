@@ -310,7 +310,7 @@ def _resub_preempted(cluster, jq, jobid):
         _update_if_owner_missing(cluster, jq, task)
 
 def _update_claimed_are_still_running(jq, cluster, job_id):
-    get_preempted = GetPreempted()
+    get_preempted = GetPreempted(min_bad_time=0)
     state = cluster.get_state(job_id)
     state.update()
     task_ids = get_preempted(state)
@@ -321,7 +321,7 @@ def _update_claimed_are_still_running(jq, cluster, job_id):
     return task_ids
 
 
-def clean(cluster : Cluster, jq : JobQueue, job_id: str, force : bool=False):
+def clean(cluster : Cluster, jq : JobQueue, job_id: str, force : bool=False, keep_cluster=None):
     if not force:
         tasks = cluster.task_store.get_tasks(job_id, status=STATUS_CLAIMED)
         if len(tasks) > 0:
@@ -333,18 +333,19 @@ def clean(cluster : Cluster, jq : JobQueue, job_id: str, force : bool=False):
                 if task.task_id not in reset_task_ids:
                     still_running.append(task.task_id)
 
+            log.info("reset_task_ids=%s, still_running=%s", reset_task_ids, still_running)
             if len(still_running) > 0:
                 log.warning("job %s is still running (%d tasks), cannot remove", job_id, len(still_running))
                 return False
 
-    log.info("deleting %s", job_id)
-    cluster.delete_job(job_id)
+    cluster.delete_job(job_id, keep_cluster=keep_cluster)
     return True
 
 def clean_cmd(cluster, jq, args):
     log.info("jobid_pattern: %s", args.jobid_pattern)
     jobids = _get_jobids_from_pattern(jq, args.jobid_pattern)
     for jobid in jobids:
+        log.info("Deleting %s", jobid)
         clean(cluster, jq, jobid, args.force)
 
 def _update_if_owner_missing(cluster, jq, task):

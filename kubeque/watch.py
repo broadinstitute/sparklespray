@@ -64,7 +64,6 @@ def watch(io : IO, jq : JobQueue, job_id :str, cluster: Cluster, target_nodes=No
     state.update()
 
     task_count = len(state.get_tasks())
-    log.info("loglive=%s, tasks=%s", loglive, task_count)
 
     if loglive is None and task_count == 1:
         loglive = True
