@@ -1,5 +1,5 @@
 from google.cloud import datastore
-from typing import Set, Any
+from typing import Set, Any, List
 
 class Batch:
     def __init__(self, client: datastore.Client, batch_size : int=300) -> None:

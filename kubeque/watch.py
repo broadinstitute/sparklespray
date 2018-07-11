@@ -14,6 +14,17 @@ from .cluster_service import Cluster
 
 log = logging.getLogger(__name__)
 
+def add_watch_cmd(subparser):
+    parser = subparser.add_parser("watch", help="Monitor the job")
+    parser.set_defaults(func=watch_cmd)
+    parser.add_argument("jobid")
+    parser.add_argument("--nodes", "-n", type=int, help="The target number of workers")
+
+def watch_cmd(jq : JobQueue, io : IO, cluster : Cluster, args):
+    from .main import _resolve_jobid
+    jobid = _resolve_jobid(jq, args.jobid)
+    watch(io, jq, jobid, cluster, target_nodes=args.nodes)
+
 @contextlib.contextmanager
 def _exception_guard(deferred_msg, reset=None):
     try:

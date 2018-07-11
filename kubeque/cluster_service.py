@@ -6,7 +6,7 @@ from .node_service import NodeService, MachineSpec
 from .job_store import JobStore
 from .task_store import TaskStore
 from .job_queue import JobQueue
-from typing import List, Dict, DefaultDict
+from typing import List, Dict, DefaultDict, Optional
 from collections import defaultdict
 from google.cloud import datastore
 import time
@@ -126,7 +126,7 @@ class Cluster():
         p("\n")
 
 
-    def delete_job(self, job_id : str, keep_cluster : str = None):
+    def delete_job(self, job_id : str, keep_cluster : Optional[str] = None):
         batch = Batch(self.client)
 
         self.job_store.delete(job_id, batch=batch)
@@ -140,7 +140,7 @@ class Cluster():
             self.task_store.delete(task_id, batch=batch)
 
         job = self.job_store.get_job(job_id)
-
+        assert job is not None
         if job.cluster != keep_cluster:
             # clean up associated node requests
             self.node_req_store.delete_for_cluster(job.cluster, batch=batch)
@@ -228,8 +228,8 @@ class ClusterState:
         self.cluster_id = cluster_id
         self.cluster = cluster
         self.datastore = datastore
-        self.tasks = None # type: List[Task]
-        self.node_reqs = None # type: List[NodeReq]
+        self.tasks = [] # type: List[Task]
+        self.node_reqs = [] # type: List[NodeReq]
         self.node_req_store = node_req_store
         self.task_store = task_store
         #self.add_node_statuses = [] # type: List[AddNodeStatus]
@@ -258,7 +258,7 @@ class ClusterState:
         return self.tasks
 
     def get_summary(self) -> str:
-        by_status = defaultdict(lambda: 0)
+        by_status : Dict[str, int] = defaultdict(lambda: 0)
         for t in self.tasks:
             by_status[t.status] += 1
         statuses = sorted(by_status.keys())
@@ -282,7 +282,7 @@ class ClusterState:
         return len([o for o in self.node_reqs if o.node_class == NODE_REQ_CLASS_PREEMPTIVE ])
 
     def get_running_tasks_with_invalid_owner(self) -> List[str]:
-        node_req_by_instance_name = {}
+        node_req_by_instance_name : Dict[str, NodeReq] = {}
         for node_req in self.node_reqs:
             if node_req.instance_name is not None:
                 assert node_req.instance_name not in node_req_by_instance_name

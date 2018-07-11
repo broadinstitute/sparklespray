@@ -69,7 +69,7 @@ def list_params_cmd(jq, io, args):
                 w.writerow(row)
 
 
-def reset_cmd(jq, args):
+def reset_cmd(jq, io, cluster, args):
     for jobid in _get_jobids_from_pattern(jq, args.jobid_pattern):
         if args.all:
             statuses_to_clear = [STATUS_CLAIMED, STATUS_FAILED, STATUS_COMPLETE, STATUS_KILLED]
@@ -80,7 +80,7 @@ def reset_cmd(jq, args):
         updated = jq.reset(jobid, args.owner, statuses_to_clear=statuses_to_clear)
         log.info("updated %d tasks", updated)
         if args.resubmit:
-            _resubmit(jq, jobid)
+            watch(io, jq, jobid, cluster, target_nodes=1)
 
 
 def _summarize_task_statuses(tasks):
@@ -123,10 +123,6 @@ def _resolve_jobid(jq, jobid):
     else:
         return jobid
 
-
-def watch_cmd(jq : JobQueue, io : IO, cluster : Cluster, args):
-    jobid = _resolve_jobid(jq, args.jobid)
-    watch(io, jq, jobid, cluster, target_nodes=args.nodes)
 
 def status_cmd(jq : JobQueue, io : IO, cluster : Cluster, args):
     jobids = _get_jobids_from_pattern(jq, args.jobid_pattern)
@@ -342,7 +338,6 @@ def clean(cluster : Cluster, jq : JobQueue, job_id: str, force : bool=False, kee
     return True
 
 def clean_cmd(cluster, jq, args):
-    log.info("jobid_pattern: %s", args.jobid_pattern)
     jobids = _get_jobids_from_pattern(jq, args.jobid_pattern)
     for jobid in jobids:
         log.info("Deleting %s", jobid)
@@ -411,48 +406,18 @@ def main(argv=None):
     import warnings
     warnings.filterwarnings("ignore", "Your application has authenticated using end user credentials")
 
-    from .submit import submit_cmd
+    from .submit import add_submit_cmd
+    from .watch import add_watch_cmd
 
     parse = argparse.ArgumentParser()
     parse.add_argument("--config", default=None)
     parse.add_argument("--debug", action="store_true", help="If set, debug messages will be output")
     subparser = parse.add_subparsers()
 
+    add_submit_cmd(subparser)
+
     # parser = subparser.add_parser("validate", help="Run a series of tests to confirm the configuration is valid")
     # parser.set_defaults(func=validate_cmd)
-
-    parser = subparser.add_parser("sub", help="Submit a command (or batch of commands) for execution")
-    parser.set_defaults(func=submit_cmd)
-    parser.add_argument("--resources", "-r",
-                        help="Specify the resources that are needed for running job. (ie: -r memory=5G,cpu=0.9) ")
-    parser.add_argument("--file", "-f",
-                        help="Job specification file (in JSON).  Only needed if command is not specified.")
-    parser.add_argument("--push", "-u", action="append", default=[],
-                        help="Path to a local file which should be uploaded to working directory of command before execution starts.  If filename starts with a '@' the file is interpreted as a list of files which need to be uploaded.")
-    parser.add_argument("--image", "-i",
-                        help="Name of docker image to run job within.  Defaults to value from kubeque config file.")
-    parser.add_argument("--name", "-n", help="The name to assign to the job")
-    parser.add_argument("--seq", type=int,
-                        help="Parameterize the command by 'index'.  Submitting with --seq=10 will submit 10 commands with a parameter 'index' varied from 1 to 10")
-    parser.add_argument("--loglive", action="store_true", help="If set, will write stdout from tasks to StackDriver logging")
-    parser.add_argument("--params", "-p",
-                        help="Parameterize the command by the rows in the specified CSV file.  If the CSV file has 5 rows, then 5 commands will be submitted.")
-    parser.add_argument("--fetch", help="After run is complete, automatically download the results")
-    parser.add_argument("--dryrun", action="store_true",
-                        help="Don't actually submit the job but just print what would have been done")
-    parser.add_argument("--skipkube", action="store_true", dest="skip_kube_submit",
-                        help="Do all steps except submitting the job to kubernetes")
-    parser.add_argument("--no-wait", action="store_false", dest="wait_for_completion",
-                        help="Exit immediately after submission instead of waiting for job to complete")
-    parser.add_argument("--results", action="append",
-                        help="Wildcard to use to find results which will be uploaded.  (defaults to '*')  Can be specified multiple times",
-                        default=None, dest="results_wildcards")
-    parser.add_argument("--cd", help="The directory to change to before executing the command", default=".",
-                        dest="working_dir")
-    parser.add_argument("--local", help="Run the tasks inside of docker on the local machine", action="store_true")
-    parser.add_argument("--clean", help="If the job id already exists, 'clean' it first to avoid an error about the job already existing", action="store_true")
-    parser.add_argument("--rerun", help="If set, will download all of the files from previous execution of this job to worker before running", action="store_true")
-    parser.add_argument("command", nargs=argparse.REMAINDER)
 
     parser = subparser.add_parser("addnodes", help="Add nodes to be used for executing a specific job")
     parser.set_defaults(func=addnodes_cmd)
@@ -494,10 +459,7 @@ def main(argv=None):
     parser.set_defaults(func=status_cmd)
     parser.add_argument("jobid_pattern", nargs="?")
 
-    parser = subparser.add_parser("watch", help="Monitor the job")
-    parser.set_defaults(func=watch_cmd)
-    parser.add_argument("jobid")
-    parser.add_argument("--nodes", "-n", type=int, help="The target number of workers")
+    add_watch_cmd(subparser)
 
     parser = subparser.add_parser("clean", help="Remove jobs which are not currently running from the database of jobs")
     parser.set_defaults(func=clean_cmd)

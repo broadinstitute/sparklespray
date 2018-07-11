@@ -4,7 +4,7 @@ import os
 import json
 import sys
 from .util import random_string, url_join
-
+from typing import List
 import kubeque
 from .node_service import MachineSpec
 from .hasher import CachingHashFunction
@@ -22,9 +22,31 @@ from .job_queue import JobQueue
 from .cluster_service import Cluster
 from .io import IO
 from .watch import watch
+import re
+from pydantic import BaseModel
+
 
 log = logging.getLogger(__name__)
 
+MEMORY_REQUEST = "memory"
+CPU_REQUEST = "cpu"
+
+class SubmitConfig(BaseModel):
+    preemptible : bool
+    bootDiskSizeGb : float
+    default_url_prefix : str
+    cpu_request: float
+    mem_limit : float
+    image : str
+    project : str
+    monitor_port : int
+    zones : List[str]
+    mount_point : str
+
+
+
+
+class ExistingJobException(Exception): pass
 
 # spec should have three rough components:
 #   common: keys shared by everything
@@ -142,8 +164,14 @@ def _make_cluster_name(job_name, image, cpu_request, mem_limit, unique_name):
         return 'l-' + random_string(20)
     return "c-" + hashlib.md5("{}-{}-{}-{}-{}-{}".format(job_name, image, cpu_request, mem_limit, kubeque.__version__, os.getlogin()).encode("utf8")).hexdigest()[:20]
 
-def submit(jq : JobQueue, io : IO, cluster : Cluster, job_id : str, spec : str, dry_run : bool, config : dict, metadata:dict, 
-    kubequeconsume_url:str, loglive=False, clean_if_exists=False):
+
+def determine_machine_type(mem_limit : float, cpu_request : float) -> str:
+    assert mem_limit <= 5
+    assert cpu_request < 2
+    return "n1-standard-1"
+
+def submit(jq : JobQueue, io : IO, cluster : Cluster, job_id : str, spec : dict, dry_run : bool, config : SubmitConfig, metadata:dict, 
+    kubequeconsume_url:str, clean_if_exists=False):
     from .key_store import KeyStore
 
     key_store = KeyStore(cluster.client)
@@ -160,21 +188,11 @@ def submit(jq : JobQueue, io : IO, cluster : Cluster, job_id : str, spec : str, 
     if dry_run:
         skip_kube_submit = True
 
-    preemptible_flag = config.get("preemptible", "n").lower()
-    if preemptible_flag not in ['y', 'n']:
-        raise Exception("setting 'preemptable' in config must either by 'y' or 'n' but was: {}".format(preemptible_flag))
+    preemptible = config.preemptible
+    bootDiskSizeGb = config.bootDiskSizeGb
+    default_url_prefix = config.default_url_prefix
 
-    preemptible = preemptible_flag == 'y'
-
-    bootDiskSizeGb_flag = config.get("bootDiskSizeGb", "20")
-    bootDiskSizeGb = int(bootDiskSizeGb_flag)
-    assert bootDiskSizeGb >= 10
-
-    default_url_prefix = config.get("default_url_prefix", "")
-    if default_url_prefix.endswith("/"):
-        default_url_prefix = default_url_prefix[:-1]
-    default_job_url_prefix = default_url_prefix + "/" + job_id
-
+    default_job_url_prefix = url_join(default_url_prefix, job_id)
     tasks = expand_tasks(spec, io, default_url_prefix, default_job_url_prefix)
     task_spec_urls = []
     command_result_urls = []
@@ -190,10 +208,9 @@ def submit(jq : JobQueue, io : IO, cluster : Cluster, job_id : str, spec : str, 
             log.debug("task post expand: %s", json.dumps(task, indent=2))
 
     if not dry_run:
-        image = spec['image']
-        resources = spec["resources"]
-        cpu_request = _parse_cpu_request(resources.get(CPU_REQUEST, config['default_resource_cpu']))
-        mem_limit = _parse_mem_limit(resources.get(MEMORY_REQUEST, config["default_resource_memory"]))
+        image = config.image
+        cpu_request = config.cpu_request
+        mem_limit = config.mem_limit
         cluster_name = _make_cluster_name(job_id, image, cpu_request, mem_limit, unique_name=False)
 
         existing_job = jq.get_job(job_id, must = False)
@@ -202,22 +219,19 @@ def submit(jq : JobQueue, io : IO, cluster : Cluster, job_id : str, spec : str, 
                 log.info("Cleaning existing job with id \"{}\"".format(job_id))
                 success = clean(cluster, jq, job_id, keep_cluster=cluster_name)
                 if not success:
-                    log.error("Could not remove \"{}\", aborting!".format(job_id))
-                    return
+                    raise ExistingJobException("Could not remove running job \"{}\", aborting!".format(job_id))
             else:
-                log.error("Existing job with id \"{}\", aborting!".format(job_id))
-                return
+                raise ExistingJobException("Existing job with id \"{}\", aborting!".format(job_id))
 
-        assert mem_limit <= 5
-        assert cpu_request < 2
+        machine_type = determine_machine_type(mem_limit, cpu_request)
 
-        project = config['project']
-        port = config.get('monitor_port', '6032')
-        consume_exe_args = ["--cluster", cluster_name, "--projectId", project, "--zones", ",".join(config['zones']), "--port", port]
+        project = config.project
+        monitor_port = config.monitor_port
+        consume_exe_args = ["--cluster", cluster_name, "--projectId", project, "--zones", ",".join(config.zones), "--port", str(monitor_port)]
 
         machine_specs = MachineSpec(boot_volume_in_gb = bootDiskSizeGb,
-            mount_point = config.get("mount", "/mnt/"),
-            machine_type = "n1-standard-1")
+            mount_point = config.mount_point,
+            machine_type = machine_type)
 
         pipeline_spec = cluster.create_pipeline_spec(
             jobid=job_id,
@@ -226,7 +240,7 @@ def submit(jq : JobQueue, io : IO, cluster : Cluster, job_id : str, spec : str, 
             docker_image=image,
             consume_exe_args=consume_exe_args,
             machine_specs=machine_specs,
-            monitor_port=int(port))
+            monitor_port=monitor_port)
 
         jq.submit(job_id, list(zip(task_spec_urls, command_result_urls)), pipeline_spec, metadata, cluster_name)
         # if not skip_kube_submit and not exec_local:
@@ -253,25 +267,25 @@ def submit(jq : JobQueue, io : IO, cluster : Cluster, job_id : str, spec : str, 
         #     # log.info("Skipping submission.  You can execute tasks locally via: ./%s", cmd)
 
 
-def _write_local_script(job_id, spec, kubeque_command, kubequeconsume_exe_path, kubeque_exe_in_container):
-    from kubeque.gcp import _gcloud_cmd
-    import stat
+# def _write_local_script(job_id, spec, kubeque_command, kubequeconsume_exe_path, kubeque_exe_in_container):
+#     from .gcp import _gcloud_cmd
+#     import stat
 
-    image = spec['image']
-    cmd = _gcloud_cmd(
-        ["docker", "--", "run",
-         "-v", os.path.expanduser("~/.config/gcloud") + ":/google-creds",
-         "-e", "GOOGLE_APPLICATION_CREDENTIALS=/google-creds/application_default_credentials.json",
-         "-v", kubequeconsume_exe_path + ":" + kubeque_exe_in_container,
-         image, 'bash -c "' + kubeque_command + ' --owner localhost"', ])
-    script_name = "run-{}-locally.sh".format(job_id)
-    with open(script_name, "wt") as fd:
-        fd.write("#!/usr/bin/env bash\n")
-        fd.write(" ".join(cmd) + "\n")
+#     image = spec['image']
+#     cmd = _gcloud_cmd(
+#         ["docker", "--", "run",
+#          "-v", os.path.expanduser("~/.config/gcloud") + ":/google-creds",
+#          "-e", "GOOGLE_APPLICATION_CREDENTIALS=/google-creds/application_default_credentials.json",
+#          "-v", kubequeconsume_exe_path + ":" + kubeque_exe_in_container,
+#          image, 'bash -c "' + kubeque_command + ' --owner localhost"', ])
+#     script_name = "run-{}-locally.sh".format(job_id)
+#     with open(script_name, "wt") as fd:
+#         fd.write("#!/usr/bin/env bash\n")
+#         fd.write(" ".join(cmd) + "\n")
 
-    # make script executable
-    os.chmod(script_name, os.stat(script_name).st_mode | stat.S_IXUSR)
-    return script_name
+#     # make script executable
+#     os.chmod(script_name, os.stat(script_name).st_mode | stat.S_IXUSR)
+#     return script_name
 
 def new_job_id():
     import uuid
@@ -334,11 +348,6 @@ def expand_files_to_upload(io, filenames):
             pairs.append(SrcDstPair(src, dst))
     return pairs
 
-MEMORY_REQUEST = "memory"
-CPU_REQUEST = "cpu"
-
-import re
-
 def _parse_resources(resources_str):
     # not robust parsing at all
     spec = {}
@@ -361,6 +370,38 @@ def _obj_path_to_url(path):
     bucket, key = m.groups()
     return "https://{}.storage.googleapis.com/{}".format(bucket, key)
 
+def add_submit_cmd(subparser):
+    parser = subparser.add_parser("sub", help="Submit a command (or batch of commands) for execution")
+    parser.set_defaults(func=submit_cmd)
+    parser.add_argument("--resources", "-r",
+                        help="Specify the resources that are needed for running job. (ie: -r memory=5G,cpu=0.9) ")
+    parser.add_argument("--file", "-f",
+                        help="Job specification file (in JSON).  Only needed if command is not specified.")
+    parser.add_argument("--push", "-u", action="append", default=[],
+                        help="Path to a local file which should be uploaded to working directory of command before execution starts.  If filename starts with a '@' the file is interpreted as a list of files which need to be uploaded.")
+    parser.add_argument("--image", "-i",
+                        help="Name of docker image to run job within.  Defaults to value from kubeque config file.")
+    parser.add_argument("--name", "-n", help="The name to assign to the job")
+    parser.add_argument("--seq", type=int,
+                        help="Parameterize the command by 'index'.  Submitting with --seq=10 will submit 10 commands with a parameter 'index' varied from 1 to 10")
+    parser.add_argument("--params", "-p",
+                        help="Parameterize the command by the rows in the specified CSV file.  If the CSV file has 5 rows, then 5 commands will be submitted.")
+    # parser.add_argument("--fetch", help="After run is complete, automatically download the results")
+    parser.add_argument("--dryrun", action="store_true",
+                        help="Don't actually submit the job but just print what would have been done")
+    parser.add_argument("--skipkube", action="store_true", dest="skip_kube_submit",
+                        help="Do all steps except submitting the job to kubernetes")
+    parser.add_argument("--no-wait", action="store_false", dest="wait_for_completion",
+                        help="Exit immediately after submission instead of waiting for job to complete")
+    parser.add_argument("--results", action="append",
+                        help="Wildcard to use to find results which will be uploaded.  (defaults to '*')  Can be specified multiple times",
+                        default=None, dest="results_wildcards")
+    parser.add_argument("--cd", help="The directory to change to before executing the command", default=".",
+                        dest="working_dir")
+    parser.add_argument("--local", help="Run the tasks inside of docker on the local machine", action="store_true")
+    parser.add_argument("--clean", help="If the job id already exists, 'clean' it first to avoid an error about the job already existing", action="store_true")
+    parser.add_argument("--rerun", help="If set, will download all of the files from previous execution of this job to worker before running", action="store_true")
+    parser.add_argument("command", nargs=argparse.REMAINDER)
 
 def submit_cmd(jq, io, cluster, args, config):
     metadata = {}
@@ -369,6 +410,15 @@ def submit_cmd(jq, io, cluster, args, config):
         image = args.image
     else:
         image = config['default_image']
+
+    preemptible_flag = config.get("preemptible", "n").lower()
+    if preemptible_flag not in ['y', 'n']:
+        raise Exception("setting 'preemptable' in config must either by 'y' or 'n' but was: {}".format(preemptible_flag))
+    
+    bootDiskSizeGb_flag = config.get("bootDiskSizeGb", "20")
+    bootDiskSizeGb = int(bootDiskSizeGb_flag)
+    assert bootDiskSizeGb >= 10
+    default_url_prefix = config.get("default_url_prefix", "")
 
     job_id = args.name
     if job_id is None:
@@ -425,14 +475,34 @@ def submit_cmd(jq, io, cluster, args, config):
             io.put(filename, dest, skip_if_exists=True, is_public=is_public)
 
     log.debug("spec: %s", json.dumps(spec, indent=2))
-    submit(jq, io, cluster, job_id, spec, args.dryrun, config,  metadata, kubequeconsume_exe_url,
-           loglive=args.loglive, clean_if_exists = args.clean or args.rerun)
+
+    resources = spec["resources"]
+    cpu_request = _parse_cpu_request(resources.get(CPU_REQUEST, config['default_resource_cpu']))
+    mem_limit = _parse_mem_limit(resources.get(MEMORY_REQUEST, config['default_resource_memory']))
+
+    submit_config = SubmitConfig(preemptible =preemptible_flag == 'y',
+        bootDiskSizeGb =bootDiskSizeGb,
+        default_url_prefix  = default_url_prefix,
+        cpu_request = cpu_request,
+        mem_limit = mem_limit,
+        image = spec['image'],
+        project = config['project'],
+        monitor_port = int(config.get('monitor_port', '6032')),
+        zones = config['zones'],
+        mount_point = config.get("mount", "/mnt/")
+        )
+
+    submit(jq, io, cluster, job_id, spec, args.dryrun, submit_config,  metadata, kubequeconsume_exe_url,
+           clean_if_exists = args.clean or args.rerun)
 
     finished = False
     successful_execution = True
-    if args.local:
+
+
+    if args.local: 
         # if we ran it within docker, and the docker command completed, then the job is done
-        finished = True
+        raise Exception("local mode is no longer availible")
+        # finished = True
     else:
         if not (args.dryrun or args.skip_kube_submit) and args.wait_for_completion:
             log.info("Waiting for job to terminate")
@@ -440,32 +510,32 @@ def submit_cmd(jq, io, cluster, args, config):
             finished = True
 
     if finished:
-        if args.fetch:
-            log.info("Done waiting for job to complete, downloading results to %s", args.fetch)
-            fetch_cmd_(jq, io, job_id, args.fetch)
-        else:
-            log.info("Done waiting for job to complete, results written to %s", default_url_prefix + "/" + job_id)
-            log.info("You can download results via 'gsutil rsync -r %s DEST_DIR'", default_url_prefix + "/" + job_id)
+        # if args.fetch:
+        #     log.info("Done waiting for job to complete, downloading results to %s", args.fetch)
+        #     fetch_cmd_(jq, io, job_id, args.fetch)
+        # else:
+        log.info("Done waiting for job to complete, results written to %s", default_url_prefix + "/" + job_id)
+        log.info("You can download results via 'gsutil rsync -r %s DEST_DIR'", default_url_prefix + "/" + job_id)
 
     if successful_execution:
         sys.exit(0)
     else:
         sys.exit(1)
 
-def retry_cmd(jq, cluster, io, args):
-    resource_spec = _parse_resources(args.resources)
+# def retry_cmd(jq, cluster, io, args):
+#     resource_spec = _parse_resources(args.resources)
 
-    jobids = _get_jobids_from_pattern(jq, args.jobid_pattern)
-    if len(jobids) == 0:
-        print("No jobs found with name matching {}".format(args.jobid_pattern))
-        return
+#     jobids = _get_jobids_from_pattern(jq, args.jobid_pattern)
+#     if len(jobids) == 0:
+#         print("No jobs found with name matching {}".format(args.jobid_pattern))
+#         return
 
-    for jobid in jobids:
-        log.info("retrying %s", jobid)
-        jq.reset(jobid, args.owner)
-        _resubmit(jq, jobid, resource_spec)
+#     for jobid in jobids:
+#         log.info("retrying %s", jobid)
+#         jq.reset(jobid, args.owner)
+#         _resubmit(jq, jobid, resource_spec)
 
-    if args.wait_for_completion:
-        log.info("Waiting for job to terminate")
-        for job_id in jobids:
-            watch(io, jq, job_id, cluster)
+#     if args.wait_for_completion:
+#         log.info("Waiting for job to terminate")
+#         for job_id in jobids:
+#             watch(io, jq, job_id, cluster)
