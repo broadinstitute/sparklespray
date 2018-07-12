@@ -1,11 +1,12 @@
 import logging
-import kubeque
+import sparklespray
 
 log = logging.getLogger(__name__)
 
 
 def validate_cmd(jq, io, cluster, config):
-    log.info("Validating config, using kubeque %s", kubeque.__version__)
+    log.info("Validating config, using sparklespray %s",
+             sparklespray.__version__)
     log.info("Printing config:")
     import pprint
     pprint.pprint(config)

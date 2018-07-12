@@ -9,11 +9,11 @@ from setuptools import setup, find_packages
 
 _version_re = re.compile(r'__version__\s*=\s*(.*)')
 
-with open('kubeque/__init__.py', 'rt') as f:
+with open('sparklespray/__init__.py', 'rt') as f:
     version = str(ast.literal_eval(_version_re.search(
         f.read()).group(1)))
 
-setup(name='kubeque',
+setup(name='sparklespray',
       version=version,
       description='batch job submission front to kubernettes',
       author='Philip Montgomery',
@@ -26,8 +26,8 @@ setup(name='kubeque',
           ],
       packages=find_packages(),
       entry_points={'console_scripts': [
-        "kubeque = kubeque.main:main",
-        "sparkles = kubeque.main:main",
+        "kubeque = sparklespray.main:main",
+        "sparkles = sparklespray.main:main",
         ]}
      )
 

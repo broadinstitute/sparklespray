@@ -4,10 +4,12 @@ from .datastore_batch import ImmediateBatch, Batch
 from typing import List
 
 NODE_REQ_SUBMITTED = "submitted"
+NODE_REQ_STAGING = "staging"
 NODE_REQ_RUNNING = "running"
 NODE_REQ_COMPLETE = "complete"
 
-REQUESTED_NODE_STATES = set([NODE_REQ_SUBMITTED, NODE_REQ_RUNNING])
+REQUESTED_NODE_STATES = set(
+    [NODE_REQ_SUBMITTED, NODE_REQ_RUNNING, NODE_REQ_STAGING])
 
 NODE_REQ_CLASS_PREEMPTIVE = "preemptable"
 NODE_REQ_CLASS_NORMAL = "normal"
@@ -20,6 +22,7 @@ class NodeReq(object):
     status = attr.ib()
     node_class = attr.ib()
     sequence = attr.ib()
+    job_id = attr.ib()
     instance_name = attr.ib(default=None)
 
 
@@ -28,6 +31,7 @@ def node_req_to_entity(client: datastore.Client, o: NodeReq) -> datastore.Entity
     entity_key = client.key("NodeReq", o.operation_id)
     entity = datastore.Entity(key=entity_key)
     entity['cluster_id'] = o.cluster_id
+    entity['job_id'] = o.job_id
     entity['status'] = o.status
     entity['node_class'] = o.node_class
     entity['sequence'] = o.sequence
@@ -41,6 +45,7 @@ def entity_to_node_req(entity: datastore.Entity) -> NodeReq:
                    status=entity['status'],
                    node_class=entity['node_class'],
                    sequence=entity['sequence'],
+                   job_id=entity.get('job_id'),
                    instance_name=entity['instance_name'])
 
 
@@ -69,12 +74,13 @@ class AddNodeReqStore:
         entity['instance_name'] = instance_name
         self.client.put(entity)
 
-    def delete_for_cluster(self, cluster_id: str, batch: Batch=None) -> None:
+    def cleanup_cluster(self, cluster_id: str, batch: Batch=None) -> None:
         if batch is None:
             batch = self.immediate_batch
 
         query = self.client.query(kind="NodeReq")
         query.add_filter("cluster_id", "=", cluster_id)
+        query.add_filter("status", "=", NODE_REQ_COMPLETE)
         for entity in query.fetch():
             self.client.delete(entity.key)
 

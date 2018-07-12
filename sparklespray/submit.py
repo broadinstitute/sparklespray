@@ -3,17 +3,18 @@ import logging
 import os
 import json
 import sys
-from .util import random_string, url_join
-from typing import List
-import kubeque
-from .node_service import MachineSpec
-from .hasher import CachingHashFunction
-
-from kubeque.spec import make_spec_from_command, SrcDstPair
 import csv
 import copy
 import argparse
-from kubeque.logclient import LogMonitor
+from typing import List
+import re
+from pydantic import BaseModel
+
+from .util import random_string, url_join
+from .node_service import MachineSpec
+from .hasher import CachingHashFunction
+from .spec import make_spec_from_command, SrcDstPair
+from .logclient import LogMonitor
 from configparser import ConfigParser
 from .main import clean
 from .task_store import STATUS_PENDING
@@ -22,8 +23,7 @@ from .job_queue import JobQueue
 from .cluster_service import Cluster
 from .io import IO
 from .watch import watch
-import re
-from pydantic import BaseModel
+import sparklespray
 
 
 log = logging.getLogger(__name__)
@@ -168,7 +168,7 @@ def _make_cluster_name(job_name, image, cpu_request, mem_limit, unique_name):
     import os
     if unique_name:
         return 'l-' + random_string(20)
-    return "c-" + hashlib.md5("{}-{}-{}-{}-{}-{}".format(job_name, image, cpu_request, mem_limit, kubeque.__version__, os.getlogin()).encode("utf8")).hexdigest()[:20]
+    return "c-" + hashlib.md5("{}-{}-{}-{}-{}-{}".format(job_name, image, cpu_request, mem_limit, sparklespray.__version__, os.getlogin()).encode("utf8")).hexdigest()[:20]
 
 
 def determine_machine_type(mem_limit: float, cpu_request: float) -> str:
@@ -185,8 +185,8 @@ def submit(jq: JobQueue, io: IO, cluster: Cluster, job_id: str, spec: dict, conf
     cert, key = key_store.get_cert_and_key()
     if cert is None:
         log.info("No cert and key for cluster found -- generating now")
-        import kubeque.certgen
-        cert, key = kubeque.certgen.create_self_signed_cert()
+        from .certgen import create_self_signed_cert
+        cert, key = create_self_signed_cert()
         key_store.set_cert_and_key(cert, key)
 
     log.info("Submitting job with id: %s", job_id)
@@ -225,7 +225,7 @@ def submit(jq: JobQueue, io: IO, cluster: Cluster, job_id: str, spec: dict, conf
         if existing_job is not None:
             if clean_if_exists:
                 log.info("Cleaning existing job with id \"{}\"".format(job_id))
-                success = clean(cluster, jq, job_id, keep_cluster=cluster_name)
+                success = clean(cluster, jq, job_id)
                 if not success:
                     raise ExistingJobException(
                         "Could not remove running job \"{}\", aborting!".format(job_id))
@@ -380,8 +380,6 @@ def add_submit_cmd(subparser):
     parser.add_argument(
         "--local", help="Run the tasks inside of docker on the local machine", action="store_true")
     parser.add_argument(
-        "--clean", help="If the job id already exists, 'clean' it first to avoid an error about the job already existing", action="store_true")
-    parser.add_argument(
         "--rerun", help="If set, will download all of the files from previous execution of this job to worker before running", action="store_true")
     parser.add_argument("command", nargs=argparse.REMAINDER)
 
@@ -485,7 +483,7 @@ def submit_cmd(jq, io, cluster, args, config):
                                  )
 
     submit(jq, io, cluster, job_id, spec, submit_config, metadata=metadata,
-           clean_if_exists=args.clean or args.rerun, dry_run=args.dryrun)
+           clean_if_exists=True, dry_run=args.dryrun)
 
     finished = False
     successful_execution = True
@@ -507,9 +505,9 @@ def submit_cmd(jq, io, cluster, args, config):
         #     fetch_cmd_(jq, io, job_id, args.fetch)
         # else:
         log.info("Done waiting for job to complete, results written to %s",
-                 default_url_prefix + "/" + job_id)
+                 url_join(default_url_prefix, job_id))
         log.info("You can download results via 'gsutil rsync -r %s DEST_DIR'",
-                 default_url_prefix + "/" + job_id)
+                 url_join(default_url_prefix, job_id))
 
     if successful_execution:
         sys.exit(0)

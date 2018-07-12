@@ -24,6 +24,9 @@ SETUP_IMAGE = "sequenceiq/alpine-curl"
 
 import json
 
+# which step in the actions does kubeconsume run in
+CONSUMER_ACTION_ID = 2
+
 
 class ClusterStatus:
     def __init__(self, instances: List[dict]) -> None:
@@ -89,7 +92,8 @@ class Cluster():
                       cluster_id=job.cluster,
                       status=NODE_REQ_SUBMITTED,
                       node_class=NODE_REQ_CLASS_PREEMPTIVE if preemptible else NODE_REQ_CLASS_NORMAL,
-                      sequence=get_timestamp()
+                      sequence=get_timestamp(),
+                      job_id=job_id
                       )
         self.node_req_store.add_node_req(req)
         return operation_id
@@ -136,7 +140,7 @@ class Cluster():
             p(".")
         p("\n")
 
-    def delete_job(self, job_id: str, keep_cluster: Optional[str] = None):
+    def delete_job(self, job_id: str):
         batch = Batch(self.client)
 
         self.job_store.delete(job_id, batch=batch)
@@ -151,9 +155,8 @@ class Cluster():
 
         job = self.job_store.get_job(job_id)
         assert job is not None
-        if job.cluster != keep_cluster:
-            # clean up associated node requests
-            self.node_req_store.delete_for_cluster(job.cluster, batch=batch)
+        # clean up associated node requests
+        self.node_req_store.cleanup_cluster(job.cluster, batch=batch)
 
         self.job_store.delete(job_id, batch=batch)
 
@@ -284,7 +287,7 @@ class ClusterState:
         node_status = ", ".join(
             ["{} ({})".format(status, by_status[status]) for status in statuses])
 
-        return "tasks: {}, nodes: {}".format(task_status, node_status)
+        return "tasks: {}, worker nodes: {}".format(task_status, node_status)
 
     def get_incomplete_task_count(self) -> int:
         return len([t for t in self.tasks if t.status in INCOMPLETE_TASK_STATES])

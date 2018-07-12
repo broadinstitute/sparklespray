@@ -3,7 +3,7 @@ import os
 import json
 import sys
 
-import kubeque
+import sparklespray
 from .task_store import STATUS_FAILED, STATUS_CLAIMED, STATUS_PENDING, STATUS_KILLED, STATUS_COMPLETE
 from .util import get_timestamp, url_join
 from .job_store import JOB_STATUS_KILLED
@@ -326,7 +326,7 @@ def _update_claimed_are_still_running(jq, cluster, job_id):
     return task_ids
 
 
-def clean(cluster: Cluster, jq: JobQueue, job_id: str, force: bool=False, keep_cluster=None):
+def clean(cluster: Cluster, jq: JobQueue, job_id: str, force: bool=False):
     if not force:
         tasks = cluster.task_store.get_tasks(job_id, status=STATUS_CLAIMED)
         if len(tasks) > 0:
@@ -346,7 +346,7 @@ def clean(cluster: Cluster, jq: JobQueue, job_id: str, force: bool=False, keep_c
                     "job %s is still running (%d tasks), cannot remove", job_id, len(still_running))
                 return False
 
-    cluster.delete_job(job_id, keep_cluster=keep_cluster)
+    cluster.delete_job(job_id)
     return True
 
 
@@ -410,7 +410,7 @@ def dumpjob_cmd(jq, io, args):
 
 
 def version_cmd():
-    print(kubeque.__version__)
+    print(sparklespray.__version__)
 
 
 def get_func_parameters(func):

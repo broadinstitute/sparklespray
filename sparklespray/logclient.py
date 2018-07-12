@@ -1,6 +1,6 @@
 from termcolor import colored, cprint
-from kubeque.pb_pb2_grpc import MonitorStub
-from kubeque.pb_pb2 import ReadOutputRequest
+from .pb_pb2_grpc import MonitorStub
+from .pb_pb2 import ReadOutputRequest
 import grpc
 import datetime
 import logging

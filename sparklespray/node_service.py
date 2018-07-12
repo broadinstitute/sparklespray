@@ -9,8 +9,8 @@ import attr
 import os
 from collections import defaultdict
 import json
-from kubeque.compute_service import ComputeService
-from .node_req_store import NODE_REQ_COMPLETE, NODE_REQ_RUNNING, NODE_REQ_SUBMITTED
+from .compute_service import ComputeService
+from .node_req_store import NODE_REQ_COMPLETE, NODE_REQ_RUNNING, NODE_REQ_SUBMITTED, NODE_REQ_STAGING
 from typing import List, DefaultDict, Tuple
 
 # from oauth2client.client import GoogleCredentials
@@ -80,6 +80,8 @@ class AddNodeStatus:
 
     @property
     def status(self):
+        from .cluster_service import CONSUMER_ACTION_ID
+
         if self.response['done']:
             return NODE_REQ_COMPLETE
         else:
@@ -87,8 +89,12 @@ class AddNodeStatus:
             if instance_name is None:
                 return NODE_REQ_SUBMITTED
             else:
-                return NODE_REQ_RUNNING
-            # events = self.response.get('metadata', {}).get('events')
+                events = self.response.get('metadata', {}).get('events')
+                for event in events:
+                    if event['details'].get("actionId") == CONSUMER_ACTION_ID:
+                        return NODE_REQ_RUNNING
+                return NODE_REQ_STAGING
+            #
             # start_events = [x for x in events if x['description'] == 'pulling-image']
             # if len(start_events) > 0:
             #     return NODE_REQ_RUNNING
@@ -135,6 +141,8 @@ class NodeService:
     def get_add_node_status(self, operation_name: str):
         request = self.service.projects().operations().get(name=operation_name)
         response = request.execute()
+        with open("response.log", "a") as fd:
+            fd.write(json.dumps(response, indent=2)+"\n")
         return AddNodeStatus(response)
 
     def cancel_add_node(self, operation_name: str):
