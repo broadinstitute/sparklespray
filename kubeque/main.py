@@ -632,12 +632,10 @@ def reset_cmd(jq, args):
             statuses_to_clear = [STATUS_CLAIMED, STATUS_FAILED, STATUS_COMPLETE, STATUS_KILLED]
         else:
             statuses_to_clear = [STATUS_CLAIMED, STATUS_FAILED, STATUS_KILLED]
-        log.info("reseting %s by changing tasks with statuses (%s) -> %s", jobid, ",".join(statuses_to_clear),
+        log.info("reseting %s by changing tasks with statuses (%s) and (status=%s, and exit_code != 0) -> %s", jobid, ",".join(statuses_to_clear), STATUS_COMPLETE,
                  STATUS_PENDING)
-        updated = jq.reset(jobid, args.owner, statuses_to_clear=statuses_to_clear)
+        updated = jq.reset(jobid, args.owner, statuses_to_clear=statuses_to_clear, reset_nonzero_exit=True)
         log.info("updated %d tasks", updated)
-        if args.resubmit:
-            _resubmit(jq, jobid)
 
 
 def _summarize_task_statuses(tasks):
@@ -1187,10 +1185,9 @@ def main(argv=None):
     parser = subparser.add_parser("reset",
                                   help="Mark any 'claimed', 'killed' or 'failed' jobs as ready for execution again.  Useful largely only during debugging issues with job submission.")
     parser.set_defaults(func=reset_cmd)
-    parser.add_argument("jobid_pattern")
-    parser.add_argument("--owner")
-    parser.add_argument("--resubmit", action="store_true")
-    parser.add_argument("--all", action="store_true")
+    parser.add_argument("jobid_pattern", help="The jobid to reset")
+    parser.add_argument("--owner", help="if set, only reset tasks owned by the specified worker node")
+    parser.add_argument("--all", action="store_true", help="If set, reset successfully completed tasks as well as incomplete tasks")
 
     parser = subparser.add_parser("listparams", help="Write to a csv file the parameters for each task")
     parser.set_defaults(func=list_params_cmd)
