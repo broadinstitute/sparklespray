@@ -12,7 +12,7 @@ from .cluster_service import Cluster
 from .io import IO
 from .watch import watch
 from .resize_cluster import GetPreempted
-
+from . import txtui
 import csv
 import argparse
 
@@ -156,7 +156,7 @@ def status_cmd(jq: JobQueue, io: IO, cluster: Cluster, args):
         # else:
         tasks = cluster.task_store.get_tasks(jobid)
         status, complete = _summarize_task_statuses(tasks)
-        log.info("%s: %s", jobid, status)
+        txtui.user_print(f"{jobid}: {status}")
 
 
 def fetch_cmd(jq, io, args):
@@ -418,6 +418,9 @@ def get_func_parameters(func):
     return inspect.getfullargspec(func)[0]
 
 
+from . import txtui
+
+
 def main(argv=None):
     import warnings
     warnings.filterwarnings(
@@ -515,13 +518,7 @@ def main(argv=None):
 
     args = parse.parse_args(argv)
 
-    if args.debug:
-        logging.basicConfig(
-            level=logging.DEBUG, format="%(asctime)s:%(levelname)s:%(name)s:%(message)s")
-    else:
-        logging.basicConfig(level=logging.INFO,
-                            format="%(asctime)s %(message)s")
-        logging.getLogger("googleapiclient.discovery").setLevel(logging.WARN)
+    txtui.config_logging(100 if args.debug else 0)
 
     if not hasattr(args, 'func'):
         parse.print_help()

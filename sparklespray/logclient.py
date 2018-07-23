@@ -1,26 +1,11 @@
-from termcolor import colored, cprint
 from .pb_pb2_grpc import MonitorStub
 from .pb_pb2 import ReadOutputRequest
 import grpc
 import datetime
 import logging
+from .txtui import print_log_content
 
 log = logging.getLogger(__name__)
-
-
-def print_log_content(timestamp, payload):
-    if payload[-1] == "\n":
-        payload = payload[:-1]
-    payload_lines = payload.split("\n")
-    if payload_lines[-1] == "":
-        del payload_lines[-1]
-    prefix = None
-    for line in payload_lines:
-        if prefix is None:
-            prefix = "[{}]".format(timestamp.strftime("%H:%M:%S"))
-            print(colored(prefix, "green"), colored(line, "yellow"))
-        else:
-            print(colored(" "*len(prefix), "white"), colored(line, "yellow"))
 
 
 class LogMonitor:

@@ -11,8 +11,10 @@ from .resize_cluster import ResizeCluster, GetPreempted
 from .io import IO
 from .job_queue import JobQueue
 from .cluster_service import Cluster
+from . import txtui
 
 log = logging.getLogger(__name__)
+from .txtui import user_print
 
 
 def add_watch_cmd(subparser):
@@ -78,7 +80,7 @@ def _watch(job_id, state, initial_poll_delay, max_poll_delay, loglive, cluster, 
 
         summary = state.get_summary()
         if prev_summary != summary:
-            log.info("%s", summary)
+            user_print(summary)
             prev_summary = summary
 
             poll_delay = initial_poll_delay
@@ -153,7 +155,7 @@ def watch(io: IO, jq: JobQueue, job_id: str, cluster: Cluster, target_nodes=None
             with _exception_guard(lambda: "restarting preempted nodes threw exception"):
                 task_ids = get_preempted(state)
                 if len(task_ids) > 0:
-                    log.info(
+                    log.warning(
                         "Resetting tasks which appear to have been preempted: %s", ", ".join(task_ids))
                     for task_id in task_ids:
                         jq.reset_task(task_id)
@@ -166,8 +168,8 @@ def watch(io: IO, jq: JobQueue, job_id: str, cluster: Cluster, target_nodes=None
 
         failures = state.get_failed_task_count()
         successes = state.get_successful_task_count()
-        log.info(
-            "Job finished. %d tasks completed successfully, %d tasks failed", successes, failures)
+        txtui.user_print(
+            f"Job finished. {successes} tasks completed successfully, {failures} tasks failed")
 
         if failures > 0 and len(job.tasks) == 1:
             log.warning(

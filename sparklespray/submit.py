@@ -23,6 +23,7 @@ from .job_queue import JobQueue
 from .cluster_service import Cluster
 from .io import IO
 from .watch import watch
+from . import txtui
 import sparklespray
 
 
@@ -455,10 +456,22 @@ def submit_cmd(jq, io, cluster, args, config):
 
         log.debug("upload_map = %s", upload_map)
         log.info("kubeconsume at %s", kubequeconsume_exe_url)
+
+        # First check existance of files, so we can print out a single summary statement
+        needs_upload = []
+        needs_upload_bytes = 0
         for filename, dest, is_public in upload_map.uploads():
-            print("filename={}, dest={}, is_public={}".format(
-                filename, dest, is_public))
-            io.put(filename, dest, skip_if_exists=True, is_public=is_public)
+            if not io.exists(dest):
+                needs_upload.append((filename, dest, is_public))
+                needs_upload_bytes += os.path.getsize(filename)
+
+        # now upload those which did not exist
+        txtui.user_print(
+            f"{len(needs_upload)} files ({needs_upload_bytes} bytes) out of {len(upload_map.uploads())} files will be uploaded")
+        for filename, dest, is_public in needs_upload:
+            log.debug(
+                f"Uploading {filename}-> to {dest} (is_public={is_public}")
+            io.put(filename, dest, skip_if_exists=False, is_public=is_public)
 
     log.debug("spec: %s", json.dumps(spec, indent=2))
 
