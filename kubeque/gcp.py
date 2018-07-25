@@ -640,6 +640,14 @@ class IO:
         else:
             assert not must, "Could not find {}".format(path)
 
+    def verify_writable(self, dst_url):
+        bucket, path = self._get_bucket_and_path(dst_url)
+        blob = bucket.blob(path)
+        # write a test file
+        blob.upload_from_string(str(time.time()))
+        # if no exception, delete it
+        blob.delete()
+
     def put(self, src_filename, dst_url, must=True, skip_if_exists=False):
         if must:
             assert os.path.exists(src_filename), "{} does not exist".format(src_filename)

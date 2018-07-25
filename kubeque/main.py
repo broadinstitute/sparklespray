@@ -197,6 +197,10 @@ def submit(jq, io, cluster, job_id, spec, dry_run, config, skip_kube_submit, met
         default_url_prefix = default_url_prefix[:-1]
     default_job_url_prefix = default_url_prefix + "/" + job_id
 
+    # verify we can write to the bucket before kicking off the jobs
+    canary_url = default_job_url_prefix+"/writes-okay"
+    io.verify_writable(canary_url)
+
     tasks = expand_tasks(spec, io, default_url_prefix, default_job_url_prefix)
     task_spec_urls = []
     command_result_urls = []
