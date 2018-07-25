@@ -2,6 +2,7 @@ package kubequeconsume
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"log"
@@ -37,8 +38,10 @@ func NewIOClient(ctx context.Context, tokenSource oauth2.TokenSource) (IOClient,
 }
 
 func (ioc *GCSIOClient) Upload(src string, destURL string) error {
-	log.Printf("Uploading %s -> %s", src, destURL)
+
+	// log.Printf("Uploading %s -> %s", src, destURL)
 	obj, err := ioc.getObj(destURL)
+	// log.Printf("getObj(%s) -> %v, %v", destURL, obj, err)
 	if err != nil {
 		return err
 	}
@@ -47,14 +50,36 @@ func (ioc *GCSIOClient) Upload(src string, destURL string) error {
 	if err != nil {
 		return err
 	}
+	rFi, err := r.Stat()
+	if err != nil {
+		return err
+	}
+	fileSize := rFi.Size()
+	// log.Printf("Successfully opened src (size=%d)", fileSize)
 	defer r.Close()
 
 	w := obj.NewWriter(ioc.ctx)
+	// log.Printf("Successfully opened dst")
 	defer w.Close()
 
-	if _, err := io.Copy(NotifyOnWrite(w), r); err != nil {
+	var n int64
+	if n, err = io.Copy(NotifyOnWrite(w), r); err != nil {
 		return err
 	}
+
+	// if n != fileSize {
+	// 	return fmt.Errorf("While uploading %s to %s, only %d out of %d bytes transfered", src, destURL, n, fileSize)
+	// }
+
+	attrs, err := obj.Attrs(ioc.ctx)
+	if err != nil {
+		return err
+	}
+	if n != fileSize {
+		return fmt.Errorf("While uploading %s to %s, expected size to be %d, but saw %d bytes transfered", src, destURL, n, attrs.Size)
+	}
+
+	// log.Printf("Successfully copied")
 
 	return nil
 }
