@@ -30,6 +30,7 @@ def config_logging(verbosity):
     to_file = logging.handlers.RotatingFileHandler(
         "sparkles.log", mode='a', maxBytes=10*1024*1024, backupCount=1)
     to_file.setFormatter(verbose_fmt)
+    to_file.setLevel(logging.INFO)
     handlers = [to_file]
     to_stderr = logging.StreamHandler()
     to_stderr.setFormatter(trim_fmt)
@@ -37,8 +38,6 @@ def config_logging(verbosity):
     handlers.append(to_stderr)
 
     if verbosity > 0:
-        # logging.basicConfig(
-        #     level=logging.DEBUG, format="%(asctime)s:%(levelname)s:%(name)s:%(message)s")
         to_stderr.setLevel(logging.DEBUG)
     else:
         logging.getLogger("googleapiclient.discovery").setLevel(logging.WARN)

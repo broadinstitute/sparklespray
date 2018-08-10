@@ -107,7 +107,40 @@ def _watch(job_id, state, initial_poll_delay, max_poll_delay, loglive, cluster, 
 # TODO: Finish implementing. Use to start docker instance and watch progress
 
 
-def local_watch(job_id: str, cluster: Cluster, initial_poll_delay=1.0, max_poll_delay=30.0):
+import subprocess
+import os
+
+
+def start_docker_process(job_spec_str: str, consume_exe: str, work_dir: str):
+    job_spec = json.loads(job_spec_str)
+    actions = job_spec['pipeline']['actions']
+    # action 0 is curl downloading consume
+    consume_action = actions[1]
+    docker_image = consume_action["imageUri"]
+    docker_command = consume_action["commands"]
+    docker_portmapping = consume_action["portMappings"]
+
+    assert docker_command[0] == "/mnt/consume"
+
+    # TODO: Add options for google creds
+    docker_options = [
+        "-v", os.path.expanduser("~/.config/gcloud") + ":/google-creds",
+        "-e", "GOOGLE_APPLICATION_CREDENTIALS=/google-creds/application_default_credentials.json",
+        "-v", f"{consume_exe}:/mnt/consume", "-v", f"{work_dir}:/mnt"]
+
+    for src_port, dst_port in docker_portmapping.items():
+        docker_options.extend(["-p", f"{src_port}:{dst_port}"])
+
+    cmd = ["gcloud", "docker", "--", "run"] + \
+        docker_options + [docker_image] + docker_command
+
+    print("Executing:", cmd)
+    proc = subprocess.Popen(cmd)
+
+    return proc
+
+
+def local_watch(job_id: str, consume_exe: str, work_dir: str, cluster: Cluster, initial_poll_delay=1.0, max_poll_delay=30.0):
     loglive = True
 
     job = cluster.job_store.get_job(job_id)
@@ -115,17 +148,32 @@ def local_watch(job_id: str, cluster: Cluster, initial_poll_delay=1.0, max_poll_
     state = cluster.get_state(job_id)
     state.update()
 
-    def poll_cluster(): return None
+    proc = start_docker_process(job.kube_job_spec, consume_exe, work_dir)
 
-    proc = start_docker_process(job.kube_job_spec)
+    def poll_cluster():
+        if proc.poll() is not None:
+            raise Exception("Docker process prematurely died")
 
     try:
         _watch(job_id, state, initial_poll_delay,
                max_poll_delay, loglive, cluster, poll_cluster)
+
+        failures = state.get_failed_task_count()
+        successes = state.get_successful_task_count()
+        txtui.user_print(
+            f"Job finished. {successes} tasks completed successfully, {failures} tasks failed")
+
+        successful_execution = failures == 0
+
     except KeyboardInterrupt:
         print("Interrupted -- Aborting...")
+        successful_execution = False
 
-    proc.stop()
+    if proc.poll() is not None:
+        log.warning("Sending terminate signal to {proc}")
+        proc.terminate()
+
+    return successful_execution
 
 
 def watch(io: IO, jq: JobQueue, job_id: str, cluster: Cluster, target_nodes=None, initial_poll_delay=1.0, max_poll_delay=30.0):

@@ -69,8 +69,11 @@ func consume(c *cli.Context) error {
 		return err
 	}
 
-	externalIP := owner
-	if metadata.OnGCP() {
+	isLocalRun := strings.HasPrefix(cluster, "local-")
+	log.Printf("isLocal = %s (cluster=%s)", isLocalRun, cluster)
+	var owner string
+	var externalIP string
+	if !isLocalRun {
 		log.Printf("Querying metadata to get host instance name")
 		instanceName, err := GetInstanceName()
 		if err != nil {

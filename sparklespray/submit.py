@@ -22,7 +22,7 @@ from .util import get_timestamp
 from .job_queue import JobQueue
 from .cluster_service import Cluster
 from .io import IO
-from .watch import watch
+from .watch import watch, local_watch
 from . import txtui
 import sparklespray
 
@@ -128,7 +128,7 @@ def expand_tasks(spec, io, default_url_prefix, default_job_url_prefix):
     common = spec['common']
     common['downloads'] = rewrite_downloads(
         io, common.get('downloads', []), default_url_prefix)
-    #common['uploads'] = rewrite_uploads(common.get('uploads', []), default_job_url_prefix)
+    # common['uploads'] = rewrite_uploads(common.get('uploads', []), default_job_url_prefix)
 
     tasks = []
     for task_i, spec_task in enumerate(spec['tasks']):
@@ -136,7 +136,7 @@ def expand_tasks(spec, io, default_url_prefix, default_job_url_prefix):
         task = expand_task_spec(common, spec_task)
         task['downloads'] = rewrite_downloads(
             io, task['downloads'], default_url_prefix)
-        #task['uploads'] = rewrite_uploads(task['uploads'], task_url_prefix)
+        # task['uploads'] = rewrite_uploads(task['uploads'], task_url_prefix)
         task['stdout_url'] = rewrite_url_with_prefix(
             task['stdout_url'], task_url_prefix)
         task['command_result_url'] = rewrite_url_with_prefix(
@@ -179,7 +179,7 @@ def determine_machine_type(mem_limit: float, cpu_request: float) -> str:
 
 
 def submit(jq: JobQueue, io: IO, cluster: Cluster, job_id: str, spec: dict, config: SubmitConfig, metadata: dict = {},
-           clean_if_exists: bool=False, dry_run: bool=False):
+           clean_if_exists: bool=False, dry_run: bool=False, cluster_name=None):
     from .key_store import KeyStore
 
     key_store = KeyStore(cluster.client)
@@ -219,8 +219,9 @@ def submit(jq: JobQueue, io: IO, cluster: Cluster, job_id: str, spec: dict, conf
         image = config.image
         cpu_request = config.cpu_request
         mem_limit = config.mem_limit
-        cluster_name = _make_cluster_name(
-            job_id, image, cpu_request, mem_limit, unique_name=False)
+        if cluster_name is None:
+            cluster_name = _make_cluster_name(
+                job_id, image, cpu_request, mem_limit)
 
         existing_job = jq.get_job(job_id, must=False)
         if existing_job is not None:
@@ -402,6 +403,7 @@ def submit_cmd(jq, io, cluster, args, config):
     bootDiskSizeGb = int(bootDiskSizeGb_flag)
     assert bootDiskSizeGb >= 10
     default_url_prefix = config.get("default_url_prefix", "")
+    work_dir = config.get("local_work_dir", "local_work_dir")
 
     job_id = args.name
     if job_id is None:
@@ -495,16 +497,22 @@ def submit_cmd(jq, io, cluster, args, config):
                                  kubequeconsume_url=kubequeconsume_exe_url
                                  )
 
+    cluster_name = None
+    if args.local:
+        # if doing a local submission, generate a unique cluster name each time
+        # to ensure the local process is the one which picks up the job.
+        cluster_name = "local-"+random_string(8)
+
     submit(jq, io, cluster, job_id, spec, submit_config, metadata=metadata,
-           clean_if_exists=True, dry_run=args.dryrun)
+           clean_if_exists=True, dry_run=args.dryrun, cluster_name=cluster_name)
 
     finished = False
     successful_execution = True
 
     if args.local:
-        # if we ran it within docker, and the docker command completed, then the job is done
-        raise Exception("local mode is no longer availible")
-        # finished = True
+        successful_execution = local_watch(
+            job_id, kubequeconsume_exe_path, work_dir, cluster)
+        finished = True
     else:
         if not (args.dryrun or args.skip_kube_submit) and args.wait_for_completion:
             log.info("Waiting for job to terminate")
@@ -513,14 +521,8 @@ def submit_cmd(jq, io, cluster, args, config):
             finished = True
 
     if finished:
-        # if args.fetch:
-        #     log.info("Done waiting for job to complete, downloading results to %s", args.fetch)
-        #     fetch_cmd_(jq, io, job_id, args.fetch)
-        # else:
-        log.info("Done waiting for job to complete, results written to %s",
-                 url_join(default_url_prefix, job_id))
-        log.info("You can download results via 'gsutil rsync -r %s DEST_DIR'",
-                 url_join(default_url_prefix, job_id))
+        txtui.user_print("Done waiting for job. You can download results via 'gsutil rsync -r {} DEST_DIR'".format(
+            url_join(default_url_prefix, job_id)))
 
     if successful_execution:
         sys.exit(0)
