@@ -21,7 +21,7 @@ from .config import get_config_path, load_config
 from .log import log
 
 
-def list_params_cmd(jq, io, args):
+def list_params_cmd(jq: JobQueue, io: IO, args):
     jobid = _resolve_jobid(jq, args.jobid)
     retcode = args.exitcode
     include_extra = args.extra
@@ -31,7 +31,7 @@ def list_params_cmd(jq, io, args):
         for status in [STATUS_FAILED, STATUS_CLAIMED, STATUS_PENDING, STATUS_KILLED]:
             tasks.extend(jq.get_tasks(jobid, status=status))
     else:
-        tasks = jq.get_tasks(jobid)
+        tasks = jq.task_storage.get_tasks(jobid)
 
     if retcode is not None:
         def retcode_matches(exit_code):
@@ -364,7 +364,7 @@ def _update_if_owner_missing(cluster, jq, task):
         jq.reset_task(task.task_id, status=new_status)
 
 
-def kill_cmd(jq, cluster, args):
+def kill_cmd(jq: JobQueue, cluster, args):
     jobids = _get_jobids_from_pattern(jq, args.jobid_pattern)
     if len(jobids) == 0:
         log.warning("No jobs found matching pattern")
@@ -380,7 +380,7 @@ def kill_cmd(jq, cluster, args):
                 _update_if_owner_missing(cluster, jq, task)
 
         # if there are any sit sitting at pending, mark them as killed
-        tasks = jq.get_tasks(jobid, status=STATUS_PENDING)
+        tasks = jq.task_storage.get_tasks(jobid, status=STATUS_PENDING)
         for task in tasks:
             jq.reset_task(task.task_id, status=STATUS_KILLED)
 
