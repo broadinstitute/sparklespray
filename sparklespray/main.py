@@ -18,7 +18,7 @@ import argparse
 
 from .config import get_config_path, load_config
 
-log = logging.getLogger(__name__)
+from .log import log
 
 
 def list_params_cmd(jq, io, args):
@@ -392,13 +392,13 @@ def kill_cmd(jq, cluster, args):
             jq.reset_task(task.task_id, status=STATUS_KILLED)
 
 
-def dumpjob_cmd(jq, io, args):
+def dumpjob_cmd(jq: JobQueue, io: IO, args):
     import attr
     tasks_as_dicts = []
     jobid = _resolve_jobid(jq, args.jobid)
     job = jq.get_job(jobid)
     job = attr.asdict(job)
-    tasks = jq.get_tasks(jobid)
+    tasks = jq.task_storage.get_tasks(jobid)
     for task in tasks:
         t = attr.asdict(task)
 
@@ -406,10 +406,12 @@ def dumpjob_cmd(jq, io, args):
         t['args_url'] = t['args']
         t['args'] = json.loads(task_args)
         tasks_as_dicts.append(t)
+
     print(json.dumps(dict(job=job, tasks=tasks_as_dicts), indent=2, sort_keys=True))
 
 
 def version_cmd():
+    log.info("version command ran")
     print(sparklespray.__version__)
 
 

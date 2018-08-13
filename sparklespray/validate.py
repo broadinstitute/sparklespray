@@ -1,7 +1,7 @@
 import logging
 import sparklespray
 
-log = logging.getLogger(__name__)
+from .log import log
 
 
 def validate_cmd(jq, io, cluster, config):

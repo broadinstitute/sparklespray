@@ -26,7 +26,7 @@ import sys
 CLAIM_TIMEOUT = 5
 
 
-log = logging.getLogger(__name__)
+from .log import log
 
 
 def get_credentials(account, cred_file="~/.config/gcloud/credentials"):

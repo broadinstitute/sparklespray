@@ -1,6 +1,7 @@
 import logging
 import logging.handlers
 from termcolor import colored, cprint
+from .log import log
 
 
 def user_print(msg):
@@ -36,7 +37,7 @@ def config_logging(verbosity):
     to_stderr.setFormatter(trim_fmt)
     to_stderr.setLevel(logging.WARNING)
     handlers.append(to_stderr)
-
+    log.setLevel(logging.INFO)
     if verbosity > 0:
         to_stderr.setLevel(logging.DEBUG)
     else:

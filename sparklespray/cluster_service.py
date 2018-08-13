@@ -17,7 +17,7 @@ from .util import get_timestamp
 from .datastore_batch import Batch
 from abc import abstractmethod
 
-log = logging.getLogger(__name__)
+from .log import log
 
 # and image which has curl and sh installed, used to prep the worker node
 SETUP_IMAGE = "sequenceiq/alpine-curl"
@@ -148,17 +148,24 @@ class Cluster():
         job_key = self.client.key("Job", job_id)
         entity_job = self.client.get(job_key)
 
-        task_ids = entity_job.get("tasks", [])
+        task_ids = set(entity_job.get("tasks", []))
+        # If we've got a mismatch between the data store and the data in the Job object, take the union
+        # to get things back into sync
+        for task in self.task_store.get_tasks(job_id):
+            task_ids.add(task.task_id)
+
         # delete tasks
         for task_id in task_ids:
             self.task_store.delete(task_id, batch=batch)
 
         job = self.job_store.get_job(job_id)
         assert job is not None
+
         # clean up associated node requests
         self.node_req_store.cleanup_cluster(job.cluster, batch=batch)
 
         self.job_store.delete(job_id, batch=batch)
+        log.info(f"in delete_job flushing batch: {batch}")
 
         batch.flush()
 

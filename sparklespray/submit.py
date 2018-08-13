@@ -27,7 +27,7 @@ from . import txtui
 import sparklespray
 
 
-log = logging.getLogger(__name__)
+from .log import log
 
 MEMORY_REQUEST = "memory"
 CPU_REQUEST = "cpu"
@@ -221,7 +221,7 @@ def submit(jq: JobQueue, io: IO, cluster: Cluster, job_id: str, spec: dict, conf
         mem_limit = config.mem_limit
         if cluster_name is None:
             cluster_name = _make_cluster_name(
-                job_id, image, cpu_request, mem_limit)
+                job_id, image, cpu_request, mem_limit, False)
 
         existing_job = jq.get_job(job_id, must=False)
         if existing_job is not None:

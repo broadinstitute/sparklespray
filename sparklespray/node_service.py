@@ -17,7 +17,7 @@ from typing import List, DefaultDict, Tuple
 # from google.cloud import datastore
 # from kubeque.gcp import NODE_REQ_COMPLETE, NODE_REQ_RUNNING, NODE_REQ_SUBMITTED
 
-log = logging.getLogger(__name__)
+from .log import log
 
 
 @attr.s

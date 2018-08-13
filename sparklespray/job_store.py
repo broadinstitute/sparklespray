@@ -12,7 +12,7 @@ from typing import List, Tuple, Optional
 from .task_store import task_to_entity
 from .datastore_batch import ImmediateBatch, Batch
 
-log = logging.getLogger(__name__)
+from .log import log
 
 
 @attr.s

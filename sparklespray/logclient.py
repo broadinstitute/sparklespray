@@ -5,7 +5,7 @@ import datetime
 import logging
 from .txtui import print_log_content
 
-log = logging.getLogger(__name__)
+from .log import log
 
 
 class LogMonitor:

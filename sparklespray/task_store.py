@@ -13,7 +13,7 @@ from typing import List
 import logging
 from .datastore_batch import ImmediateBatch, Batch
 
-log = logging.getLogger(__name__)
+from .log import log
 
 STATUS_CLAIMED = "claimed"
 STATUS_PENDING = "pending"

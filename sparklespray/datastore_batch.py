@@ -9,6 +9,9 @@ class Batch:
         self.batch_size = batch_size
         self.client = client
 
+    def __repr__(self):
+        return f"<Batch {len(self.deletes)} deletes, {len(self.puts)} puts>"
+
     def delete(self, key) -> None:
         self.deletes.add(key)
 

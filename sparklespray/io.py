@@ -6,7 +6,7 @@ import json
 from .util import compute_hash
 import logging
 
-log = logging.getLogger(__name__)
+from .log import log
 
 
 class IO:

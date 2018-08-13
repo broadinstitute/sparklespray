@@ -6,8 +6,6 @@ from .io import IO
 from configparser import ConfigParser
 from .cluster_service import Cluster
 
-log = logging.getLogger(__name__)
-
 
 def load_config(config_file, gcloud_config_file="~/.config/gcloud/configurations/config_default"):
     # first load defaults from gcloud config

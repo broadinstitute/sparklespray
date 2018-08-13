@@ -8,7 +8,7 @@ from .task_store import Task
 from .node_req_store import NodeReq
 from .cluster_service import Cluster, ClusterState, ClusterMod
 import logging
-log = logging.getLogger(__name__)
+from .log import log
 
 
 class GetPreempted:

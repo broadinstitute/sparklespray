@@ -13,7 +13,7 @@ from .job_queue import JobQueue
 from .cluster_service import Cluster
 from . import txtui
 
-log = logging.getLogger(__name__)
+from .log import log
 from .txtui import user_print
 
 
