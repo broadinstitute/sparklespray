@@ -7,7 +7,8 @@ class ComputeService:
     """
 
     def __init__(self, project: str, credentials=None) -> None:
-        self.compute = build('compute', 'v1', credentials=credentials)
+        self.compute = build(
+            'compute', 'v1', credentials=credentials, cache_discovery=False)
         self.project = project
 
     def get_cluster_instances(self, zones, cluster_name):

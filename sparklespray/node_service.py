@@ -134,7 +134,8 @@ class AddNodeStatus:
 
 class NodeService:
     def __init__(self, project: str, zones: List[str], credentials=None) -> None:
-        self.service = build('genomics', 'v2alpha1', credentials=credentials)
+        self.service = build('genomics', 'v2alpha1',
+                             credentials=credentials, cache_discovery=False)
         self.zones = zones
         self.project = project
 

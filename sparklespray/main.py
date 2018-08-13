@@ -80,11 +80,9 @@ def reset_cmd(jq, io, cluster, args):
             statuses_to_clear = [STATUS_CLAIMED, STATUS_FAILED, STATUS_KILLED]
         log.info("reseting %s by changing tasks with statuses (%s) -> %s", jobid, ",".join(statuses_to_clear),
                  STATUS_PENDING)
-        updated = jq.reset(jobid, args.owner,
+        updated = jq.reset(jobid, None,
                            statuses_to_clear=statuses_to_clear)
         log.info("updated %d tasks", updated)
-        if args.resubmit:
-            watch(io, jq, jobid, cluster, target_nodes=1)
 
 
 def _summarize_task_statuses(tasks):
@@ -302,11 +300,6 @@ def _is_complete(status_counts):
 #         return _summarize_task_statuses(self.tasks)
 
 
-def addnodes_cmd(jq, cluster, args, config):
-    job_id = _resolve_jobid(jq, args.job_id)
-    return cluster.add_nodes(job_id, jq, cluster, args.count, None, config['default_url_prefix'])
-
-
 def _resub_preempted(cluster, jq, jobid):
     tasks = jq.get_tasks(jobid, STATUS_CLAIMED)
     for task in tasks:
@@ -442,21 +435,12 @@ def main(argv=None):
     # parser = subparser.add_parser("validate", help="Run a series of tests to confirm the configuration is valid")
     # parser.set_defaults(func=validate_cmd)
 
-    parser = subparser.add_parser(
-        "addnodes", help="Add nodes to be used for executing a specific job")
-    parser.set_defaults(func=addnodes_cmd)
-    parser.add_argument(
-        "job_id", help="the job id used to determine which cluster node should be added to.")
-    parser.add_argument(
-        "count", help="the number of worker nodes to add to the cluster", type=int)
-
     parser = subparser.add_parser("reset",
-                                  help="Mark any 'claimed', 'killed' or 'failed' jobs as ready for execution again.  Useful largely only during debugging issues with job submission.")
+                                  help="Mark any 'claimed', 'killed' or 'failed' jobs as ready for execution again.  Useful largely only during debugging issues with job submission. Potentially also useful for retrying after transient failures.")
     parser.set_defaults(func=reset_cmd)
     parser.add_argument("jobid_pattern")
-    parser.add_argument("--owner")
-    parser.add_argument("--resubmit", action="store_true")
-    parser.add_argument("--all", action="store_true")
+    parser.add_argument("--all", action="store_true",
+                        help="If set, will mark all tasks as 'pending', not just 'claimed', 'killed' or 'failed' tasks")
 
     parser = subparser.add_parser(
         "listparams", help="Write to a csv file the parameters for each task")
