@@ -2,7 +2,7 @@ import logging
 import os
 import json
 import sys
-
+import attr
 import sparklespray
 from .task_store import STATUS_FAILED, STATUS_CLAIMED, STATUS_PENDING, STATUS_KILLED, STATUS_COMPLETE
 from .util import get_timestamp, url_join
@@ -21,10 +21,12 @@ from .config import get_config_path, load_config
 from .log import log
 
 
-def list_params_cmd(jq: JobQueue, io: IO, args):
+def show_cmd(jq: JobQueue, io: IO, args):
     jobid = _resolve_jobid(jq, args.jobid)
     retcode = args.exitcode
-    include_extra = args.extra
+
+    # job = jq.get_job(jobid)
+    # job = attr.asdict(job)
 
     if args.incomplete:
         tasks = []
@@ -39,36 +41,73 @@ def list_params_cmd(jq: JobQueue, io: IO, args):
 
         before_count = len(tasks)
         tasks = [task for task in tasks if retcode_matches(task.exit_code)]
-        print("Filtered {} tasks to {} tasks with exit code {}".format(
+        log.info("Filtered {} tasks to {} tasks with exit code {}".format(
             before_count, len(tasks), retcode))
 
     if len(tasks) == 0:
-        print("No tasks found")
+        log.info("No tasks found")
     else:
-        print("Getting parameters from %d tasks" % len(tasks))
-        parameters = []
-        for task in tasks:
+        log.info("Getting parameters from %d tasks" % len(tasks))
+
+        rows = []
+
+        def make_simple_row(task):
+            row = {}
+            row['sparklespray_task_id'] = task.task_id
+            row['sparklespray_exit_code'] = task.exit_code
+            row['sparklespray_failure_reason'] = task.failure_reason
+            row['sparklespray_status'] = task.status
+
+            if args.params:
+                task_spec = json.loads(io.get_as_str(task.args))
+                task_parameters = task_spec.get('parameters', {})
+                row.update(task_parameters)
+
+            return row
+
+        def make_full_row(task):
+            row = attr.asdict(task)
             task_spec = json.loads(io.get_as_str(task.args))
-            task_parameters = task_spec.get('parameters', {})
-            if include_extra:
-                task_parameters['task_id'] = task.task_id
-                task_parameters['exit_code'] = task.exit_code
-            parameters.append(task_parameters)
+            row['args_url'] = task.args
+            row['args'] = task_spec
+            return row
 
-        # find the union of all keys
-        keys = set()
-        for p in parameters:
-            keys.update(p.keys())
+        def write_json_rows(rows, fd):
+            for row in rows:
+                fd.write(json.dumps(row, indent=3)+"\n")
 
-        columns = list(keys)
-        columns.sort()
+        def write_csv_rows(rows, fd):
+            # find the union of all keys
+            keys = set()
+            for p in rows:
+                keys.update(p.keys())
 
-        with open(args.filename, "wt") as fd:
+            columns = list(keys)
+            columns.sort()
+
             w = csv.writer(fd)
             w.writerow(columns)
-            for p in parameters:
+            for p in rows:
                 row = [str(p.get(column, "")) for column in columns]
                 w.writerow(row)
+
+        if args.detailed:
+            for task in tasks:
+                rows.append(make_full_row(task))
+            write = write_json_rows
+        else:
+            for task in tasks:
+                rows.append(make_simple_row(task))
+            if args.csv:
+                write = write_csv_rows
+            else:
+                write = write_json_rows
+
+        if args.out:
+            with open(args.out, "wt") as fd:
+                write(rows, fd)
+        else:
+            write(rows, sys.stdout)
 
 
 def reset_cmd(jq, io, cluster, args):
@@ -385,24 +424,6 @@ def kill_cmd(jq: JobQueue, cluster, args):
             jq.reset_task(task.task_id, status=STATUS_KILLED)
 
 
-def dumpjob_cmd(jq: JobQueue, io: IO, args):
-    import attr
-    tasks_as_dicts = []
-    jobid = _resolve_jobid(jq, args.jobid)
-    job = jq.get_job(jobid)
-    job = attr.asdict(job)
-    tasks = jq.task_storage.get_tasks(jobid)
-    for task in tasks:
-        t = attr.asdict(task)
-
-        task_args = io.get_as_str(task.args)
-        t['args_url'] = t['args']
-        t['args'] = json.loads(task_args)
-        tasks_as_dicts.append(t)
-
-    print(json.dumps(dict(job=job, tasks=tasks_as_dicts), indent=2, sort_keys=True))
-
-
 def version_cmd():
     log.info("version command ran")
     print(sparklespray.__version__)
@@ -443,19 +464,22 @@ def main(argv=None):
                         help="If set, will mark all tasks as 'pending', not just 'claimed', 'killed' or 'failed' tasks")
 
     parser = subparser.add_parser(
-        "listparams", help="Write to a csv file the parameters for each task")
-    parser.set_defaults(func=list_params_cmd)
+        "show", help="Write to a csv file the parameters for each task")
+    parser.set_defaults(func=show_cmd)
     parser.add_argument("jobid")
     parser.add_argument(
-        "filename", help="The filename to write the csv file containing the parameters")
+        "--out", help="The filename to write the output to. If not specified, writes to stdout")
+    parser.add_argument(
+        "--params", help="If set, include the parameters for each task", action="store_true")
+    parser.add_argument(
+        "--csv", help="If set, will write as csv", action="store_true")
+    parser.add_argument(
+        "--detailed", help="If set, will write full details as json", action="store_true")
     parser.add_argument("--incomplete", "-i",
                         help="By default, will list all parameters. If this flag is present, only those tasks which are not complete will be written to the csv",
                         action="store_true")
     parser.add_argument(
         "--exitcode", "-e", help="Only include those tasks with this return code", type=int)
-    parser.add_argument("--extra",
-                        help="Add columns 'task_id' and 'exit_code' for each task",
-                        action="store_true")
 
     #    parser = subparser.add_parser("retry", help="Resubmit any 'failed' jobs for execution again. (often after increasing memory required)")
     #    parser.set_defaults(func=retry_cmd)
@@ -463,11 +487,6 @@ def main(argv=None):
     #    parser.add_argument("--resources", "-r", help="Update the resource requirements that should be used when re-running job. (ie: -r memory=5G,cpu=2) ")
     #    parser.add_argument("--owner", help="if specified, only tasks with this owner will be retried")
     #    parser.add_argument("--no-wait", action="store_false", dest="wait_for_completion", help="Exit immediately after submission instead of waiting for job to complete")
-
-    parser = subparser.add_parser(
-        "dumpjob", help="Extract a json description of a submitted job")
-    parser.set_defaults(func=dumpjob_cmd)
-    parser.add_argument("jobid")
 
     parser = subparser.add_parser(
         "status", help="Print the status for the tasks which make up the specified job")
