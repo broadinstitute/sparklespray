@@ -45,7 +45,8 @@ def show_cmd(jq: JobQueue, io: IO, args):
             before_count, len(tasks), retcode))
 
     if len(tasks) == 0:
-        log.info("No tasks found")
+        log.error("No tasks found")
+        sys.exit(1)
     else:
         log.info("Getting parameters from %d tasks" % len(tasks))
 
@@ -73,8 +74,7 @@ def show_cmd(jq: JobQueue, io: IO, args):
             return row
 
         def write_json_rows(rows, fd):
-            for row in rows:
-                fd.write(json.dumps(row, indent=3)+"\n")
+            fd.write(json.dumps(rows, indent=3)+"\n")
 
         def write_csv_rows(rows, fd):
             # find the union of all keys
@@ -110,7 +110,7 @@ def show_cmd(jq: JobQueue, io: IO, args):
             write(rows, sys.stdout)
 
 
-def reset_cmd(jq, io, cluster, args):
+def reset_cmd(jq: JobQueue, io: IO, cluster, args):
     for jobid in _get_jobids_from_pattern(jq, args.jobid_pattern):
         if args.all:
             statuses_to_clear = [STATUS_CLAIMED,

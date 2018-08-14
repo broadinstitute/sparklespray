@@ -114,7 +114,7 @@ class JobQueue:
             counts[task.status] += 1
         return dict(counts)
 
-    def reset(self, jobid, owner, statuses_to_clear=[STATUS_CLAIMED, STATUS_FAILED]):
+    def reset(self, jobid: str, owner, statuses_to_clear=[STATUS_CLAIMED, STATUS_FAILED]):
         tasks = []
         for status_to_clear in statuses_to_clear:
             tasks.extend(self.task_storage.get_tasks(
