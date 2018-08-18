@@ -131,11 +131,12 @@ class AddNodeStatus:
     def is_done(self) -> bool:
         return self.status['done']
 
+from .compute_service import DirCache
 
 class NodeService:
     def __init__(self, project: str, zones: List[str], credentials=None) -> None:
         self.service = build('genomics', 'v2alpha1',
-                             credentials=credentials, cache_discovery=False)
+                             credentials=credentials, cache_discovery=True, cache=DirCache(".sparkles-cache/services"))
         self.zones = zones
         self.project = project
 

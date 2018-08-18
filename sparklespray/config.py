@@ -5,6 +5,12 @@ import sys
 from .io import IO
 from configparser import ConfigParser
 from .cluster_service import Cluster
+from .node_req_store import AddNodeReqStore
+from .task_store import TaskStore
+from .job_store import JobStore
+from .job_queue import JobQueue
+from google.cloud import datastore
+from .util import url_join
 
 
 def load_config(config_file, gcloud_config_file="~/.config/gcloud/configurations/config_default"):
@@ -52,20 +58,21 @@ def load_config(config_file, gcloud_config_file="~/.config/gcloud/configurations
 
     assert isinstance(merged_config['zones'], list)
 
+    from google.oauth2 import service_account
+
+    SCOPES = ['https://www.googleapis.com/auth/genomics',
+              'https://www.googleapis.com/auth/cloud-platform']
+    service_account_key = "service-keys/broad-achilles.json"
+
+    merged_config['credentials'] = service_account.Credentials.from_service_account_file(
+        service_account_key, scopes=SCOPES)
+
     jq, io, cluster = load_config_from_dict(merged_config)
     return merged_config, jq, io, cluster
 
 
-from .node_req_store import AddNodeReqStore
-from .task_store import TaskStore
-from .job_store import JobStore
-from .job_queue import JobQueue
-from google.cloud import datastore
-from .util import url_join
-
-
 def load_config_from_dict(config):
-    credentials = None
+    credentials = config['credentials']
     project_id = config['project']
     io = IO(project_id, config['cas_url_prefix'], credentials)
 

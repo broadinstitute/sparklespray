@@ -1,4 +1,5 @@
 import sys
-from .main import main
+from sparklespray.main import main
 
 main(sys.argv[1:])
+

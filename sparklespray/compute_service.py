@@ -1,6 +1,37 @@
 from apiclient.discovery import build
 from googleapiclient.errors import HttpError
 
+from googleapiclient.discovery_cache.base import Cache
+import os
+import hashlib 
+import tempfile
+
+class DirCache(Cache):
+    def __init__(self, path):
+        self.path = path
+        # attempt to create if not already existing
+        try:
+            os.makedirs(self.path)
+        except FileExistsError:
+            pass
+    
+    def _get_filename(self, url):
+        return os.path.join(self.path, hashlib.sha256(url.encode("utf8")).hexdigest())
+        
+    def get(self, url):
+        fn = self._get_filename(url)
+        try:
+            with open(fn, "rt") as fd:
+                return fd.read()
+        except FileNotFoundError:
+            return None
+        
+    def set(self, url, content):
+        fn = self._get_filename(url)
+        tmp_fd = tempfile.NamedTemporaryFile(mode="wt", dir=self.path, delete=False)
+        tmp_fd.write(content)
+        tmp_fd.close()
+        os.rename(tmp_fd.name, fn)
 
 class ComputeService:
     """ Facade/wrapper around GCS compute API
@@ -8,7 +39,7 @@ class ComputeService:
 
     def __init__(self, project: str, credentials=None) -> None:
         self.compute = build(
-            'compute', 'v1', credentials=credentials, cache_discovery=False)
+            'compute', 'v1', credentials=credentials, cache_discovery=True, cache=DirCache(".sparkles-cache/services"))
         self.project = project
 
     def get_cluster_instances(self, zones, cluster_name):
