@@ -11,9 +11,14 @@ from .job_store import JobStore
 from .job_queue import JobQueue
 from google.cloud import datastore
 from .util import url_join
+from google.oauth2 import service_account
+from .txtui import log
 
 
-def load_config(config_file, gcloud_config_file="~/.config/gcloud/configurations/config_default"):
+def load_only_config_dict(config_file, gcloud_config_file="~/.config/gcloud/configurations/config_default"):
+    config_file = get_config_path(config_file)
+    log.info("Using config: %s", config_file)
+
     # first load defaults from gcloud config
     gcloud_config_file = os.path.expanduser(gcloud_config_file)
     defaults = {}
@@ -38,8 +43,15 @@ def load_config(config_file, gcloud_config_file="~/.config/gcloud/configurations
     merged_config.update(config_from_file)
 
     missing_values = []
-    for property in ["default_url_prefix", "project",
-                     "default_image", "default_resource_cpu", "default_resource_memory", "zones", "region", "account"]:
+    required_properties = ["default_url_prefix",
+                           "project",
+                           "default_image",
+                           "default_resource_cpu",
+                           "default_resource_memory",
+                           "zones",
+                           "region",
+                           "account"]
+    for property in required_properties:
         if property not in merged_config or merged_config[property] == "" or merged_config[property] is None:
             missing_values.append(property)
 
@@ -58,11 +70,22 @@ def load_config(config_file, gcloud_config_file="~/.config/gcloud/configurations
 
     assert isinstance(merged_config['zones'], list)
 
-    from google.oauth2 import service_account
+    project_id = merged_config['project']
+    service_account_key = os.path.expanduser(merged_config.get(
+        "service_account_key", f"~/.sparkles-cache/service-keys/{project_id}.json"))
+    merged_config['service_account_key'] = service_account_key
 
+    return merged_config
+
+
+def load_config(config_file):
+    merged_config = load_only_config_dict(config_file)
     SCOPES = ['https://www.googleapis.com/auth/genomics',
               'https://www.googleapis.com/auth/cloud-platform']
-    service_account_key = "service-keys/broad-achilles.json"
+    service_account_key = merged_config['service_account_key']
+    if not os.path.exists(service_account_key):
+        raise Exception(
+            "Could not find service account key at %s", service_account_key)
 
     merged_config['credentials'] = service_account.Credentials.from_service_account_file(
         service_account_key, scopes=SCOPES)

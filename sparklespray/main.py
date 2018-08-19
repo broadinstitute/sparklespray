@@ -16,7 +16,7 @@ from . import txtui
 import csv
 import argparse
 
-from .config import get_config_path, load_config
+from .config import get_config_path, load_config, load_only_config_dict
 
 from .log import log
 
@@ -435,6 +435,11 @@ def get_func_parameters(func):
 
 
 from . import txtui
+from .gcp_setup import setup_project
+
+
+def setup_cmd(args, config):
+    setup_project(config['project'], config['service_account_key'])
 
 
 def main(argv=None):
@@ -462,6 +467,10 @@ def main(argv=None):
     parser.add_argument("jobid_pattern")
     parser.add_argument("--all", action="store_true",
                         help="If set, will mark all tasks as 'pending', not just 'claimed', 'killed' or 'failed' tasks")
+
+    parser = subparser.add_parser("setup",
+                                  help="Configures the google project chosen in the config to be compatible with sparklespray. (requires gcloud installed in path)")
+    parser.set_defaults(func=setup_cmd)
 
     parser = subparser.add_parser(
         "show", help="Write to a csv file the parameters for each task")
@@ -529,24 +538,28 @@ def main(argv=None):
         parse.print_help()
         sys.exit(1)
 
-    func_param_names = get_func_parameters(args.func)
-    if len(set(["config", "jq", "io"]).intersection(func_param_names)) > 0:
-        config_path = get_config_path(args.config)
-        log.info("Using config: %s", config_path)
-        config, jq, io, cluster = load_config(config_path)
-    func_params = {}
-    if "args" in func_param_names:
-        func_params["args"] = args
-    if "config" in func_param_names:
-        func_params["config"] = config
-    if "io" in func_param_names:
-        func_params["io"] = io
-    if "jq" in func_param_names:
-        func_params["jq"] = jq
-    if 'cluster' in func_param_names:
-        func_params['cluster'] = cluster
+    if args.func == setup_cmd:
+        # special case, because this is the one command which must work before the service account
+        # is set up.
+        config = load_only_config_dict(args.config)
+        args.func(args, config)
+    else:
+        func_param_names = get_func_parameters(args.func)
+        if len(set(["config", "jq", "io"]).intersection(func_param_names)) > 0:
+            config, jq, io, cluster = load_config(args.config)
+        func_params = {}
+        if "args" in func_param_names:
+            func_params["args"] = args
+        if "config" in func_param_names:
+            func_params["config"] = config
+        if "io" in func_param_names:
+            func_params["io"] = io
+        if "jq" in func_param_names:
+            func_params["jq"] = jq
+        if 'cluster' in func_param_names:
+            func_params['cluster'] = cluster
 
-    args.func(**func_params)
+        args.func(**func_params)
 
 
 if __name__ == "__main__":
