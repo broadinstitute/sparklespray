@@ -13,6 +13,7 @@ from .io import IO
 from .watch import watch
 from .resize_cluster import GetPreempted
 from . import txtui
+from .validate import validate_cmd
 import csv
 import argparse
 
@@ -458,8 +459,9 @@ def main(argv=None):
 
     add_submit_cmd(subparser)
 
-    # parser = subparser.add_parser("validate", help="Run a series of tests to confirm the configuration is valid")
-    # parser.set_defaults(func=validate_cmd)
+    parser = subparser.add_parser(
+        "validate", help="Run a series of tests to confirm the configuration is valid")
+    parser.set_defaults(func=validate_cmd)
 
     parser = subparser.add_parser("reset",
                                   help="Mark any 'claimed', 'killed' or 'failed' jobs as ready for execution again.  Useful largely only during debugging issues with job submission. Potentially also useful for retrying after transient failures.")

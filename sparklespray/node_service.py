@@ -131,7 +131,9 @@ class AddNodeStatus:
     def is_done(self) -> bool:
         return self.status['done']
 
+
 from .compute_service import DirCache
+
 
 class NodeService:
     def __init__(self, project: str, zones: List[str], credentials=None) -> None:
@@ -139,6 +141,13 @@ class NodeService:
                              credentials=credentials, cache_discovery=True, cache=DirCache(".sparkles-cache/services"))
         self.zones = zones
         self.project = project
+
+    def test_pipeline_api(self, project_id):
+        request = self.service.projects().operations().list(
+            name=f"projects/{project_id}/operations", filter="labels.invalid= \"invalid\"")
+        response = request.execute()
+        assert "operations" in response
+        # print(response)
 
     def get_add_node_status(self, operation_name: str):
         request = self.service.projects().operations().get(name=operation_name)
@@ -160,19 +169,75 @@ class NodeService:
         if preemptible is not None:
             pipeline_def['pipeline']['resources']['virtualMachine']['preemptible'] = preemptible
 
-        cp_action = {'imageUri': 'google/cloud-sdk:alpine',
-                     # 'commands': ["gsutil", "rsync", "-r", "/google/logs",
-                     #              "gs://broad-achilles-kubeque/test-kube/sleeptest/1/pipeline.log"],
-                     'commands': ["gsutil", "cp", "/google/logs/output", debug_log_url],
-                     'flags': ["ALWAYS_RUN"]
-                     }
-        pipeline_def['pipeline']['actions'].append(cp_action)
+        if debug_log_url:
+            cp_action = {'imageUri': 'google/cloud-sdk:alpine',
+                         # 'commands': ["gsutil", "rsync", "-r", "/google/logs",
+                         #              "gs://broad-achilles-kubeque/test-kube/sleeptest/1/pipeline.log"],
+                         'commands': ["gsutil", "cp", "/google/logs/output", debug_log_url],
+                         'flags': ["ALWAYS_RUN"]
+                         }
+            pipeline_def['pipeline']['actions'].append(cp_action)
         # print(json.dumps(pipeline_def, indent=2))
 
         # Run the pipeline
         operation = self.service.pipelines().run(body=pipeline_def).execute()
 
         return operation['name']
+
+    def test_pipeline_submit_api(self, setup_image, job_image, command, machine_type, boot_volume_in_gb):
+        normalized_jobid = "test-pipeline-submit-api"
+        pipeline_def = {
+            'pipeline': {
+                'actions': [
+                    {'imageUri': setup_image,
+                     'commands': command
+                     },
+                    {'imageUri': job_image,
+                     'commands': command
+                     },
+                ],
+                'resources': {
+                    'projectId': self.project,
+                    'zones': self.zones,
+                    'virtualMachine': {
+                        'machineType': machine_type,
+                        'preemptible': False,
+                        'serviceAccount': {
+                            'email': 'default',
+                            'scopes': [
+                                'https://www.googleapis.com/auth/cloud-platform',
+                            ]
+                        },
+                        'bootDiskSizeGb': boot_volume_in_gb,
+                        'labels': {
+                            'kubeque-cluster': normalized_jobid,
+                            'sparkles-job': normalized_jobid
+                        }
+                    }
+                }
+            },
+            'labels': {
+                'kubeque-cluster': normalized_jobid,
+                'sparkles-job': normalized_jobid
+            }
+        }
+
+        operation_name = self.add_node(pipeline_def, False, None)
+        prev_status_text = None
+        out = sys.stdout
+        while True:
+            status = self.get_add_node_status(operation_name)
+            status_text = status.status
+            if prev_status_text != status_text:
+                out.write(f"({status_text})")
+                prev_status_text = status_text
+            else:
+                out.write(".")
+            out.flush()
+            if status_text == NODE_REQ_COMPLETE:
+                break
+            time.sleep(2)
+        out.write("\n")
 
     def create_pipeline_json(self,
                              jobid: str,

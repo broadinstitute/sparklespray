@@ -386,6 +386,13 @@ def add_submit_cmd(subparser):
     parser.add_argument("command", nargs=argparse.REMAINDER)
 
 
+def _get_bootDiskSizeGb(config):
+    bootDiskSizeGb_flag = config.get("bootDiskSizeGb", "20")
+    bootDiskSizeGb = int(bootDiskSizeGb_flag)
+    assert bootDiskSizeGb >= 10
+    return bootDiskSizeGb
+
+
 def submit_cmd(jq, io, cluster, args, config):
     metadata = {}
 
@@ -398,10 +405,7 @@ def submit_cmd(jq, io, cluster, args, config):
     if preemptible_flag not in ['y', 'n']:
         raise Exception(
             "setting 'preemptable' in config must either by 'y' or 'n' but was: {}".format(preemptible_flag))
-
-    bootDiskSizeGb_flag = config.get("bootDiskSizeGb", "20")
-    bootDiskSizeGb = int(bootDiskSizeGb_flag)
-    assert bootDiskSizeGb >= 10
+    bootDiskSizeGb = _get_bootDiskSizeGb(config)
     default_url_prefix = config.get("default_url_prefix", "")
     work_dir = config.get("local_work_dir", "local_work_dir")
 

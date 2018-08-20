@@ -187,23 +187,14 @@ class Cluster():
     #         log.info("Operation %s is not yet started. Events: %s", operation_id, response["metadata"]["events"])
     #         return NODE_REQ_SUBMITTED
     #
-    # def test_api(self):
-    #     """Simple api call used to verify the service is enabled"""
-    #     result = self.service.projects().operations().list(name="projects/{}/operations".format(self.project)).execute()
-    #     assert "operations" in result
-    #
-    # def test_image(self, docker_image, sample_url, logging_url):
-    #     pipeline_def = self.create_pipeline_spec("test-image", docker_image, "bash -c 'echo hello'",
-    #                                              "/mnt/kubequeconsume", sample_url, 1, 1, get_random_string(20), 10,
-    #                                              False)
-    #     operation = self.add_node(pipeline_def, False)
-    #     operation_name = operation['name']
-    #     while not operation['done']:
-    #         operation = self.service.projects().operations().get(name=operation_name).execute()
-    #         time.sleep(5)
-    #     if "error" in operation:
-    #         raise Exception("Got error: {}".format(operation['error']))
-    #     log.info("execution completed successfully")
+    def test_pipeline_api(self):
+        """Simple api call used to verify the service is enabled"""
+        self.nodes.test_pipeline_api(self.project)
+
+    def test_image(self, docker_image, sample_url, logging_url, boot_volume_in_gb):
+        self.nodes.test_pipeline_submit_api(setup_image=SETUP_IMAGE, job_image=docker_image, command=[
+                                            "sh", "-c", "echo okay"], machine_type="n1-standard-2",
+                                            boot_volume_in_gb=boot_volume_in_gb)
 
     def is_owner_running(self, owner: str) -> bool:
         if owner == "localhost":
