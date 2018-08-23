@@ -130,7 +130,6 @@ def make_spec_from_command(argv,
                            parameters=[{}],
                            hash_function=None,
                            is_executable_function=is_executable,
-                           resource_spec=None,
                            extra_files=[],
                            src_wildcards=None,
                            pre_exec_script="ls -al",
@@ -161,7 +160,6 @@ def make_spec_from_command(argv,
 
     spec = {
         "image": docker_image,
-        "resources": resource_spec,
         "common": {
             "working_dir": working_dir,
             "command_result_url": "result.json",

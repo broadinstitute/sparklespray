@@ -152,7 +152,7 @@ class JobQueue:
         now = time.time()
 
         batch = Batch(self.client)
-        task_index = 0
+        task_index = 1
         for arg, command_result_url in args:
             task_id = "{}.{}".format(job_id, task_index)
             task = Task(task_id=task_id,

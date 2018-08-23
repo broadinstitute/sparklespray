@@ -88,6 +88,11 @@ def _watch(job_id, state, initial_poll_delay, max_poll_delay, loglive, cluster, 
             # if the status hasn't changed since last time then slow down polling
             poll_delay = min(poll_delay * 1.5, max_poll_delay)
 
+        if state.failed_node_req_count > 3:
+            log.error("%d node requests failed. Aborting...",
+                      state.failed_node_req_count)
+            break
+
         poll_cluster()
 
         if log_monitor is None:

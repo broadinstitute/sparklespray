@@ -37,8 +37,7 @@ class SubmitConfig(BaseModel):
     preemptible: bool
     bootDiskSizeGb: float
     default_url_prefix: str
-    cpu_request: float
-    mem_limit: float
+    machine_type: str
     image: str
     project: str
     monitor_port: int
@@ -164,18 +163,12 @@ def _parse_mem_limit(txt):
         return float(txt[:-1])
 
 
-def _make_cluster_name(job_name, image, cpu_request, mem_limit, unique_name):
+def _make_cluster_name(job_name, image, machine_type, unique_name):
     import hashlib
     import os
     if unique_name:
         return 'l-' + random_string(20)
-    return "c-" + hashlib.md5("{}-{}-{}-{}-{}-{}".format(job_name, image, cpu_request, mem_limit, sparklespray.__version__, os.getlogin()).encode("utf8")).hexdigest()[:20]
-
-
-def determine_machine_type(mem_limit: float, cpu_request: float) -> str:
-    assert mem_limit <= 5
-    assert cpu_request < 2
-    return "n1-standard-1"
+    return "c-" + hashlib.md5("{}-{}-{}-{}-{}".format(job_name, image, machine_type, sparklespray.__version__, os.getlogin()).encode("utf8")).hexdigest()[:20]
 
 
 def submit(jq: JobQueue, io: IO, cluster: Cluster, job_id: str, spec: dict, config: SubmitConfig, metadata: dict = {},
@@ -217,11 +210,9 @@ def submit(jq: JobQueue, io: IO, cluster: Cluster, job_id: str, spec: dict, conf
 
     if not dry_run:
         image = config.image
-        cpu_request = config.cpu_request
-        mem_limit = config.mem_limit
         if cluster_name is None:
             cluster_name = _make_cluster_name(
-                job_id, image, cpu_request, mem_limit, False)
+                job_id, image, config.machine_type, False)
 
         existing_job = jq.get_job(job_id, must=False)
         if existing_job is not None:
@@ -235,8 +226,6 @@ def submit(jq: JobQueue, io: IO, cluster: Cluster, job_id: str, spec: dict, conf
                 raise ExistingJobException(
                     "Existing job with id \"{}\", aborting!".format(job_id))
 
-        machine_type = determine_machine_type(mem_limit, cpu_request)
-
         project = config.project
         monitor_port = config.monitor_port
         consume_exe_args = ["--cluster", cluster_name, "--projectId", project,
@@ -244,7 +233,7 @@ def submit(jq: JobQueue, io: IO, cluster: Cluster, job_id: str, spec: dict, conf
 
         machine_specs = MachineSpec(boot_volume_in_gb=bootDiskSizeGb,
                                     mount_point=config.mount_point,
-                                    machine_type=machine_type)
+                                    machine_type=config.machine_type)
 
         pipeline_spec = cluster.create_pipeline_spec(
             jobid=job_id,
@@ -354,8 +343,7 @@ def add_submit_cmd(subparser):
     parser = subparser.add_parser(
         "sub", help="Submit a command (or batch of commands) for execution")
     parser.set_defaults(func=submit_cmd)
-    parser.add_argument("--resources", "-r",
-                        help="Specify the resources that are needed for running job. (ie: -r memory=5G,cpu=0.9) ")
+    parser.add_argument("--machine-type", "-m", help="The machine type that should be used when starting up instances at GCP (overrides the 'machine_type' parameter in the .sparkles config file)", dest="machine_type", default=None)
     parser.add_argument("--file", "-f",
                         help="Job specification file (in JSON).  Only needed if command is not specified.")
     parser.add_argument("--push", "-u", action="append", default=[],
@@ -413,6 +401,10 @@ def submit_cmd(jq, io, cluster, args, config):
     if job_id is None:
         job_id = new_job_id()
 
+    machine_type = config['machine_type']
+    if args.machine_type:
+        machine_type = args.machine_type
+
     cas_url_prefix = config['cas_url_prefix']
     default_url_prefix = config['default_url_prefix']
 
@@ -428,8 +420,6 @@ def submit_cmd(jq, io, cluster, args, config):
             parameters = [{}]
 
         assert len(args.command) != 0
-
-        resource_spec = _parse_resources(args.resources)
 
         dest_url = url_join(default_url_prefix, job_id)
         files_to_push = list(args.push)
@@ -447,7 +437,6 @@ def submit_cmd(jq, io, cluster, args, config):
                                                   dest_url=dest_url,
                                                   cas_url=cas_url_prefix,
                                                   parameters=parameters,
-                                                  resource_spec=resource_spec,
                                                   hash_function=hash_db.hash_filename,
                                                   src_wildcards=args.results_wildcards,
                                                   extra_files=expand_files_to_upload(
@@ -481,17 +470,10 @@ def submit_cmd(jq, io, cluster, args, config):
 
     log.debug("spec: %s", json.dumps(spec, indent=2))
 
-    resources = spec["resources"]
-    cpu_request = _parse_cpu_request(resources.get(
-        CPU_REQUEST, config['default_resource_cpu']))
-    mem_limit = _parse_mem_limit(resources.get(
-        MEMORY_REQUEST, config['default_resource_memory']))
-
     submit_config = SubmitConfig(preemptible=preemptible_flag == 'y',
                                  bootDiskSizeGb=bootDiskSizeGb,
                                  default_url_prefix=default_url_prefix,
-                                 cpu_request=cpu_request,
-                                 mem_limit=mem_limit,
+                                 machine_type=machine_type,
                                  image=spec['image'],
                                  project=config['project'],
                                  monitor_port=int(config.get(

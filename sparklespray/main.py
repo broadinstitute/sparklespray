@@ -112,17 +112,24 @@ def show_cmd(jq: JobQueue, io: IO, args):
 
 
 def reset_cmd(jq: JobQueue, io: IO, cluster, args):
-    for jobid in _get_jobids_from_pattern(jq, args.jobid_pattern):
-        if args.all:
-            statuses_to_clear = [STATUS_CLAIMED,
-                                 STATUS_FAILED, STATUS_COMPLETE, STATUS_KILLED]
-        else:
-            statuses_to_clear = [STATUS_CLAIMED, STATUS_FAILED, STATUS_KILLED]
-        log.info("reseting %s by changing tasks with statuses (%s) -> %s", jobid, ",".join(statuses_to_clear),
-                 STATUS_PENDING)
-        updated = jq.reset(jobid, None,
-                           statuses_to_clear=statuses_to_clear)
-        log.info("updated %d tasks", updated)
+    jobid_pattern = args.jobid_pattern
+    if "." in jobid_pattern:
+        task = jq.task_storage.get_task(jobid_pattern)
+        print(f"reseting task from {task.status} -> STATUS_PENDING")
+        jq._reset_task(task, STATUS_PENDING)
+    else:
+        for jobid in _get_jobids_from_pattern(jq, jobid_pattern):
+            if args.all:
+                statuses_to_clear = [STATUS_CLAIMED,
+                                     STATUS_FAILED, STATUS_COMPLETE, STATUS_KILLED]
+            else:
+                statuses_to_clear = [STATUS_CLAIMED,
+                                     STATUS_FAILED, STATUS_KILLED]
+            log.info("reseting %s by changing tasks with statuses (%s) -> %s", jobid, ",".join(statuses_to_clear),
+                     STATUS_PENDING)
+            updated = jq.reset(jobid, None,
+                               statuses_to_clear=statuses_to_clear)
+            log.info("updated %d tasks", updated)
 
 
 def _summarize_task_statuses(tasks):
@@ -221,10 +228,10 @@ def fetch_cmd_(jq, io, jobid, dest_root, force=False, flat=False):
 
     for task in tasks:
         spec = json.loads(io.get_as_str(task.args))
-        log.debug("task %d spec: %s", task.task_index + 1, spec)
+        log.debug("task %d spec: %s", task.task_index, spec)
 
         if include_index:
-            dest = os.path.join(dest_root, str(task.task_index + 1))
+            dest = os.path.join(dest_root, str(task.task_index))
             if not os.path.exists(dest):
                 os.mkdir(dest)
         else:
@@ -249,7 +256,7 @@ def fetch_cmd_(jq, io, jobid, dest_root, force=False, flat=False):
         for src, dst_url in to_download:
             if include_index:
                 localpath = os.path.join(
-                    dest_root, str(task.task_index + 1), src)
+                    dest_root, str(task.task_index), src)
             else:
                 localpath = os.path.join(dest_root, src)
             pdir = os.path.dirname(localpath)

@@ -7,6 +7,7 @@ NODE_REQ_SUBMITTED = "submitted"
 NODE_REQ_STAGING = "staging"
 NODE_REQ_RUNNING = "running"
 NODE_REQ_COMPLETE = "complete"
+NODE_REQ_FAILED = "failed"
 
 REQUESTED_NODE_STATES = set(
     [NODE_REQ_SUBMITTED, NODE_REQ_RUNNING, NODE_REQ_STAGING])
@@ -81,6 +82,12 @@ class AddNodeReqStore:
         query = self.client.query(kind="NodeReq")
         query.add_filter("cluster_id", "=", cluster_id)
         query.add_filter("status", "=", NODE_REQ_COMPLETE)
+        for entity in query.fetch():
+            self.client.delete(entity.key)
+
+        query = self.client.query(kind="NodeReq")
+        query.add_filter("cluster_id", "=", cluster_id)
+        query.add_filter("status", "=", NODE_REQ_FAILED)
         for entity in query.fetch():
             self.client.delete(entity.key)
 

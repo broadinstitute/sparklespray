@@ -1,6 +1,6 @@
 import re
 from .task_store import INCOMPLETE_TASK_STATES, Task, STATUS_FAILED, STATUS_COMPLETE, STATUS_CLAIMED
-from .node_req_store import AddNodeReqStore, NodeReq, NODE_REQ_SUBMITTED, NODE_REQ_CLASS_PREEMPTIVE, NODE_REQ_CLASS_NORMAL, NODE_REQ_COMPLETE, REQUESTED_NODE_STATES
+from .node_req_store import AddNodeReqStore, NodeReq, NODE_REQ_SUBMITTED, NODE_REQ_CLASS_PREEMPTIVE, NODE_REQ_CLASS_NORMAL, NODE_REQ_COMPLETE, REQUESTED_NODE_STATES, NODE_REQ_FAILED
 from .compute_service import ComputeService
 from .node_service import NodeService, MachineSpec
 from .job_store import JobStore
@@ -96,6 +96,8 @@ class Cluster():
                       job_id=job_id
                       )
         self.node_req_store.add_node_req(req)
+        log.info(
+            f"Requested node (preemptible: {preemptible} operation_id: {operation_id} debug_log_url: {debug_log_url})")
         return operation_id
 
     def get_cluster_status(self, cluster_name: str) -> ClusterStatus:
@@ -243,6 +245,7 @@ class ClusterState:
         self.node_reqs = []  # type: List[NodeReq]
         self.node_req_store = node_req_store
         self.task_store = task_store
+        self.failed_node_req_count = 0
         # self.add_node_statuses = [] # type: List[AddNodeStatus]
 
     def update(self):
@@ -256,10 +259,14 @@ class ClusterState:
 
         # get all the status of each operation
         for node_req in self.node_reqs:
-            if node_req.status != NODE_REQ_COMPLETE:
+            if node_req.status not in [NODE_REQ_COMPLETE, NODE_REQ_FAILED]:
                 op = self.cluster.nodes.get_add_node_status(
                     node_req.operation_id)
                 new_status = op.status
+                if new_status == NODE_REQ_FAILED:
+                    log.warning("Node request (%s) failed: %s",
+                                node_req.operation_id, op.error_message)
+                    self.failed_node_req_count += 1
                 # print("fetched {} and status was {}".format(node_req.operation_id, new_status))
                 if new_status != node_req.status:
                     self.node_req_store.update_node_req_status(

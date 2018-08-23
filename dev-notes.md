@@ -1,3 +1,12 @@
+last few changes:
+- task output/index mismatch [fixed]
+- result output folder in show command
+- machine type is working? [fixed]
+- use local SD? [fixed]
+- command to print steps to reproduce running task
+- change machine type on job (as a parameter to reset)
+- streaming logs?
+
 # Development notes (Not useful for users)
 
 ### Polling efficiency

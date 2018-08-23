@@ -42,12 +42,16 @@ def load_only_config_dict(config_file, gcloud_config_file="~/.config/gcloud/conf
     merged_config = dict(defaults)
     merged_config.update(config_from_file)
 
+    for unused_property in ["default_resource_cpu", "default_resource_memory"]:
+        if unused_property in merged_config:
+            log.warning(
+                "'%s' in config file but no longer used. Use 'machine_type' instead", unused_property)
+
     missing_values = []
     required_properties = ["default_url_prefix",
                            "project",
                            "default_image",
-                           "default_resource_cpu",
-                           "default_resource_memory",
+                           "machine_type",
                            "zones",
                            "region",
                            "account"]

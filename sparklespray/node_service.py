@@ -10,7 +10,7 @@ import os
 from collections import defaultdict
 import json
 from .compute_service import ComputeService
-from .node_req_store import NODE_REQ_COMPLETE, NODE_REQ_RUNNING, NODE_REQ_SUBMITTED, NODE_REQ_STAGING
+from .node_req_store import NODE_REQ_COMPLETE, NODE_REQ_RUNNING, NODE_REQ_SUBMITTED, NODE_REQ_STAGING, NODE_REQ_FAILED
 from typing import List, DefaultDict, Tuple
 
 # from oauth2client.client import GoogleCredentials
@@ -83,7 +83,10 @@ class AddNodeStatus:
         from .cluster_service import CONSUMER_ACTION_ID
 
         if self.response['done']:
-            return NODE_REQ_COMPLETE
+            if 'error' in self.response:
+                return NODE_REQ_FAILED
+            else:
+                return NODE_REQ_COMPLETE
         else:
             instance_name = self.instance_name
             if instance_name is None:
@@ -101,8 +104,12 @@ class AddNodeStatus:
             # else:
             #     return NODE_REQ_SUBMITTED
 
-    # def is_done(self):
-    #     return self.status == NODE_REQ_COMPLETE
+    @property
+    def error_message(self):
+        if "error" not in self.response:
+            return None
+
+        return self.response['error']['message']
 
     def get_event_summary(self, since=None):
         log = []
@@ -259,7 +266,6 @@ class NodeService:
             }
         ]
 
-        log.warning("Using pd-standard for local storage instead of local ssd")
         pipeline_def = {
             'pipeline': {
                 'actions': [
@@ -280,8 +286,10 @@ class NodeService:
                         'machineType': machine_specs.machine_type,
                         'preemptible': False,
                         'disks': [
-                            # TODO: figure out type to specify for local_ssd
-                            {'name': 'ephemeralssd'}
+                            {
+                                'name': 'ephemeralssd',
+                                'type': 'local-ssd'
+                            }
                         ],
                         'serviceAccount': {
                             'email': 'default',
