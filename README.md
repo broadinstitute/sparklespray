@@ -52,7 +52,6 @@ Download the latest release tar file, extract it and run the install:
 ```
 tar xzf sparklespray-LATEST_VERSION.tar.gz
 cd sparklespray-LATEST_VERSION
-pip install -r requirements.txt
 python setup.py install
 ```
 
@@ -67,14 +66,19 @@ file should contain the following:
 default_url_prefix=gs://your-bucket
 project=your-project
 default_image=alpine
-default_resource_cpu=1
-default_resource_memory=100M
+machine_type=n1-standard-1
 zones=us-east1-b
 ```
 
+Be sure to replace "your-bucket" and "your-project" with the bucket name and 
+your project id respectively. (The bucket is used to hold results from jobs
+and cache data pushed to nodes. You can either give a name of a nonexistant
+bucket, which will automatically be created when you run "setup" below, or
+an existing bucket as long as its in the same project.)
+
 Once you have a config file you can have sparkles use the gcloud command and
 the account you authenticated above to setup the project with everything
-that sparklespray requires. (Specifically, enables DataStore, Google
+that sparklespray requires. (Specifically, this command enables DataStore, Google
 Storage, and the Genomics Pipeline API and creates a role account which has
 access to those services.)
 
@@ -112,13 +116,14 @@ following content:
 
 ```
 [config]
-default_url_prefix=gs://YOUR_BUCKET/PREFIX
+default_url_prefix=gs://YOUR_BUCKET
 project=YOUR_PROJECT
 default_image=python
-default_resource_cpu=1
-default_resource_memory=100M
+machine_type=n1-standard-1
 zones=us-east1-b
 ```
+
+You should replace "YOUR_
 
 To run:
 

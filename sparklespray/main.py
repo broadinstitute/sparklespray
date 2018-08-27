@@ -1,3 +1,4 @@
+import re
 import logging
 import os
 import json
@@ -447,7 +448,12 @@ from .gcp_setup import setup_project
 
 
 def setup_cmd(args, config):
-    setup_project(config['project'], config['service_account_key'])
+    default_url_prefix=config['default_url_prefix']
+    m = re.match("^gs://([^/]+)(?:/.*)?$", default_url_prefix)
+    assert m != None, "invalid remote path: {}".format(default_url_prefix)
+    bucket_name = m.group(1)
+    
+    setup_project(config['project'], config['service_account_key'], bucket_name)
 
 
 def main(argv=None):
@@ -550,7 +556,7 @@ def main(argv=None):
     if args.func == setup_cmd:
         # special case, because this is the one command which must work before the service account
         # is set up.
-        config = load_only_config_dict(args.config)
+        config = load_only_config_dict(args.config, verbose=True)
         args.func(args, config)
     else:
         func_param_names = get_func_parameters(args.func)

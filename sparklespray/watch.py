@@ -5,7 +5,9 @@ import contextlib
 import json
 from .logclient import LogMonitor
 
-from google.gax.errors import RetryError
+#from google.gax.errors import RetryError
+class RetryError(Exception): 
+    pass
 
 from .resize_cluster import ResizeCluster, GetPreempted
 from .io import IO

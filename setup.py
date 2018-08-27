@@ -20,9 +20,13 @@ setup(name='sparklespray',
       author_email='pmontgom@broadinstitute.org',
       include_package_data=True,
       install_requires=[
-#      'google-api-python-client==1.6.4',
-      'google-cloud==0.31.0',
-      'attrs'
+      'termcolor==1.1.0',
+      'attrs==17.2.0',
+      'google-cloud-datastore==1.4.0',
+      'google-cloud-storage==1.6.0',
+      'grpcio-tools==1.13.0',
+      'pydantic==0.11.2',
+      'google-api-python-client==1.7.4'
           ],
       packages=find_packages(),
       entry_points={'console_scripts': [

@@ -14,10 +14,11 @@ from .util import url_join
 from google.oauth2 import service_account
 from .txtui import log
 
+SCOPES = ['https://www.googleapis.com/auth/genomics',
+              'https://www.googleapis.com/auth/cloud-platform']
 
-def load_only_config_dict(config_file, gcloud_config_file="~/.config/gcloud/configurations/config_default"):
-    config_file = get_config_path(config_file)
-    log.info("Using config: %s", config_file)
+
+def load_only_config_dict(config_file, gcloud_config_file="~/.config/gcloud/configurations/config_default", verbose=False):
 
     # first load defaults from gcloud config
     gcloud_config_file = os.path.expanduser(gcloud_config_file)
@@ -29,8 +30,14 @@ def load_only_config_dict(config_file, gcloud_config_file="~/.config/gcloud/conf
                         project=gcloud_config.get("core", "project"),
                         zones=[gcloud_config.get("compute", "zone")],
                         region=gcloud_config.get("compute", "region"))
+        if verbose:
+            print("Using defaults from {}: {}".format(gcloud_config_file, defaults))
 
+    config_file = get_config_path(config_file)
     config_file = os.path.expanduser(config_file)
+    log.info("Using config: %s", config_file)
+    if verbose:
+        print("Using config: {}".format(config_file))
 
     config = ConfigParser()
     config.read(config_file)
@@ -84,8 +91,6 @@ def load_only_config_dict(config_file, gcloud_config_file="~/.config/gcloud/conf
 
 def load_config(config_file):
     merged_config = load_only_config_dict(config_file)
-    SCOPES = ['https://www.googleapis.com/auth/genomics',
-              'https://www.googleapis.com/auth/cloud-platform']
     service_account_key = merged_config['service_account_key']
     if not os.path.exists(service_account_key):
         raise Exception(
