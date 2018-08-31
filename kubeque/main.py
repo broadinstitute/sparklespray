@@ -596,7 +596,7 @@ def list_params_cmd(jq, io, args):
 
     if retcode is not None:
         def retcode_matches(exit_code):
-            return exit_code is not None and int(exit_code) == retcode
+            return not (exit_code is None or exit_code == "") and int(exit_code) == retcode
 
         before_count = len(tasks)
         tasks = [task for task in tasks if retcode_matches(task.exit_code)]
@@ -632,6 +632,12 @@ def list_params_cmd(jq, io, args):
 
 
 def reset_cmd(jq, args):
+    if '.' in args.jobid_pattern:
+        task = jq.storage.get_task(args.jobid_pattern)
+        print("reseting task {} -> pending".format(task))
+        jq._reset_task(task, STATUS_PENDING)
+        return
+    
     for jobid in _get_jobids_from_pattern(jq, args.jobid_pattern):
         if args.all:
             statuses_to_clear = [STATUS_CLAIMED, STATUS_FAILED, STATUS_COMPLETE, STATUS_KILLED]
