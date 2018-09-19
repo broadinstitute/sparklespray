@@ -2,6 +2,7 @@ import subprocess
 import os
 from sparklespray.util import random_string
 import re
+import sys
 
 services_to_add = [  # "storage.googleapis.com",
     "datastore.googleapis.com", "storage-component.googleapis.com", "genomics.googleapis.com", "pubsub.googleapis.com", "storage-api.googleapis.com", "compute.googleapis.com"]
@@ -22,6 +23,7 @@ def _run_cmd(cmd, args):
     except subprocess.CalledProcessError as e:
         print("Command failed. Output:")
         print(e.output)
+        sys.exit(1)
 
 def gcloud(args):
     _run_cmd("gcloud", args)
@@ -31,7 +33,7 @@ def gsutil(args):
 
 def enable_services(project_id):
     for service in services_to_add:
-        gcloud(['service-management', 'enable',
+        gcloud(['services', 'enable',
                 service, '--project', project_id])
 
 

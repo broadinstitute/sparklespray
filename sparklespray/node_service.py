@@ -178,8 +178,6 @@ class NodeService:
 
         if debug_log_url:
             cp_action = {'imageUri': 'google/cloud-sdk:alpine',
-                         # 'commands': ["gsutil", "rsync", "-r", "/google/logs",
-                         #              "gs://broad-achilles-kubeque/test-kube/sleeptest/1/pipeline.log"],
                          'commands': ["gsutil", "cp", "/google/logs/output", debug_log_url],
                          'flags': ["ALWAYS_RUN"]
                          }
