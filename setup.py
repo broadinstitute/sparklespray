@@ -26,7 +26,8 @@ setup(name='sparklespray',
       'google-cloud-storage==1.6.0',
       'grpcio-tools==1.13.0',
       'pydantic==0.11.2',
-      'google-api-python-client==1.7.4'
+      'google-api-python-client==1.7.4',
+      'pyOpenSSL==18.0.0'
           ],
       packages=find_packages(),
       entry_points={'console_scripts': [
