@@ -442,6 +442,9 @@ def get_func_parameters(func):
     import inspect
     return inspect.getfullargspec(func)[0]
 
+def dump_operation_cmd(cluster : Cluster, args):
+    operation = cluster.get_raw_operation_details(args.operation_id)
+    print(json.dumps(operation, indent="  "))
 
 from . import txtui
 from .gcp_setup import setup_project
@@ -486,6 +489,10 @@ def main(argv=None):
     parser = subparser.add_parser("setup",
                                   help="Configures the google project chosen in the config to be compatible with sparklespray. (requires gcloud installed in path)")
     parser.set_defaults(func=setup_cmd)
+
+    parser = subparser.add_parser("dump-operation", help="primarily used for debugging. If a sparkles cannot turn on a node, this can be used to dump the details of the operation which requested the node.")
+    parser.set_defaults(func=dump_operation_cmd)
+    parser.add_argument("operation_id")
 
     parser = subparser.add_parser(
         "show", help="Write to a csv file the parameters for each task")
@@ -560,7 +567,7 @@ def main(argv=None):
         args.func(args, config)
     else:
         func_param_names = get_func_parameters(args.func)
-        if len(set(["config", "jq", "io"]).intersection(func_param_names)) > 0:
+        if len(set(["config", "jq", "io", "cluster"]).intersection(func_param_names)) > 0:
             config, jq, io, cluster = load_config(args.config)
         func_params = {}
         if "args" in func_param_names:

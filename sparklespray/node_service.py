@@ -156,9 +156,13 @@ class NodeService:
         assert "operations" in response
         # print(response)
 
-    def get_add_node_status(self, operation_name: str):
+    def get_operation_details(self, operation_name : str) -> dict:
         request = self.service.projects().operations().get(name=operation_name)
         response = request.execute()
+        return response
+
+    def get_add_node_status(self, operation_name: str) -> AddNodeStatus:
+        response = self.get_operation_details(operation_name)
         with open("response.log", "a") as fd:
             fd.write(json.dumps(response, indent=2)+"\n")
         return AddNodeStatus(response)

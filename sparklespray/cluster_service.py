@@ -74,6 +74,9 @@ class Cluster():
         self.task_store = task_store
         self.debug_log_prefix = debug_log_prefix
 
+    def get_raw_operation_details(self, operation_id):
+        return self.nodes.get_operation_details(operation_id)
+
     def get_state(self, job_id):
         job = self.job_store.get_job(job_id)
         return ClusterState(job_id, job.cluster, self.task_store, self.node_req_store, self)
@@ -370,7 +373,7 @@ class ClusterMod:
         self.debug_log_prefix = debug_log_prefix
 
     def add_node(self, preemptable: bool) -> None:
-        self.cluster.add_node(self.job_id, preemptable, self.debug_log_prefix)
+        self.cluster.add_node(self.job_id, preemptable, "{}/{}/{}".format(self.job_id, get_timestamp(), self.debug_log_prefix))
 
     def cancel_nodes(self, state: ClusterState, count: int) -> None:
         pending_node_reqs = [
