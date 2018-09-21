@@ -371,9 +371,12 @@ class ClusterMod:
         self.job_id = job_id
         self.cluster = cluster
         self.debug_log_prefix = debug_log_prefix
+        self.node_counter = 0 # just used to make sure logs are unique
 
     def add_node(self, preemptable: bool) -> None:
-        self.cluster.add_node(self.job_id, preemptable, "{}/{}/{}".format(self.job_id, get_timestamp(), self.debug_log_prefix))
+        self.node_counter += 1
+        debug_log_path = "{}/{}/{}-{}.txt".format(self.debug_log_prefix, self.job_id, get_timestamp(), self.node_counter)
+        self.cluster.add_node(self.job_id, preemptable, debug_log_path)
 
     def cancel_nodes(self, state: ClusterState, count: int) -> None:
         pending_node_reqs = [
