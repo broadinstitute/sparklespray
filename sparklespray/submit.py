@@ -349,7 +349,7 @@ def add_submit_cmd(subparser):
     parser.add_argument("--push", "-u", action="append", default=[],
                         help="Path to a local file which should be uploaded to working directory of command before execution starts.  If filename starts with a '@' the file is interpreted as a list of files which need to be uploaded.")
     parser.add_argument("--image", "-i",
-                        help="Name of docker image to run job within.  Defaults to value from kubeque config file.")
+                        help="Name of docker image to run job within.  Defaults to value from sparkles config file.")
     parser.add_argument("--name", "-n", help="The name to assign to the job")
     parser.add_argument("--seq", type=int,
                         help="Parameterize the command by 'index'.  Submitting with --seq=10 will submit 10 commands with a parameter 'index' varied from 1 to 10")
