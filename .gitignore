@@ -20,3 +20,7 @@ james-failure/long-job-test
 james-failure
 kubeque/bin/kubequeconsume
 htmlcov
+
+response.log
+sparkles.log
+sparklespray/bin/

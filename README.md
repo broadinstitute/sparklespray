@@ -20,6 +20,9 @@ Create a google project if you do not already have one you wish to use.  In the 
 "your-project". Also create a google bucket to store results. We'll assume
 the bucket name is "your-bucket" below.
 
+Add a firewall rule to your project: https://console.cloud.google.com/networking/firewalls => `Create firewall rule`
+=> name = sparklespray-monitor, targets = All instances of the network, source IP ranges = 0.0.0.0/0, check tcp port and enter value 6032
+
 Install the Google Cloud SDK ( https://cloud.google.com/sdk/install ) and
 then set up gcloud:
 
@@ -65,7 +68,7 @@ file should contain the following:
 [config]
 default_url_prefix=gs://your-bucket
 project=your-project
-default_image=alpine
+default_image=octoblu/alpine-ca-certificates
 machine_type=n1-standard-1
 zones=us-east1-b
 ```
