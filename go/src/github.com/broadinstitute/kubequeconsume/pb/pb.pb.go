@@ -3,9 +3,11 @@
 
 package pb
 
-import proto "github.com/golang/protobuf/proto"
-import fmt "fmt"
-import math "math"
+import (
+	fmt "fmt"
+	proto "github.com/golang/protobuf/proto"
+	math "math"
+)
 
 import (
 	context "golang.org/x/net/context"
@@ -37,16 +39,17 @@ func (m *ReadOutputRequest) Reset()         { *m = ReadOutputRequest{} }
 func (m *ReadOutputRequest) String() string { return proto.CompactTextString(m) }
 func (*ReadOutputRequest) ProtoMessage()    {}
 func (*ReadOutputRequest) Descriptor() ([]byte, []int) {
-	return fileDescriptor_pb_18cf64b9be0bfc80, []int{0}
+	return fileDescriptor_f80abaa17e25ccc8, []int{0}
 }
+
 func (m *ReadOutputRequest) XXX_Unmarshal(b []byte) error {
 	return xxx_messageInfo_ReadOutputRequest.Unmarshal(m, b)
 }
 func (m *ReadOutputRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
 	return xxx_messageInfo_ReadOutputRequest.Marshal(b, m, deterministic)
 }
-func (dst *ReadOutputRequest) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_ReadOutputRequest.Merge(dst, src)
+func (m *ReadOutputRequest) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_ReadOutputRequest.Merge(m, src)
 }
 func (m *ReadOutputRequest) XXX_Size() int {
 	return xxx_messageInfo_ReadOutputRequest.Size(m)
@@ -92,16 +95,17 @@ func (m *ReadOutputReply) Reset()         { *m = ReadOutputReply{} }
 func (m *ReadOutputReply) String() string { return proto.CompactTextString(m) }
 func (*ReadOutputReply) ProtoMessage()    {}
 func (*ReadOutputReply) Descriptor() ([]byte, []int) {
-	return fileDescriptor_pb_18cf64b9be0bfc80, []int{1}
+	return fileDescriptor_f80abaa17e25ccc8, []int{1}
 }
+
 func (m *ReadOutputReply) XXX_Unmarshal(b []byte) error {
 	return xxx_messageInfo_ReadOutputReply.Unmarshal(m, b)
 }
 func (m *ReadOutputReply) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
 	return xxx_messageInfo_ReadOutputReply.Marshal(b, m, deterministic)
 }
-func (dst *ReadOutputReply) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_ReadOutputReply.Merge(dst, src)
+func (m *ReadOutputReply) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_ReadOutputReply.Merge(m, src)
 }
 func (m *ReadOutputReply) XXX_Size() int {
 	return xxx_messageInfo_ReadOutputReply.Size(m)
@@ -212,9 +216,9 @@ var _Monitor_serviceDesc = grpc.ServiceDesc{
 	Metadata: "pb.proto",
 }
 
-func init() { proto.RegisterFile("pb.proto", fileDescriptor_pb_18cf64b9be0bfc80) }
+func init() { proto.RegisterFile("pb.proto", fileDescriptor_f80abaa17e25ccc8) }
 
-var fileDescriptor_pb_18cf64b9be0bfc80 = []byte{
+var fileDescriptor_f80abaa17e25ccc8 = []byte{
 	// 192 bytes of a gzipped FileDescriptorProto
 	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0xe2, 0xe2, 0x28, 0x48, 0xd2, 0x2b,
 	0x28, 0xca, 0x2f, 0xc9, 0x57, 0x0a, 0xe7, 0x12, 0x0c, 0x4a, 0x4d, 0x4c, 0xf1, 0x2f, 0x2d, 0x29,
