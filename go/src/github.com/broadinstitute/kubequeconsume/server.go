@@ -3,10 +3,12 @@ package kubequeconsume
 import (
 	"crypto/tls"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net"
 	"os"
+	"strings"
 	"sync"
 
 	"golang.org/x/net/context"
@@ -29,12 +31,16 @@ func NewMonitor() *Monitor {
 }
 
 func (m *Monitor) ReadOutput(ctx context.Context, in *pb.ReadOutputRequest) (*pb.ReadOutputReply, error) {
+	knownTaskIds := make([]string, 0, 100)
 	m.mutex.Lock()
 	stdoutPath, ok := m.logPerTaskId[in.TaskId]
+	for _, taskId := range m.logPerTaskId {
+		knownTaskIds = append(knownTaskIds, taskId)
+	}
 	m.mutex.Unlock()
 
 	if !ok {
-		return nil, errors.New("Unknown task")
+		return nil, fmt.Errorf("unknown task: %s (Known tasks: %s)", in.TaskId, strings.Join(knownTaskIds, ", "))
 	}
 
 	f, err := os.Open(stdoutPath)
@@ -104,6 +110,8 @@ func (m *Monitor) StartServer(port string, certPEMBlock []byte, keyPEMBlock []by
 }
 
 func (m *Monitor) StartWatchingLog(taskId string, stdoutPath string) {
+	log.Printf("StartWatchingLog(\"%s\", \"%s\")", taskId, stdoutPath)
+
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 

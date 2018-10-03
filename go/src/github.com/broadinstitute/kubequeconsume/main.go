@@ -1,7 +1,10 @@
 package kubequeconsume
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"log"
+	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -12,6 +15,9 @@ import (
 
 	"github.com/urfave/cli"
 	compute "google.golang.org/api/compute/v1"
+	"google.golang.org/api/option"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 )
 
 func Main() {
@@ -44,8 +50,53 @@ func Main() {
 	app.Run(os.Args)
 }
 
+func initCerts() *x509.CertPool {
+	pool := x509.NewCertPool()
+	pool.AppendCertsFromPEM([]byte(pemCerts))
+	return pool
+}
+
+func clientWithCerts(ctx context.Context, certs *x509.CertPool, scope ...string) (*http.Client, error) {
+	// func NewClient(ctx context.Context, src TokenSource) *http.Client {
+	// 	if src == nil {
+	// 		c, err := internal.ContextClient(ctx)
+	// 		if err != nil {
+	// 			return &http.Client{Transport: internal.ErrorTransport{Err: err}}
+	// 		}
+	// 		return c
+	// 	}
+	// 	return &http.Client{
+	// 		Transport: &Transport{
+	// 			Base:   internal.ContextTransport(ctx),
+	// 			Source: ReuseTokenSource(nil, src),
+	// 		},
+	// 	}
+	// }
+
+	// func DefaultClient(ctx context.Context, scope ...string) (*http.Client, error) {
+	// 	ts, err := DefaultTokenSource(ctx, scope...)
+	// 	if err != nil {
+	// 		return nil, err
+	// 	}
+	// 	return NewClient(ctx, ts), nil
+	// }
+
+	// return DefaultClient(ctx, scope)
+
+	return google.DefaultClient(ctx, scope...)
+}
+
 func consume(c *cli.Context) error {
 	log.Printf("Starting consume")
+	certs := initCerts()
+	http.DefaultTransport = &http.Transport{
+		TLSClientConfig: &tls.Config{RootCAs: certs},
+	}
+	// http.DefaultClient = &http.Client{
+	// 	Transport: &http.Transport{
+	// 		TLSClientConfig: &tls.Config{RootCAs: certs},
+	// 	},
+	// }
 
 	projectID := c.String("projectId")
 	cacheDir := c.String("cacheDir")
@@ -62,8 +113,13 @@ func consume(c *cli.Context) error {
 	ctx := context.Background()
 
 	var err error
+	httpclient, err := clientWithCerts(ctx, certs, "https://www.googleapis.com/auth/compute.readonly")
+	if err != nil {
+		log.Printf("Could not create default client: %v", err)
+		return err
+	}
 
-	ioc, err := NewIOClient(ctx)
+	ioc, err := NewIOClient(ctx, certs, httpclient)
 	if err != nil {
 		log.Printf("Creating io client failed: %v", err)
 		return err
@@ -120,11 +176,6 @@ func consume(c *cli.Context) error {
 	Timeout := 1 * time.Second
 	ReservationSize := 1
 
-	httpclient, err := google.DefaultClient(ctx, "https://www.googleapis.com/auth/compute.readonly")
-	if err != nil {
-		log.Printf("Could not create default client: %v", err)
-		return err
-	}
 	service, err := compute.New(httpclient)
 	if err != nil {
 		log.Printf("Could not create compute service: %v", err)
@@ -140,7 +191,8 @@ func consume(c *cli.Context) error {
 		time.Sleep(sleepTime)
 	}
 
-	client, err := datastore.NewClient(ctx, projectID)
+	transportCreds := grpc.WithTransportCredentials(credentials.NewClientTLSFromCert(certs, ""))
+	client, err := datastore.NewClient(ctx, projectID, option.WithGRPCDialOption(transportCreds))
 	if err != nil {
 		log.Printf("Creating datastore client failed: %v", err)
 		return err

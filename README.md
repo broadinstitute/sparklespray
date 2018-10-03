@@ -333,3 +333,39 @@ sparkles show JOB_ID
 sparkles watch JOB_ID
 ```
 
+# Developing sparklespray
+
+The repo contains code in two languages: go and python. The go code is for
+the "consumer" process which runs on each worker and takes jobs from the
+queue. The python code is used by the "sparkles" command line tool.
+
+To build a new release need the "consumer" compiled, and the python code
+packaged up into a tar.gz file. You can do this by running:
+
+```
+# compile the go code and save the binary as ./sparklespray/bin/kubequeconsume
+$ sh build-consumer.sh
+
+# make the installable python package which will be saved in the dist
+# directory with the version on the end of the name. 
+# (Example: dist/sparklespray-3.0.2.tar.gz)
+$ python setup.py sdist
+```
+
+## Changing the protocol between "sparkles" and "consumer"
+
+The command line tool communicates with workers via gRPC. If a change is
+made to the protocol, we need to regenerate the python and go code used by
+the client/server ends by running:
+
+```
+$ sh scripts/build-grpc.sh
+```
+
+This will write generated code to the following files:
+
+```
+./go/src/github.com/broadinstitute/kubequeconsume/pb/pb.pb.go
+./sparklespray/pb_pb2.py
+./sparklespray/pb_pb2_grpc.py
+```

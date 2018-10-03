@@ -10,6 +10,10 @@ import (
 	"path"
 	"regexp"
 
+	"google.golang.org/api/option"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
+
 	"cloud.google.com/go/storage"
 	"golang.org/x/net/context"
 )
@@ -26,8 +30,9 @@ type GCSIOClient struct {
 	client *storage.Client
 }
 
-func NewIOClient(ctx context.Context) (IOClient, error) {
-	client, err := storage.NewClient(ctx)
+func NewIOClient(ctx context.Context, pool *x509.CertPool, httpClient *http.Client) (IOClient, error) {
+	grpcDialOption := grpc.WithTransportCredentials(credentials.NewClientTLSFromCert(pool, ""))
+	client, err := storage.NewClient(ctx, option.WithGRPCDialOption(grpcDialOption)) //, option.WithHTTPClient(httpClient))
 	if err != nil {
 		return nil, err
 	}
