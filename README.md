@@ -190,7 +190,8 @@ see that information in the results.json file saved for each task.
 
 ### GPU usage
 
-Sparkles supports GPUs via `--gpu_count {number_of_gpus}`.
+Sparkles supports GPUs via `--gpu_count {number_of_gpus}`. By default, it will spawn a Nvidia Tesla p100.
+You would need to be in the zone us-east1-b (or one supporting this GPU) to have access to this feature.
 
 If you would want to use them, you would need to have a [compatible Docker image](https://www.tensorflow.org/install/gpu).
 If you are using Tensorflow, it is highly recommended to derive your Docker image from [tensorflow/tensorflow:latest-gpu-py3](https://hub.docker.com/r/tensorflow/tensorflow/).
