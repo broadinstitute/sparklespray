@@ -190,6 +190,15 @@ order to run.
 If you are interested in how much memory your process actually used, you can
 see that information in the results.json file saved for each task.
 
+### GPU usage
+
+Sparkles supports GPUs via `--gpu {y/n}` and `--gpu_count {number_of_gpus}`.
+
+If you would want to use them, you would need to have a [compatible Docker image](https://www.tensorflow.org/install/gpu).
+If you are using Tensorflow, it is highly recommended to derive your Docker image from [tensorflow/tensorflow:latest-gpu](https://hub.docker.com/r/tensorflow/tensorflow/).
+
+Benchmarking will be coming soon to help you decide on your machine specifications.
+
 ## Submitting along with multiple files that are needed by job
 
 Files can automatically be uploaded from your local host on submission, and will be downloaded to the working directory before your job starts.  You can specify what files you'd like uploaded with the "-u" option.
