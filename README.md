@@ -71,7 +71,6 @@ project=your-project
 default_image=octoblu/alpine-ca-certificates
 machine_type=n1-standard-1
 zones=us-east1-b
-gpu=n
 ```
 
 Be sure to replace "your-bucket" and "your-project" with the bucket name and 
@@ -125,7 +124,6 @@ project=YOUR_PROJECT
 default_image=python
 machine_type=n1-standard-1
 zones=us-east1-b
-gpu=n
 ```
 
 You should replace "YOUR_
@@ -192,7 +190,7 @@ see that information in the results.json file saved for each task.
 
 ### GPU usage
 
-Sparkles supports GPUs via `--gpu {y/n}` and `--gpu_count {number_of_gpus}`.
+Sparkles supports GPUs via `--gpu_count {number_of_gpus}`.
 
 If you would want to use them, you would need to have a [compatible Docker image](https://www.tensorflow.org/install/gpu).
 If you are using Tensorflow, it is highly recommended to derive your Docker image from [tensorflow/tensorflow:latest-gpu-py3](https://hub.docker.com/r/tensorflow/tensorflow/).
