@@ -413,6 +413,10 @@ def submit_cmd(jq, io, cluster, args, config):
     if args.machine_type:
         machine_type = args.machine_type
 
+    gpu = config['gpu']
+    if args.gpu:
+        gpu = args.gpu
+
     gpu_count = config.get('gpu_count', 1)
     if args.gpu_count:
         gpu_count = args.gpu_count
@@ -493,7 +497,7 @@ def submit_cmd(jq, io, cluster, args, config):
                                  zones=config['zones'],
                                  mount_point=config.get("mount", "/mnt/"),
                                  kubequeconsume_url=kubequeconsume_exe_url,
-                                 gpu=config['gpu'],
+                                 gpu=gpu,
                                  gpu_count=gpu_count
                                  )
 

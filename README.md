@@ -195,7 +195,7 @@ see that information in the results.json file saved for each task.
 Sparkles supports GPUs via `--gpu {y/n}` and `--gpu_count {number_of_gpus}`.
 
 If you would want to use them, you would need to have a [compatible Docker image](https://www.tensorflow.org/install/gpu).
-If you are using Tensorflow, it is highly recommended to derive your Docker image from [tensorflow/tensorflow:latest-gpu](https://hub.docker.com/r/tensorflow/tensorflow/).
+If you are using Tensorflow, it is highly recommended to derive your Docker image from [tensorflow/tensorflow:latest-gpu-py3](https://hub.docker.com/r/tensorflow/tensorflow/).
 
 Benchmarking will be coming soon to help you decide on your machine specifications.
 
