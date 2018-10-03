@@ -1,3 +1,5 @@
+#!/bin/bash
+
 set -xe
 
 sh scripts/dep-ensure.sh

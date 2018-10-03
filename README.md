@@ -333,7 +333,7 @@ packaged up into a tar.gz file. You can do this by running:
 
 ```
 # compile the go code and save the binary as ./sparklespray/bin/kubequeconsume
-$ build-consumer.sh
+$ sh build-consumer.sh
 
 # make the installable python package which will be saved in the dist
 # directory with the version on the end of the name. 
