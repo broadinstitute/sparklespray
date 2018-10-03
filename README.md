@@ -71,6 +71,7 @@ project=your-project
 default_image=octoblu/alpine-ca-certificates
 machine_type=n1-standard-1
 zones=us-east1-b
+gpu=n
 ```
 
 Be sure to replace "your-bucket" and "your-project" with the bucket name and 
@@ -124,6 +125,7 @@ project=YOUR_PROJECT
 default_image=python
 machine_type=n1-standard-1
 zones=us-east1-b
+gpu=n
 ```
 
 You should replace "YOUR_

@@ -44,6 +44,9 @@ class SubmitConfig(BaseModel):
     zones: List[str]
     mount_point: str
     kubequeconsume_url: str
+    gpu: str
+    gpu_count: int
+
 
 
 class ExistingJobException(Exception):
@@ -192,6 +195,7 @@ def submit(jq: JobQueue, io: IO, cluster: Cluster, job_id: str, spec: dict, conf
     preemptible = config.preemptible
     bootDiskSizeGb = config.bootDiskSizeGb
     default_url_prefix = config.default_url_prefix
+    gpu_count = config.gpu_count
 
     default_job_url_prefix = url_join(default_url_prefix, job_id)
     tasks = expand_tasks(spec, io, default_url_prefix, default_job_url_prefix)
@@ -233,7 +237,9 @@ def submit(jq: JobQueue, io: IO, cluster: Cluster, job_id: str, spec: dict, conf
 
         machine_specs = MachineSpec(boot_volume_in_gb=bootDiskSizeGb,
                                     mount_point=config.mount_point,
-                                    machine_type=config.machine_type)
+                                    machine_type=config.machine_type,
+                                    gpu=config.gpu,
+                                    gpu_count=gpu_count)
 
         pipeline_spec = cluster.create_pipeline_spec(
             jobid=job_id,
@@ -372,6 +378,8 @@ def add_submit_cmd(subparser):
     parser.add_argument(
         "--rerun", help="If set, will download all of the files from previous execution of this job to worker before running", action="store_true")
     parser.add_argument("command", nargs=argparse.REMAINDER)
+    parser.add_argument("--gpu", choices=['y', 'n'], help="Add one (or more, see --gpu_count) GPU Nvidia Tesla p100 on your VM")
+    parser.add_argument("--gpu_count", type=int, help="Number of gpus on your VM", default=1)
 
 
 def _get_bootDiskSizeGb(config):
@@ -404,6 +412,10 @@ def submit_cmd(jq, io, cluster, args, config):
     machine_type = config['machine_type']
     if args.machine_type:
         machine_type = args.machine_type
+
+    gpu_count = config.get('gpu_count', 1)
+    if args.gpu_count:
+        gpu_count = args.gpu_count
 
     cas_url_prefix = config['cas_url_prefix']
     default_url_prefix = config['default_url_prefix']
@@ -480,7 +492,9 @@ def submit_cmd(jq, io, cluster, args, config):
                                      'monitor_port', '6032')),
                                  zones=config['zones'],
                                  mount_point=config.get("mount", "/mnt/"),
-                                 kubequeconsume_url=kubequeconsume_exe_url
+                                 kubequeconsume_url=kubequeconsume_exe_url,
+                                 gpu=config['gpu'],
+                                 gpu_count=gpu_count
                                  )
 
     cluster_name = None

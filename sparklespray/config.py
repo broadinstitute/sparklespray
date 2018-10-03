@@ -61,7 +61,8 @@ def load_only_config_dict(config_file, gcloud_config_file="~/.config/gcloud/conf
                            "machine_type",
                            "zones",
                            "region",
-                           "account"]
+                           "account",
+                           "gpu"]
     for property in required_properties:
         if property not in merged_config or merged_config[property] == "" or merged_config[property] is None:
             missing_values.append(property)

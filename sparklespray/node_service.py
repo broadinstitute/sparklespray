@@ -25,6 +25,24 @@ class MachineSpec(object):
     boot_volume_in_gb = attr.ib()
     mount_point = attr.ib()
     machine_type = attr.ib()
+    gpu = attr.ib(default='n')
+    gpu_count = attr.ib(default='1')
+
+    def get_gpu(self):
+        """Definition of GPU by version v2alpha1"""
+        if self.gpu == 'y':
+            def_gpu = {
+                    'type': 'nvidia-tesla-p100',
+                    'count': self.gpu_count
+            }
+            return def_gpu
+        elif self.gpu == 'n' or not self.gpu:
+            def_gpu = None
+        else:
+            log.warn("GPU is not set properly in your config file. Please choose between 'y', 'b' or no 'gpu=' line")
+            def_gpu = None
+
+
 
 
 def get_random_string(length):
@@ -195,6 +213,7 @@ class NodeService:
 
     def test_pipeline_submit_api(self, setup_image, job_image, command, machine_type, boot_volume_in_gb):
         normalized_jobid = "test-pipeline-submit-api"
+        # TODO: Add here the gpu/gpu_count testing
         pipeline_def = {
             'pipeline': {
                 'actions': [
@@ -300,6 +319,10 @@ class NodeService:
                             ]
                         },
                         'bootDiskSizeGb': machine_specs.boot_volume_in_gb,
+                        'accelerators': [
+                            machine_specs.get_gpu()
+                        ],
+                        'nvidiaDriverVersion': '390.46',
                         'labels': {
                             'kubeque-cluster': cluster_name,
                             'sparkles-job': normalized_jobid
