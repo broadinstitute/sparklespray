@@ -565,7 +565,7 @@ def create_gcs_job_queue(project_id, credentials, use_pubsub):
         pubsub_client = None
 
     from google.cloud import logging as gcp_logging
-    log_client = gcp_logging.Client()
+    log_client = gcp_logging.Client(project=project_id, credentials=credentials)
 
     storage = JobStorage(client, pubsub_client, log_client)
     return JobQueue(storage)
