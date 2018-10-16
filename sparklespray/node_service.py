@@ -25,7 +25,7 @@ class MachineSpec(object):
     boot_volume_in_gb = attr.ib()
     mount_point = attr.ib()
     machine_type = attr.ib()
-    gpu_count = attr.ib(default='0')
+    gpu_count = attr.ib(default=0)
 
     def get_gpu(self):
         if self.gpu_count > 0:
