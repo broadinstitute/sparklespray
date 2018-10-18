@@ -455,6 +455,7 @@ def submit_cmd(jq, io, cluster, args, config):
         job_id = new_job_id()
 
     existing_job = jq.get_job(job_id, must = False)
+    finished = False
     if existing_job is not None:
         if args.clean or args.rerun:
             log.info("Cleaning existing job with id \"{}\"".format(job_id))
@@ -462,80 +463,88 @@ def submit_cmd(jq, io, cluster, args, config):
             if not success:
                 log.error("Could not remove \"{}\", aborting!".format(job_id))
                 return
+        elif args.skipifexists:
+            log.info("Existing job with id \"{}\", skipping submission.".format(job_id))
+            finished = True
+            successful_execution = True
         else:
             log.error("Existing job with id \"{}\", aborting!".format(job_id))
-            return
-
-    cas_url_prefix = config['cas_url_prefix']
-    default_url_prefix = config['default_url_prefix']
-
-    if args.file:
-        assert len(args.command) == 0
-        spec = json.load(open(args.file, "rt"))
-    else:
-        if args.seq is not None:
-            parameters = [{"index": str(i)} for i in range(args.seq)]
-        elif args.params is not None:
-            parameters = read_parameters_from_csv(args.params)
-        else:
-            parameters = [{}]
-
-        assert len(args.command) != 0
-
-        resource_spec = _parse_resources(args.resources)
-
-        dest_url = _join(default_url_prefix, job_id)
-        files_to_push = list(args.push)
-        if args.rerun:
-            assert args.name is not None, "Cannot re-run a job if the name isn't specified"
-            assert len(parameters) == 1, "Cannot re-run a job with more than one task"
-            # Add the existing job directory to the list of files to download to the worker
-            files_to_push.append(_join(dest_url, "1")+":.")
-
-        hash_db = CachingHashFunction(config.get("cache_db_path", ".kubeque-cached-file-hashes"))
-        upload_map, spec = make_spec_from_command(args.command,
-                                                  image,
-                                                  dest_url=dest_url,
-                                                  cas_url=cas_url_prefix,
-                                                  parameters=parameters,
-                                                  resource_spec=resource_spec,
-                                                  hash_function=hash_db.hash_filename,
-                                                  src_wildcards=args.results_wildcards,
-                                                  extra_files=expand_files_to_upload(io, files_to_push),
-                                                  working_dir=args.working_dir)
-
-        kubequeconsume_exe_path = config['kubequeconsume_exe_path']
-        kubequeconsume_exe_url = add_file_to_upload_map(upload_map, hash_db.hash_filename, cas_url_prefix,
-                                                        kubequeconsume_exe_path, "!KUBEQUECONSUME")
-
-        hash_db.persist()
-
-        log.debug("upload_map = %s", upload_map)
-        for filename, dest in upload_map.items():
-            io.put(filename, dest, skip_if_exists=True)
-
-    log.debug("spec: %s", json.dumps(spec, indent=2))
-    submit(jq, io, cluster, job_id, spec, args.dryrun, config, args.skip_kube_submit, metadata, kubequeconsume_exe_url,
-           args.local, args.loglive, leave_running_on_failure=args.leave_running_on_failure)
-
-    finished = False
-    successful_execution = True
-    if args.local:
-        # if we ran it within docker, and the docker command completed, then the job is done
-        finished = True
-    else:
-        if not (args.dryrun or args.skip_kube_submit) and args.wait_for_completion:
-            log.info("Waiting for job to terminate")
-            successful_execution = watch(io, jq, job_id, cluster, loglive=args.loglive)
             finished = True
+            successful_execution = False
 
-    if finished:
-        if args.fetch:
-            log.info("Done waiting for job to complete, downloading results to %s", args.fetch)
-            fetch_cmd_(jq, io, job_id, args.fetch)
+    if not finished:
+        cas_url_prefix = config['cas_url_prefix']
+        default_url_prefix = config['default_url_prefix']
+
+        if args.file:
+            assert len(args.command) == 0
+            spec = json.load(open(args.file, "rt"))
         else:
-            log.info("Done waiting for job to complete, results written to %s", default_url_prefix + "/" + job_id)
-            log.info("You can download results via 'gsutil rsync -r %s DEST_DIR'", default_url_prefix + "/" + job_id)
+            if args.seq is not None:
+                parameters = [{"index": str(i)} for i in range(args.seq)]
+            elif args.params is not None:
+                parameters = read_parameters_from_csv(args.params)
+            else:
+                parameters = [{}]
+
+            assert len(args.command) != 0
+
+            resource_spec = _parse_resources(args.resources)
+
+            dest_url = _join(default_url_prefix, job_id)
+            files_to_push = list(args.push)
+            if args.rerun:
+                assert args.name is not None, "Cannot re-run a job if the name isn't specified"
+                assert len(parameters) == 1, "Cannot re-run a job with more than one task"
+                # Add the existing job directory to the list of files to download to the worker
+                files_to_push.append(_join(dest_url, "1")+":.")
+
+            hash_db = CachingHashFunction(config.get("cache_db_path", ".kubeque-cached-file-hashes"))
+            upload_map, spec = make_spec_from_command(args.command,
+                                                      image,
+                                                      dest_url=dest_url,
+                                                      cas_url=cas_url_prefix,
+                                                      parameters=parameters,
+                                                      resource_spec=resource_spec,
+                                                      hash_function=hash_db.hash_filename,
+                                                      src_wildcards=args.results_wildcards,
+                                                      extra_files=expand_files_to_upload(io, files_to_push),
+                                                      working_dir=args.working_dir)
+
+            kubequeconsume_exe_path = config['kubequeconsume_exe_path']
+            kubequeconsume_exe_url = add_file_to_upload_map(upload_map, hash_db.hash_filename, cas_url_prefix,
+                                                            kubequeconsume_exe_path, "!KUBEQUECONSUME")
+
+            hash_db.persist()
+
+            log.debug("upload_map = %s", upload_map)
+            for filename, dest in upload_map.items():
+                io.put(filename, dest, skip_if_exists=True)
+
+        log.debug("spec: %s", json.dumps(spec, indent=2))
+        submit(jq, io, cluster, job_id, spec, args.dryrun, config, args.skip_kube_submit, metadata, kubequeconsume_exe_url,
+               args.local, args.loglive, leave_running_on_failure=args.leave_running_on_failure)
+
+        successful_execution = True
+        if args.local:
+            # if we ran it within docker, and the docker command completed, then the job is done
+            finished = True
+            successful_execution = True
+        else:
+            if not (args.dryrun or args.skip_kube_submit) and args.wait_for_completion:
+                log.info("Waiting for job to terminate")
+                successful_execution = watch(io, jq, job_id, cluster, loglive=args.loglive)
+                finished = True
+            else:
+                finished = False
+
+        if finished:
+            if args.fetch:
+                log.info("Done waiting for job to complete, downloading results to %s", args.fetch)
+                fetch_cmd_(jq, io, job_id, args.fetch)
+            else:
+                log.info("Done waiting for job to complete, results written to %s", default_url_prefix + "/" + job_id)
+                log.info("You can download results via 'gsutil rsync -r %s DEST_DIR'", default_url_prefix + "/" + job_id)
 
     if successful_execution:
         sys.exit(0)
@@ -1024,7 +1033,7 @@ def watch(io, jq, jobid, cluster, refresh_delay=5, min_check_time=10, loglive=Fa
 
 def addnodes_cmd(jq, cluster, args):
     job_id = _resolve_jobid(jq, args.job_id)
-    return _addnodes(job_id, jq, cluster, args.count, None)
+    return _addnodes(job_id, jq, cluster, args.count, args.preemptable)
 
 def _addnodes(job_id, jq, cluster, count, preemptible):
     job = jq.get_job(job_id)
@@ -1184,6 +1193,7 @@ def main(argv=None):
                         dest="working_dir")
     parser.add_argument("--local", help="Run the tasks inside of docker on the local machine", action="store_true")
     parser.add_argument("--clean", help="If the job id already exists, 'clean' it first to avoid an error about the job already existing", action="store_true")
+    parser.add_argument("--skipifexists", help="If the job id already exists, abort with 0 exit code.", action="store_true")
     parser.add_argument("--rerun", help="If set, will download all of the files from previous execution of this job to worker before running", action="store_true")
     parser.add_argument("--leave-running-on-failure", help="if set and the worker has an internal error, don't let the VM automatically after the crash, so that it can be SSHed to and investigated", action="store_true", dest="leave_running_on_failure")
     parser.add_argument("command", nargs=argparse.REMAINDER)
@@ -1192,6 +1202,7 @@ def main(argv=None):
     parser.set_defaults(func=addnodes_cmd)
     parser.add_argument("job_id", help="the job id used to determine which cluster node should be added to.")
     parser.add_argument("count", help="the number of worker nodes to add to the cluster", type=int)
+    parser.add_argument("--preemptable", help="If set, added nodes will be preemptable", action="store_true")
 
     parser = subparser.add_parser("reset",
                                   help="Mark any 'claimed', 'killed' or 'failed' jobs as ready for execution again.  Useful largely only during debugging issues with job submission.")
