@@ -197,7 +197,15 @@ class Cluster:
         # mutate the pipeline as needed
         if preemptible is not None:
             pipeline_def['ephemeralPipeline']['resources']['preemptible'] = preemptible
+
         logging_url = pipeline_def['pipelineArgs']['logging']['gcsPath']
+
+        # drop the timestamp at the end of the url and add a new one
+        import datetime, os
+        from .gcp import _join
+        d = datetime.datetime.now()
+        logging_url = _join(os.path.dirname(logging_url), d.strftime("%Y%m%d-%H%M%S"))
+        pipeline_def['pipelineArgs']['logging']['gcsPath'] = logging_url
 
         # Run the pipeline
         operation = self.service.pipelines().run(body=pipeline_def).execute()
