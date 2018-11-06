@@ -1,0 +1,93 @@
+---
+title: "GPU benchmark with Google Cloud (Using Sparkles Spray)"
+author: "Remi Marenco"
+date: "11/6/2018"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(ggplot2)
+```
+
+### Overview
+
+The goal of this analysis is to help researcher to know the resources to use for their machine learning
+analysis.
+It contains:
+- CPU analysis
+- GPU analysis
+- Time
+- Different kind of data type (small, medium, large)
+
+The raw data are living [here]( https://docs.google.com/spreadsheets/d/1ctvK6JM-jaFBDgN8oY4n1Nj86OpvlMoGVBsR-Sk0t90/edit?usp=sharing)
+
+
+### Contents
+**Runtime per data size**
+
+**Cost in function of time, depending on GPU**
+
+### Runtime per data size
+
+```{r runtime_per_data_size, warning=FALSE}
+# Read the file we got from the google spreadsheet
+benchmark <- read.csv(file="~/Dev/test_sparkles/remi_cloud_benchmarking/Benchmarking MOA Prediction Cloud - Data_to_process.csv",
+                      header=TRUE, na.strings = c("", "NA"),
+                      colClasses = c("factor", "integer", "numeric", "factor", "numeric", "factor", "numeric", "numeric"))
+# Remove NAs / empty rows
+benchmark <- benchmark %>% na.omit()
+
+# Consider n1-highcpu equivalent to standard
+benchmark <- benchmark %>% mutate(machine_type=replace(machine_type, machine_type=='n1-highcpu-2', 'n1-standard-2')) %>% as.data.frame()
+benchmark <- benchmark %>% mutate(machine_type=replace(machine_type, machine_type=='n1-highcpu-8', 'n1-standard-8')) %>% as.data.frame()
+
+# Remove standard1 sine this machine has not enough memory (3.75)
+benchmark <- benchmark[benchmark$machine_type != 'n1-standard-1',]
+
+# Add a column to combine machine_type with gpu
+
+bench_run_time_per_machine_type_agg <- aggregate(benchmark, by=list(benchmark$machine_type, benchmark$gpu, benchmark$data_type),
+                                                 FUN=mean,
+                                                 drop=TRUE)
+# Clean names
+drops <- c("machine_type", "gpu", "data_type")
+bench_run_time_per_machine_type_agg <- bench_run_time_per_machine_type_agg[, !(names(bench_run_time_per_machine_type_agg) %in% drops)]
+
+# Rename Groups
+colnames(bench_run_time_per_machine_type_agg)[colnames(bench_run_time_per_machine_type_agg)=="Group.1"] <- "machine_type"
+colnames(bench_run_time_per_machine_type_agg)[colnames(bench_run_time_per_machine_type_agg)=="Group.2"] <- "gpu"
+colnames(bench_run_time_per_machine_type_agg)[colnames(bench_run_time_per_machine_type_agg)=="Group.3"] <- "data_type"
+
+
+# TODO: facet grid CPU ~ data size, with bar plot
+plot_time_data_per_machine <- ggplot(data=bench_run_time_per_machine_type_agg, aes(y=log2(program_run_time_s/60),
+                                                         x=data_type,
+                                                         shape=gpu,
+                                                         color=machine_type,
+                                                         size=1)) + scale_size(guide = 'none')
+plot_time_data_per_machine <- plot_time_data_per_machine + geom_point() + labs(x = 'Data size') + labs(y = 'Program runtime (log2 minutes)')
+plot(plot_time_data_per_machine)
+```
+
+### Cost in function of time, depending on GPU
+
+```{r cost_function_time_gpu}
+# Plot time vs cost
+# TODO: Switch axis
+# TODO: Make size bubbles per data_type
+
+# TODO: Bar plots with gpu/cpu stacked between
+time_vs_cost <- ggplot(benchmark,
+                       aes(x=program_run_time_s/60,
+                           y=price_regular,
+                           color=gpu)) + geom_point() + geom_smooth(method=lm)
+
+# Labels
+time_vs_cost <- time_vs_cost + labs(x = 'Program runtime (minutes)') + labs(y = 'Regular price ($)')
+plot(time_vs_cost)
+```

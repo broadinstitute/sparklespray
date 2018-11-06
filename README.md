@@ -196,7 +196,7 @@ You would need to be in the zone us-east1-b (or one supporting this GPU) to have
 If you would want to use them, you would need to have a [compatible Docker image](https://www.tensorflow.org/install/gpu).
 If you are using Tensorflow, it is highly recommended to derive your Docker image from [tensorflow/tensorflow:latest-gpu-py3](https://hub.docker.com/r/tensorflow/tensorflow/).
 
-Benchmarking will be coming soon to help you decide on your machine specifications.
+Benchmarking will be coming is available [here](benchmark.html) to decide on your machine specifications.
 
 ## Submitting along with multiple files that are needed by job
 
@@ -350,7 +350,7 @@ $ sh build-consumer.sh
 # (Example: dist/sparklespray-3.0.2.tar.gz)
 $ python setup.py sdist
 ```
-
+sparkles sub -u train_mlp_sm.py -u data -u benchmark_train_mlp.py --gpu n --gpu_count 0 -i tensorflow/tensorflow:latest-py3 --machine-type n1-standard-4 python benchmark_train_mlp.py --data_size small --test_description \'Machine type n1-standard-4, GPU count 0, small dataset\'
 ## Changing the protocol between "sparkles" and "consumer"
 
 The command line tool communicates with workers via gRPC. If a change is
@@ -358,7 +358,7 @@ made to the protocol, we need to regenerate the python and go code used by
 the client/server ends by running:
 
 ```
-$ sh scripts/build-grpc.sh
+$ sh scripts/build-grpc.sh # You might need to install protobuf first
 ```
 
 This will write generated code to the following files:
