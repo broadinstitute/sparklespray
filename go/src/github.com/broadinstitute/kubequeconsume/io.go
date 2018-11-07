@@ -16,6 +16,7 @@ import (
 
 	"cloud.google.com/go/storage"
 	"golang.org/x/net/context"
+	"crypto/x509"
 )
 
 type IOClient interface {
