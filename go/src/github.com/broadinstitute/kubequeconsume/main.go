@@ -1,20 +1,23 @@
 package kubequeconsume
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"log"
+	"net/http"
 	"os"
 	"strings"
 	"time"
 
 	"cloud.google.com/go/datastore"
-	"cloud.google.com/go/logging"
-	"cloud.google.com/go/pubsub"
 	"golang.org/x/net/context"
 	"golang.org/x/oauth2/google"
 
 	"github.com/urfave/cli"
 	compute "google.golang.org/api/compute/v1"
 	"google.golang.org/api/option"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 )
 
 func Main() {
@@ -32,109 +35,101 @@ func Main() {
 		cli.Command{
 			Name: "consume",
 			Flags: []cli.Flag{
-				cli.StringFlag{Name: "owner"},
-				cli.BoolFlag{Name: "loglive"},
 				cli.StringFlag{Name: "projectId"},
 				cli.StringFlag{Name: "cacheDir"},
 				cli.StringFlag{Name: "cluster"},
 				cli.StringFlag{Name: "tasksDir"},
+				cli.StringFlag{Name: "tasksFile"},
 				cli.StringFlag{Name: "zones"},
+				cli.StringFlag{Name: "port"},
 				cli.IntFlag{Name: "timeout", Value: 5}, // 5 minutes means the process will be killed after 10 minutes
 				cli.IntFlag{Name: "restimeout",
 					Value: 10}},
 			Action: consume}}
 
-	err := app.Run(os.Args)
-	if err != nil {
-		log.Printf("Exiting retcode == 1 because: %s", err)
-		os.Exit(1)
-	} else {
-		log.Println("Exiting cleanly")
-		os.Exit(0)
-	}
+	app.Run(os.Args)
+}
+
+func initCerts() *x509.CertPool {
+	pool := x509.NewCertPool()
+	pool.AppendCertsFromPEM([]byte(pemCerts))
+	return pool
+}
+
+func clientWithCerts(ctx context.Context, certs *x509.CertPool, scope ...string) (*http.Client, error) {
+	// func NewClient(ctx context.Context, src TokenSource) *http.Client {
+	// 	if src == nil {
+	// 		c, err := internal.ContextClient(ctx)
+	// 		if err != nil {
+	// 			return &http.Client{Transport: internal.ErrorTransport{Err: err}}
+	// 		}
+	// 		return c
+	// 	}
+	// 	return &http.Client{
+	// 		Transport: &Transport{
+	// 			Base:   internal.ContextTransport(ctx),
+	// 			Source: ReuseTokenSource(nil, src),
+	// 		},
+	// 	}
+	// }
+
+	// func DefaultClient(ctx context.Context, scope ...string) (*http.Client, error) {
+	// 	ts, err := DefaultTokenSource(ctx, scope...)
+	// 	if err != nil {
+	// 		return nil, err
+	// 	}
+	// 	return NewClient(ctx, ts), nil
+	// }
+
+	// return DefaultClient(ctx, scope)
+
+	return google.DefaultClient(ctx, scope...)
 }
 
 func consume(c *cli.Context) error {
 	log.Printf("Starting consume")
+	certs := initCerts()
+	http.DefaultTransport = &http.Transport{
+		TLSClientConfig: &tls.Config{RootCAs: certs},
+	}
+	// http.DefaultClient = &http.Client{
+	// 	Transport: &http.Transport{
+	// 		TLSClientConfig: &tls.Config{RootCAs: certs},
+	// 	},
+	// }
 
-	owner := c.String("owner")
 	projectID := c.String("projectId")
 	cacheDir := c.String("cacheDir")
 	cluster := c.String("cluster")
 	tasksDir := c.String("tasksDir")
+	tasksFile := c.String("tasksFile")
+	port := c.String("port")
 	zones := strings.Split(c.String("zones"), ",")
 	ReservationTimeout := time.Duration(c.Int("restimeout")) * time.Minute
 	watchdogTimeout := time.Duration(c.Int("timeout")) * time.Minute
-	usePubSub := false
-	logLive := c.Bool("loglive")
 
 	EnableWatchdog(watchdogTimeout)
 
 	ctx := context.Background()
 
-	var loggingClient *logging.Client
 	var err error
-	if logLive {
-		log.Printf("Creating log client")
-		ctx := context.Background()
-		loggingClient, err = logging.NewClient(ctx, projectID)
-		if err != nil {
-			log.Printf("Creating log client failed: %v", err)
-			return err
-		}
-	}
-
-	creds, err := google.FindDefaultCredentials(ctx)
+	httpclient, err := clientWithCerts(ctx, certs, "https://www.googleapis.com/auth/compute.readonly")
 	if err != nil {
-		log.Printf("Could not find default credentials: %v", err)
+		log.Printf("Could not create default client: %v", err)
 		return err
 	}
 
-	client, err := datastore.NewClient(ctx, projectID, option.WithCredentials(creds))
-	if err != nil {
-		log.Printf("Creating datastore client failed: %v", err)
-		return err
-	}
-
-	ioc, err := NewIOClient(ctx, creds.TokenSource)
+	ioc, err := NewIOClient(ctx, certs, httpclient)
 	if err != nil {
 		log.Printf("Creating io client failed: %v", err)
 		return err
 	}
 
-	// Attempting to work around issue where the metadata server becomes unavailible
-	// when running >8 hr jobs. Work around by proactively trying to always have a valid token
-	// and if we get an error, keep retrying to get a good token.
-	pollTokenForever := func() {
-		errorCount := 0
-		lastAccessToken := ""
-		// loop as long as the process is alive
-		for {
-			token, err := creds.TokenSource.Token()
-			if err != nil {
-				log.Printf("Got error fetching token (attempt %d): %v", errorCount, err)
-				time.Sleep(5 * time.Minute)
-				errorCount += 1
-				if errorCount > 1000 {
-					log.Printf("Giving up")
-					break
-				}
-				continue
-			}
-			errorCount = 0
-
-			if token.AccessToken != lastAccessToken {
-				lastAccessToken = token.AccessToken
-				log.Printf("Got new token with expiry: %v", token.Expiry)
-			}
-
-			time.Sleep(5 * time.Minute)
-		}
-	}
-
-	go pollTokenForever()
-
-	if owner == "" {
+	isLocalRun := strings.HasPrefix(cluster, "local-")
+	log.Printf("isLocal = %s (cluster=%s)", isLocalRun, cluster)
+	var owner string
+	var externalIP string
+	if !isLocalRun {
 		log.Printf("Querying metadata to get host instance name")
 		instanceName, err := GetInstanceName()
 		if err != nil {
@@ -153,7 +148,20 @@ func consume(c *cli.Context) error {
 		}
 
 		owner = zone + "/" + instanceName
+		externalIP, err = GetExternalIP()
+		if err != nil {
+			log.Printf("GetExternalIP failed: %v", err)
+			return err
+		} else {
+			log.Printf("Got externalIP: %s", externalIP)
+		}
+	} else {
+		log.Printf("Does not appear to be running under GCP, assuming localhost should be used as the name")
+		externalIP = "localhost"
+		owner = "localhost"
 	}
+
+	monitor := NewMonitor()
 
 	options := &Options{
 		ClaimTimeout:      30 * time.Second, // how long do we keep trying if we get an error claiming a task
@@ -162,17 +170,12 @@ func consume(c *cli.Context) error {
 		Owner:             owner}
 
 	executor := func(taskId string, taskParam string) (string, error) {
-		return ExecuteTaskFromUrl(ioc, taskId, taskParam, cacheDir, tasksDir, loggingClient)
+		return ExecuteTaskFromUrl(ioc, taskId, taskParam, cacheDir, tasksDir, monitor)
 	}
 
 	Timeout := 1 * time.Second
 	ReservationSize := 1
 
-	httpclient, err := google.DefaultClient(ctx, "https://www.googleapis.com/auth/compute.readonly")
-	if err != nil {
-		log.Printf("Could not create default client: %v", err)
-		return err
-	}
 	service, err := compute.New(httpclient)
 	if err != nil {
 		log.Printf("Could not create compute service: %v", err)
@@ -183,74 +186,52 @@ func consume(c *cli.Context) error {
 		ReservationSize, ReservationTimeout)
 
 	var sleepUntilNotify func(sleepTime time.Duration)
-	if usePubSub {
-		// set up notify
-		notifyChannel := make(chan bool, 100)
-		log.Printf("Creating pubsub client...")
-		pubsubClient, err := pubsub.NewClient(ctx, projectID)
-
-		if err != nil {
-			log.Printf("Could not create pubsub client: %v", err)
-			return err
-		}
-		log.Printf("pubsub client err=%v", err)
-
-		topic := pubsubClient.Topic("kubeque-global")
-		subCtx, subCancel := context.WithCancel(ctx)
-		sub, err := pubsubClient.CreateSubscription(subCtx, "sub-name",
-			pubsub.SubscriptionConfig{Topic: topic})
-		if err != nil {
-			log.Printf("CreateSubscription failed: %v", err)
-		} else {
-			go (func() {
-				err := sub.Receive(ctx, func(ctx context.Context, m *pubsub.Message) {
-					log.Printf("Got message: %s", m.Data)
-					m.Ack()
-					notifyChannel <- true
-				})
-				if err != nil {
-					log.Printf("Subscription receive failed: %v", err)
-				}
-			})()
-
-			deleteSubscription := func() {
-				log.Printf("Deleting subscription")
-				subCancel()
-				err = sub.Delete(ctx)
-				if err != nil {
-					log.Printf("Got error while deleting subscription: %v", err)
-				}
-			}
-			defer deleteSubscription()
-		}
-
-		sleepUntilNotify = func(sleepTime time.Duration) {
-			log.Printf("Going to sleep (max: %d milliseconds)", sleepTime/time.Millisecond)
-			select {
-			case <-notifyChannel:
-				log.Printf("Woke up due to pubsub notification")
-			case <-time.After(sleepTime):
-				log.Printf("Woke up due to timeout")
-			}
-		}
-	} else {
-		sleepUntilNotify = func(sleepTime time.Duration) {
-			log.Printf("Going to sleep (max: %d milliseconds)", sleepTime/time.Millisecond)
-			time.Sleep(sleepTime)
-		}
+	sleepUntilNotify = func(sleepTime time.Duration) {
+		log.Printf("Going to sleep (max: %d milliseconds)", sleepTime/time.Millisecond)
+		time.Sleep(sleepTime)
 	}
 
-	err = ConsumerRunLoop(ctx, client, sleepUntilNotify, cluster, executor, timeout, options)
+	transportCreds := grpc.WithTransportCredentials(credentials.NewClientTLSFromCert(certs, ""))
+	client, err := datastore.NewClient(ctx, projectID, option.WithGRPCDialOption(transportCreds))
+	if err != nil {
+		log.Printf("Creating datastore client failed: %v", err)
+		return err
+	}
+
+	monitorAddress := ""
+	if port != "" {
+		entityKey := datastore.NameKey("ClusterKeys", "sparklespray", nil)
+		var clusterKeys ClusterKeys
+		err := client.Get(ctx, entityKey, &clusterKeys)
+		if err != nil {
+			log.Printf("failed to get cluster keys: %v\n", err)
+			return err
+		}
+
+		err = monitor.StartServer(":"+port, clusterKeys.Cert, clusterKeys.PrivateKey, clusterKeys.SharedSecret)
+		if err != nil {
+			log.Printf("Failed to start grpc server: %v", err)
+			return err
+		}
+		monitorAddress = externalIP + ":" + port
+	}
+
+	var queue Queue
+	if tasksFile != "" {
+		queue, err = CreatePreloadedQueue(tasksFile)
+	} else {
+		queue, err = CreateDataStoreQueue(client, cluster, owner, options.InitialClaimRetry, options.ClaimTimeout, monitorAddress)
+	}
+	if err != nil {
+		log.Printf("failed to initialize queue: %v\n", err)
+		return err
+	}
+
+	err = ConsumerRunLoop(ctx, queue, sleepUntilNotify, executor, timeout, options.SleepOnEmpty)
 	if err != nil {
 		log.Printf("consumerRunLoop exited with: %v\n", err)
 		return err
 	}
 
-	if loggingClient != nil {
-		err = loggingClient.Close()
-		if err != nil {
-			log.Printf("loggingClient Close returned: %v", err)
-		}
-	}
 	return nil
 }
