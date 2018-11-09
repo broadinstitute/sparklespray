@@ -367,8 +367,9 @@ def _update_claimed_are_still_running(jq, cluster, job_id):
     return task_ids
 
 
-def clean(cluster: Cluster, jq: JobQueue, job_id: str, force: bool=False):
+def clean(cluster: Cluster, jq: JobQueue, job_id: str, force: bool=False, force_pending: bool=False):
     if not force:
+        # Check to not remove tasks that are claimed and still running
         tasks = cluster.task_store.get_tasks(job_id, status=STATUS_CLAIMED)
         if len(tasks) > 0:
             # if some tasks are still marked 'claimed' verify that the owner is still running
@@ -387,6 +388,17 @@ def clean(cluster: Cluster, jq: JobQueue, job_id: str, force: bool=False):
                     "job %s is still running (%d tasks), cannot remove", job_id, len(still_running))
                 return False
 
+        if not force_pending:
+            # Check to not remove tasks that are pending (waiting to be claimed)
+            tasks = cluster.task_store.get_tasks(job_id, status=STATUS_PENDING)
+            nb_tasks_pending = len(tasks)
+            if nb_tasks_pending > 0:
+                log.warning(
+                    "Job {} has {} tasks that are still pending. If you want to force cleaning them,"
+                    " please use --force_pending".format(job_id, nb_tasks_pending)
+                )
+                return False
+
     cluster.delete_job(job_id)
     return True
 
@@ -395,7 +407,7 @@ def clean_cmd(cluster, jq, args):
     jobids = _get_jobids_from_pattern(jq, args.jobid_pattern)
     for jobid in jobids:
         log.info("Deleting %s", jobid)
-        clean(cluster, jq, jobid, args.force)
+        clean(cluster, jq, jobid, args.force, args.force_pending)
 
 
 def _update_if_owner_missing(cluster, jq, task):
@@ -533,6 +545,7 @@ def main(argv=None):
         "--force", "-f", help="If set, will delete job regardless of whether it is running or not", action="store_true")
     parser.add_argument("jobid_pattern", nargs="?",
                         help="If specified will only attempt to remove jobs that match this pattern")
+    parser.add_argument("--force_pending", "-p", help="If set, will delete pending jobs", action="store_true")
 
     parser = subparser.add_parser("kill", help="Terminate the specified job")
     parser.set_defaults(func=kill_cmd)
