@@ -442,21 +442,30 @@ def get_func_parameters(func):
     import inspect
     return inspect.getfullargspec(func)[0]
 
-def dump_operation_cmd(cluster : Cluster, args):
+
+def dump_operation_cmd(cluster: Cluster, args):
     operation = cluster.get_raw_operation_details(args.operation_id)
     print(json.dumps(operation, indent="  "))
+
 
 from . import txtui
 from .gcp_setup import setup_project
 
 
 def setup_cmd(args, config):
-    default_url_prefix=config['default_url_prefix']
+    default_url_prefix = config['default_url_prefix']
     m = re.match("^gs://([^/]+)(?:/.*)?$", default_url_prefix)
     assert m != None, "invalid remote path: {}".format(default_url_prefix)
     bucket_name = m.group(1)
-    
-    setup_project(config['project'], config['service_account_key'], bucket_name)
+
+    setup_project(config['project'],
+                  config['service_account_key'], bucket_name)
+
+
+def sparkles_main():
+    retcode = main()
+    if retcode is not None:
+        sys.exit(retcode)
 
 
 def main(argv=None):
@@ -490,7 +499,8 @@ def main(argv=None):
                                   help="Configures the google project chosen in the config to be compatible with sparklespray. (requires gcloud installed in path)")
     parser.set_defaults(func=setup_cmd)
 
-    parser = subparser.add_parser("dump-operation", help="primarily used for debugging. If a sparkles cannot turn on a node, this can be used to dump the details of the operation which requested the node.")
+    parser = subparser.add_parser(
+        "dump-operation", help="primarily used for debugging. If a sparkles cannot turn on a node, this can be used to dump the details of the operation which requested the node.")
     parser.set_defaults(func=dump_operation_cmd)
     parser.add_argument("operation_id")
 
@@ -581,7 +591,7 @@ def main(argv=None):
         if 'cluster' in func_param_names:
             func_params['cluster'] = cluster
 
-        args.func(**func_params)
+        return args.func(**func_params)
 
 
 if __name__ == "__main__":

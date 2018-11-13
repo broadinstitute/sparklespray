@@ -47,7 +47,6 @@ class SubmitConfig(BaseModel):
     gpu_count: int
 
 
-
 class ExistingJobException(Exception):
     pass
 
@@ -376,7 +375,8 @@ def add_submit_cmd(subparser):
     parser.add_argument(
         "--rerun", help="If set, will download all of the files from previous execution of this job to worker before running", action="store_true")
     parser.add_argument("command", nargs=argparse.REMAINDER)
-    parser.add_argument("--gpu_count", type=int, help="Number of gpus on your VM", default=0)
+    parser.add_argument("--gpu_count", type=int,
+                        help="Number of gpus on your VM", default=0)
 
 
 def _get_bootDiskSizeGb(config):
@@ -521,6 +521,6 @@ def submit_cmd(jq, io, cluster, args, config):
             url_join(default_url_prefix, job_id)))
 
     if successful_execution:
-        sys.exit(0)
+        return 0
     else:
-        sys.exit(1)
+        return 1

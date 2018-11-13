@@ -4,10 +4,15 @@ import logging
 import contextlib
 import json
 from .logclient import LogMonitor
+from typing import Callable
+from .cluster_service import ClusterState
 
 #from google.gax.errors import RetryError
-class RetryError(Exception): 
+
+
+class RetryError(Exception):
     pass
+
 
 from .resize_cluster import ResizeCluster, GetPreempted
 from .io import IO
@@ -69,7 +74,7 @@ def dump_stdout_if_single_task(jq, io, jobid):
     print_error_lines(stdout_lines)
 
 
-def _watch(job_id, state, initial_poll_delay, max_poll_delay, loglive, cluster, poll_cluster):
+def _watch(job_id: str, state: ClusterState, initial_poll_delay: float, max_poll_delay: float, loglive: bool, cluster: Cluster, poll_cluster: Callable[[], None]):
     log_monitor = None
     prev_summary = None
 

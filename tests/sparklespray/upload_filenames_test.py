@@ -1,4 +1,5 @@
-from kubeque.main import expand_files_to_upload, SrcDstPair
+from sparklespray.submit import expand_files_to_upload, SrcDstPair
+#from sparklespray.main import expand_files_to_upload, SrcDstPair
 import os
 
 def test_simple_expand_files_for_upload():
