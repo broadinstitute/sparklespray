@@ -25,8 +25,13 @@ class LogMonitor:
 
     def poll(self):
         while True:
-            response = self.stub.ReadOutput(ReadOutputRequest(taskId=self.task_id, offset=self.offset, size=100000),
-                                            metadata=[('shared-secret', self.shared_secret)])
+            try:
+                response = self.stub.ReadOutput(ReadOutputRequest(taskId=self.task_id, offset=self.offset, size=100000),
+                                                metadata=[('shared-secret', self.shared_secret)])
+            except grpc.RpcError as rpc_error:
+                # TODO: Might be caught in an infinite loop. Could be good to add an exponential delay before retrying. And stop after a number of retries
+                log.debug("Received a RpcError {}. Retrying to contact the VM".format(rpc_error))
+                continue
 
             payload = response.data.decode('utf8')
             if payload != "":
