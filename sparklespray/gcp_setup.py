@@ -10,6 +10,7 @@ from sparklespray.config import SCOPES
 from google.oauth2 import service_account
 import google.api_core.exceptions
 import time
+from collections import namedtuple
 
 services_to_add = [  # "storage.googleapis.com",
     "datastore.googleapis.com", "storage-component.googleapis.com", "genomics.googleapis.com", "pubsub.googleapis.com", "storage-api.googleapis.com", "compute.googleapis.com"]
@@ -22,7 +23,7 @@ roles_to_add = ["roles/owner", # Eventually drop this
                 "roles/storage.admin"]
 
 
-def _run_cmd(cmd, args):
+def _run_cmd(cmd, args, error_callback=None):
     cmd = [cmd] + args
     cmd_str = " ".join(cmd)
     print(f"Executing: {cmd_str}")
@@ -31,10 +32,14 @@ def _run_cmd(cmd, args):
     except subprocess.CalledProcessError as e:
         print("Command failed. Output:")
         print(e.output)
-        sys.exit(1)
 
-def gcloud(args):
-    _run_cmd("gcloud", args)
+        if not error_callback:
+            sys.exit(1)
+        else:
+            error_callback(e)
+
+def gcloud(args, error_callback=None):
+    _run_cmd("gcloud", args, error_callback)
     
 def gsutil(args):
     _run_cmd("gsutil", args)
@@ -59,6 +64,26 @@ def create_service_account(service_acct, project_id, key_path):
     # TODO Add check for access google.api_core.exceptions.Forbidden
 #    print("Waiting for a minute for permissions to take effect...")
 #    time.sleep(60)
+
+def add_firewall_rule():
+    """Add the sparkles firewall rule in VPC Network of Google Cloud"""
+    # Create the FirewallRule object for manipulation easiness
+    FirewallRule = namedtuple('FirewallRule', ['name', 'protocol', 'port'])
+    firewall_rule_obj = FirewallRule('sparklespray-monitor', 'tcp', 6032)
+    protocol_and_port = '{}:{}'.format(firewall_rule_obj.protocol, firewall_rule_obj.port)
+
+    def error_callback(error):
+        # If we have an error, we should try to check if rule already exists. If yes, we are all set.
+        # Assuming if the rule 'sparkles-monitor' exists, we are ok.
+        # TODO: Check the rule is on port 6032 with protocol tcp
+        # If no, we should stop here and let the user debug
+        gcloud_command = ['compute', 'firewall-rules', 'describe', firewall_rule_obj.name]
+        gcloud(gcloud_command)
+        print("Firewall rule seems already set. Ignoring.")
+
+    # Try to create the firewall rule. If fails, try to describe it to check we have one
+    gcloud_command = ['compute', 'firewall-rules', 'create', firewall_rule_obj.name, '--allow', protocol_and_port]
+    gcloud(gcloud_command, error_callback=error_callback)
 
 
 def can_reach_datastore_api(project_id, key_path):
@@ -86,6 +111,10 @@ def setup_project(project_id, key_path, bucket_name):
             f"Not creating service account because key already exists at {key_path} Delete this and rerun if you wish to create a new service account.")
 
     setup_bucket(project_id, key_path, bucket_name)
+
+    # Setup firewall using gcloud function
+    print("Adding firewall rule...")
+    add_firewall_rule()
 
     if not can_reach_datastore_api(project_id, key_path):
         print("Go to https://console.cloud.google.com/datastore/setup?project={} to choose where to store your data will reside in and then set up will be complete. Select \"Cloud Datastore\" and then select a region close to you, and then \"Create database\".".format(project_id) )
