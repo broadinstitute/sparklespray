@@ -43,16 +43,22 @@ def rewrite_argv_with_parameters(argv, parameters):
 
 
 class Download:
-    def __init__(self, src_url, dst, executable):
+    def __init__(self, src_url, dst, executable, is_cas_key, symlink_safe=True):
         self.src_url = src_url
         self.dst = dst
         self.executable = executable
-        #log.debug("src_url", self.src_url, self.executable)
+        self.is_cas_key = is_cas_key
+        self.symlink_safe = symlink_safe
 
     def _asdict(self):
         d = dict(src_url=self.src_url, dst=self.dst)
         if self.executable:
             d["executable"] = self.executable
+        if self.is_cas_key:
+            d['is_cas_key'] = self.is_cas_key
+        #
+        if self.symlink_safe:
+            d['symlink_safe'] = self.symlink_safe
         return d
 
 
@@ -86,7 +92,11 @@ def add_file_to_pull_to_wd(src_dst_pair, upload_map, hash_function, is_executabl
                 assert len(src_dst_pair.src) > 0
                 url = upload_map.add(hash_function, cas_url, src_dst_pair.src)
 
-    files_to_dl.append(Download(url, src_dst_pair.dst, executable_flag))
+    is_cas_key = url.startswith(cas_url)
+    # print("add_file_to_pull_to_wd url={} cas_url={}, is_cas_key={}".format(
+    #     url, cas_url, is_cas_key))
+    files_to_dl.append(Download(url, src_dst_pair.dst,
+                                executable_flag, is_cas_key))
 
 
 def rewrite_argvs_files_to_upload(list_of_argvs, cas_url, hash_function, is_executable_function, extra_files):

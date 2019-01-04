@@ -113,7 +113,10 @@ def rewrite_downloads(io, downloads, default_url_prefix):
         assert not (dst.startswith("../"))
         assert not (dst.startswith("/"))
 
-        return dict(src_url=src_url, dst=dst, executable=url.get("executable", False))
+        return dict(src_url=src_url, dst=dst,
+                    executable=url.get("executable", False),
+                    is_cas_key=url.get("is_cas_key", False),
+                    symlink_safe=url.get("symlink_safe", False))
 
     src_expanded = [rewrite_download(x) for x in downloads]
 
