@@ -43,7 +43,7 @@ def rewrite_argv_with_parameters(argv, parameters):
 
 
 class Download:
-    def __init__(self, src_url, dst, executable, is_cas_key, symlink_safe=True):
+    def __init__(self, src_url, dst, executable, is_cas_key, symlink_safe):
         self.src_url = src_url
         self.dst = dst
         self.executable = executable
@@ -96,7 +96,7 @@ def add_file_to_pull_to_wd(src_dst_pair, upload_map, hash_function, is_executabl
     # print("add_file_to_pull_to_wd url={} cas_url={}, is_cas_key={}".format(
     #     url, cas_url, is_cas_key))
     files_to_dl.append(Download(url, src_dst_pair.dst,
-                                executable_flag, is_cas_key))
+                                executable_flag, is_cas_key, False))
 
 
 def rewrite_argvs_files_to_upload(list_of_argvs, cas_url, hash_function, is_executable_function, extra_files):
