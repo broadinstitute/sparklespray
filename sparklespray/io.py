@@ -14,11 +14,36 @@ class IO:
         assert project is not None
 
         self.buckets = {}
+        self.credentials = credentials
+        self.project = project
         self.client = GSClient(project, credentials=credentials)
         if cas_url_prefix[-1] == "/":
             cas_url_prefix = cas_url_prefix[:-1]
         self.cas_url_prefix = cas_url_prefix
         self.compute_hash = compute_hash
+
+    def bulk_exists_check(self, paths):
+        from multiprocessing.pool import ThreadPool
+        import threading
+        my = threading.local()
+
+        def init_thread():
+            my.client = GSClient(self.project, credentials=self.credentials)
+
+        pool = ThreadPool(processes=10, initializer=init_thread)
+
+        def check(url):
+            m = re.match("^gs://([^/]+)/(.*)$", url)
+            assert m != None, "invalid remote path: {}".format(path)
+            bucket_name = m.group(1)
+            path = m.group(2)
+            bucket = my.client.bucket(bucket_name)
+            blob = bucket.blob(path)
+            return (url, blob.exists())
+
+        result = dict(pool.map(check, paths))
+        print("result of map", result)
+        return result
 
     def _get_bucket_and_path(self, path):
         m = re.match("^gs://([^/]+)/(.*)$", path)

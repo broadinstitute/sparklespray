@@ -464,8 +464,13 @@ def submit_cmd(jq, io, cluster, args, config):
         # First check existance of files, so we can print out a single summary statement
         needs_upload = []
         needs_upload_bytes = 0
-        for filename, dest, is_public in upload_map.uploads():
-            if not io.exists(dest):
+        pending_uploads = upload_map.uploads()
+
+        key_exists = io.bulk_exists_check(
+            [dest for _, dest, _ in pending_uploads])
+
+        for filename, dest, is_public in pending_uploads:
+            if not key_exists[dest]:
                 needs_upload.append((filename, dest, is_public))
                 needs_upload_bytes += os.path.getsize(filename)
 
