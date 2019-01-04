@@ -152,6 +152,10 @@ def start_docker_process(job_spec_str: str, consume_exe: str, work_dir: str):
     return proc
 
 
+class DockerFailedException(Exception):
+    pass
+
+
 def local_watch(job_id: str, consume_exe: str, work_dir: str, cluster: Cluster, initial_poll_delay=1.0, max_poll_delay=30.0):
     loglive = True
 
@@ -164,7 +168,7 @@ def local_watch(job_id: str, consume_exe: str, work_dir: str, cluster: Cluster, 
 
     def poll_cluster():
         if proc.poll() is not None:
-            raise Exception("Docker process prematurely died")
+            raise DockerFailedException("Docker process prematurely died")
 
     try:
         _watch(job_id, state, initial_poll_delay,

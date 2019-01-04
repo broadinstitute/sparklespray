@@ -25,7 +25,7 @@ from .io import IO
 from .watch import watch, local_watch
 from . import txtui
 import sparklespray
-
+from .watch import DockerFailedException
 
 from .log import log
 
@@ -511,9 +511,15 @@ def submit_cmd(jq, io, cluster, args, config):
     successful_execution = True
 
     if args.local:
+        try:
         successful_execution = local_watch(
             job_id, kubequeconsume_exe_path, work_dir, cluster)
         finished = True
+        except DockerFailedException:
+            log.error(
+                "Docker process prematurely died -- reseting job %s to release any claimed tasks", job_id)
+            jq.reset(job_id, None)
+            finished = False
     else:
         if not (args.dryrun or args.skip_kube_submit) and args.wait_for_completion:
             log.info("Waiting for job to terminate")
