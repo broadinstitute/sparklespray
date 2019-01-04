@@ -19,10 +19,11 @@ import (
 )
 
 type TaskDownload struct {
-	IsCASKey   bool   `json:"is_cas_key"`
-	Executable bool   `json:"executable"`
-	Dst        string `json:"dst"`
-	SrcURL     string `json:"src_url"`
+	IsCASKey    bool   `json:"is_cas_key"`
+	Executable  bool   `json:"executable"`
+	SymlinkSafe bool   `json:"symlink_safe"`
+	Dst         string `json:"dst"`
+	SrcURL      string `json:"src_url"`
 }
 
 type UploadSpec struct {
@@ -104,9 +105,16 @@ func downloadAll(ioc IOClient, workdir string, downloads []*TaskDownload, cacheD
 		//parentDir := strings.ToLower(path.Base(path.Dir(srcURL)))
 		if dl.IsCASKey {
 			casKey := path.Base(srcURL)
+			if _, err := os.Stat(cacheDir); os.IsNotExist(err) {
+				err = os.MkdirAll(cacheDir, 0777)
+				if err != nil {
+					return fmt.Errorf("Could not create cacheDir %s: %s", cacheDir, err), downloaded
+				}
+			}
+
 			cacheDest := path.Join(cacheDir, casKey)
 
-			if _, err := os.Stat(cacheDest); !os.IsNotExist(err) {
+			if _, err := os.Stat(cacheDest); os.IsNotExist(err) {
 				err = ioc.Download(srcURL, cacheDest)
 				if err != nil {
 					return err, downloaded
@@ -115,11 +123,37 @@ func downloadAll(ioc IOClient, workdir string, downloads []*TaskDownload, cacheD
 				log.Printf("No download, %s already exists", cacheDest)
 			}
 
-			err := copyFile(cacheDest, destination)
-			if err != nil {
-				// this should not be possible
-				panic(fmt.Sprintf("Error calling proc.Wait(): %s", err))
+			dstDir := path.Dir(destination)
+			if _, err := os.Stat(dstDir); os.IsNotExist(err) {
+				err = os.MkdirAll(dstDir, 0777)
+				if err != nil {
+					return fmt.Errorf("Could not create directory %s: %s", dstDir, err), downloaded
+				}
 			}
+
+			if _, err := os.Stat(destination); !os.IsNotExist(err) {
+				log.Printf("Warning: Removing existing file %s", destination)
+				err = os.Remove(destination)
+				if err != nil {
+					return fmt.Errorf("Could not remove existing file %s that is the destination of new DL", destination, err), downloaded
+				}
+			}
+
+			if dl.SymlinkSafe {
+				log.Printf("Symlinking %s -> %s", cacheDest, destination)
+				err := os.Symlink(cacheDest, destination)
+				if err != nil {
+					panic(fmt.Sprintf("symlink %s -> %s failed: %s", cacheDest, destination, err))
+				}
+			} else {
+				log.Printf("copying %s -> %s", cacheDest, destination)
+				err := copyFile(cacheDest, destination)
+				if err != nil {
+					// this should not be possible
+					panic(fmt.Sprintf("copyFile %s -> %s failed: %s", cacheDest, destination, err))
+				}
+			}
+
 		} else {
 			err := ioc.Download(srcURL, destination)
 			if err != nil {
