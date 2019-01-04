@@ -403,7 +403,8 @@ def submit_cmd(jq, io, cluster, args, config):
             "setting 'preemptable' in config must either by 'y' or 'n' but was: {}".format(preemptible_flag))
     bootDiskSizeGb = _get_bootDiskSizeGb(config)
     default_url_prefix = config.get("default_url_prefix", "")
-    work_dir = config.get("local_work_dir", "local_work_dir")
+    work_dir = config.get("local_work_dir", os.path.expanduser(
+        "~/.sparkles-cache/local_work_dir"))
 
     job_id = args.name
     if job_id is None:
@@ -515,9 +516,9 @@ def submit_cmd(jq, io, cluster, args, config):
 
     if args.local:
         try:
-        successful_execution = local_watch(
-            job_id, kubequeconsume_exe_path, work_dir, cluster)
-        finished = True
+            successful_execution = local_watch(
+                job_id, kubequeconsume_exe_path, work_dir, cluster)
+            finished = True
         except DockerFailedException:
             log.error(
                 "Docker process prematurely died -- reseting job %s to release any claimed tasks", job_id)
