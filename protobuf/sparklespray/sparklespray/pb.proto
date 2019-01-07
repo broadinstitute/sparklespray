@@ -3,6 +3,7 @@ syntax = "proto3";
 service Monitor {
   // Sends a greeting
   rpc ReadOutput (ReadOutputRequest) returns (ReadOutputReply) {}
+  rpc GetProcessStatus (GetProcessStatusRequest) returns (GetProcessStatusReply) {}
 }
 
 // The request message containing the user's name.
@@ -17,4 +18,16 @@ message ReadOutputReply {
   bytes data = 1;
   bool endOfFile = 2;
   int64 newOffset = 3;
+}
+
+message GetProcessStatusRequest {
+
+}
+
+message GetProcessStatusReply {
+  int32 processCount = 1;
+  int64 totalMemory = 2;
+  int64 totalData = 3;
+  int64 totalShared = 4;
+  int64 totalResident = 5;
 }

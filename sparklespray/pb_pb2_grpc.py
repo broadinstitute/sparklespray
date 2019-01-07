@@ -19,6 +19,11 @@ class MonitorStub(object):
         request_serializer=sparklespray_dot_pb__pb2.ReadOutputRequest.SerializeToString,
         response_deserializer=sparklespray_dot_pb__pb2.ReadOutputReply.FromString,
         )
+    self.GetProcessStatus = channel.unary_unary(
+        '/Monitor/GetProcessStatus',
+        request_serializer=sparklespray_dot_pb__pb2.GetProcessStatusRequest.SerializeToString,
+        response_deserializer=sparklespray_dot_pb__pb2.GetProcessStatusReply.FromString,
+        )
 
 
 class MonitorServicer(object):
@@ -32,6 +37,13 @@ class MonitorServicer(object):
     context.set_details('Method not implemented!')
     raise NotImplementedError('Method not implemented!')
 
+  def GetProcessStatus(self, request, context):
+    # missing associated documentation comment in .proto file
+    pass
+    context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+    context.set_details('Method not implemented!')
+    raise NotImplementedError('Method not implemented!')
+
 
 def add_MonitorServicer_to_server(servicer, server):
   rpc_method_handlers = {
@@ -39,6 +51,11 @@ def add_MonitorServicer_to_server(servicer, server):
           servicer.ReadOutput,
           request_deserializer=sparklespray_dot_pb__pb2.ReadOutputRequest.FromString,
           response_serializer=sparklespray_dot_pb__pb2.ReadOutputReply.SerializeToString,
+      ),
+      'GetProcessStatus': grpc.unary_unary_rpc_method_handler(
+          servicer.GetProcessStatus,
+          request_deserializer=sparklespray_dot_pb__pb2.GetProcessStatusRequest.FromString,
+          response_serializer=sparklespray_dot_pb__pb2.GetProcessStatusReply.SerializeToString,
       ),
   }
   generic_handler = grpc.method_handlers_generic_handler(

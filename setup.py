@@ -2,7 +2,7 @@
 
 # need python3 or gcloud stores bad values into datastore
 import sys
-assert sys.version_info >= (3,5), "This package requires at least python 3.5"
+assert sys.version_info >= (3, 5), "This package requires at least python 3.5"
 import ast
 import re
 from setuptools import setup, find_packages
@@ -20,19 +20,18 @@ setup(name='sparklespray',
       author_email='pmontgom@broadinstitute.org',
       include_package_data=True,
       install_requires=[
-      'termcolor==1.1.0',
-      'attrs==17.2.0',
-      'google-cloud-datastore==1.4.0',
-      'google-cloud-storage==1.6.0',
-      'grpcio-tools==1.13.0',
-      'pydantic==0.11.2',
-      'google-api-python-client==1.7.4',
-      'pyOpenSSL==18.0.0'
-          ],
+          'termcolor==1.1.0',
+          'attrs==17.2.0',
+          'google-cloud-datastore==1.4.0',
+          'google-cloud-storage==1.6.0',
+          'grpcio-tools==1.13.0',
+          'pydantic==0.11.2',
+          'google-api-python-client==1.7.4',
+          'pyOpenSSL==18.0.0'
+      ],
       packages=find_packages(),
       entry_points={'console_scripts': [
-        "kubeque = sparklespray.main:main",
-        "sparkles = sparklespray.main:main",
-        ]}
-     )
-
+          "kubeque = sparklespray.main:sparkles_main",
+          "sparkles = sparklespray.main:sparkles_main",
+      ]}
+      )

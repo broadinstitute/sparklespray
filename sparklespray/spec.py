@@ -67,15 +67,15 @@ DownloadsAndCommand = collections.namedtuple(
 SrcDstPair = collections.namedtuple("SrcDstPair", "src dst")
 
 
-def _add_files_in_dir_to_pull_to_wd(src_dst_pair, upload_map, hash_function, is_executable_function, cas_url, files_to_dl):
+def _add_files_in_dir_to_pull_to_wd(src_dst_pair, upload_map, hash_function, is_executable_function, cas_url, files_to_dl, allow_symlinks):
     for filename in os.listdir(src_dst_pair.src):
         src_filename = os.path.join(src_dst_pair.src, filename)
         dst_filename = os.path.join(src_dst_pair.dst, filename)
         add_file_to_pull_to_wd(SrcDstPair(src=src_filename, dst=dst_filename),
-                               upload_map, hash_function, is_executable_function, cas_url, files_to_dl)
+                               upload_map, hash_function, is_executable_function, cas_url, files_to_dl, allow_symlinks)
 
 
-def add_file_to_pull_to_wd(src_dst_pair, upload_map, hash_function, is_executable_function, cas_url, files_to_dl):
+def add_file_to_pull_to_wd(src_dst_pair, upload_map, hash_function, is_executable_function, cas_url, files_to_dl, allow_symlinks):
     assert isinstance(src_dst_pair, SrcDstPair)
     if src_dst_pair.src.startswith("gs://"):
         url = src_dst_pair.src
@@ -83,7 +83,7 @@ def add_file_to_pull_to_wd(src_dst_pair, upload_map, hash_function, is_executabl
     else:
         if os.path.isdir(src_dst_pair.src):
             _add_files_in_dir_to_pull_to_wd(
-                src_dst_pair, upload_map, hash_function, is_executable_function, cas_url, files_to_dl)
+                src_dst_pair, upload_map, hash_function, is_executable_function, cas_url, files_to_dl, allow_symlinks)
             return
         else:
             executable_flag = is_executable_function(src_dst_pair.src)
@@ -96,10 +96,10 @@ def add_file_to_pull_to_wd(src_dst_pair, upload_map, hash_function, is_executabl
     # print("add_file_to_pull_to_wd url={} cas_url={}, is_cas_key={}".format(
     #     url, cas_url, is_cas_key))
     files_to_dl.append(Download(url, src_dst_pair.dst,
-                                executable_flag, is_cas_key, False))
+                                executable_flag, is_cas_key, allow_symlinks))
 
 
-def rewrite_argvs_files_to_upload(list_of_argvs, cas_url, hash_function, is_executable_function, extra_files):
+def rewrite_argvs_files_to_upload(list_of_argvs, cas_url, hash_function, is_executable_function, extra_files, allow_symlinks):
     assert cas_url is not None
     if not cas_url.endswith("/"):
         cas_url += "/"
@@ -116,7 +116,7 @@ def rewrite_argvs_files_to_upload(list_of_argvs, cas_url, hash_function, is_exec
             else:
                 filename = m.group(1)
                 add_file_to_pull_to_wd(SrcDstPair(
-                    filename, filename), upload_map, hash_function, is_executable_function, cas_url, files_to_dl)
+                    filename, filename), upload_map, hash_function, is_executable_function, cas_url, files_to_dl, allow_symlinks)
                 return filename
 
         l.append(DownloadsAndCommand(files_to_dl, " ".join(
@@ -124,7 +124,7 @@ def rewrite_argvs_files_to_upload(list_of_argvs, cas_url, hash_function, is_exec
 
         for src_dst_pair in extra_files:
             add_file_to_pull_to_wd(
-                src_dst_pair, upload_map, hash_function, is_executable_function, cas_url, files_to_dl)
+                src_dst_pair, upload_map, hash_function, is_executable_function, cas_url, files_to_dl, allow_symlinks)
 
     return upload_map, l
 
@@ -144,7 +144,8 @@ def make_spec_from_command(argv,
                            src_wildcards=None,
                            pre_exec_script="ls -al",
                            post_exec_script="ls -al",
-                           working_dir="."):
+                           working_dir=".",
+                           allow_symlinks=False):
 
     if src_wildcards is None:
         src_wildcards = ["**"]
@@ -152,7 +153,7 @@ def make_spec_from_command(argv,
     list_of_argvs = rewrite_argv_with_parameters(argv, parameters)
 
     upload_map, list_of_dl_and_commands = rewrite_argvs_files_to_upload(
-        list_of_argvs, cas_url, hash_function, is_executable_function, extra_files)
+        list_of_argvs, cas_url, hash_function, is_executable_function, extra_files, allow_symlinks)
 
     # we're able to index into parameters and list_of_dl_and_commands because they should be in
     # the same order.

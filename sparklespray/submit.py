@@ -374,6 +374,10 @@ def add_submit_cmd(subparser):
     parser.add_argument("--cd", help="The directory to change to before executing the command", default=".",
                         dest="working_dir")
     parser.add_argument(
+        "--symlinks",
+        help="When localizing files, use symlinks instead of copying files into location. This should only be used when the uploaded files will not be modified by the job.",
+        action="store_true")
+    parser.add_argument(
         "--local", help="Run the tasks inside of docker on the local machine", action="store_true")
     parser.add_argument(
         "--rerun", help="If set, will download all of the files from previous execution of this job to worker before running", action="store_true")
@@ -454,7 +458,8 @@ def submit_cmd(jq, io, cluster, args, config):
                                                   src_wildcards=args.results_wildcards,
                                                   extra_files=expand_files_to_upload(
                                                       io, files_to_push),
-                                                  working_dir=args.working_dir)
+                                                  working_dir=args.working_dir,
+                                                  allow_symlinks=args.symlinks)
 
         kubequeconsume_exe_path = config['kubequeconsume_exe_path']
         kubequeconsume_exe_obj_path = upload_map.add(hash_db.hash_filename, cas_url_prefix,

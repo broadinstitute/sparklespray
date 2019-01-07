@@ -8,19 +8,25 @@ def user_print(msg):
     print(msg)
 
 
-def print_log_content(timestamp, payload):
+def print_log_content(timestamp, payload, from_sparkles=False):
     if payload[-1] == "\n":
         payload = payload[:-1]
     payload_lines = payload.split("\n")
     if payload_lines[-1] == "":
         del payload_lines[-1]
     prefix = None
+
+    message_color = "yellow"
+    if from_sparkles:
+        message_color = "green"
+
     for line in payload_lines:
         if prefix is None:
             prefix = "[{}]".format(timestamp.strftime("%H:%M:%S"))
-            print(colored(prefix, "green"), colored(line, "yellow"))
+            print(colored(prefix, "green"), colored(line, message_color))
         else:
-            print(colored(" "*len(prefix), "white"), colored(line, "yellow"))
+            print(colored(" "*len(prefix), "white"),
+                  colored(line, message_color))
 
 
 def config_logging(verbosity):

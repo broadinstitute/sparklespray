@@ -285,6 +285,9 @@ func execLifecycleScript(label string, workdir string, script string) {
 	}
 }
 
+// Perhaps should not be hardcoded, and could be determined at compile time somehow.
+const PAGE_SIZE = 4 * 1024
+
 func startWatchingLog(loggingClient *logging.Client, taskID string, stdoutPath string) (chan bool, error) {
 	log.Printf("Starting watch of logfile: %s", stdoutPath)
 
