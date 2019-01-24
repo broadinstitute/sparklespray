@@ -2,6 +2,7 @@ import logging
 import logging.handlers
 from termcolor import colored, cprint
 from .log import log
+import datetime
 
 
 def user_print(msg):
@@ -9,6 +10,9 @@ def user_print(msg):
 
 
 def print_log_content(timestamp, payload, from_sparkles=False):
+    if timestamp is None:
+        timestamp = datetime.datetime.now()
+
     if payload[-1] == "\n":
         payload = payload[:-1]
     payload_lines = payload.split("\n")

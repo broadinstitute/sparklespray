@@ -533,7 +533,7 @@ def submit_cmd(jq, io, cluster, args, config):
         if not (args.dryrun or args.skip_kube_submit) and args.wait_for_completion:
             log.info("Waiting for job to terminate")
             successful_execution = watch(
-                io, jq, job_id, cluster, target_nodes=1)
+                io, jq, job_id, cluster, target_nodes=1, loglive=True)
             finished = True
 
     if finished:

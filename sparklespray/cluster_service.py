@@ -280,6 +280,13 @@ class ClusterState:
     def get_tasks(self):
         return self.tasks
 
+    def get_running_tasks(self):
+        return [x for x in self.tasks if x.status == STATUS_CLAIMED]
+
+    def is_task_running(self, task_id):
+        by_id = {x.task_id: x for x in self.tasks}
+        return by_id[task_id].status == STATUS_CLAIMED
+
     def get_summary(self) -> str:
         by_status: Dict[str, int] = defaultdict(lambda: 0)
         for t in self.tasks:
@@ -371,11 +378,12 @@ class ClusterMod:
         self.job_id = job_id
         self.cluster = cluster
         self.debug_log_prefix = debug_log_prefix
-        self.node_counter = 0 # just used to make sure logs are unique
+        self.node_counter = 0  # just used to make sure logs are unique
 
     def add_node(self, preemptable: bool) -> None:
         self.node_counter += 1
-        debug_log_path = "{}/{}/{}-{}.txt".format(self.debug_log_prefix, self.job_id, get_timestamp(), self.node_counter)
+        debug_log_path = "{}/{}/{}-{}.txt".format(
+            self.debug_log_prefix, self.job_id, get_timestamp(), self.node_counter)
         self.cluster.add_node(self.job_id, preemptable, debug_log_path)
 
     def cancel_nodes(self, state: ClusterState, count: int) -> None:

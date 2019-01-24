@@ -6,8 +6,8 @@ import json
 from .logclient import LogMonitor
 from typing import Callable
 from .cluster_service import ClusterState
-
-#from google.gax.errors import RetryError
+from .txtui import print_log_content
+# from google.gax.errors import RetryError
 
 
 class RetryError(Exception):
@@ -30,12 +30,14 @@ def add_watch_cmd(subparser):
     parser.add_argument("jobid")
     parser.add_argument("--nodes", "-n", type=int,
                         help="The target number of workers")
+    parser.add_argument(
+        "--loglive", help="tail the first running task we can find", action="store_true")
 
 
 def watch_cmd(jq: JobQueue, io: IO, cluster: Cluster, args):
     from .main import _resolve_jobid
     jobid = _resolve_jobid(jq, args.jobid)
-    watch(io, jq, jobid, cluster, target_nodes=args.nodes)
+    watch(io, jq, jobid, cluster, target_nodes=args.nodes, loglive=args.loglive)
 
 
 @contextlib.contextmanager
@@ -104,15 +106,24 @@ def _watch(job_id: str, state: ClusterState, initial_poll_delay: float, max_poll
 
         if log_monitor is None:
             if loglive:
-                task = list(state.get_tasks())[0]
-                if task.monitor_address is not None:
-                    log.info("Obtained monitor address for task %s: %s",
-                             task.task_id, task.monitor_address)
-                    log_monitor = LogMonitor(
-                        cluster.client, task.monitor_address, task.task_id)
+                running = list(state.get_running_tasks())
+                if len(running) > 0:
+                    task = running[0]
+                    if task.monitor_address is not None:
+                        log.info("Obtained monitor address for task %s: %s",
+                                 task.task_id, task.monitor_address)
+                        log_monitor = LogMonitor(
+                            cluster.client, task.monitor_address, task.task_id)
+                        print_log_content(None,
+                                          "[starting tail of log {}]".format(log_monitor.task_id), from_sparkles=True)
         else:
-            with _exception_guard(lambda: "polling log file threw exception"):
-                log_monitor.poll()
+            if state.is_task_running(log_monitor.task_id):
+                with _exception_guard(lambda: "polling log file threw exception"):
+                    log_monitor.poll()
+            else:
+                print_log_content(None,
+                                  "[{} is no longer running, tail of log stopping]".format(log_monitor.task_id), from_sparkles=True)
+                log_monitor = None
 
         time.sleep(poll_delay)
 
@@ -192,9 +203,8 @@ def local_watch(job_id: str, consume_exe: str, work_dir: str, cluster: Cluster, 
     return successful_execution
 
 
-def watch(io: IO, jq: JobQueue, job_id: str, cluster: Cluster, target_nodes=None, initial_poll_delay=1.0, max_poll_delay=30.0):
+def watch(io: IO, jq: JobQueue, job_id: str, cluster: Cluster, target_nodes=None, initial_poll_delay=1.0, max_poll_delay=30.0, loglive=None):
     job = jq.get_job(job_id)
-    loglive = None
 
     if target_nodes is None:
         target_nodes = job.target_node_count
@@ -212,10 +222,10 @@ def watch(io: IO, jq: JobQueue, job_id: str, cluster: Cluster, target_nodes=None
         loglive = True
         log.info("Only one task, so tailing log")
 
-    if loglive and task_count != 1:
-        log.warning(
-            "Could not tail logs because there are %d tasks, and we can only watch one task at a time", len(job.tasks))
-        loglive = False
+    # if loglive and task_count != 1:
+    #     log.warning(
+    #         "Could not tail logs because there are %d tasks, and we can only watch one task at a time", len(job.tasks))
+    #     loglive = False
 
     try:
         def poll_cluster():
