@@ -196,7 +196,10 @@ def watch(io: IO, jq: JobQueue, job_id: str, cluster: Cluster, target_nodes=None
     job = jq.get_job(job_id)
     loglive = None
 
-    resize_cluster = ResizeCluster(target_node_count=job.target_node_count,
+    if target_nodes is None:
+        target_nodes = job.target_node_count
+
+    resize_cluster = ResizeCluster(target_nodes,
                                    max_preemptable_attempts=job.max_preemptable_attempts)
     get_preempted = GetPreempted()
 
