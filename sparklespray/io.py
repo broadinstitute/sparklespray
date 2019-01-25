@@ -42,7 +42,6 @@ class IO:
             return (url, blob.exists())
 
         result = dict(pool.map(check, paths))
-        print("result of map", result)
         return result
 
     def _get_bucket_and_path(self, path):
