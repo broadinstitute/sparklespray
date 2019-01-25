@@ -46,6 +46,7 @@ class Task(object):
     history = attr.ib()  # list of TaskHistory
     command_result_url = attr.ib()
     cluster = attr.ib()
+    log_url = attr.ib()
     failure_reason = attr.ib(default=None)
     version = attr.ib(default=1)
     exit_code = attr.ib(default=None)
@@ -88,6 +89,7 @@ def task_to_entity(client, o):
     entity['history'] = history
     entity['version'] = o.version
     entity['exit_code'] = o.exit_code
+    entity['log_url'] = o.log_url
     return entity
 
 
@@ -99,6 +101,7 @@ def entity_to_task(entity):
             'owner'), failure_reason=he.get('failure_reason')))
 
     return Task(
+        log_url=entity.get('log_url'),
         task_id=entity.key.name,
         task_index=entity['task_index'],
         job_id=entity['job_id'],

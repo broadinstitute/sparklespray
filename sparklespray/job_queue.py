@@ -153,7 +153,7 @@ class JobQueue:
 
         batch = Batch(self.client)
         task_index = 1
-        for arg, command_result_url in args:
+        for arg, command_result_url, log_url in args:
             task_id = "{}.{}".format(job_id, task_index)
             task = Task(task_id=task_id,
                         task_index=task_index,
@@ -164,7 +164,8 @@ class JobQueue:
                         owner=None,
                         command_result_url=command_result_url,
                         cluster=cluster,
-                        monitor_address=None)
+                        monitor_address=None,
+                        log_url=log_url)
             self.task_storage.insert(task, batch=batch)
             task_index += 1
 

@@ -37,6 +37,7 @@ type Task struct {
 	ExitCode         string         `datastore:"exit_code" json:"exit_code"`
 	Cluster          string         `datastore:"cluster" json:"cluster"`
 	MonitorAddress   string         `datastore:"monitor_address" json:"monitor_address"`
+	LogURL           string         `datastore:"log_url", json:"log_url"`
 }
 
 type TaskStatusNotification struct {

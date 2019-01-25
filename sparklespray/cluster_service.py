@@ -1,6 +1,6 @@
 import re
 from .task_store import INCOMPLETE_TASK_STATES, Task, STATUS_FAILED, STATUS_COMPLETE, STATUS_CLAIMED
-from .node_req_store import AddNodeReqStore, NodeReq, NODE_REQ_SUBMITTED, NODE_REQ_CLASS_PREEMPTIVE, NODE_REQ_CLASS_NORMAL, NODE_REQ_COMPLETE, REQUESTED_NODE_STATES, NODE_REQ_FAILED
+from .node_req_store import AddNodeReqStore, NodeReq, NODE_REQ_SUBMITTED, NODE_REQ_CLASS_PREEMPTIVE, NODE_REQ_CLASS_NORMAL, NODE_REQ_COMPLETE, REQUESTED_NODE_STATES, NODE_REQ_FAILED, REQUESTED_NODE_STATES
 from .compute_service import ComputeService
 from .node_service import NodeService, MachineSpec
 from .job_store import JobStore
@@ -107,6 +107,13 @@ class Cluster():
         instances = self.compute.get_cluster_instances(
             self.zones, cluster_name)
         return ClusterStatus(instances)
+
+    def has_active_node_requests(self, cluster_id):
+        node_reqs = self.node_req_store.get_node_reqs(cluster_id)
+        for node_req in node_reqs:
+            if node_req.status in REQUESTED_NODE_STATES:
+                return True
+        return False
 
     def stop_cluster(self, cluster_name: str):
         instances = self.compute.get_cluster_instances(

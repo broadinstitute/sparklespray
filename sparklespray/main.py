@@ -23,6 +23,18 @@ from .config import get_config_path, load_config, load_only_config_dict
 from .log import log
 
 
+def logs_cmd(jq: JobQueue, io: IO, args):
+    jobid = _resolve_jobid(jq, args.jobid)
+    tasks = jq.task_storage.get_tasks(jobid)
+    if not args.all:
+        tasks = [t for t in tasks if t.status == STATUS_FAILED or (
+            t.exit_code is not None and str(t.exit_code) != "0")]
+    print("You can view any of these logs by using: gsutil cat <log_path>")
+    print("task_id\texit_code\tlog_path\t")
+    for t in tasks:
+        print("{}\t{}\t{}".format(t.task_id, t.exit_code, t.log_url))
+
+
 def show_cmd(jq: JobQueue, io: IO, args):
     jobid = _resolve_jobid(jq, args.jobid)
     retcode = args.exitcode
@@ -390,12 +402,14 @@ def clean(cluster: Cluster, jq: JobQueue, job_id: str, force: bool=False, force_
 
         if not force_pending:
             # Check to not remove tasks that are pending (waiting to be claimed)
+            job = cluster.job_store.get_job(job_id)
             tasks = cluster.task_store.get_tasks(job_id, status=STATUS_PENDING)
             nb_tasks_pending = len(tasks)
-            if nb_tasks_pending > 0:
+            if nb_tasks_pending > 0 and cluster.has_active_node_requests(job.cluster):
                 log.warning(
-                    "Job {} has {} tasks that are still pending. If you want to force cleaning them,"
-                    " please use --force_pending".format(job_id, nb_tasks_pending)
+                    "Job {} has {} tasks that are still pending and active requests for VMs. If you want to force cleaning them,"
+                    " please use 'sparkles kill {}'".format(
+                        job_id, nb_tasks_pending, job_id)
                 )
                 return False
 
@@ -517,6 +531,15 @@ def main(argv=None):
     parser.add_argument("operation_id")
 
     parser = subparser.add_parser(
+        "logs", help="Print out logs from failed tasks"
+    )
+    parser.set_defaults(func=logs_cmd)
+    parser.add_argument("jobid")
+    parser.add_argument(
+        "--all", help="If set, show paths to logs for all tasks instead of just failures",
+        action="store_true")
+
+    parser = subparser.add_parser(
         "show", help="Write to a csv file the parameters for each task")
     parser.set_defaults(func=show_cmd)
     parser.add_argument("jobid")
@@ -555,7 +578,8 @@ def main(argv=None):
         "--force", "-f", help="If set, will delete job regardless of whether it is running or not", action="store_true")
     parser.add_argument("jobid_pattern", nargs="?",
                         help="If specified will only attempt to remove jobs that match this pattern")
-    parser.add_argument("--force_pending", "-p", help="If set, will delete pending jobs", action="store_true")
+    parser.add_argument("--force_pending", "-p",
+                        help="If set, will delete pending jobs", action="store_true")
 
     parser = subparser.add_parser("kill", help="Terminate the specified job")
     parser.set_defaults(func=kill_cmd)

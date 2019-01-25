@@ -202,6 +202,7 @@ def submit(jq: JobQueue, io: IO, cluster: Cluster, job_id: str, spec: dict, conf
     tasks = expand_tasks(spec, io, default_url_prefix, default_job_url_prefix)
     task_spec_urls = []
     command_result_urls = []
+    log_urls = []
 
     # TODO: When len(tasks) is a fair size (>100) this starts taking a noticable amount of time.
     # Perhaps store tasks in a single blob?  Or do write with multiple requests in parallel?
@@ -210,6 +211,7 @@ def submit(jq: JobQueue, io: IO, cluster: Cluster, job_id: str, spec: dict, conf
             url = io.write_json_to_cas(task)
             task_spec_urls.append(url)
             command_result_urls.append(task['command_result_url'])
+            log_urls.append(task['stdout_url'])
         else:
             log.debug("task post expand: %s", json.dumps(task, indent=2))
 
@@ -250,7 +252,7 @@ def submit(jq: JobQueue, io: IO, cluster: Cluster, job_id: str, spec: dict, conf
             machine_specs=machine_specs,
             monitor_port=monitor_port)
 
-        jq.submit(job_id, list(zip(task_spec_urls, command_result_urls)),
+        jq.submit(job_id, list(zip(task_spec_urls, command_result_urls, log_urls)),
                   pipeline_spec, metadata, cluster_name)
 
 
