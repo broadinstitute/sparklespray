@@ -15,6 +15,8 @@ from .watch import watch
 from .resize_cluster import GetPreempted
 from . import txtui
 from .validate import validate_cmd
+from . import txtui
+from .gcp_setup import setup_project
 import csv
 import argparse
 
@@ -474,10 +476,6 @@ def dump_operation_cmd(cluster: Cluster, args):
     print(json.dumps(operation, indent="  "))
 
 
-from . import txtui
-from .gcp_setup import setup_project
-
-
 def setup_cmd(args, config):
     default_url_prefix = config['default_url_prefix']
     m = re.match("^gs://([^/]+)(?:/.*)?$", default_url_prefix)
@@ -598,6 +596,15 @@ def main(argv=None):
 
     parser = subparser.add_parser("version", help="print the version and exit")
     parser.set_defaults(func=version_cmd)
+
+    parser = subparser.add_parser(
+        "scatter", help="Run a python function to generate a scatter submission")
+    parser.add_argument("-n", "jobname")
+    parser.add_argument("--function", default="scatter",
+                        help="The name of the function in the python file to execute")
+    parser.add_argument("script_filename")
+    parser.add_argument("script_args", nargs=argparse.REMAINDER)
+    parser.set_defaults(func=scatter_cmd)
 
     args = parse.parse_args(argv)
 
