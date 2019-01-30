@@ -45,6 +45,7 @@ class SubmitConfig(BaseModel):
     mount_point: str
     kubequeconsume_url: str
     gpu_count: int
+    target_node_count: int
 
 
 class ExistingJobException(Exception):
@@ -253,7 +254,7 @@ def submit(jq: JobQueue, io: IO, cluster: Cluster, job_id: str, spec: dict, conf
             monitor_port=monitor_port)
 
         jq.submit(job_id, list(zip(task_spec_urls, command_result_urls, log_urls)),
-                  pipeline_spec, metadata, cluster_name)
+                  pipeline_spec, metadata, cluster_name, target_node_count)
 
 
 def new_job_id():
@@ -373,6 +374,8 @@ def add_submit_cmd(subparser):
     parser.add_argument("--results", action="append",
                         help="Wildcard to use to find results which will be uploaded.  (defaults to '*')  Can be specified multiple times",
                         default=None, dest="results_wildcards")
+    parser.add_argument(
+        "--nodes", help="Max number of VMs to start up to run these tasks", type=int, default=1)
     parser.add_argument("--cd", help="The directory to change to before executing the command", default=".",
                         dest="working_dir")
     parser.add_argument(
@@ -506,7 +509,8 @@ def submit_cmd(jq, io, cluster, args, config):
                                  zones=config['zones'],
                                  mount_point=config.get("mount", "/mnt/"),
                                  kubequeconsume_url=kubequeconsume_exe_url,
-                                 gpu_count=gpu_count
+                                 gpu_count=gpu_count,
+                                 target_node_count=args.nodes
                                  )
 
     cluster_name = None
