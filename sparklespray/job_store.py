@@ -24,8 +24,8 @@ class Job(object):
     cluster = attr.ib()
     status = attr.ib()
     submit_time = attr.ib()
+    max_preemptable_attempts = attr.ib()
     target_node_count = attr.ib(default=1)
-    max_preemptable_attempts = attr.ib(default=0)
 
 
 JOB_STATUS_SUBMITTED = "submitted"
@@ -47,6 +47,8 @@ def job_to_entity(client, o):
     entity['metadata'] = metadata
     entity['status'] = o.status
     entity['submit_time'] = o.submit_time
+    entity['target_node_count'] = o.target_node_count
+    entity['max_preemptable_attempts'] = o.max_preemptable_attempts
 
     return entity
 
@@ -59,7 +61,9 @@ def entity_to_job(entity):
                kube_job_spec=entity.get('kube_job_spec'),
                metadata=dict([(m['name'], m['value']) for m in metadata]),
                status=entity['status'],
-               submit_time=entity.get('submit_time'))
+               submit_time=entity.get('submit_time'),
+               target_node_count=entity.get('target_node_count', 1),
+               max_preemptable_attempts=entity.get('max_preemptable_attempts', 0))
 
 
 class JobStore:

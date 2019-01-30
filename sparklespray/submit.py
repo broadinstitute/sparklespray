@@ -170,10 +170,11 @@ def _parse_mem_limit(txt):
 
 def _make_cluster_name(job_name, image, machine_type, unique_name):
     import hashlib
-    import os
+
     if unique_name:
         return 'l-' + random_string(20)
-    return "c-" + hashlib.md5("{}-{}-{}-{}-{}".format(job_name, image, machine_type, sparklespray.__version__, os.getlogin()).encode("utf8")).hexdigest()[:20]
+    else:
+        return "c-" + hashlib.md5(f"{job_name}-{image}-{machine_type}-{sparklespray.__version__}".encode("utf8")).hexdigest()[:20]
 
 
 def submit(jq: JobQueue, io: IO, cluster: Cluster, job_id: str, spec: dict, config: SubmitConfig, metadata: dict = {},
@@ -253,8 +254,12 @@ def submit(jq: JobQueue, io: IO, cluster: Cluster, job_id: str, spec: dict, conf
             machine_specs=machine_specs,
             monitor_port=monitor_port)
 
+        max_preemptable_attempts = 0
+        if preemptible:
+            max_preemptable_attempts = config.target_node_count * 2
+
         jq.submit(job_id, list(zip(task_spec_urls, command_result_urls, log_urls)),
-                  pipeline_spec, metadata, cluster_name, target_node_count)
+                  pipeline_spec, metadata, cluster_name, config.target_node_count, max_preemptable_attempts)
 
 
 def new_job_id():
@@ -379,6 +384,9 @@ def add_submit_cmd(subparser):
     parser.add_argument("--cd", help="The directory to change to before executing the command", default=".",
                         dest="working_dir")
     parser.add_argument(
+        "--skipifexists", help="If the job with this name already exists, do not submit a new one",
+        action="store_true")
+    parser.add_argument(
         "--symlinks",
         help="When localizing files, use symlinks instead of copying files into location. This should only be used when the uploaded files will not be modified by the job.",
         action="store_true")
@@ -386,6 +394,8 @@ def add_submit_cmd(subparser):
         "--local", help="Run the tasks inside of docker on the local machine", action="store_true")
     parser.add_argument(
         "--rerun", help="If set, will download all of the files from previous execution of this job to worker before running", action="store_true")
+    parser.add_argument("--preemptible", action="store_true",
+                        help="If set, will try to turn on nodes initally as preemptible nodes")
     parser.add_argument("command", nargs=argparse.REMAINDER)
     parser.add_argument("--gpu_count", type=int,
                         help="Number of gpus on your VM", default=0)
@@ -406,10 +416,15 @@ def submit_cmd(jq, io, cluster, args, config):
     else:
         image = config['default_image']
 
-    preemptible_flag = config.get("preemptible", "n").lower()
-    if preemptible_flag not in ['y', 'n']:
-        raise Exception(
-            "setting 'preemptable' in config must either by 'y' or 'n' but was: {}".format(preemptible_flag))
+    if args.preemptible:
+        preemptible = True
+    else:
+        preemptible_flag = config.get("preemptible", "n").lower()
+        if preemptible_flag not in ['y', 'n']:
+            raise Exception(
+                "setting 'preemptible' in config must either by 'y' or 'n' but was: {}".format(preemptible_flag))
+        preemptible = preemptible_flag == 'y'
+
     bootDiskSizeGb = _get_bootDiskSizeGb(config)
     default_url_prefix = config.get("default_url_prefix", "")
     work_dir = config.get("local_work_dir", os.path.expanduser(
@@ -418,7 +433,14 @@ def submit_cmd(jq, io, cluster, args, config):
     job_id = args.name
     if job_id is None:
         job_id = new_job_id()
+    elif args.skipifexists:
+        job = jq.get_job(job_id, must=False)
+        if job is not None:
+            txtui.user_print(
+                f"Found existing job {job_id} and submitted job with --skipifexists so aborting")
+            return 0
 
+    target_node_count = args.nodes
     machine_type = config['machine_type']
     if args.machine_type:
         machine_type = args.machine_type
@@ -498,7 +520,7 @@ def submit_cmd(jq, io, cluster, args, config):
 
     log.debug("spec: %s", json.dumps(spec, indent=2))
 
-    submit_config = SubmitConfig(preemptible=preemptible_flag == 'y',
+    submit_config = SubmitConfig(preemptible=preemptible,
                                  bootDiskSizeGb=bootDiskSizeGb,
                                  default_url_prefix=default_url_prefix,
                                  machine_type=machine_type,
@@ -510,7 +532,7 @@ def submit_cmd(jq, io, cluster, args, config):
                                  mount_point=config.get("mount", "/mnt/"),
                                  kubequeconsume_url=kubequeconsume_exe_url,
                                  gpu_count=gpu_count,
-                                 target_node_count=args.nodes
+                                 target_node_count=target_node_count
                                  )
 
     cluster_name = None
@@ -539,7 +561,7 @@ def submit_cmd(jq, io, cluster, args, config):
         if not (args.dryrun or args.skip_kube_submit) and args.wait_for_completion:
             log.info("Waiting for job to terminate")
             successful_execution = watch(
-                io, jq, job_id, cluster, target_nodes=1, loglive=True)
+                io, jq, job_id, cluster, target_nodes=target_node_count, loglive=True)
             finished = True
 
     if finished:

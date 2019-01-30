@@ -340,8 +340,8 @@ class ClusterState:
             else:
                 node_req = node_req_by_instance_name[instance_name]
                 if node_req.status == NODE_REQ_COMPLETE:
-                    log.warning("task status = {}, but node_req was {}".format(
-                        task.status, node_req.status))
+                    log.warning("task {} status = {}, but node_req was {}".format(
+                        task.task_id, task.status, node_req.status))
                     if node_req.node_class != NODE_REQ_CLASS_PREEMPTIVE:
                         log.error(
                             "instance %s terminated but task %s was reported to still be using instance and the instance was not preemptiable", instance_name, task.task_id)

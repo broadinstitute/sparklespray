@@ -455,6 +455,8 @@ def kill_cmd(jq: JobQueue, cluster, args):
 
         # if there are any sit sitting at pending, mark them as killed
         tasks = jq.task_storage.get_tasks(jobid, status=STATUS_PENDING)
+        txtui.user_print(
+            "Marking {} pending tasks as killed".format(len(tasks)))
         for task in tasks:
             jq.reset_task(task.task_id, status=STATUS_KILLED)
 
