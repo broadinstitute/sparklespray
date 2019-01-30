@@ -499,6 +499,7 @@ def main(argv=None):
 
     from .submit import add_submit_cmd
     from .watch import add_watch_cmd
+    from .scatter import add_scatter_cmd
 
     parse = argparse.ArgumentParser()
     parse.add_argument("--config", default=None)
@@ -507,6 +508,7 @@ def main(argv=None):
     subparser = parse.add_subparsers()
 
     add_submit_cmd(subparser)
+    add_scatter_cmd(subparser)
 
     parser = subparser.add_parser(
         "validate", help="Run a series of tests to confirm the configuration is valid")
@@ -596,15 +598,6 @@ def main(argv=None):
 
     parser = subparser.add_parser("version", help="print the version and exit")
     parser.set_defaults(func=version_cmd)
-
-    parser = subparser.add_parser(
-        "scatter", help="Run a python function to generate a scatter submission")
-    parser.add_argument("-n", "jobname")
-    parser.add_argument("--function", default="scatter",
-                        help="The name of the function in the python file to execute")
-    parser.add_argument("script_filename")
-    parser.add_argument("script_args", nargs=argparse.REMAINDER)
-    parser.set_defaults(func=scatter_cmd)
 
     args = parse.parse_args(argv)
 
