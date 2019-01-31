@@ -503,6 +503,7 @@ def main(argv=None):
 
     from .submit import add_submit_cmd
     from .watch import add_watch_cmd
+    from .list import add_list_cmd
 
     parse = argparse.ArgumentParser()
     parse.add_argument("--config", default=None)
@@ -511,6 +512,7 @@ def main(argv=None):
     subparser = parse.add_subparsers()
 
     add_submit_cmd(subparser)
+    add_list_cmd(subparser)
 
     parser = subparser.add_parser(
         "validate", help="Run a series of tests to confirm the configuration is valid")
