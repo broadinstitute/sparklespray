@@ -18,7 +18,11 @@ def test_process_records():
     # test use of filters and getting all fields
     filtered = process_records(
         records, fields=None, filter_expressions=["type=duck"])
-    assert filtered == [{"name": "sir-quackers", "type": "duck", "age": "101"}]
+    assert filtered == [records[1]]
+
+    filtered = process_records(
+        records, fields=None, filter_expressions=["type!=duck"])
+    assert filtered == [records[0], records[2]]
 
 
 def test_process_nested_records():

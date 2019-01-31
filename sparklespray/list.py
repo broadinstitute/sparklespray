@@ -134,7 +134,7 @@ def project(d: dict, fields: List[str]):
 
 
 def make_predicate(filter_expression):
-    m = re.match("([A-Za-z0-9.]+)(=|!=)(.*)", filter_expression)
+    m = re.match("([A-Za-z0-9._]+)(=|!=)(.*)", filter_expression)
     assert m is not None, "Could not parse '{}'".format(filter_expression)
     var = m.group(1)
     op = m.group(2)
