@@ -161,7 +161,7 @@ class JobQueue:
 
         batch = Batch(self.client)
         task_index = 1
-        assert len(args) > 0
+        assert len(args) > 0, "Cannot to submit a job with no tasks"
         for arg, command_result_url, log_url in args:
             task_id = "{}.{}".format(job_id, task_index)
             task = Task(task_id=task_id,

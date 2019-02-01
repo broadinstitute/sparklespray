@@ -396,6 +396,8 @@ def add_submit_cmd(subparser):
         "--rerun", help="If set, will download all of the files from previous execution of this job to worker before running", action="store_true")
     parser.add_argument("--preemptible", action="store_true",
                         help="If set, will try to turn on nodes initally as preemptible nodes")
+    parser.add_argument("--clustername",
+                        help="Override ID generated for tracking cluster members (only use if you know what you're doing)")
     parser.add_argument("command", nargs=argparse.REMAINDER)
     parser.add_argument("--gpu_count", type=int,
                         help="Number of gpus on your VM", default=0)
@@ -536,6 +538,9 @@ def submit_cmd(jq, io, cluster, args, config):
                                  )
 
     cluster_name = None
+    if args.clustername:
+        cluster_name = args.clustername
+
     if args.local:
         # if doing a local submission, generate a unique cluster name each time
         # to ensure the local process is the one which picks up the job.
