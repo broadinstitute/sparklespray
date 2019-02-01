@@ -146,7 +146,7 @@ class JobQueue:
         task = self.task_storage.get_task(task_id)
         self._reset_task(task, status)
 
-    def submit(self, job_id, args, kube_job_spec, metadata, cluster):
+    def submit(self, job_id, args, kube_job_spec, metadata, cluster, target_node_count, max_preemptable_attempts):
         kube_job_spec = json.dumps(kube_job_spec)
         tasks = []
         now = time.time()
@@ -170,7 +170,7 @@ class JobQueue:
             task_index += 1
 
         job = Job(job_id=job_id, tasks=[t.task_id for t in tasks], kube_job_spec=kube_job_spec, metadata=metadata, cluster=cluster, status=JOB_STATUS_SUBMITTED,
-                  submit_time=time.time())
+                  submit_time=time.time(), target_node_count=target_node_count, max_preemptable_attempts=max_preemptable_attempts)
         self.job_storage.insert(job, batch=batch)
         batch.flush()
         #log.info("Saved task definition batch containing %d tasks", len(batch))

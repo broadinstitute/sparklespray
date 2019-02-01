@@ -457,6 +457,8 @@ def kill_cmd(jq: JobQueue, cluster, args):
 
         # if there are any sit sitting at pending, mark them as killed
         tasks = jq.task_storage.get_tasks(jobid, status=STATUS_PENDING)
+        txtui.user_print(
+            "Marking {} pending tasks as killed".format(len(tasks)))
         for task in tasks:
             jq.reset_task(task.task_id, status=STATUS_KILLED)
 
@@ -499,6 +501,7 @@ def main(argv=None):
 
     from .submit import add_submit_cmd
     from .watch import add_watch_cmd
+    from .list import add_list_cmd
     from .scatter import add_scatter_cmd
 
     parse = argparse.ArgumentParser()
@@ -508,6 +511,7 @@ def main(argv=None):
     subparser = parse.add_subparsers()
 
     add_submit_cmd(subparser)
+    add_list_cmd(subparser)
     add_scatter_cmd(subparser)
 
     parser = subparser.add_parser(
