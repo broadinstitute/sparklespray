@@ -50,7 +50,7 @@ source activate sparkles
 
 ### Installing sparkles into the virtual environment
 
-Download the latest release tar file, extract it and run the install:
+Download the [latest release tar file](https://github.com/broadinstitute/sparklespray/releases), extract it and run the install:
 
 ```
 tar xzf sparklespray-LATEST_VERSION.tar.gz
@@ -104,8 +104,7 @@ sparkles sub sh -c 'echo Done!'
 ```
 
 Once you've seen your first sparkles job complete successfully, you can
-change "zones", "default_image", "default_resource_cpu", and
-"default_resource_memory" based on your needs.
+change "zones", and "default_image" based on your needs.
 
 # Command reference
 
