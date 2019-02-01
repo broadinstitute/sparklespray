@@ -105,8 +105,8 @@ def scatter_cmd(jq, io: IO, args):
         submission_dir = job_name
 
     python_exe = args.python_exe
-    extra_sparkles_options = ["-i",
-                              "python:3.6-alpine", "-u", script_filename]
+    extra_sparkles_options = ["-i", "python:3.6-alpine",
+                              "-u", script_filename]
     scatter_function_parameters = args.extra_args
 
     # run scatter phase
