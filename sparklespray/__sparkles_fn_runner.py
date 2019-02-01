@@ -1,3 +1,7 @@
+# this file is a little unusual in that it is not a normal module. It actually is
+# a script which is copied and used to launch the script inside of a docker image
+# as part of the scatter command.
+
 import sys
 import argparse
 import pickle
@@ -55,7 +59,7 @@ def scatter_cmd(args):
             #       if we cannot.
             pickle.dump(dict(module=function.__module__,
                              name=function.__name__,
-                             script_filename=args.script_filename))
+                             script_filename=args.script_filename), fd)
 
 
 def main(args=None):

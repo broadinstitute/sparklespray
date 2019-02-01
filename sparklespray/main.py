@@ -609,7 +609,7 @@ def main(argv=None):
 
     if not hasattr(args, 'func'):
         parse.print_help()
-        sys.exit(1)
+        return 1
 
     if args.func == setup_cmd:
         # special case, because this is the one command which must work before the service account

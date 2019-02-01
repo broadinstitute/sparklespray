@@ -4,6 +4,9 @@ import shutil
 import csv
 from zipfile import ZipFile
 import argparse
+from .io import IO
+from .task_store import Task
+from .txtui import user_print
 
 
 def prepare_scatter(job_name, script_filename, function_name, submission_dir, python_exe, extra_sparkles_options, scatter_function_parameters):
@@ -82,7 +85,16 @@ def add_scatter_cmd(subparser):
     parser.add_argument("extra_args", nargs=argparse.REMAINDER)
 
 
-def scatter_cmd(args):
+import json
+
+
+def _get_uploaded_files(io: IO, task: Task):
+    result_spec = json.loads(io.get_as_str(task.command_result_url))
+    files = result_spec['files']
+    return {f['src']: f['dst_url'] for f in files}
+
+
+def scatter_cmd(jq, io: IO, args):
     job_name = args.job_name
     script_filename = args.script_filename
     scatter_function_name = args.scatter_function_name
@@ -94,7 +106,8 @@ def scatter_cmd(args):
         submission_dir = job_name
 
     python_exe = args.python_exe
-    extra_sparkles_options = ["--local"]
+    extra_sparkles_options = ["--local", "-i",
+                              "python:3.6-alpine", "-u", script_filename]
     scatter_function_parameters = args.extra_args
 
     # run scatter phase
@@ -103,12 +116,35 @@ def scatter_cmd(args):
                           python_exe, extra_sparkles_options, scatter_function_parameters)
 
     from .main import main
-    main(cmd)
+    print("---------- running")
+    ret_code = main(cmd)
+    if ret_code != 0:
+        return ret_code
 
-    # TODO: check that scatter executed successfully
     # copy files back from scatter job. should job_name/1/submission_dir/package.zip
+    package_path = os.path.join(submission_dir, "package.zip")
+    tasks = jq.task_storage.get_tasks(scatter_job_name)
+    assert len(tasks) == 1
+    files = _get_uploaded_files(io, tasks[0])
+    print("---------- complete")
+
+    if tasks[0].exit_code != "0":
+        stdout_url = tasks[0].log_url
+        user_print("Scatter task failed. Dumping output from script:")
+        user_print(io.get_as_str(stdout_url))
+        return 1
+
+    print("---------- success")
+    package_url = files[package_path]
+
+    # copy the package (the result of the scatter script) to our local submission directory
+    io.get(package_url, package_path)
 
     # run foreach phase
+    print("---------- foreach")
     cmd = prepare_foreach(job_name, script_filename, submission_dir,
                           python_exe, foreach_function_name, extra_sparkles_options, batch_size)
-    main(cmd)
+    ret_code = main(cmd)
+    print("---------- foreach done")
+
+    return ret_code

@@ -29,6 +29,14 @@ CLAIM_TIMEOUT = 5
 from .log import log
 
 
+def try_n_times(fn, delay_between_attempts, max_attempts):
+    for i in range(max_attempts):
+        if fn():
+            return
+        time.sleep(delay_between_attempts)
+    raise Exception("{} failed {} times".format(fn, max_attempts))
+
+
 def get_credentials(account, cred_file="~/.config/gcloud/credentials"):
     return None
     # cred_file = os.path.expanduser(cred_file)
@@ -153,6 +161,7 @@ class JobQueue:
 
         batch = Batch(self.client)
         task_index = 1
+        assert len(args) > 0
         for arg, command_result_url, log_url in args:
             task_id = "{}.{}".format(job_id, task_index)
             task = Task(task_id=task_id,
@@ -173,6 +182,11 @@ class JobQueue:
                   submit_time=time.time(), target_node_count=target_node_count, max_preemptable_attempts=max_preemptable_attempts)
         self.job_storage.insert(job, batch=batch)
         batch.flush()
+        # wait until we can see the tasks we just created
+
+        def at_least_one_task_visible():
+            return len(self.task_storage.get_tasks(job_id)) > 0
+        try_n_times(at_least_one_task_visible, 2.0, 10)
         #log.info("Saved task definition batch containing %d tasks", len(batch))
 
 #     def test_datastore_api(self, job_id):
