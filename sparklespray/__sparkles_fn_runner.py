@@ -42,12 +42,10 @@ def scatter_cmd(args):
     elements = scatter_def['elements']
     extra_args = scatter_def.get("extra_args", [])
 
-    with ZipFile(args.package_filename, "w") as myzip:
-        with myzip.open('element_count.pickle', "w") as fd:
-            # write out the length of the array so we don't have to deserialize the actual array
-            # to do batching. Useful to avoid deserialzing classes which sparklespray doesn't know about.
-            pickle.dump(len(elements), fd)
+    with open(args.element_count_filename, "wt") as fd:
+        fd.write(str(len(elements)))
 
+    with ZipFile(args.package_filename, "w") as myzip:
         with myzip.open('elements.pickle', 'w') as fd:
             pickle.dump(elements, fd)
 
@@ -70,6 +68,7 @@ def main(args=None):
     parser.add_argument("script_filename")
     parser.add_argument("function_name")
     parser.add_argument("package_filename")
+    parser.add_argument("element_count_filename")
     parser.add_argument("script_args", nargs=argparse.REMAINDER)
     parser.set_defaults(func=scatter_cmd)
 

@@ -368,3 +368,36 @@ This will write generated code to the following files:
 ./sparklespray/pb_pb2.py
 ./sparklespray/pb_pb2_grpc.py
 ```
+
+
+Setup
+    validate            Run a series of tests to confirm the configuration is
+                        valid
+
+    setup               Configures the google project chosen in the config to
+                        be compatible with sparklespray. (requires gcloud
+                        installed in path)
+
+    version             print the version and exit
+
+Submissions
+    sub                 Submit a command (or batch of commands) for execution
+    logs                Print out logs from failed tasks
+    show                Write to a csv file the parameters for each task
+    status              Print the status for the tasks which make up the
+                        specified job
+    watch               Monitor the job
+    kill                Terminate the specified job
+    fetch               Download results from a completed job
+
+Debugging
+    reset               Mark any 'claimed', 'killed' or 'failed' jobs as ready
+                        for execution again. Useful largely only during
+                        debugging issues with job submission. Potentially also
+                        useful for retrying after transient failures.
+    clean               Remove jobs which are not currently running from the
+                        database of jobs
+
+    dump-operation      primarily used for debugging. If a sparkles cannot
+                        turn on a node, this can be used to dump the details
+                        of the operation which requested the node.

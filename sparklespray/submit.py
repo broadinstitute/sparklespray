@@ -387,6 +387,9 @@ def add_submit_cmd(subparser):
         "--skipifexists", help="If the job with this name already exists, do not submit a new one",
         action="store_true")
     parser.add_argument(
+        "--watchifexists", help="If the job with this name already exists, do not submit a new one, but instead wait for it to complete",
+        action="store_true")
+    parser.add_argument(
         "--symlinks",
         help="When localizing files, use symlinks instead of copying files into location. This should only be used when the uploaded files will not be modified by the job.",
         action="store_true")
@@ -398,9 +401,27 @@ def add_submit_cmd(subparser):
                         help="If set, will try to turn on nodes initally as preemptible nodes")
     parser.add_argument("--clustername",
                         help="Override ID generated for tracking cluster members (only use if you know what you're doing)")
-    parser.add_argument("command", nargs=argparse.REMAINDER)
     parser.add_argument("--gpu_count", type=int,
                         help="Number of gpus on your VM", default=0)
+
+    foreach_group = parser.add_argument_group('foreach mode', 'Normally sub is used to execute identical commands with a few parameters being varied. Another common need ' +
+                                              'is to want to run a function on a list of inputs. For this "sub" can be used in the --foreach mode where a script is run to generate the list of inputs and then ' +
+                                              'a function will be run in parallel for each element in that list.')
+    # foreach args
+    foreach_group.add_argument(
+        "--foreach", action="store_true", help="If set, the first parameter is taken to be the name of a 'foreach' script. The name of the script must end in either .R or .py so it can detect which language to use when executing script.")
+    foreach_group.add_argument(
+        "--get-foreach-args-name", help="Name of function in foreach script which should be used to get arguments for foreach function", default="get_foreach_args")
+    foreach_group.add_argument(
+        "--foreach-name", dest="foreach_name", default="foreach")
+    foreach_group.add_argument("--foreach-batch-size", "-b", help="Number of elements to execute foreach on per task",
+                               type=int, default=1)
+    foreach_group.add_argument("--foreach-submission-dir",
+                               help="Name of directory that will be used for temporary files as part of running foreach script")
+    foreach_group.add_argument("--foreach-script-exe",
+                               help="Name of the executable to be used for running the foreach script. Defaults to 'Rscript' for R and 'python' for python scripts.", default=None)
+
+    parser.add_argument("command", nargs=argparse.REMAINDER)
 
 
 def _get_bootDiskSizeGb(config):
@@ -410,13 +431,8 @@ def _get_bootDiskSizeGb(config):
     return bootDiskSizeGb
 
 
-def submit_cmd(jq, io, cluster, args, config):
-    metadata = {}
-
-    if args.image:
-        image = args.image
-    else:
-        image = config['default_image']
+def _get_params_and_submit(args, config, io, jq, cluster, job_id):
+    bootDiskSizeGb = _get_bootDiskSizeGb(config)
 
     if args.preemptible:
         preemptible = True
@@ -427,22 +443,6 @@ def submit_cmd(jq, io, cluster, args, config):
                 "setting 'preemptible' in config must either by 'y' or 'n' but was: {}".format(preemptible_flag))
         preemptible = preemptible_flag == 'y'
 
-    bootDiskSizeGb = _get_bootDiskSizeGb(config)
-    default_url_prefix = config.get("default_url_prefix", "")
-    work_dir = config.get("local_work_dir", os.path.expanduser(
-        "~/.sparkles-cache/local_work_dir"))
-
-    job_id = args.name
-    if job_id is None:
-        job_id = new_job_id()
-    elif args.skipifexists:
-        job = jq.get_job(job_id, must=False)
-        if job is not None:
-            txtui.user_print(
-                f"Found existing job {job_id} and submitted job with --skipifexists so aborting")
-            return 0
-
-    target_node_count = args.nodes
     machine_type = config['machine_type']
     if args.machine_type:
         machine_type = args.machine_type
@@ -453,6 +453,11 @@ def submit_cmd(jq, io, cluster, args, config):
 
     cas_url_prefix = config['cas_url_prefix']
     default_url_prefix = config['default_url_prefix']
+
+    if args.image:
+        image = args.image
+    else:
+        image = config['default_image']
 
     if args.file:
         assert len(args.command) == 0
@@ -534,7 +539,7 @@ def submit_cmd(jq, io, cluster, args, config):
                                  mount_point=config.get("mount", "/mnt/"),
                                  kubequeconsume_url=kubequeconsume_exe_url,
                                  gpu_count=gpu_count,
-                                 target_node_count=target_node_count
+                                 target_node_count=args.nodes
                                  )
 
     cluster_name = None
@@ -546,14 +551,49 @@ def submit_cmd(jq, io, cluster, args, config):
         # to ensure the local process is the one which picks up the job.
         cluster_name = "local-"+random_string(8)
 
+    metadata = {}
     submit(jq, io, cluster, job_id, spec, submit_config, metadata=metadata,
            clean_if_exists=True, dry_run=args.dryrun, cluster_name=cluster_name)
+
+
+def submit_cmd(jq, io, cluster, args, config):
+    job_id = args.name
+    if job_id is None:
+        job_id = new_job_id()
+        existing_job = None
+    else:
+        existing_job = jq.get_job(job_id, must=False)
+
+    needs_submission = True
+    if existing_job is not None:
+        if args.skipifexists:
+            txtui.user_print(
+                f"Found existing job {job_id} and submitted job with --skipifexists so aborting")
+            return 0
+        elif args.watchifexists:
+            txtui.user_print(
+                f"Job {job_id} already exists, will watch instead of submitting a new job")
+            needs_submission = False
+        else:
+            # TODO: Perhaps the removal of the existing job should be lifted up to here
+            txtui.user_print(
+                f"Job {job_id} already exists, will attempt to replace with this submission")
+
+    if needs_submission:
+        if args.foreach:
+            from .foreach import foreach_cmd
+            return foreach_cmd(jq, io, cluster, args, config, job_id)
+        else:
+            _get_params_and_submit(args, config, io, jq, cluster, job_id)
 
     finished = False
     successful_execution = True
 
     if args.local:
         try:
+            kubequeconsume_exe_path = config['kubequeconsume_exe_path']
+            work_dir = config.get("local_work_dir", os.path.expanduser(
+                "~/.sparkles-cache/local_work_dir"))
             successful_execution = local_watch(
                 job_id, kubequeconsume_exe_path, work_dir, cluster)
             finished = True
@@ -566,10 +606,11 @@ def submit_cmd(jq, io, cluster, args, config):
         if not (args.dryrun or args.skip_kube_submit) and args.wait_for_completion:
             log.info("Waiting for job to terminate")
             successful_execution = watch(
-                io, jq, job_id, cluster, target_nodes=target_node_count, loglive=True)
+                io, jq, job_id, cluster, target_nodes=args.nodes, loglive=True)
             finished = True
 
     if finished:
+        default_url_prefix = config["default_url_prefix"]
         txtui.user_print("Done waiting for job. You can download results via 'gsutil rsync -r {} DEST_DIR'".format(
             url_join(default_url_prefix, job_id)))
 

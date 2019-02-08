@@ -154,7 +154,7 @@ def start_docker_process(job_spec_str: str, consume_exe: str, work_dir: str):
     for src_port, dst_port in docker_portmapping.items():
         docker_options.extend(["-p", f"{src_port}:{dst_port}"])
 
-    cmd = ["gcloud", "docker", "--", "run"] + \
+    cmd = ["docker", "run"] + \
         docker_options + [docker_image] + docker_command
 
     print("Executing:", cmd)
