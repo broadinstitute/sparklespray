@@ -1,3 +1,12 @@
+import os
+import subprocess
+from .txtui import user_print
+from .log import log
+from . import txtui
+from .cluster_service import Cluster
+from .job_queue import JobQueue
+from .io import IO
+from .resize_cluster import ResizeCluster, GetPreempted
 import time
 import sys
 import logging
@@ -12,16 +21,6 @@ from .txtui import print_log_content
 
 class RetryError(Exception):
     pass
-
-
-from .resize_cluster import ResizeCluster, GetPreempted
-from .io import IO
-from .job_queue import JobQueue
-from .cluster_service import Cluster
-from . import txtui
-
-from .log import log
-from .txtui import user_print
 
 
 def add_watch_cmd(subparser):
@@ -138,10 +137,6 @@ def _watch(job_id: str, state: ClusterState, initial_poll_delay: float,
     elif len(state.get_tasks()) == 1:
         task = state.get_tasks()[0]
         flush_remaining(task.task_id, 0)
-
-
-import subprocess
-import os
 
 
 def start_docker_process(job_spec_str: str, consume_exe: str, work_dir: str):
