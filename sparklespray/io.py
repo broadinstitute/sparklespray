@@ -88,6 +88,13 @@ class IO:
         else:
             assert not must, "Could not find {}".format(path)
 
+    def get_as_str_starting_at(self, src_url, start):
+        bucket, path = self._get_bucket_and_path(src_url)
+        blob = bucket.blob(path)
+        if blob.size == start:
+            return ""
+        return blob.download_as_string(start=start).decode("utf8")
+
     def put(self, src_filename, dst_url, must=True, skip_if_exists=False, is_public=False):
         if must:
             assert os.path.exists(

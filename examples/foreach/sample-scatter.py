@@ -1,5 +1,8 @@
-def scatter():
-    return dict(elements=[1,2,3,4], foreach=foreach)
+def scatter(scale):
+    return dict(elements=[1,2,3,4], extra_args=[float(scale)])
     
-def foreach(x):
-    print("Here from foreach", x)
+def foreach(x, scale):
+    return x * scale
+
+def gather(x):
+    print(x)

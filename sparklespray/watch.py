@@ -76,7 +76,11 @@ def dump_stdout_if_single_task(jq, io, jobid):
     print_error_lines(stdout_lines)
 
 
-def _watch(job_id: str, state: ClusterState, initial_poll_delay: float, max_poll_delay: float, loglive: bool, cluster: Cluster, poll_cluster: Callable[[], None]):
+def _watch(job_id: str, state: ClusterState, initial_poll_delay: float,
+           max_poll_delay: float, loglive: bool, cluster: Cluster,
+           poll_cluster: Callable[[], None],
+           flush_remaining: Callable[[str, int], None]):
+
     log_monitor = None
     prev_summary = None
 
@@ -123,11 +127,17 @@ def _watch(job_id: str, state: ClusterState, initial_poll_delay: float, max_poll
             else:
                 print_log_content(None,
                                   "[{} is no longer running, tail of log stopping]".format(log_monitor.task_id), from_sparkles=True)
+                flush_remaining(log_monitor.task_id, log_monitor.offset)
                 log_monitor = None
 
         time.sleep(poll_delay)
 
-# TODO: Finish implementing. Use to start docker instance and watch progress
+    # waiting is done, try to flush any remaining logs
+    if log_monitor is not None:
+        flush_remaining(log_monitor.task_id, log_monitor.offset)
+    elif len(state.get_tasks()) == 1:
+        task = state.get_tasks()[0]
+        flush_remaining(task.task_id, 0)
 
 
 import subprocess
@@ -167,7 +177,7 @@ class DockerFailedException(Exception):
     pass
 
 
-def local_watch(job_id: str, consume_exe: str, work_dir: str, cluster: Cluster, initial_poll_delay=1.0, max_poll_delay=30.0):
+def local_watch(io: IO, jq: JobQueue, job_id: str, consume_exe: str, work_dir: str, cluster: Cluster, initial_poll_delay=1.0, max_poll_delay=30.0):
     loglive = True
 
     job = cluster.job_store.get_job(job_id)
@@ -183,7 +193,8 @@ def local_watch(job_id: str, consume_exe: str, work_dir: str, cluster: Cluster, 
 
     try:
         _watch(job_id, state, initial_poll_delay,
-               max_poll_delay, loglive, cluster, poll_cluster)
+               max_poll_delay, loglive, cluster, poll_cluster,
+               make_log_flush_remainder(io, jq))
 
         failures = state.get_failed_task_count()
         successes = state.get_successful_task_count()
@@ -197,10 +208,19 @@ def local_watch(job_id: str, consume_exe: str, work_dir: str, cluster: Cluster, 
         successful_execution = False
 
     if proc.poll() is not None:
-        log.warning("Sending terminate signal to {proc}")
+        log.warning(f"Sending terminate signal to {proc}")
         proc.terminate()
 
     return successful_execution
+
+
+def make_log_flush_remainder(io, jq):
+    def log_flush_remainder(task_id, offset):
+        task = jq.task_storage.get_task(task_id)
+        remainder = io.get_as_str_starting_at(task.log_url, offset)
+        if remainder != "":
+            txtui.print_log_content(None, remainder)
+    return log_flush_remainder
 
 
 def watch(io: IO, jq: JobQueue, job_id: str, cluster: Cluster, target_nodes=None, initial_poll_delay=1.0, max_poll_delay=30.0, loglive=None):
@@ -222,11 +242,6 @@ def watch(io: IO, jq: JobQueue, job_id: str, cluster: Cluster, target_nodes=None
         loglive = True
         log.info("Only one task, so tailing log")
 
-    # if loglive and task_count != 1:
-    #     log.warning(
-    #         "Could not tail logs because there are %d tasks, and we can only watch one task at a time", len(job.tasks))
-    #     loglive = False
-
     try:
         def poll_cluster():
             with _exception_guard(lambda: "restarting preempted nodes threw exception"):
@@ -241,7 +256,8 @@ def watch(io: IO, jq: JobQueue, job_id: str, cluster: Cluster, target_nodes=None
                 resize_cluster(state, cluster.get_cluster_mod(job_id))
 
         _watch(job_id, state, initial_poll_delay,
-               max_poll_delay, loglive, cluster, poll_cluster)
+               max_poll_delay, loglive, cluster, poll_cluster,
+               make_log_flush_remainder(io, jq))
 
         failures = state.get_failed_task_count()
         successes = state.get_successful_task_count()

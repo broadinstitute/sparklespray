@@ -594,8 +594,8 @@ def submit_cmd(jq, io, cluster, args, config):
             kubequeconsume_exe_path = config['kubequeconsume_exe_path']
             work_dir = config.get("local_work_dir", os.path.expanduser(
                 "~/.sparkles-cache/local_work_dir"))
-            successful_execution = local_watch(
-                job_id, kubequeconsume_exe_path, work_dir, cluster)
+            successful_execution = local_watch(io, jq,
+                                               job_id, kubequeconsume_exe_path, work_dir, cluster)
             finished = True
         except DockerFailedException:
             log.error(

@@ -10,13 +10,14 @@ from .log import log
 
 class LogMonitor:
     def __init__(self, datastore_client, node_address, task_id):
-        log.info("connecting to %s", node_address)
         entity_key = datastore_client.key("ClusterKeys", "sparklespray")
         entity = datastore_client.get(entity_key)
 
         cert = entity['cert']
         self.shared_secret = entity['shared_secret']
         creds = grpc.ssl_channel_credentials(cert)
+
+        log.info("connecting to %s", node_address)
         channel = grpc.secure_channel(node_address, creds,
                                       options=(('grpc.ssl_target_name_override', 'sparkles.server',),))
         self.stub = MonitorStub(channel)
