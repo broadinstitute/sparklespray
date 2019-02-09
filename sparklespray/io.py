@@ -91,6 +91,9 @@ class IO:
     def get_as_str_starting_at(self, src_url, start):
         bucket, path = self._get_bucket_and_path(src_url)
         blob = bucket.blob(path)
+        blob.reload()
+        assert blob.exists()
+        assert blob.size is not None
         if blob.size == start:
             return ""
         return blob.download_as_string(start=start).decode("utf8")

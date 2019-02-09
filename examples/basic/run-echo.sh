@@ -1,1 +1,1 @@
-sparkles sub -i alpine --local -n sample2 echo hello world
+sparkles sub -i alpine -n sample2 echo hello world

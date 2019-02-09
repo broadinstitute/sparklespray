@@ -199,8 +199,8 @@ def foreach_cmd(jq, io, cluster, args, config, job_id):
 
     sub_args = prepare_gather(
         args, job_id, script_filename, foreach_submission_dir, interpreter_exe, gather_name, element_count, package_url, job.cluster, script_suffix, results_from_tasks)
-    print("*****")
-    pprint(vars(sub_args))
+    # print("*****")
+    # pprint(vars(sub_args))
     ret_code = submit_cmd(jq, io, cluster, sub_args, config)
 
     return ret_code
