@@ -68,7 +68,7 @@ file should contain the following:
 [config]
 default_url_prefix=gs://your-bucket
 project=your-project
-default_image=octoblu/alpine-ca-certificates
+default_image=alpine
 machine_type=n1-standard-1
 zones=us-east1-b
 ```
@@ -100,12 +100,11 @@ If this completes without errors, you are good to go! Try the following
 submission:
 
 ```
-sparkles sub sh -c 'echo Done!'
+sparkles sub echo hello world
 ```
 
 Once you've seen your first sparkles job complete successfully, you can
-change "zones", "default_image", "default_resource_cpu", and
-"default_resource_memory" based on your needs.
+change "zones", "default_image", "machine_type" based on your needs.
 
 # Command reference
 
@@ -113,80 +112,21 @@ change "zones", "default_image", "default_resource_cpu", and
 
 Submitting a sample job
 
-There's a sample script in the examples/sample-job directory. In order to
-run, you will need to make a '.sparkles' file in that directory with the
-following content:
-
-```
-[config]
-default_url_prefix=gs://YOUR_BUCKET
-project=YOUR_PROJECT
-default_image=python
-machine_type=n1-standard-1
-zones=us-east1-b
-```
-
-You should replace "YOUR_
-
 To run:
 
 ```
-> sparkles sub python '^mandelbrot.py' 0 0 0.5
-2017-09-15 09:49:48,062 Already in CAS cache, skipping upload of mandelbrot.py
-2017-09-15 09:49:48,171 Already in CAS cache, skipping upload of /Users/pmontgom/dev/sparkles/sparkles/bin/sparklesconsume
-2017-09-15 09:49:48,171 Submitting job with id: 20170915-094947-1fb5
-2017-09-15 09:49:48,386 Saved task definition batch containing 1 tasks
-2017-09-15 09:49:49,195 Saved job definition with 1 tasks
-2017-09-15 09:49:49,891 Adding initial node for cluster
-2017-09-15 09:49:50,554 Node's log will be written to: gs://broad-achilles-sparkles/test/kube/node-logs/EJCHtq7oKxjbzq-lrdL-xg8gtubt_vUYKg9wcm9kdWN0aW9uUXVldWU
-2017-09-15 09:49:50,554 Waiting for job to terminate
-2017-09-15 09:49:50,805 Tasks: pending: 1
-2017-09-15 09:49:50,976 Nodes: (no nodes)
-2017-09-15 09:50:01,603 Nodes: RUNNING: 1
-2017-09-15 09:51:04,076 Tasks: complete(code=0): 1
-2017-09-15 09:51:04,076 Done waiting for job to complete, results written to gs://broad-achilles-sparkles/test/kube/20170915-094947-1fb5
-2017-09-15 09:51:04,076 You can download results via 'gsutil rsync -r gs://broad-achilles-sparkles/test/kube/20170915-094947-1fb5 DEST_DIR'
+$ sparkles sub -n sample echo hello world
+0 files (0 bytes) out of 1 files will be uploaded
+tasks: pending (1), worker nodes:
+tasks: pending (1), worker nodes: staging (1)
+[22:52:50] hello world
+Job finished. 1 tasks completed successfully, 0 tasks failed
+Done waiting for job. You can download results via 'gsutil rsync -r gs://bucket/sample DEST_DIR'
+$
 ```
 
-Note, it took about 10 seconds to get the first worker node started (@
-09:49) and then another minute for it to pull the docker container and start
-running the task. (The task itself, took less than a second and completed @ 9:51). However, if we submit a second job which has the same requirements
-(# number of CPUs required, same memory required, same docker image) then we
-can use the worker that is still running from this last invocation.
-
-```
-> sparkles sub python '^mandelbrot.py' 0 0 0.4
-2017-09-15 09:51:18,430 Already in CAS cache, skipping upload of mandelbrot.py
-2017-09-15 09:51:18,538 Already in CAS cache, skipping upload of /Users/pmontgom/dev/sparkles/sparkles/bin/sparklesconsume
-2017-09-15 09:51:18,538 Submitting job with id: 20170915-095118-af10
-2017-09-15 09:51:18,735 Saved task definition batch containing 1 tasks
-2017-09-15 09:51:19,439 Saved job definition with 1 tasks
-2017-09-15 09:51:20,086 Cluster already exists, not adding node. Cluster status: RUNNING: 1
-2017-09-15 09:51:20,086 Waiting for job to terminate
-2017-09-15 09:51:20,361 Tasks: claimed: 1
-2017-09-15 09:51:20,524 Nodes: RUNNING: 1
-2017-09-15 09:51:25,632 Tasks: complete(code=0): 1
-2017-09-15 09:51:25,632 Done waiting for job to complete, results written to gs://broad-achilles-sparkles/test/kube/20170915-095118-af10
-2017-09-15 09:51:25,632 You can download results via 'gsutil rsync -r gs://broad-achilles-sparkles/test/kube/20170915-095118-af10 DEST_DIR'
-```
-
-Note at 9:51 it recognizes there's already a worker running, so the task
-gets picked up right away at 09:51:20 and the whole process takes only 7
-seconds.
-
-### A note on resource requirements
-
-The CPUs and memory required are used as minimums and will determine the
-smallest machine type which satisfies the requirements. (The machine types are listed 
-here https://cloud.google.com/compute/docs/machine-types)
-The actual machine type chosen may have more memory/cpus than was required,
-and your process is free to use the additional resources. 
-
-Expect that larger requirements will require more expensive instances in
-order to run. 
-
-If you are interested in how much memory your process actually used, you can
-see that information in the results.json file saved for each task.
+Note, it took about 10 seconds to get the first worker node started. However, if we submit a second job which has the same requirements
+(same machine type, job name, same docker image) then the same worker that was started earlier will be reused. 
 
 ### GPU usage
 
