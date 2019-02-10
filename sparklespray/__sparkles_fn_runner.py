@@ -7,6 +7,7 @@ import argparse
 import pickle
 import csv
 from zipfile import ZipFile
+import os
 
 
 def get_function(script_filename, function_name):
@@ -29,15 +30,20 @@ def foreach_cmd(args):
         with myzip.open('elements.pickle', "r") as fd:
             elements = pickle.load(fd)
 
+    results = []
     for i in range(args.start_index, args.stop_index):
-        function(elements[i], *common_args)
+        result = function(elements[i], *common_args)
+        results.append(result)
+
+    with open(args.results_filename, "w") as fd:
+        pickle.dump(dict(start_index=args.start_index,
+                         stop_index=args.stop_index, results=results), fd)
 
 
 def scatter_cmd(args):
     function = get_function(args.script_filename, args.function_name)
     scatter_def = function(*args.script_args)
     assert isinstance(scatter_def, dict)
-    assert "foreach" in scatter_def
     assert "elements" in scatter_def
     elements = scatter_def['elements']
     extra_args = scatter_def.get("extra_args", [])
@@ -46,18 +52,33 @@ def scatter_cmd(args):
         fd.write(str(len(elements)))
 
     with ZipFile(args.package_filename, "w") as myzip:
-        with myzip.open('elements.pickle', 'w') as fd:
-            pickle.dump(elements, fd)
+        myzip.writestr('elements.pickle', pickle.dumps(elements))
+        myzip.writestr('extra_args.pickle', pickle.dumps(extra_args))
 
-        with myzip.open('extra_args.pickle', 'w') as fd:
-            pickle.dump(extra_args, fd)
 
-        with myzip.open('foreach.pickle', 'w') as fd:
-            # todo: add validation that we can look up function by module + name and give useful error
-            #       if we cannot.
-            pickle.dump(dict(module=function.__module__,
-                             name=function.__name__,
-                             script_filename=args.script_filename), fd)
+def gather_cmd(args):
+    function = get_function(args.script_filename, args.function_name)
+
+    with ZipFile(args.package_filename, "r") as myzip:
+        with myzip.open("extra_args.pickle", "r") as fd:
+            common_args = pickle.load(fd)
+
+    results = [None] * args.element_count
+
+    # read in results from all foreach calls
+    for fn in os.listdir(args.results_dir):
+        if fn.startswith("."):
+            continue
+        filename = os.path.join(args.results_dir, fn)
+        with open(filename, "rb") as fd:
+            block = pickle.load(fd)
+            start_index = block['start_index']
+            stop_index = block['stop_index']
+
+            for i in range(start_index, stop_index):
+                results[i] = block['results'][i - start_index]
+
+    function(results, *common_args)
 
 
 def main(args=None):
@@ -76,9 +97,18 @@ def main(args=None):
     parser.add_argument("script_filename")
     parser.add_argument("function_name")
     parser.add_argument("package_filename")
+    parser.add_argument("results_filename")
     parser.add_argument("start_index", type=int)
     parser.add_argument("stop_index", type=int)
     parser.set_defaults(func=foreach_cmd)
+
+    parser = subparser.add_parser("gather")
+    parser.add_argument("script_filename")
+    parser.add_argument("function_name")
+    parser.add_argument("results_dir")
+    parser.add_argument("element_count", type=int)
+    parser.add_argument("package_filename")
+    parser.set_defaults(func=gather_cmd)
 
     args = global_parser.parse_args(args)
     args.func(args)

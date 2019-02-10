@@ -50,7 +50,8 @@ def prepare_get_args(args, job_id, script_filename, function_name, submission_di
                              "scatter",
                              script_filename,
                              function_name,
-                             package_filename, element_count_filename],
+                             package_filename,
+                             element_count_filename] + scatter_function_parameters,
                     name=job_id,
                     foreach=False)
 
