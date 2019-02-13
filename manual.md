@@ -20,7 +20,8 @@ sparkles sub echo hello world
 This should yield output similar to:
 
 ```
-$ sparkles sub echo hello world                                                       0 files (0 bytes) out of 1 files will be uploaded
+$ sparkles sub echo hello world        
+0 files (0 bytes) out of 1 files will be uploaded
 tasks: pending (1), worker nodes:
 tasks: pending (1), worker nodes: staging (1)
 [21:29:46] hello world
