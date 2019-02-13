@@ -1,7 +1,6 @@
 # Sparkle Spray: Easy submission of batch jobs to google compute engine
 
-Sparkle spray, or "sparkles" for short, is a command line tool to make it easy to submit adhoc batch jobs
-for execution on GCE instances.
+Sparkle spray, or "sparkles" for short, is a command line tool to make it easy to submit adhoc batch jobs for execution on the cloud on the Google Cloud Platform.
 
 # Getting started:
 
@@ -367,39 +366,3 @@ Experiment:
 - add support for localization via gcsfuse
 
 
-Outline:
-
-Introduction
-
-Quick start
-    sub 
-    sub --local
-
-Tutorial
-    Running
-        Using files not in the docker image
-            --uploading
-            Use of @files
-
-        Watch
-
-        Kill
-        
-        controlling scale
-            --nodes
-            --preemptable
-
-        Submission of parallel jobs
-            sub --params
-            sub --seq
-        
-        foreach
-
-        Special cases
-            --watchifexists
-            --rerun
-
-    Inspecting
-        status
-
-Reference
