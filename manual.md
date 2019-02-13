@@ -4,7 +4,9 @@ Sparkle spray, or "sparkles" for short, is a command line tool to make it easy t
 
 "sparkles" was designed in the spirit of batch submission tools such as Grid Engine [http://www.univa.com/products/] or Slurm [https://slurm.schedmd.com/sbatch.html] with the key difference that sparkles powers up nodes on GCP, instead of scheduling the work on a traditional HPC cluster.
 
-The goal of sparkles is to lower the amount of effort required to run a non-interactive script or other compute on the cloud. In addition, once one can run a script via sparkles, it's trivial to run a batch of commands with some varying parameters in parallel.
+The largest challenge of running jobs on the cloud is getting the execution environment and data accessible on each node. In most HPC clusters, there is a shared network filesystem which greatly simplifies the problem. Sparkles uses a combination of using docker and the ability to push or overlay addition files to create the execution environment with each job submission. While less convenient, the abilty of the cloud to elastically expand or contract compute on demand makes this tradeoff worthwhile.
+
+The goal of sparkles is to lower the amount of effort required to run a non-interactive script or other compute on the cloud. In addition, once one can run a script via sparkles, it's trivial to run a batch of commands with some varying parameters all in parallel.
 
 
 ## Quick start
@@ -39,9 +41,11 @@ It's worth noting that this trival example took around 80 seconds to execute, wh
 
 First some basic terminology:
 
-"node" - a VM (more specifically, a Google Compute Engine instance) which sparkles powered on.
-"task" - A single command to be executed.
-"job" - The unit of work submitted by executing `sparkles sub`. One job may have multiple "tasks" associated with it.
+**node** a VM (more specifically, a Google Compute Engine instance) which sparkles powered on.
+
+**task** A single command to be executed.
+
+**job** - The unit of work submitted by executing `sparkles sub`. One job may have multiple *tasks* associated with it.
 
 You will see these terms appear in the output of sparkles and through out the documentation.
 
@@ -51,6 +55,60 @@ several sub commands. Executing `sparkles --help` will list all subcommands with
 ### Job submission
 
 `sparkles sub ...` is used for submitting a job and has by far the most options. 
+
+Taking the example from the quick start, let's explain what the output means:
+
+```
+$ sparkles sub echo hello world        
+0 files (0 bytes) out of 1 files will be uploaded
+tasks: pending (1), worker nodes:
+tasks: pending (1), worker nodes: staging (1)
+[21:29:46] hello world
+Job finished. 1 tasks completed successfully, 0 tasks failed
+Done waiting for job. You can download results via 'gsutil rsync -r gs://test-sparkles-bucket/20190212-212815-bf0a DEST_DIR'
+```
+
+The first line of output...
+
+```
+0 files (0 bytes) out of 1 files will be uploaded
+```
+
+...explains how much data needs to be pushed from your local machine to the cloud before the job can start. This only needs to happen the first time a job refers to a file, and resubmissions will reuse cached copies of the data.
+
+The next lines...
+
+```
+tasks: pending (1), worker nodes:
+tasks: pending (1), worker nodes: staging (1)
+```
+
+...describe the state of the *tasks* and *nodes* associated with the running job. The "pending" refers to the state of the tasks associated with this job and the number in parenthes refers to the count of tasks with that state. The "worker nodes" are discribed similarly. 
+
+In this example, the first line said our job had one task waiting for execution, and in the second line we see a node "staging" or getting ready to start executing tasks.
+
+The next line...
+
+```
+[21:29:46] hello world
+```
+
+...is reporting output from our task. For longer running jobs, we would probably see another line in the status of the job saying:
+
+```
+tasks: claimed (1), worker nodes: running (1)
+```
+
+indicating that we have a node which is running tasks, and our one task is now claimed by a node. However, in this example the tasks executed and completed so quickly, sparkles never got a chance to see this state change occur.
+
+Now that all tasks are complete, we get a final summary:
+
+```
+Job finished. 1 tasks completed successfully, 0 tasks failed
+Done waiting for job. You can download results via 'gsutil rsync -r gs://test-sparkles-bucket/20190212-212815-bf0a DEST_DIR'
+```
+
+which tells you counts of tasks that succeeded and failed and how to download all the files that those tasks wrote out. 
 
 #### Naming jobs to improve performance
 
