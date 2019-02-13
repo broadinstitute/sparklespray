@@ -1,4 +1,4 @@
-### Introduction
+## Introduction
 
 Sparkle spray, or "sparkles" for short, is a command line tool to make it easy to submit adhoc batch jobs for execution on the cloud on the Google Cloud Platform.
 
@@ -7,7 +7,7 @@ Sparkle spray, or "sparkles" for short, is a command line tool to make it easy t
 The goal of sparkles is to lower the amount of effort required to run a non-interactive script or other compute on the cloud. In addition, once one can run a script via sparkles, it's trivial to run a batch of commands with some varying parameters in parallel.
 
 
-### Quick start
+## Quick start
 
 All sparkles commands are subcommands of the command line tool "sparkles". The most commonly used is "sub" which is short for "submit".
 
@@ -33,9 +33,9 @@ The "hello world" which was written at the output, actually executed on a VM whi
 
 It's worth noting that this trival example took around 80 seconds to execute, which is fairly uninspiring. The time spent is largely due to the time it takes to power on a VM. However, later in the tutorial, we'll see we can get job submissions down to a few seconds by letting sparkles reuse VMs.
 
-### Tutorial
+## Tutorial
 
-#### Terminology
+### Terminology
 
 First some basic terminology:
 
@@ -48,17 +48,17 @@ You will see these terms appear in the output of sparkles and through out the do
 All interaction with sparkles is through the `sparkles` command which is divided into 
 several sub commands. Executing `sparkles --help` will list all subcommands with a description for each.
 
-#### Job submission
+### Job submission
 
 `sparkles sub ...` is used for submitting a job and has by far the most options. 
 
-##### Naming jobs to improve performance
+#### Naming jobs to improve performance
 
 The first option that we generally always want to use is `-n` to give the job a name. In practice, giving a job a name substantially speeds up job submissions, because when a job is submitted, sparkles decides whether there is an existing VM already running which can take tasks for that job, or whether it needs to turn on new nodes.
 
 Turning on new nodes always takes around a minute or two, but if there's an existing node, then it can pick up the task immediately with no delay. The critera for a "compatible VM" is one where the machine type, the docker image and the job name all match. If job name is not specified a unique one is generated each time, resulting in an new VM each submission.
 
-##### Pushing files along with job submission
+#### Pushing files along with job submission
 
 As shown in the quick start, a submission can be as simple as `sparkles sub echo hello`, however, without any additional options, we can only execute commands where all files are present within the docker image.
 
@@ -90,27 +90,27 @@ Then, sparkles will read `files.txt` to learn that it needs to push `sample.R` a
 
 On the surface, it may seem that pushing the data to the remote node each time, would add a lot of time to job submissions. However 'pushing' data aggressively caches files at multiple layers, so the first time a file is referenced, it will need to be uploaded to google cloud storage. For large files this may take some time, but on subsequent job submissions that use the same file, it will recognize if the file is unchanged and avoid uploading it a second time.
 
-##### Submission of parallel jobs
+#### Submission of parallel jobs
 
             sub --params
             sub --seq
         
         foreach
 
-#### Monitoring jobs
+### Monitoring jobs
 
 `sparkles watch jobname`
 
-##### Controlling parallelism
+#### Controlling parallelism
         controlling scale
             --nodes
             --preemptable
 
-#### Killing jobs
+### Killing jobs
 
 `sparkles kill jobname`
 
-#### Inspecting jobs
+### Inspecting jobs
 
 `sparkles logs jobname`
 `sparkles list jobname`
