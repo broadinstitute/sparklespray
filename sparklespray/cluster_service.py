@@ -1,3 +1,4 @@
+import json
 import re
 from .task_store import INCOMPLETE_TASK_STATES, Task, STATUS_FAILED, STATUS_COMPLETE, STATUS_CLAIMED
 from .node_req_store import AddNodeReqStore, NodeReq, NODE_REQ_SUBMITTED, NODE_REQ_CLASS_PREEMPTIVE, NODE_REQ_CLASS_NORMAL, NODE_REQ_COMPLETE, REQUESTED_NODE_STATES, NODE_REQ_FAILED, REQUESTED_NODE_STATES
@@ -22,7 +23,6 @@ from .log import log
 # and image which has curl and sh installed, used to prep the worker node
 SETUP_IMAGE = "sequenceiq/alpine-curl"
 
-import json
 
 # which step in the actions does kubeconsume run in
 CONSUMER_ACTION_ID = 2
@@ -295,13 +295,19 @@ class ClusterState:
         return by_id[task_id].status == STATUS_CLAIMED
 
     def get_summary(self) -> str:
+        # summarize tasks
         by_status: Dict[str, int] = defaultdict(lambda: 0)
         for t in self.tasks:
-            by_status[t.status] += 1
+            if t.exit_code is not None and t.exit_code != "":
+                status_txt = "{}[code={}]".format(t.status, t.exit_code)
+            else:
+                status_txt = t.status
+            by_status[status_txt] += 1
         statuses = sorted(by_status.keys())
         task_status = ", ".join(
             ["{} ({})".format(status, by_status[status]) for status in statuses])
 
+        # summarize nodes
         by_status = defaultdict(lambda: 0)
         for r in self.node_reqs:
             by_status[r.status] += 1
@@ -340,11 +346,12 @@ class ClusterState:
             else:
                 node_req = node_req_by_instance_name[instance_name]
                 if node_req.status == NODE_REQ_COMPLETE:
-                    log.warning("task {} status = {}, but node_req was {}".format(
-                        task.task_id, task.status, node_req.status))
                     if node_req.node_class != NODE_REQ_CLASS_PREEMPTIVE:
                         log.error(
                             "instance %s terminated but task %s was reported to still be using instance and the instance was not preemptiable", instance_name, task.task_id)
+                    else:
+                        log.warning("task {} running (status = {}), but owning node was not (status={}), likely node was preempted".format(
+                            task.task_id, task.status, node_req.status))
                     task_ids_needing_reset.append(task.task_id)
 
         return task_ids_needing_reset

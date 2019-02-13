@@ -29,3 +29,4 @@ htmlcov
 
 go/src/github.com/broadinstitute/kubequeconsume/cli/main
 examples/foreach/sample
+examples/basic/sparkles-docker.log

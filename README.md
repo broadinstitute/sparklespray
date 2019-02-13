@@ -341,3 +341,65 @@ Debugging
     dump-operation      primarily used for debugging. If a sparkles cannot
                         turn on a node, this can be used to dump the details
                         of the operation which requested the node.
+
+Big:
+- explore pyInstall to build self contained executable package
+
+Remaining needs from scatter:
+- pass foreach input index in, task index in
+- localize all outputs from foreach task to gather steps (merge? create one per task
+  dir?) I think merge would be easier to reason about. However, we'll
+  definitely need task index in foreach so it knows how to prevent
+  clobbering. Print out warning about clobbers before running gather.
+- support gather = none to skip gather phase
+- support --start-at getargs | foreach | gather to resubmit without running. Should
+  verify jobs with right names already exist
+- write documentation
+
+Nice to do:
+- change --local to not show all docker stuff. If docker fails, dump log. Add debug flag which controls
+whether to show or not.
+- fix vm keep-alive to either use node req objects. (First pass, just add
+  field to node-req to say how long to stay alive. if a VM has no
+  corresponding node-req obj, default stay alive to 0.)
+
+Experiment:
+- add support for localization via gcsfuse
+
+
+Outline:
+
+Introduction
+
+Quick start
+    sub 
+    sub --local
+
+Tutorial
+    Running
+        Using files not in the docker image
+            --uploading
+            Use of @files
+
+        Watch
+
+        Kill
+        
+        controlling scale
+            --nodes
+            --preemptable
+
+        Submission of parallel jobs
+            sub --params
+            sub --seq
+        
+        foreach
+
+        Special cases
+            --watchifexists
+            --rerun
+
+    Inspecting
+        status
+
+Reference

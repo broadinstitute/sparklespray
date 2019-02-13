@@ -98,7 +98,15 @@ class JobQueue:
 #         return self.storage.get_last_job()
 
     def get_jobids(self, job_id_wildcard="*"):
-        job_ids = self.job_storage.get_job_ids()
+        if ('*' in job_id_wildcard) or ('?' in job_id_wildcard):
+            job_ids = self.job_storage.get_job_ids()
+        else:
+            # fast path, if no wildcard, just verify the job exists. Don't query all job ids
+            job = self.get_job(job_id_wildcard, must=False)
+            if job is None:
+                return []
+            else:
+                return [job_id_wildcard]
         return [job_id for job_id in job_ids if fnmatch(job_id, job_id_wildcard)]
 
 #     def get_kube_job_spec(self, job_id):

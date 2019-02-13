@@ -162,8 +162,10 @@ def start_docker_process(job_spec_str: str, consume_exe: str, work_dir: str):
     cmd = ["docker", "run"] + \
         docker_options + [docker_image] + docker_command
 
-    print("Executing:", cmd)
-    proc = subprocess.Popen(cmd)
+    with open("sparkles-docker.log", "a") as docker_log:
+        docker_log.write("Executing: {}".format(cmd))
+        proc = subprocess.Popen(
+            cmd, stderr=subprocess.STDOUT, stdout=docker_log)
 
     return proc
 

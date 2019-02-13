@@ -1,3 +1,5 @@
+from queue import Queue
+import threading
 from .pb_pb2_grpc import MonitorStub
 from .pb_pb2 import ReadOutputRequest, GetProcessStatusRequest
 import grpc
@@ -6,6 +8,55 @@ import logging
 from .txtui import print_log_content
 
 from .log import log
+
+# Give all grpc calls a timeout of 10 seconds to complete
+GRPC_TIMEOUT = 10.0
+
+
+class WrappedStub:
+    def __init__(self, timeout):
+        in_queue = Queue()
+        out_queue = Queue()
+
+        self.in_queue = in_queue
+        self.out_queue = out_queue
+        self.timeout = timeout
+
+    def _worker_loop(self, channel):
+        stub = MonitorStub(channel)
+        while True:
+            cmd = self.in_queue.get()
+            if cmd == "dispose":
+                break
+            else:
+                name, args, kwargs = cmd
+                try:
+                    result = getattr(stub, name)(*args, **kwargs)
+                except Exception as ex:
+                    self.out_queue.put(("exception", ex))
+                else:
+                    self.out_queue.put(("result", result))
+
+    def start(self, channel):
+        t = threading.Thread(target=self._worker_loop, args=[channel])
+        t.daemon = True
+        t.start()
+
+    def _blocking_call(self, method, args, kwargs):
+        self.in_queue.put((method, args, kwargs))
+        type, value = self.out_queue.get(timeout=self.timeout)
+        if type == "exception":
+            raise value
+        return value
+
+    def ReadOutput(self, *args, **kwargs):
+        return self._blocking_call("ReadOutput", args, kwargs)
+
+    def GetProcessStatus(self, *args, **kwargs):
+        return self._blocking_call("GetProcessStatus", args, kwargs)
+
+    def dispose(self):
+        self.in_queue.put("dispose")
 
 
 class LogMonitor:
@@ -20,7 +71,9 @@ class LogMonitor:
         log.info("connecting to %s", node_address)
         channel = grpc.secure_channel(node_address, creds,
                                       options=(('grpc.ssl_target_name_override', 'sparkles.server',),))
-        self.stub = MonitorStub(channel)
+
+        self.stub = WrappedStub(GRPC_TIMEOUT*2)
+        self.stub.start(channel)
         self.task_id = task_id
         self.offset = 0
 
@@ -30,7 +83,7 @@ class LogMonitor:
         while True:
             try:
                 response = self.stub.ReadOutput(ReadOutputRequest(taskId=self.task_id, offset=self.offset, size=100000),
-                                                metadata=[('shared-secret', self.shared_secret)])
+                                                metadata=[('shared-secret', self.shared_secret)], timeout=GRPC_TIMEOUT)
             except grpc.RpcError as rpc_error:
                 # TODO: Might be caught in an infinite loop. Could be good to add an exponential delay before retrying. And stop after a number of retries
                 log.debug(
@@ -48,7 +101,7 @@ class LogMonitor:
 
         try:
             response = self.stub.GetProcessStatus(GetProcessStatusRequest(),
-                                                  metadata=[('shared-secret', self.shared_secret)])
+                                                  metadata=[('shared-secret', self.shared_secret)], timeout=GRPC_TIMEOUT)
         except grpc.RpcError as rpc_error:
             # TODO: Might be caught in an infinite loop. Could be good to add an exponential delay before retrying. And stop after a number of retries
             log.debug(
