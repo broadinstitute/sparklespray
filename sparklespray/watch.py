@@ -12,7 +12,7 @@ import sys
 import logging
 import contextlib
 import json
-from .logclient import LogMonitor
+from .logclient import LogMonitor, CommunicationError
 from typing import Callable
 from .cluster_service import ClusterState
 from .txtui import print_log_content
@@ -122,7 +122,13 @@ def _watch(job_id: str, state: ClusterState, initial_poll_delay: float,
         else:
             if state.is_task_running(log_monitor.task_id):
                 with _exception_guard(lambda: "polling log file threw exception"):
-                    log_monitor.poll()
+                    try:
+                        log_monitor.poll()
+                    except CommunicationError as err:
+                        log.info("Got error from log_monitor.poll() -> %s", err)
+                        log_monitor = None
+                        print_log_content(None,
+                                          "[Got communication error getting logs, stopping watch of logs from {}]".format(log_monitor.task_id), from_sparkles=True)
             else:
                 print_log_content(None,
                                   "[{} is no longer running, tail of log stopping]".format(log_monitor.task_id), from_sparkles=True)

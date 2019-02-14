@@ -1,4 +1,4 @@
-from queue import Queue
+from queue import Queue, Empty
 import threading
 from .pb_pb2_grpc import MonitorStub
 from .pb_pb2 import ReadOutputRequest, GetProcessStatusRequest
@@ -11,6 +11,18 @@ from .log import log
 
 # Give all grpc calls a timeout of 10 seconds to complete
 GRPC_TIMEOUT = 10.0
+
+
+class CommunicationError(Exception):
+    pass
+
+
+class GRPCError(CommunicationError):
+    pass
+
+
+class Timeout(CommunicationError):
+    pass
 
 
 class WrappedStub:
@@ -44,7 +56,10 @@ class WrappedStub:
 
     def _blocking_call(self, method, args, kwargs):
         self.in_queue.put((method, args, kwargs))
-        type, value = self.out_queue.get(timeout=self.timeout)
+        try:
+            type, value = self.out_queue.get(timeout=self.timeout)
+        except Empty:
+            raise Timeout("Timeout trying in call to {}".format(method))
         if type == "exception":
             raise value
         return value
@@ -88,7 +103,7 @@ class LogMonitor:
                 # TODO: Might be caught in an infinite loop. Could be good to add an exponential delay before retrying. And stop after a number of retries
                 log.debug(
                     "Received a RpcError {}. Retrying to contact the VM".format(rpc_error))
-                continue
+                raise GRPCError(rpc_error)
 
             payload = response.data.decode('utf8')
             if payload != "":
@@ -106,6 +121,7 @@ class LogMonitor:
             # TODO: Might be caught in an infinite loop. Could be good to add an exponential delay before retrying. And stop after a number of retries
             log.debug(
                 "Received a RpcError {}. Retrying to contact the VM".format(rpc_error))
+            raise GRPCError(rpc_error)
 
         mem_total = response.totalMemory + response.totalData + \
             response.totalShared + response.totalResident
