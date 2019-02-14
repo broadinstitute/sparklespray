@@ -164,6 +164,8 @@ def foreach_cmd(jq, io, cluster, args, config, job_id):
     from pprint import pprint
     # print("*****")
     # pprint(vars(sub_args))
+    user_print("Submitting job named {} to execute {}({})".format(
+        get_args_job_name, get_args_job_name, ", ".join([repr(x) for x in getargs_function_parameters])))
     ret_code = submit_cmd(jq, io, cluster, sub_args, config)
     if ret_code != 0:
         return ret_code
@@ -190,6 +192,8 @@ def foreach_cmd(jq, io, cluster, args, config, job_id):
     # run foreach phase
     sub_args = prepare_foreach(args, job_id, script_filename, foreach_submission_dir,
                                interpreter_exe, foreach_function_name, batch_size, job.cluster, script_suffix, element_count, package_url)
+    user_print("Submitting job named {} to evaluate {} on {} elements".format(
+        job_id, foreach_function_name, element_count))
     ret_code = submit_cmd(jq, io, cluster, sub_args, config)
     if ret_code != 0:
         return ret_code
@@ -202,6 +206,8 @@ def foreach_cmd(jq, io, cluster, args, config, job_id):
         args, job_id, script_filename, foreach_submission_dir, interpreter_exe, gather_name, element_count, package_url, job.cluster, script_suffix, results_from_tasks)
     # print("*****")
     # pprint(vars(sub_args))
+    user_print("Submitting job named {} to evaluate {}".format(
+        sub_args.name, gather_name))
     ret_code = submit_cmd(jq, io, cluster, sub_args, config)
 
     return ret_code
