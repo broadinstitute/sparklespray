@@ -246,7 +246,100 @@ Then `get_foreach_args` returns a dictionary with a list named `elements`. Each 
 
 After `get_foreach_args` a task will be created for each element and as part of that task. Each task will evaluate `foreach` on a single element and any extra arguments returned from `get_foreach_args`.
 
+Executing the submission, we see output like the following:
+
+```
+$ sparkles sub -i python:2.7-alpine -n sample --foreach sample-scatter.py 2.0
+Submitting job named sample-getargs to execute sample-getargs('2.0')
+0 files (0 bytes) out of 3 files will be uploaded
+tasks: pending (1), worker nodes:
+tasks: pending (1), worker nodes: staging (1)
+Job finished. 1 tasks completed successfully, 0 tasks failed
+Submitting job named sample to evaluate foreach on 4 elements
+0 files (0 bytes) out of 3 files will be uploaded
+tasks: pending (4), worker nodes: running (1)
+[22:35:46] [starting tail of log sample.1]
+[22:35:48] Processes running in container: 3, total memory used: 0.343 GB, data memory used: 0.297 GB, shared used 0.032 GB, resident 0.072 GB
+Job finished. 1 tasks completed successfully, 0 tasks failed
+Submitting job named sample-gather to evaluate gather
+0 files (0 bytes) out of 3 files will be uploaded
+tasks: pending (1), worker nodes: running (1)
+tasks: claimed (1), worker nodes: running (1)
+[22:35:55] [starting tail of log sample-gather.1]
+[22:35:57] [2.0, 4.0, 6.0, 8.0]
+Job finished. 1 tasks completed successfully, 0 tasks failed
+```
+
+In this output you can see the three distinct phases been run as 
+three different jobs. After all three phases have completed, the `sparkles sub ...` command terminates.
+
 ##### R implementation
+
+The R implementation works identically, and the choice whether to run via Rscript or python is determined by the file extension of the script being run. 
+
+You can see `examples/foreach/sample-scatter.r` as an example of an R script which fits a linear model for each feature of the iris dataset using all other features in the dataset. Then for each model, it computes the RMSE, and collects all the results and writes out a csv file.
+
+Again the functions `get_foreach_args`, `foreach` and `gather` are invoked, with the same parameters. Only the syntax is different.
+
+The contents of `examples/foreach/sample-scatter.r` is as follows:
+
+```
+# function for converting factors to one-hot columns
+one.hot <- function(x) {
+  sapply( levels(x), function(level) {
+    as.numeric(x == level)
+  })
+}
+
+# regress the target feature using all features except itself
+fit.and.get.rmsq <- function(target.index, features) {
+  model <- lm.fit(features[,-target.index], features[,target.index])
+  # return RMSE
+  mean(model$residuals ** 2) ** 0.5
+}
+
+# returns the list of elements to compute foreach on and additional arguments to pass to foreach
+get_foreach_args <- function() {
+  data(iris)
+
+  # turn species from catagorical to one-hot encoded and get a numeric matrix of features
+  features <- as.matrix(cbind(iris[,1:4], one.hot(iris[,5])))
+
+  list(elements=seq(ncol(features)), extra_args=list(features))
+}
+
+# evaluated once per element return from scatter()
+foreach <- function(i, features) {
+  data.frame(target=colnames(features)[[i]], rmse=fit.and.get.rmsq(i, features))
+}
+
+# evaluated on the list of values returned from all foreach calls
+gather <- function(results, ...) {
+ print("results")
+ str(results)
+  df <- do.call(rbind, results)
+  write.csv(df, file="results.csv")
+}
+```
+
+This script can be run as:
+
+```
+sparkles sub --foreach -i r-base:3.5.2 -n sample sample-scatter.r
+```
+
+Upon completion, we can download `results.csv` and see that it contains:
+
+```
+"","target","rmse"
+"1","Sepal.Length",0.300626956897024
+"2","Sepal.Width",0.262392490381384
+"3","Petal.Length",0.257419025528041
+"4","Petal.Width",0.163249617363952
+"5","setosa",0.0751863401588153
+"6","versicolor",0.0818033953243054
+"7","virginica",0.0683978359513745
+```
 
 ### Monitoring jobs
 
