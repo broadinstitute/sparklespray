@@ -116,6 +116,14 @@ The first option that we generally always want to use is `-n` to give the job a 
 
 Turning on new nodes always takes around a minute or two, but if there's an existing node, then it can pick up the task immediately with no delay. The critera for a "compatible VM" is one where the machine type, the docker image and the job name all match. If job name is not specified a unique one is generated each time, resulting in an new VM each submission.
 
+#### Testing submissions by running locally
+
+When getting started with sparkles, it can be convenient to run the submission locally. Instead of turning on a new VM, the submission with run inside docker on the local machine.
+
+This has the advantage of not needing to wait for a VM and so submissions should always be quicker. However, it is a much more limited mode. The requested machine type will be ignored, so memory and # of cpus are restricted to what is availible locally. (In addition, docker under MacOS has a memory cap more restricted than the physical memory availible, which can be controlled in Docker's settings.) Also, in this mode, only one task per job will run at a time. 
+
+This mode is really best limited to testing, but can be a good way to get started with sparkles.
+
 #### Pushing files along with job submission
 
 As shown in the quick start, a submission can be as simple as `sparkles sub echo hello`, however, without any additional options, we can only execute commands where all files are present within the docker image.
@@ -150,10 +158,95 @@ On the surface, it may seem that pushing the data to the remote node each time, 
 
 #### Submission of parallel jobs
 
-            sub --params
-            sub --seq
-        
-        foreach
+Now that we can submit a single command, it's easy to submit a batch of commands which are identical except for a single parameter.
+
+If all we need can write our script so that it is parameterized by a single integer (similar to what many batch submission tools called a "job array") we can add the `--seq` option and in our command we put `'{index}` as the placeholder for where the task index should be provided.
+
+For example the following submission executes three tasks in parallel:
+
+```
+$ sparkles sub -i alpine --seq 3 echo I am task '{index}'
+0 files (0 bytes) out of 1 files will be uploaded
+tasks: pending (3), worker nodes:
+tasks: pending (3), worker nodes: staging (1)
+Job finished. 3 tasks completed successfully, 0 tasks failed
+Done waiting for job. You can download results via 'gsutil rsync -r gs://test-sparkles-bucket/20190213-110827-8755 DEST_DIR'
+```
+
+Now, if you were to look under gs://test-sparkles-bucket/20190213-110827-8755, you'll see three folders named "1", "2", and "3". Each folder contains a stdout.txt file which contains the message written from the `echo` command.
+
+Often we have more than a single parameter we want to vary so sparkles allows the parameters to be taken from a csv file.
+
+Imagine we have a csv file named `parameters.csv` containing:
+
+```
+lambda,size
+0.1,small
+1.0,large
+```
+
+We can submit a command using those parameters with the `--params` flag:
+
+```
+$ sparkles sub echo '{lambda}' '{size}'
+```
+
+This will result in the command `echo 0.1 small` and `echo 1.0 large` being run as two tasks in parallel.
+
+#### Advanced parallel submission with --foreach
+
+A common pattern that arrises is one where we have some compute we'd like to run on some large dataset, but we can chop up the input data into pieces that can be computed independently. Then for each piece in parallel, we run the compute. After all those tasks are done, we merge all the results together.
+
+Sometimes this pattern is referred to as "scatter-gather".
+
+Using the options described so far one would have to write at least three scripts:
+
+1. a script to generate a csv with some identifier to which piece of data each task should use.
+2. a script which takes that identifier and computes some result
+3. a script to download the results and merge them together into the final result.
+
+This scripts 1 and 3 end up being written over and over again for each type of job. 
+
+To streamline this use case, `sparkles` has the `--foreach` option which makes it easy to write a scatter/gather style script in either python or R.
+
+The syntax is slightly different between R and python, but the concepts are identical so once you've used one, the other is probably obvious.
+
+##### Python implementation
+
+In `examples/foreach` we have an example called `sample-scatter.py`. This is a toy example script in which we scale the vector `[1,2,3,4]` by a constant, provided at the time of job submission. The multiplication of the element by the constant can be done independantly, so in this example, each element will be computed by a seperate task.
+
+After all elements are scaled, the final step prints out the resulting list of values.
+
+To run `sample-scatter.py` we can execute:
+
+```
+sparkles sub -i python:2.7-alpine -n sample --foreach sample-scatter.py 2.0
+```
+
+The `-i` and `-n` options were described earlier, however the important new option here is `--foreach`. This causes the remaining parameters to be interpreted not as a command, but as a script conforming to a few requirements, described below, and a series of arguments.
+
+When running with `--foreach` we require that the script have functions named `get_foreach_args`, `foreach` and `gather`.
+
+In this example, the `sample-scatter.py` script consists of:
+
+```
+def get_foreach_args(scale):
+    return dict(elements=[1,2,3,4], extra_args=[float(scale)])
+
+def foreach(x, scale):
+    return x * scale
+
+def gather(x, *other_args):
+    print(x)
+```
+
+The first step has `get_foreach_args` run with any arguments passed to in as part of the submission. In the example `sparkles sub ...` submission we can see that value is `"2.0"`
+
+Then `get_foreach_args` returns a dictionary with a list named `elements`. Each element in that list will have `foreach` run on it. In addition `get_foreach_args` returns `extra_args` which are passed to `foreach`.
+
+After `get_foreach_args` a task will be created for each element and as part of that task. Each task will evaluate `foreach` on a single element and any extra arguments returned from `get_foreach_args`.
+
+##### R implementation
 
 ### Monitoring jobs
 
