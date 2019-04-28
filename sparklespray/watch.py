@@ -216,16 +216,8 @@ def watch(io: IO, jq: JobQueue, job_id: str, cluster: Cluster, target_nodes=None
     state = cluster.get_state(job_id)
     state.update()
 
-    task_count = len(state.get_tasks())
-
-    if loglive is None and task_count == 1:
+    if loglive is None:
         loglive = True
-        log.info("Only one task, so tailing log")
-
-    # if loglive and task_count != 1:
-    #     log.warning(
-    #         "Could not tail logs because there are %d tasks, and we can only watch one task at a time", len(job.tasks))
-    #     loglive = False
 
     try:
         def poll_cluster():
