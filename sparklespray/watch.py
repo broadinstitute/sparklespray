@@ -64,19 +64,28 @@ def print_error_lines(lines):
     for line in lines:
         print(colored(line, "red"))
 
+import datetime
 
-def dump_stdout_if_single_task(jq, io, jobid):
-    tasks = jq.get_tasks(jobid)
-    if len(tasks) != 1:
-        return
-    task = list(tasks)[0]
+def flush_stdout_from_complete_task(jq, io, task_id, offset):
+    task = jq.task_storage.get_task(task_id)
     spec = json.loads(io.get_as_str(task.args))
-    stdout_lines = io.get_as_str(spec['stdout_url']).split("\n")
-    stdout_lines = stdout_lines[-100:]
-    print_error_lines(stdout_lines)
 
+    attempts = 0
+    while True:
+        rest_of_stdout = io.get_as_str(spec['stdout_url'], start=offset)
+        if rest_of_stdout is not None:
+            break
+        log.warning("Log doesn't appear to exist yet. Will try again...")
+        time.sleep(5)
+        attempts += 1
+        if attempts > 10:
+            raise Exception("Log file never did appear. Aborting")
 
-def _watch(job_id: str, state: ClusterState, initial_poll_delay: float, max_poll_delay: float, loglive: bool, cluster: Cluster, poll_cluster: Callable[[], None]):
+    print_log_content(datetime.datetime.now(), rest_of_stdout)
+
+def _watch(job_id: str, state: ClusterState, initial_poll_delay: float, max_poll_delay: float, loglive: bool, cluster: Cluster,
+           poll_cluster: Callable[[], None],
+           flush_stdout_from_complete_task : Callable[[str, int], None] = None):
     log_monitor = None
     prev_summary = None
 
@@ -123,9 +132,12 @@ def _watch(job_id: str, state: ClusterState, initial_poll_delay: float, max_poll
             else:
                 print_log_content(None,
                                   "[{} is no longer running, tail of log stopping]".format(log_monitor.task_id), from_sparkles=True)
+                if flush_stdout_from_complete_task:
+                    flush_stdout_from_complete_task(log_monitor.task_id, log_monitor.offset)
                 log_monitor = None
 
         time.sleep(poll_delay)
+
 
 # TODO: Finish implementing. Use to start docker instance and watch progress
 
@@ -205,6 +217,11 @@ def local_watch(job_id: str, consume_exe: str, work_dir: str, cluster: Cluster, 
 
 def watch(io: IO, jq: JobQueue, job_id: str, cluster: Cluster, target_nodes=None, initial_poll_delay=1.0, max_poll_delay=30.0, loglive=None):
     job = jq.get_job(job_id)
+    flush_stdout_calls = [0]
+
+    def flush_stdout(task_id, offset):
+        flush_stdout_from_complete_task(jq, io, task_id, offset)
+        flush_stdout_calls[0] += 1
 
     if target_nodes is None:
         target_nodes = job.target_node_count
@@ -214,7 +231,15 @@ def watch(io: IO, jq: JobQueue, job_id: str, cluster: Cluster, target_nodes=None
     get_preempted = GetPreempted()
 
     state = cluster.get_state(job_id)
-    state.update()
+
+    check_attempts = 0
+    while len(state.get_tasks()) == 0:
+        state.update()
+        log.warning("Did not see any tasks for %s, sleeping and will check again...", job_id)
+        time.sleep(5)
+        check_attempts += 1
+        if check_attempts > 20:
+            raise Exception("Even after waiting a while no tasks ever appeared")
 
     if loglive is None:
         loglive = True
@@ -233,17 +258,23 @@ def watch(io: IO, jq: JobQueue, job_id: str, cluster: Cluster, target_nodes=None
                 resize_cluster(state, cluster.get_cluster_mod(job_id))
 
         _watch(job_id, state, initial_poll_delay,
-               max_poll_delay, loglive, cluster, poll_cluster)
+               max_poll_delay, loglive, cluster, poll_cluster, flush_stdout_from_complete_task=flush_stdout)
 
         failures = state.get_failed_task_count()
         successes = state.get_successful_task_count()
         txtui.user_print(
             f"Job finished. {successes} tasks completed successfully, {failures} tasks failed")
 
-        if failures > 0 and len(job.tasks) == 1:
+        if failures > 0:
             log.warning(
-                "Job failed, and there was only one task, so dumping the tail of the output from that task")
-            dump_stdout_if_single_task(jq, io, job_id)
+                "At least one task failed. Dumping stdout from one of the failures.")
+            failed_tasks = state.get_failed_tasks()
+            flush_stdout(failed_tasks[0].task_id, 0)
+
+        elif flush_stdout_calls[0] == 0 and loglive: # if we want the logs and yet we've never written out a single log, pick one at random and write it out
+            log.info("Dumping arbitrary successful task stdout")
+            successful_tasks = state.get_successful_tasks()
+            flush_stdout(successful_tasks[0].task_id, 0)
 
         return failures == 0
     except KeyboardInterrupt:

@@ -80,13 +80,22 @@ class IO:
         else:
             assert not must, "Could not find {}".format(path)
 
-    def get_as_str(self, src_url, must=True):
+    def get_as_str(self, src_url, must=True, start=None):
+
         bucket, path = self._get_bucket_and_path(src_url)
         blob = bucket.blob(path)
         if blob.exists():
-            return blob.download_as_string().decode("utf8")
+            end = None
+            if start is not None:
+                blob.reload()
+                end = blob.size
+                if start == end:
+                    return ""
+            # log.warning("Downloading %s (%s, %s)", src_url, start, end)
+            return blob.download_as_string(start=start, end=end).decode("utf8")
         else:
             assert not must, "Could not find {}".format(path)
+            return None
 
     def put(self, src_filename, dst_url, must=True, skip_if_exists=False, is_public=False):
         if must:

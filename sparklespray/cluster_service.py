@@ -350,10 +350,16 @@ class ClusterState:
         return task_ids_needing_reset
 
     def get_successful_task_count(self):
-        return len([t for t in self.tasks if (t.status == STATUS_COMPLETE and t.exit_code == "0")])
+        return len(self.get_successful_tasks())
 
     def get_failed_task_count(self):
-        return len([t for t in self.tasks if t.status == STATUS_FAILED or (t.status == STATUS_COMPLETE and t.exit_code != "0")])
+        return len(self.get_failed_tasks())
+
+    def get_failed_tasks(self):
+        return [t for t in self.tasks if t.status == STATUS_FAILED or (t.status == STATUS_COMPLETE and t.exit_code != "0")]
+
+    def get_successful_tasks(self):
+        return [t for t in self.tasks if (t.status == STATUS_COMPLETE and t.exit_code == "0")]
 
     def is_done(self):
         return self.get_incomplete_task_count() == 0

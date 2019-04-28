@@ -13,7 +13,7 @@ def print_log_content(timestamp, payload, from_sparkles=False):
     if timestamp is None:
         timestamp = datetime.datetime.now()
 
-    if payload[-1] == "\n":
+    if len(payload) > 0 and payload[-1] == "\n":
         payload = payload[:-1]
     payload_lines = payload.split("\n")
     if payload_lines[-1] == "":
