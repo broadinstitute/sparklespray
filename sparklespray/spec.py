@@ -32,11 +32,12 @@ def rewrite_argv_with_parameters(argv, parameters):
     l = []
     for task_params in parameters:
         def expand_parameters(x):
-            m = re.match("(.*){([^}]+)}(.*)", x)
-            if m == None:
-                return x
-            else:
-                return m.group(1)+task_params[m.group(2)]+m.group(3)
+            while True:
+                m = re.match("(.*){([^}]+)}(.*)", x)
+                if m == None:
+                    return x
+                else:
+                    x = m.group(1)+task_params[m.group(2)]+m.group(3)
 
         l.append([expand_parameters(x) for x in argv])
     return l
