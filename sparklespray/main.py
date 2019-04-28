@@ -491,6 +491,11 @@ def setup_cmd(args, config):
 
 
 def sparkles_main():
+    # disable stdout/stderr buffering to work better when run non-interactively
+    import sys, io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, line_buffering=True)
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, line_buffering=True)
+
     retcode = main()
     if retcode is not None:
         sys.exit(retcode)
