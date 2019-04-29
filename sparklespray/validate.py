@@ -18,7 +18,9 @@ def _test_datastore_api(job_store: JobStore, job_id: str):
               metadata={},
               cluster=job_id,
               status=JOB_STATUS_KILLED,
-              submit_time=time.time())
+              submit_time=time.time(),
+              max_preemptable_attempts = 2
+            )
 
     job_store.insert(job)
     fetched_job = job_store.get_job(job_id)

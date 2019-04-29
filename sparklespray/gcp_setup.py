@@ -11,6 +11,7 @@ from google.oauth2 import service_account
 import google.api_core.exceptions
 import time
 from collections import namedtuple
+from google.api_core.exceptions import PermissionDenied
 
 services_to_add = [  # "storage.googleapis.com",
     "datastore.googleapis.com", "storage-component.googleapis.com", "genomics.googleapis.com", "pubsub.googleapis.com", "storage-api.googleapis.com", "compute.googleapis.com"]
@@ -23,23 +24,21 @@ roles_to_add = ["roles/owner", # Eventually drop this
                 "roles/storage.admin"]
 
 
-def _run_cmd(cmd, args, error_callback=None):
+def _run_cmd(cmd, args, suppress_warning=False):
     cmd = [cmd] + args
     cmd_str = " ".join(cmd)
     print(f"Executing: {cmd_str}")
+
     try:
-        output = subprocess.check_output(cmd, stderr=subprocess.STDOUT)
+        return subprocess.check_output(cmd, stderr=subprocess.STDOUT)
     except subprocess.CalledProcessError as e:
-        print("Command failed. Output:")
-        print(e.output)
+        if not suppress_warning:
+            print("Command failed. Output:")
+            print(e.output)
+        raise
 
-        if not error_callback:
-            sys.exit(1)
-        else:
-            error_callback(e)
-
-def gcloud(args, error_callback=None):
-    _run_cmd("gcloud", args, error_callback)
+def gcloud(args, suppress_warning=False):
+    _run_cmd("gcloud", args, suppress_warning=suppress_warning)
     
 def gsutil(args):
     _run_cmd("gsutil", args)
@@ -81,20 +80,34 @@ def add_firewall_rule():
         gcloud(gcloud_command)
         print("Firewall rule seems already set. Ignoring.")
 
-    # Try to create the firewall rule. If fails, try to describe it to check we have one
-    gcloud_command = ['compute', 'firewall-rules', 'create', firewall_rule_obj.name, '--allow', protocol_and_port]
-    gcloud(gcloud_command, error_callback=error_callback)
+    #
+    #try:
+    #    gcloud(['compute', 'firewall-rules', 'describe', firewall_rule_obj.name])
+    #except subprocess.CalledProcessError as e:
+
+    try:
+        gcloud(['compute', 'firewall-rules', 'create', firewall_rule_obj.name, '--allow', protocol_and_port], suppress_warning=True)
+    except subprocess.CalledProcessError as e:
+        output = e.output.decode('utf8')
+        # make sure the error says the resource exists
+        assert "The resource" in output and "already exists" in output, "Creating firewall failed: {}".format(output)
 
 
 def can_reach_datastore_api(project_id, key_path):
     credentials = service_account.Credentials.from_service_account_file(
         key_path, scopes=SCOPES)
     client = datastore.Client(project_id, credentials=credentials)
-    try :
-        client.get(client.key("invalid", "invalid"))
-        return True
-    except exceptions.NotFound:
-        return False
+    max_attempts = 50
+    for attempt in range(max_attempts):
+        try :
+            client.get(client.key("invalid", "invalid"))
+            return True
+        except exceptions.NotFound:
+            return False
+        except PermissionDenied:
+            print("Attempt {} out of {}: Got a permissions denied accessing datastore service with service account -- may just be a delay in permissions being applied. (It can take a few minutes for this to take effect) Retrying in 10 seconds...".format(attempt, max_attempts))
+            time.sleep(10)
+    raise Exception("Failed to confirm access to datastore")
 
 def setup_project(project_id, key_path, bucket_name):
     print("Enabling services for project {}...".format(project_id))
