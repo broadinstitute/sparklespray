@@ -8,6 +8,7 @@ import logging
 
 from .log import log
 
+use_gustil = False
 
 class IO:
     def __init__(self, project, cas_url_prefix, credentials=None, compute_hash=compute_hash):
@@ -123,14 +124,15 @@ class IO:
             log.info("put %s -> %s (acl: %s)",
                      src_filename, dst_url, canned_acl)
             # if greater than 10MB ask gsutil to upload for us
-            if os.path.getsize(src_filename) > 10 * 1024 * 1024:
+            if use_gustil and os.path.getsize(src_filename) > 10 * 1024 * 1024:
                 import subprocess
                 subprocess.check_call(
                     ['gsutil', 'cp'] + acl_params + [src_filename, dst_url])
             else:
                 blob.upload_from_filename(src_filename)
-                acl = blob.acl
-                acl.save_predefined("publicRead")
+                if canned_acl:
+                    acl = blob.acl
+                    acl.save_predefined(canned_acl)
 
     def _get_url_prefix(self):
         return "gs://"
