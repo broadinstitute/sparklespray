@@ -29,6 +29,7 @@ class LogMonitor:
         while True:
             try:
                 response = self.stub.ReadOutput(ReadOutputRequest(taskId=self.task_id, offset=self.offset, size=100000),
+                                                timeout=10,
                                                 metadata=[('shared-secret', self.shared_secret)])
             except grpc.RpcError as rpc_error:
                 # TODO: Might be caught in an infinite loop. Could be good to add an exponential delay before retrying. And stop after a number of retries
@@ -46,7 +47,7 @@ class LogMonitor:
                 break
 
         try:
-            response = self.stub.GetProcessStatus(GetProcessStatusRequest(),
+            response = self.stub.GetProcessStatus(GetProcessStatusRequest(), timeout=10,
                                                   metadata=[('shared-secret', self.shared_secret)])
         except grpc.RpcError as rpc_error:
             # TODO: Might be caught in an infinite loop. Could be good to add an exponential delay before retrying. And stop after a number of retries

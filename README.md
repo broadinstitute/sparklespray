@@ -68,7 +68,7 @@ file should contain the following:
 [config]
 default_url_prefix=gs://your-bucket
 project=your-project
-default_image=octoblu/alpine-ca-certificates
+default_image=alpine
 machine_type=n1-standard-1
 zones=us-east1-b
 ```

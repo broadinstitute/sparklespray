@@ -231,12 +231,13 @@ def watch(io: IO, jq: JobQueue, job_id: str, cluster: Cluster, target_nodes=None
     get_preempted = GetPreempted()
 
     state = cluster.get_state(job_id)
+    state.update()
 
     check_attempts = 0
     while len(state.get_tasks()) == 0:
-        state.update()
         log.warning("Did not see any tasks for %s, sleeping and will check again...", job_id)
         time.sleep(5)
+        state.update()
         check_attempts += 1
         if check_attempts > 20:
             raise Exception("Even after waiting a while no tasks ever appeared")
