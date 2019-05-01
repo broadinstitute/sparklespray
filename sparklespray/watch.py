@@ -3,7 +3,7 @@ import sys
 import logging
 import contextlib
 import json
-from .logclient import LogMonitor
+from .logclient import LogMonitor, CommunicationError
 from typing import Callable
 from .cluster_service import ClusterState
 from .txtui import print_log_content
@@ -128,7 +128,13 @@ def _watch(job_id: str, state: ClusterState, initial_poll_delay: float, max_poll
         else:
             if state.is_task_running(log_monitor.task_id):
                 with _exception_guard(lambda: "polling log file threw exception"):
-                    log_monitor.poll()
+                    try:
+                        log_monitor.poll()
+                    except CommunicationError as ex:
+                        log.warning("Got error polling log. shutting down log watch: {}".format(ex))
+                        log_monitor.close()
+                        log_monitor = None
+
             else:
                 print_log_content(None,
                                   "[{} is no longer running, tail of log stopping]".format(log_monitor.task_id), from_sparkles=True)
@@ -166,11 +172,13 @@ def start_docker_process(job_spec_str: str, consume_exe: str, work_dir: str):
     for src_port, dst_port in docker_portmapping.items():
         docker_options.extend(["-p", f"{src_port}:{dst_port}"])
 
-    cmd = ["gcloud", "docker", "--", "run"] + \
+    cmd = ["docker", "run"] + \
         docker_options + [docker_image] + docker_command
 
-    print("Executing:", cmd)
-    proc = subprocess.Popen(cmd)
+    with open("sparkles-docker.log", "a") as docker_log:
+        docker_log.write("Executing: {}".format(cmd))
+        proc = subprocess.Popen(
+            cmd, stderr=subprocess.STDOUT, stdout=docker_log)
 
     return proc
 
@@ -209,7 +217,7 @@ def local_watch(job_id: str, consume_exe: str, work_dir: str, cluster: Cluster, 
         successful_execution = False
 
     if proc.poll() is not None:
-        log.warning("Sending terminate signal to {proc}")
+        log.warning(f"Sending terminate signal to {proc}")
         proc.terminate()
 
     return successful_execution
