@@ -297,11 +297,18 @@ class ClusterState:
     def get_summary(self) -> str:
         by_status: Dict[str, int] = defaultdict(lambda: 0)
         for t in self.tasks:
-            by_status[t.status] += 1
+            if t.status == STATUS_COMPLETE:
+                label = "{}(code={})".format(t.status, t.exit_code)
+            elif t.status == STATUS_FAILED:
+                label = "{}({})".format(t.status, t.failure_reason)
+            else:
+                label = t.status
+            by_status[label] += 1
         statuses = sorted(by_status.keys())
         task_status = ", ".join(
             ["{} ({})".format(status, by_status[status]) for status in statuses])
 
+        # compute status of workers
         by_status = defaultdict(lambda: 0)
         for r in self.node_reqs:
             by_status[r.status] += 1
