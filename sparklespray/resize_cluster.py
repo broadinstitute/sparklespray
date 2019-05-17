@@ -20,7 +20,6 @@ class GetPreempted:
     def __call__(self, state: ClusterState) -> List[str]:
         tasks_to_reset = []
         task_ids = state.get_running_tasks_with_invalid_owner()
-        self.first_time_task_reported_bad
         next_times = {}
         for task_id in task_ids:
             first_time = self.first_time_task_reported_bad.get(

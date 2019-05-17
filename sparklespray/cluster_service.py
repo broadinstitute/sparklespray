@@ -1,6 +1,6 @@
 import re
 from .task_store import INCOMPLETE_TASK_STATES, Task, STATUS_FAILED, STATUS_COMPLETE, STATUS_CLAIMED
-from .node_req_store import AddNodeReqStore, NodeReq, NODE_REQ_SUBMITTED, NODE_REQ_CLASS_PREEMPTIVE, NODE_REQ_CLASS_NORMAL, NODE_REQ_COMPLETE, REQUESTED_NODE_STATES, NODE_REQ_FAILED, REQUESTED_NODE_STATES
+from .node_req_store import AddNodeReqStore, NodeReq, NODE_REQ_SUBMITTED, NODE_REQ_CLASS_PREEMPTIVE, NODE_REQ_CLASS_NORMAL, NODE_REQ_COMPLETE, REQUESTED_NODE_STATES, NODE_REQ_FAILED, REQUESTED_NODE_STATES,NODE_REQ_STAGING,NODE_REQ_RUNNING
 from .compute_service import ComputeService
 from .node_service import NodeService, MachineSpec
 from .job_store import JobStore
@@ -335,10 +335,9 @@ class ClusterState:
                 node_req_by_instance_name[node_req.instance_name] = node_req
 
         task_ids_needing_reset = []
-        for task in self.tasks:
-            if task.status != STATUS_CLAIMED:
-                continue
+        claimed_tasks = [task for task in self.tasks if task.status == STATUS_CLAIMED]
 
+        for task in claimed_tasks:
             instance_name = task.get_instance_name()
 
             if instance_name not in node_req_by_instance_name:
@@ -346,13 +345,15 @@ class ClusterState:
                     instance_name, ", ".join(node_req_by_instance_name.keys())))
             else:
                 node_req = node_req_by_instance_name[instance_name]
-                if node_req.status == NODE_REQ_COMPLETE:
+                if node_req.status in [NODE_REQ_COMPLETE, NODE_REQ_FAILED]:
                     log.warning("task {} status = {}, but node_req was {}".format(
                         task.task_id, task.status, node_req.status))
                     if node_req.node_class != NODE_REQ_CLASS_PREEMPTIVE:
                         log.error(
                             "instance %s terminated but task %s was reported to still be using instance and the instance was not preemptiable", instance_name, task.task_id)
                     task_ids_needing_reset.append(task.task_id)
+                else:
+                    assert node_req.status in [NODE_REQ_SUBMITTED,NODE_REQ_STAGING,NODE_REQ_RUNNING]
 
         return task_ids_needing_reset
 
