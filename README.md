@@ -282,8 +282,19 @@ sparkles kill LAST
 
 ## Resubmitting failures
 
-You may have some of your jobs fail (not enough memory, or some data
-specific bug) and you want to rerun only those that failed. To do this, you
+If you have a job that failed due to some transient failure, you can tell sparkles to take the tasks which did not complete successfully and mark them as 'pending' to try them again. (Note: Only run this after the job is finished running. If there are any tasks still running, marked 'claimed', this will reset those as well)
+
+```
+# find all the incomplete tasks and mark them as ready to be run again
+> sparkles reset JOBID
+# Now, kick of executing the job again
+> sparkles watch JOBID
+```
+
+That will work for transient failures. However, more often you may have failures that are deterministic and require you change something and then re-run.
+
+For example, you may have some of your jobs fail (not enough memory, or some data
+specific bug). In such a case, you might want to rerun only those that failed after you've corrected the underlying problem. To do this, you
 can query for only those jobs which did not complete, and get their
 parameters. Once you have those parameters, you can resubmit only those
 parameters which had problems.
@@ -295,7 +306,7 @@ parameters which had problems.
 
 # but, oh no! some of the jobs failed. After you've made your fix to
 # process_file.py, you can resubmit the failures:
-> sparkles listparams --incomplete missing-tasks.csv
+> sparkles list --params --filter exit_code!=0 -o missing-tasks.csv
 > sparkles sub --params missing-tasks.csv process_file.py '{^filename}'
 ```
 
