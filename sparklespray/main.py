@@ -217,6 +217,30 @@ def status_cmd(jq: JobQueue, io: IO, cluster: Cluster, args):
         tasks = cluster.task_store.get_tasks(jobid)
         status, complete = _summarize_task_statuses(tasks)
         txtui.user_print(f"{jobid}: {status}")
+        if args.stats:
+            task_times = []
+
+            for task in tasks:
+                claimed_time = None
+                task_time = None
+                for entry in task.history:
+                    if entry.status == STATUS_CLAIMED:
+                        claimed_time = entry.timestamp
+                    elif entry.status == STATUS_COMPLETE:
+                        task_time = entry.timestamp - claimed_time
+                
+                task_times.append(task_time)
+            
+            task_times.sort()
+            n = len(tasks)
+            txtui.user_print("task count: {}, execution time quantiles (in seconds): {}, {}, {}, {}, {}, mean: {}".format(n,
+                task_times[0],
+                task_times[int(n/4)],
+                task_times[int(n/2)],
+                task_times[int(n*3/4)],
+                task_times[n-1],
+                sum(task_times)/n
+            ))
 
 
 def fetch_cmd(jq, io, args):
@@ -575,6 +599,7 @@ def main(argv=None):
 
     parser = subparser.add_parser(
         "status", help="Print the status for the tasks which make up the specified job")
+    parser.add_argument("--stats", action="store_true")
     parser.set_defaults(func=status_cmd)
     parser.add_argument("jobid_pattern", nargs="?")
 
