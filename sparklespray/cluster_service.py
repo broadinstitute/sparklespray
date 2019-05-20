@@ -1,6 +1,24 @@
 import re
-from .task_store import INCOMPLETE_TASK_STATES, Task, STATUS_FAILED, STATUS_COMPLETE, STATUS_CLAIMED
-from .node_req_store import AddNodeReqStore, NodeReq, NODE_REQ_SUBMITTED, NODE_REQ_CLASS_PREEMPTIVE, NODE_REQ_CLASS_NORMAL, NODE_REQ_COMPLETE, REQUESTED_NODE_STATES, NODE_REQ_FAILED, REQUESTED_NODE_STATES,NODE_REQ_STAGING,NODE_REQ_RUNNING
+from .task_store import (
+    INCOMPLETE_TASK_STATES,
+    Task,
+    STATUS_FAILED,
+    STATUS_COMPLETE,
+    STATUS_CLAIMED,
+)
+from .node_req_store import (
+    AddNodeReqStore,
+    NodeReq,
+    NODE_REQ_SUBMITTED,
+    NODE_REQ_CLASS_PREEMPTIVE,
+    NODE_REQ_CLASS_NORMAL,
+    NODE_REQ_COMPLETE,
+    REQUESTED_NODE_STATES,
+    NODE_REQ_FAILED,
+    REQUESTED_NODE_STATES,
+    NODE_REQ_STAGING,
+    NODE_REQ_RUNNING,
+)
 from .compute_service import ComputeService
 from .node_service import NodeService, MachineSpec
 from .job_store import JobStore
@@ -35,7 +53,7 @@ class ClusterStatus:
 
         running_count = 0
         for instance in instances:
-            status = instance['status']
+            status = instance["status"]
             key = status
             instances_per_key[key] += 1
             if status != "STOPPING":
@@ -55,14 +73,26 @@ class ClusterStatus:
     def as_string(self):
         if len(self.table) == 0:
             return "(no nodes)"
-        return ", ".join(["{}: {}".format(status, count) for status, count in self.table])
+        return ", ".join(
+            ["{}: {}".format(status, count) for status, count in self.table]
+        )
 
     def is_running(self):
         return self.running_count > 0
 
 
-class Cluster():
-    def __init__(self, project: str, zones: List[str], node_req_store: AddNodeReqStore, job_store: JobStore, task_store: TaskStore, client: datastore.Client, debug_log_prefix: str, credentials=None) -> None:
+class Cluster:
+    def __init__(
+        self,
+        project: str,
+        zones: List[str],
+        node_req_store: AddNodeReqStore,
+        job_store: JobStore,
+        task_store: TaskStore,
+        client: datastore.Client,
+        debug_log_prefix: str,
+        credentials=None,
+    ) -> None:
         self.compute = ComputeService(project, credentials)
         self.nodes = NodeService(project, zones, credentials)
         self.node_req_store = node_req_store
@@ -79,33 +109,38 @@ class Cluster():
 
     def get_state(self, job_id):
         job = self.job_store.get_job(job_id)
-        return ClusterState(job_id, job.cluster, self.task_store, self.node_req_store, self)
+        return ClusterState(
+            job_id, job.cluster, self.task_store, self.node_req_store, self
+        )
 
-    def add_nodes(self, job_id: str, preemptible: bool, debug_log_url_prefix: str, count: int):
+    def add_nodes(
+        self, job_id: str, preemptible: bool, debug_log_url_prefix: str, count: int
+    ):
         for i in range(count):
-            self.add_node(job_id, preemptible,
-                          "{}/{}".format(debug_log_url_prefix, i))
+            self.add_node(job_id, preemptible, "{}/{}".format(debug_log_url_prefix, i))
 
     def add_node(self, job_id: str, preemptible: bool, debug_log_url: str):
         job = self._get_job(job_id)
         pipeline_def = json.loads(job.kube_job_spec)
-        operation_id = self.nodes.add_node(
-            pipeline_def, preemptible, debug_log_url)
-        req = NodeReq(operation_id=operation_id,
-                      cluster_id=job.cluster,
-                      status=NODE_REQ_SUBMITTED,
-                      node_class=NODE_REQ_CLASS_PREEMPTIVE if preemptible else NODE_REQ_CLASS_NORMAL,
-                      sequence=get_timestamp(),
-                      job_id=job_id
-                      )
+        operation_id = self.nodes.add_node(pipeline_def, preemptible, debug_log_url)
+        req = NodeReq(
+            operation_id=operation_id,
+            cluster_id=job.cluster,
+            status=NODE_REQ_SUBMITTED,
+            node_class=NODE_REQ_CLASS_PREEMPTIVE
+            if preemptible
+            else NODE_REQ_CLASS_NORMAL,
+            sequence=get_timestamp(),
+            job_id=job_id,
+        )
         self.node_req_store.add_node_req(req)
         log.info(
-            f"Requested node (preemptible: {preemptible} operation_id: {operation_id} debug_log_url: {debug_log_url})")
+            f"Requested node (preemptible: {preemptible} operation_id: {operation_id} debug_log_url: {debug_log_url})"
+        )
         return operation_id
 
     def get_cluster_status(self, cluster_name: str) -> ClusterStatus:
-        instances = self.compute.get_cluster_instances(
-            self.zones, cluster_name)
+        instances = self.compute.get_cluster_instances(self.zones, cluster_name)
         return ClusterStatus(instances)
 
     def has_active_node_requests(self, cluster_id):
@@ -116,24 +151,29 @@ class Cluster():
         return False
 
     def stop_cluster(self, cluster_name: str):
-        instances = self.compute.get_cluster_instances(
-            self.zones, cluster_name)
+        instances = self.compute.get_cluster_instances(self.zones, cluster_name)
         if len(instances) == 0:
             log.warning(
-                "Attempted to delete instances in cluster %s but no instances found!", cluster_name)
+                "Attempted to delete instances in cluster %s but no instances found!",
+                cluster_name,
+            )
         else:
             for instance in instances:
-                zone = instance['zone'].split('/')[-1]
-                log.info("deleting instance %s associated with cluster %s",
-                         instance['name'], cluster_name)
-                self.compute.stop(instance['name'], zone)
+                zone = instance["zone"].split("/")[-1]
+                log.info(
+                    "deleting instance %s associated with cluster %s",
+                    instance["name"],
+                    cluster_name,
+                )
+                self.compute.stop(instance["name"], zone)
 
             for instance in instances:
-                zone = instance['zone'].split('/')[-1]
-                self.wait_for_instance_status(
-                    zone, instance['name'], "TERMINATED")
+                zone = instance["zone"].split("/")[-1]
+                self.wait_for_instance_status(zone, instance["name"], "TERMINATED")
 
-    def wait_for_instance_status(self, zone: str, instance_name: str, desired_status: str):
+    def wait_for_instance_status(
+        self, zone: str, instance_name: str, desired_status: str
+    ):
         def p(msg):
             sys.stdout.write(msg)
             sys.stdout.flush()
@@ -141,8 +181,7 @@ class Cluster():
         p("Waiting for {} to become {}...".format(instance_name, desired_status))
         prev_status = None
         while True:
-            instance_status = self.compute.get_instance_status(
-                zone, instance_name)
+            instance_status = self.compute.get_instance_status(zone, instance_name)
             if instance_status != prev_status:
                 prev_status = instance_status
                 p("(now {})".format(instance_status))
@@ -204,49 +243,81 @@ class Cluster():
         self.nodes.test_pipeline_api(self.project)
 
     def test_image(self, docker_image, sample_url, logging_url, boot_volume_in_gb):
-        self.nodes.test_pipeline_submit_api(setup_image=SETUP_IMAGE, job_image=docker_image, command=[
-                                            "sh", "-c", "echo okay"], machine_type="n1-standard-2",
-                                            boot_volume_in_gb=boot_volume_in_gb)
+        self.nodes.test_pipeline_submit_api(
+            setup_image=SETUP_IMAGE,
+            job_image=docker_image,
+            command=["sh", "-c", "echo okay"],
+            machine_type="n1-standard-2",
+            boot_volume_in_gb=boot_volume_in_gb,
+        )
 
     def is_owner_running(self, owner: str) -> bool:
         if owner == "localhost":
             return False
 
         m = re.match("projects/([^/]+)/zones/([^/]+)/([^/]+)", owner)
-        assert m is not None, "Expected a instance name with zone but got owner={}".format(
-            owner)
+        assert (
+            m is not None
+        ), "Expected a instance name with zone but got owner={}".format(owner)
         project_id, zone, instance_name = m.groups()
-        #assert project_id == self.project, "project_id ({}) != self.project ({})".format(project_id, self.project)
-        return self.compute.get_instance_status(zone, instance_name) == 'RUNNING'
+        # assert project_id == self.project, "project_id ({}) != self.project ({})".format(project_id, self.project)
+        return self.compute.get_instance_status(zone, instance_name) == "RUNNING"
 
-    def create_pipeline_spec(self, jobid: str, cluster_name: str, consume_exe_url: str, docker_image: str, consume_exe_args: List[str], machine_specs: MachineSpec, monitor_port: int) -> dict:
+    def create_pipeline_spec(
+        self,
+        jobid: str,
+        cluster_name: str,
+        consume_exe_url: str,
+        docker_image: str,
+        consume_exe_args: List[str],
+        machine_specs: MachineSpec,
+        monitor_port: int,
+    ) -> dict:
         mount_point = machine_specs.mount_point
 
         consume_exe_path = os.path.join(mount_point, "consume")
         consume_data = os.path.join(mount_point, "data")
 
-        return self.nodes.create_pipeline_json(jobid=jobid,
-                                               cluster_name=cluster_name,
-                                               setup_image=SETUP_IMAGE,
-                                               setup_parameters=["sh", "-c",
-                                                                 "curl -o {consume_exe_path} {consume_exe_url} && chmod a+x {consume_exe_path} && mkdir {consume_data} && chmod a+rwx {consume_data}".format(
-                                                                     consume_exe_url=consume_exe_url,
-                                                                     consume_data=consume_data,
-                                                                     consume_exe_path=consume_exe_path)],
-                                               docker_image=docker_image,
-                                               docker_command=[consume_exe_path, "consume", "--cacheDir",
-                                                               os.path.join(
-                                                                   consume_data, "cache"), "--tasksDir",
-                                                               os.path.join(consume_data, "tasks")] + consume_exe_args,
-                                               machine_specs=machine_specs,
-                                               monitor_port=monitor_port)
+        return self.nodes.create_pipeline_json(
+            jobid=jobid,
+            cluster_name=cluster_name,
+            setup_image=SETUP_IMAGE,
+            setup_parameters=[
+                "sh",
+                "-c",
+                "curl -o {consume_exe_path} {consume_exe_url} && chmod a+x {consume_exe_path} && mkdir {consume_data} && chmod a+rwx {consume_data}".format(
+                    consume_exe_url=consume_exe_url,
+                    consume_data=consume_data,
+                    consume_exe_path=consume_exe_path,
+                ),
+            ],
+            docker_image=docker_image,
+            docker_command=[
+                consume_exe_path,
+                "consume",
+                "--cacheDir",
+                os.path.join(consume_data, "cache"),
+                "--tasksDir",
+                os.path.join(consume_data, "tasks"),
+            ]
+            + consume_exe_args,
+            machine_specs=machine_specs,
+            monitor_port=monitor_port,
+        )
 
     def get_cluster_mod(self, job_id):
         return ClusterMod(job_id, self, self.debug_log_prefix)
 
 
 class ClusterState:
-    def __init__(self, job_id: str, cluster_id: str, task_store: TaskStore, node_req_store: AddNodeReqStore, cluster: Cluster) -> None:
+    def __init__(
+        self,
+        job_id: str,
+        cluster_id: str,
+        task_store: TaskStore,
+        node_req_store: AddNodeReqStore,
+        cluster: Cluster,
+    ) -> None:
         self.job_id = job_id
         self.cluster_id = cluster_id
         self.cluster = cluster
@@ -270,17 +341,20 @@ class ClusterState:
         # get all the status of each operation
         for node_req in self.node_reqs:
             if node_req.status not in [NODE_REQ_COMPLETE, NODE_REQ_FAILED]:
-                op = self.cluster.nodes.get_add_node_status(
-                    node_req.operation_id)
+                op = self.cluster.nodes.get_add_node_status(node_req.operation_id)
                 new_status = op.status
                 if new_status == NODE_REQ_FAILED:
-                    log.warning("Node request (%s) failed: %s",
-                                node_req.operation_id, op.error_message)
+                    log.warning(
+                        "Node request (%s) failed: %s",
+                        node_req.operation_id,
+                        op.error_message,
+                    )
                     self.failed_node_req_count += 1
                 # print("fetched {} and status was {}".format(node_req.operation_id, new_status))
                 if new_status != node_req.status:
                     self.node_req_store.update_node_req_status(
-                        node_req.operation_id, op.status, op.instance_name)
+                        node_req.operation_id, op.status, op.instance_name
+                    )
                     # reflect the change in memory as well
                     node_req.status = new_status
 
@@ -295,6 +369,7 @@ class ClusterState:
         return by_id[task_id].status == STATUS_CLAIMED
 
     def get_summary(self) -> str:
+        # compute status of tasks
         by_status: Dict[str, int] = defaultdict(lambda: 0)
         for t in self.tasks:
             if t.status == STATUS_COMPLETE:
@@ -306,15 +381,18 @@ class ClusterState:
             by_status[label] += 1
         statuses = sorted(by_status.keys())
         task_status = ", ".join(
-            ["{} ({})".format(status, by_status[status]) for status in statuses])
+            ["{} ({})".format(status, by_status[status]) for status in statuses]
+        )
 
         # compute status of workers
         by_status = defaultdict(lambda: 0)
         for r in self.node_reqs:
-            by_status[r.status] += 1
+            label = "{}(type={})".format(r.status, r.node_class)
+            by_status[label] += 1
         statuses = sorted(by_status.keys())
         node_status = ", ".join(
-            ["{} ({})".format(status, by_status[status]) for status in statuses])
+            ["{} ({})".format(status, by_status[status]) for status in statuses]
+        )
 
         return "tasks: {}, worker nodes: {}".format(task_status, node_status)
 
@@ -325,7 +403,9 @@ class ClusterState:
         return len([o for o in self.node_reqs if o.status in REQUESTED_NODE_STATES])
 
     def get_preempt_attempt_count(self) -> int:
-        return len([o for o in self.node_reqs if o.node_class == NODE_REQ_CLASS_PREEMPTIVE])
+        return len(
+            [o for o in self.node_reqs if o.node_class == NODE_REQ_CLASS_PREEMPTIVE]
+        )
 
     def get_running_tasks_with_invalid_owner(self) -> List[str]:
         node_req_by_instance_name: Dict[str, NodeReq] = {}
@@ -341,19 +421,32 @@ class ClusterState:
             instance_name = task.get_instance_name()
 
             if instance_name not in node_req_by_instance_name:
-                log.warning("instance {} was not listed among {}".format(
-                    instance_name, ", ".join(node_req_by_instance_name.keys())))
+                log.warning(
+                    "instance {} was not listed among {}".format(
+                        instance_name, ", ".join(node_req_by_instance_name.keys())
+                    )
+                )
             else:
                 node_req = node_req_by_instance_name[instance_name]
                 if node_req.status in [NODE_REQ_COMPLETE, NODE_REQ_FAILED]:
-                    log.warning("task {} status = {}, but node_req was {}".format(
-                        task.task_id, task.status, node_req.status))
+                    log.warning(
+                        "task {} status = {}, but node_req was {}".format(
+                            task.task_id, task.status, node_req.status
+                        )
+                    )
                     if node_req.node_class != NODE_REQ_CLASS_PREEMPTIVE:
                         log.error(
-                            "instance %s terminated but task %s was reported to still be using instance and the instance was not preemptiable", instance_name, task.task_id)
+                            "instance %s terminated but task %s was reported to still be using instance and the instance was not preemptiable",
+                            instance_name,
+                            task.task_id,
+                        )
                     task_ids_needing_reset.append(task.task_id)
                 else:
-                    assert node_req.status in [NODE_REQ_SUBMITTED,NODE_REQ_STAGING,NODE_REQ_RUNNING]
+                    assert node_req.status in [
+                        NODE_REQ_SUBMITTED,
+                        NODE_REQ_STAGING,
+                        NODE_REQ_RUNNING,
+                    ]
 
         return task_ids_needing_reset
 
@@ -364,10 +457,19 @@ class ClusterState:
         return len(self.get_failed_tasks())
 
     def get_failed_tasks(self):
-        return [t for t in self.tasks if t.status == STATUS_FAILED or (t.status == STATUS_COMPLETE and t.exit_code != "0")]
+        return [
+            t
+            for t in self.tasks
+            if t.status == STATUS_FAILED
+            or (t.status == STATUS_COMPLETE and t.exit_code != "0")
+        ]
 
     def get_successful_tasks(self):
-        return [t for t in self.tasks if (t.status == STATUS_COMPLETE and t.exit_code == "0")]
+        return [
+            t
+            for t in self.tasks
+            if (t.status == STATUS_COMPLETE and t.exit_code == "0")
+        ]
 
     def is_done(self):
         return self.get_incomplete_task_count() == 0
@@ -404,12 +506,14 @@ class ClusterMod:
     def add_node(self, preemptable: bool) -> None:
         self.node_counter += 1
         debug_log_path = "{}/{}/{}-{}.txt".format(
-            self.debug_log_prefix, self.job_id, get_timestamp(), self.node_counter)
+            self.debug_log_prefix, self.job_id, get_timestamp(), self.node_counter
+        )
         self.cluster.add_node(self.job_id, preemptable, debug_log_path)
 
     def cancel_nodes(self, state: ClusterState, count: int) -> None:
         pending_node_reqs = [
-            x for x in state.node_reqs if x.status == NODE_REQ_SUBMITTED]
+            x for x in state.node_reqs if x.status == NODE_REQ_SUBMITTED
+        ]
         pending_node_reqs.sort(key=lambda x: x.sequence)
         pending_node_reqs = list(reversed(pending_node_reqs))
         if count < len(pending_node_reqs):
