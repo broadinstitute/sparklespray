@@ -99,7 +99,7 @@ def list_tasks(
     filtered = process_records(records, fields, filter_expressions)
 
     if params_only:
-        records = [record["args"]["parameters"] for record in records]
+        filtered = [record["args"]["parameters"] for record in filtered]
 
     write(filtered, output_mode, output_filename)
 
