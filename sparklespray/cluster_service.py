@@ -386,8 +386,12 @@ class ClusterState:
 
         # compute status of workers
         by_status = defaultdict(lambda: 0)
+        to_desc = {
+            NODE_REQ_CLASS_NORMAL: "non-preempt",
+            NODE_REQ_CLASS_PREEMPTIVE: "preemptible",
+        }
         for r in self.node_reqs:
-            label = "{}(type={})".format(r.status, r.node_class)
+            label = "{}(type={})".format(r.status, to_desc[r.node_class])
             by_status[label] += 1
         statuses = sorted(by_status.keys())
         node_status = ", ".join(

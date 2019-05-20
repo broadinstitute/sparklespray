@@ -58,6 +58,7 @@ def load_only_config_dict(
 
     merged_config = dict(defaults)
     merged_config.update(config_from_file)
+    merged_config["sparkles_config_path"] = config_file
 
     for unused_property in ["default_resource_cpu", "default_resource_memory"]:
         if unused_property in merged_config:
@@ -131,6 +132,34 @@ def load_config(config_file):
 
 
 def load_config_from_dict(config):
+    allowed_parameters = set(
+        [
+            "default_image",
+            "machine_type",
+            "cas_url_prefix",
+            "default_url_prefix",
+            "kubequeconsume_exe_path",
+            "project",
+            "zones",
+            "region",
+            "account",
+            "service_account_key",
+            "credentials",
+            "bootDiskSizeGb",
+            "preemptible",
+            "local_work_dir",
+            "gpu_count",
+            "mount",
+            "sparkles_config_path",
+        ]
+    )
+    unknown_parameters = set(config.keys()).difference(allowed_parameters)
+    assert (
+        len(unknown_parameters) == 0
+    ), "The following parameters in config are unrecognized: {}".format(
+        ", ".join(unknown_parameters)
+    )
+
     credentials = config["credentials"]
     project_id = config["project"]
     io = IO(project_id, config["cas_url_prefix"], credentials)
