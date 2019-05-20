@@ -220,7 +220,10 @@ def status_cmd(jq: JobQueue, io: IO, cluster: Cluster, args):
         if args.stats:
             task_times = []
 
+            command_result_urls = []
             for task in tasks:
+                command_result_urls.append(task.command_result_url)
+
                 claimed_time = None
                 task_time = None
                 for entry in task.history:
@@ -241,6 +244,24 @@ def status_cmd(jq: JobQueue, io: IO, cluster: Cluster, args):
                 task_times[n-1],
                 sum(task_times)/n
             ))
+
+            txtui.user_print("Getting memory stats...")
+            results = io.bulk_get_as_str(command_result_urls).values()
+            results = [ json.loads(body) for body in results if body is not None]
+            max_memory_size = [ x['resource_usage']['max_memory_size'] for x in results ]
+            max_memory_size.sort()
+            n = len(max_memory_size)
+            txtui.user_print("max memory quantiles: {}, {}, {}, {}, {}, mean: {}".format(
+            max_memory_size[0],
+            max_memory_size[int(n/4)],
+            max_memory_size[int(n/2)],
+            max_memory_size[int(n*3/4)],
+            max_memory_size[n-1],
+            sum(max_memory_size)/n
+            ))
+#            import pdb
+#            pdb.set_trace()
+
 
 
 def fetch_cmd(jq, io, args):

@@ -26,6 +26,31 @@ class IO:
         self.cas_url_prefix = cas_url_prefix
         self.compute_hash = compute_hash
 
+    def bulk_get_as_str(self, paths):
+        from multiprocessing.pool import ThreadPool
+        import threading
+
+        my = threading.local()
+
+        def init_thread():
+            my.client = GSClient(self.project, credentials=self.credentials)
+
+        pool = ThreadPool(processes=10, initializer=init_thread)
+
+        def get_as_str(url):
+            m = re.match("^gs://([^/]+)/(.*)$", url)
+            assert m != None, "invalid remote path: {}".format(url)
+            bucket_name = m.group(1)
+            path = m.group(2)
+            bucket = my.client.bucket(bucket_name)
+            blob = bucket.blob(path)
+            if not blob.exists():
+                return (url, None)
+            return (url, blob.download_as_string())
+
+        result = dict(pool.map(get_as_str, paths))
+        return result
+
     def bulk_exists_check(self, paths):
         from multiprocessing.pool import ThreadPool
         import threading
