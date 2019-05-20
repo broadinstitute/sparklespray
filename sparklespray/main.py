@@ -221,28 +221,43 @@ def status_cmd(jq: JobQueue, io: IO, cluster: Cluster, args):
             task_times = []
 
             command_result_urls = []
+            claim_count_per_task = []
             for task in tasks:
                 command_result_urls.append(task.command_result_url)
 
                 claimed_time = None
                 task_time = None
+                claimed_count = 0
                 for entry in task.history:
                     if entry.status == STATUS_CLAIMED:
                         claimed_time = entry.timestamp
+                        claimed_count += 1
                     elif entry.status == STATUS_COMPLETE:
                         task_time = entry.timestamp - claimed_time
+                claim_count_per_task.append(claimed_count)
                 
                 task_times.append(task_time)
-            
+
+            claim_count_per_task.sort()
+            n = len(claim_count_per_task)
+            txtui.user_print("Number of times a task was claimed quantiles: {}, {}, {}, {}, {}, mean: {:1f}".format(
+                claim_count_per_task[0],
+                claim_count_per_task[int(n/4)],
+                claim_count_per_task[int(n/2)],
+                claim_count_per_task[int(n*3/4)],
+                claim_count_per_task[n-1],
+                sum(claim_count_per_task)/n
+            ))
+
             task_times.sort()
             n = len(tasks)
-            txtui.user_print("task count: {}, execution time quantiles (in seconds): {}, {}, {}, {}, {}, mean: {}".format(n,
-                task_times[0],
-                task_times[int(n/4)],
-                task_times[int(n/2)],
-                task_times[int(n*3/4)],
-                task_times[n-1],
-                sum(task_times)/n
+            txtui.user_print("task count: {}, execution time quantiles (in minutes): {:.1f}, {:.1f}, {:.1f}, {:.1f}, {:.1f}, mean: {:.1f}".format(n,
+                task_times[0]/60,
+                task_times[int(n/4)]/60,
+                task_times[int(n/2)]/60,
+                task_times[int(n*3/4)]/60,
+                task_times[n-1]/60,
+                sum(task_times)/n/60
             ))
 
             txtui.user_print("Getting memory stats...")
@@ -569,7 +584,7 @@ def main(argv=None):
     parser.set_defaults(func=validate_cmd)
 
     parser = subparser.add_parser("reset",
-                                  help="Mark any 'claimed', 'killed' or 'failed' jobs as ready for execution again.  Useful largely only during debugging issues with job submission. Potentially also useful for retrying after transient failures.")
+                                  help="Mark any 'claimed', 'killed' or 'failed' or jobs with non-zero exit jobs as ready for execution again.  Useful largely only during debugging issues with job submission. Potentially also useful for retrying after transient failures.")
     parser.set_defaults(func=reset_cmd)
     parser.add_argument("jobid_pattern")
     parser.add_argument("--all", action="store_true",

@@ -122,11 +122,32 @@ class JobQueue:
         return dict(counts)
 
     def reset(
-        self, jobid: str, owner, statuses_to_clear=[STATUS_CLAIMED, STATUS_FAILED]
+        self,
+        jobid: str,
+        owner,
+        statuses_to_clear=[STATUS_CLAIMED, STATUS_FAILED],
+        clear_nonzero_exit=True,
     ):
-        tasks = []
-        for status_to_clear in statuses_to_clear:
-            tasks.extend(self.task_storage.get_tasks(jobid, status=status_to_clear))
+        tasks = self.task_storage.get_tasks(jobid)
+        # for status_to_clear in statuses_to_clear:
+        #     tasks.extend(self.task_storage.get_tasks(jobid, status=status_to_clear))
+
+        def needs_clear(task):
+            if task.status in statuses_to_clear:
+                return True
+
+            if (
+                clear_nonzero_exit
+                and task.status == STATUS_COMPLETE
+                and int(task.exit_code) != 0
+            ):
+                return True
+
+            return False
+
+        tasks = [t for t in tasks if needs_clear(t)]
+        # print("clear", tasks)
+        # raise Exception()
 
         updated = 0
         for task in tasks:
