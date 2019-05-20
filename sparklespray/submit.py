@@ -542,6 +542,7 @@ def submit_cmd(jq, io, cluster, args, config):
         # to ensure the local process is the one which picks up the job.
         cluster_name = "local-"+random_string(8)
 
+    txtui.user_print("Submitting job: {}".format(job_id))
     submit(jq, io, cluster, job_id, spec, submit_config, metadata=metadata,
            clean_if_exists=True, dry_run=args.dryrun, cluster_name=cluster_name)
 
