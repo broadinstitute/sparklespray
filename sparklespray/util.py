@@ -23,7 +23,7 @@ def url_join(*args):
 
 def random_string(length):
     alphabet = string.ascii_uppercase + string.digits
-    return (''.join(random.choice(alphabet) for _ in range(length)))
+    return "".join(random.choice(alphabet) for _ in range(length))
 
 
 def get_timestamp():

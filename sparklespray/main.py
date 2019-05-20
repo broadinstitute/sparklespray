@@ -21,6 +21,8 @@ import argparse
 from .config import get_config_path, load_config, load_only_config_dict
 
 from .log import log
+from . import txtui
+from .gcp_setup import setup_project
 
 
 def logs_cmd(jq: JobQueue, io: IO, args):
@@ -476,8 +478,6 @@ def dump_operation_cmd(cluster: Cluster, args):
     print(json.dumps(operation, indent="  "))
 
 
-from . import txtui
-from .gcp_setup import setup_project
 
 
 def setup_cmd(args, config):

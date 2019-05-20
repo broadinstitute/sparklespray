@@ -6,7 +6,7 @@ import json
 def hash_from_file(filename):
     h = hashlib.sha256()
     with open(filename, "rb") as fd:
-        for chunk in iter(lambda: fd.read(100000), b''):
+        for chunk in iter(lambda: fd.read(100000), b""):
             h.update(chunk)
     return h.hexdigest()
 
@@ -25,7 +25,11 @@ class CachingHashFunction:
         mtime = os.path.getmtime(filename)
         if filename in self.cache:
             cache_entry = self.cache[filename]
-            if "mtime" in cache_entry and cache_entry["mtime"] == mtime and "sha256" in cache_entry:
+            if (
+                "mtime" in cache_entry
+                and cache_entry["mtime"] == mtime
+                and "sha256" in cache_entry
+            ):
                 return cache_entry["sha256"]
         h = hash_from_file(filename)
         cache_entry = dict(sha256=h, mtime=mtime)

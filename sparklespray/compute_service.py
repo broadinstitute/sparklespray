@@ -3,8 +3,9 @@ from googleapiclient.errors import HttpError
 
 from googleapiclient.discovery_cache.base import Cache
 import os
-import hashlib 
+import hashlib
 import tempfile
+
 
 class DirCache(Cache):
     def __init__(self, path):
@@ -14,10 +15,10 @@ class DirCache(Cache):
             os.makedirs(self.path)
         except FileExistsError:
             pass
-    
+
     def _get_filename(self, url):
         return os.path.join(self.path, hashlib.sha256(url.encode("utf8")).hexdigest())
-        
+
     def get(self, url):
         fn = self._get_filename(url)
         try:
@@ -25,7 +26,7 @@ class DirCache(Cache):
                 return fd.read()
         except FileNotFoundError:
             return None
-        
+
     def set(self, url, content):
         fn = self._get_filename(url)
         tmp_fd = tempfile.NamedTemporaryFile(mode="wt", dir=self.path, delete=False)
@@ -33,36 +34,54 @@ class DirCache(Cache):
         tmp_fd.close()
         os.rename(tmp_fd.name, fn)
 
+
 class ComputeService:
     """ Facade/wrapper around GCS compute API
     """
 
     def __init__(self, project: str, credentials=None) -> None:
         self.compute = build(
-            'compute', 'v1', credentials=credentials, cache_discovery=True, cache=DirCache(".sparkles-cache/services"))
+            "compute",
+            "v1",
+            credentials=credentials,
+            cache_discovery=True,
+            cache=DirCache(".sparkles-cache/services"),
+        )
         self.project = project
 
     def get_cluster_instances(self, zones, cluster_name):
         instances = []
         for zone in zones:
-            i = self.compute.instances().list(project=self.project, zone=zone,
-                                              filter="labels.kubeque-cluster=" + cluster_name).execute().get('items',
-                                                                                                             [])
+            i = (
+                self.compute.instances()
+                .list(
+                    project=self.project,
+                    zone=zone,
+                    filter="labels.kubeque-cluster=" + cluster_name,
+                )
+                .execute()
+                .get("items", [])
+            )
             instances.extend(i)
         return instances
 
     def stop(self, name: str, zone: str) -> None:
-        self.compute.instances().delete(project=self.project,
-                                        zone=zone, instance=name).execute()
+        self.compute.instances().delete(
+            project=self.project, zone=zone, instance=name
+        ).execute()
 
     def get_instance_status(self, zone: str, instance_name: str) -> str:
         try:
-            instance = self.compute.instances().get(project=self.project, zone=zone,
-                                                    instance=instance_name).execute()
-            return instance['status']
+            instance = (
+                self.compute.instances()
+                .get(project=self.project, zone=zone, instance=instance_name)
+                .execute()
+            )
+            return instance["status"]
         except HttpError as error:
             if error.resp.status == 404:
                 return "TERMINATED"
             else:
                 raise Exception(
-                    "Got HttpError but status was: {}".format(error.resp.status))
+                    "Got HttpError but status was: {}".format(error.resp.status)
+                )

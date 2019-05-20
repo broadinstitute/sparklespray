@@ -29,17 +29,16 @@ def print_log_content(timestamp, payload, from_sparkles=False):
             prefix = "[{}]".format(timestamp.strftime("%H:%M:%S"))
             print(colored(prefix, "green"), colored(line, message_color))
         else:
-            print(colored(" "*len(prefix), "white"),
-                  colored(line, message_color))
+            print(colored(" " * len(prefix), "white"), colored(line, message_color))
 
 
 def config_logging(verbosity):
-    verbose_fmt = logging.Formatter(
-        "%(asctime)s:%(name)s:%(message)s")
+    verbose_fmt = logging.Formatter("%(asctime)s:%(name)s:%(message)s")
     trim_fmt = logging.Formatter("%(asctime)s %(message)s")
 
     to_file = logging.handlers.RotatingFileHandler(
-        "sparkles.log", mode='a', maxBytes=10*1024*1024, backupCount=1)
+        "sparkles.log", mode="a", maxBytes=10 * 1024 * 1024, backupCount=1
+    )
     to_file.setFormatter(verbose_fmt)
     to_file.setLevel(logging.INFO)
     handlers = [to_file]

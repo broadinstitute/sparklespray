@@ -7,6 +7,7 @@ import attr
 import sys
 from .main import _resolve_jobid
 
+
 # def logs_cmd(jq: JobQueue, io: IO, args):
 #     jobid = _resolve_jobid(jq, args.jobid)
 #     tasks = jq.task_storage.get_tasks(jobid)
@@ -27,28 +28,45 @@ def list_cmd(jq: JobQueue, io, args):
     filters = []
     if args.filters is not None:
         filters = args.filters
-    list_tasks(jq, io, job_id, args.params, fields,
-               filters, args.format, args.output)
+    list_tasks(jq, io, job_id, args.params, fields, filters, args.format, args.output)
 
 
 def add_list_cmd(subparser):
-    parser = subparser.add_parser(
-        "list", help="List tasks within a job")
+    parser = subparser.add_parser("list", help="List tasks within a job")
     parser.set_defaults(func=list_cmd)
     parser.add_argument("jobid")
     parser.add_argument(
-        "--filter", help="only include records matching this filter", action='append', dest="filters")
-    parser.add_argument("--fields",
-                        help="Only include these fields")
-    parser.add_argument("--format", default="csv",
-                        help="Output format, either 'json' or 'csv'")
-    parser.add_argument("--output", "-o",
-                        help="Name of file to write to. If not specified, writes to stdout")
+        "--filter",
+        help="only include records matching this filter",
+        action="append",
+        dest="filters",
+    )
+    parser.add_argument("--fields", help="Only include these fields")
     parser.add_argument(
-        "--params", help="Only write out parameters from original --params submission", action="store_true")
+        "--format", default="csv", help="Output format, either 'json' or 'csv'"
+    )
+    parser.add_argument(
+        "--output",
+        "-o",
+        help="Name of file to write to. If not specified, writes to stdout",
+    )
+    parser.add_argument(
+        "--params",
+        help="Only write out parameters from original --params submission",
+        action="store_true",
+    )
 
 
-def list_tasks(jq: JobQueue, io, job_id: str, params_only: bool, fields: List[str], filter_expressions: List[str], output_mode: str, output_filename: str):
+def list_tasks(
+    jq: JobQueue,
+    io,
+    job_id: str,
+    params_only: bool,
+    fields: List[str],
+    filter_expressions: List[str],
+    output_mode: str,
+    output_filename: str,
+):
     # only expand "args" if we request or filter by a field inside args
     if fields is None:
         needs_full_task_def = True
@@ -70,8 +88,8 @@ def list_tasks(jq: JobQueue, io, job_id: str, params_only: bool, fields: List[st
         row = attr.asdict(task)
         if needs_full_task_def:
             task_spec = json.loads(io.get_as_str(task.args))
-            row['args_url'] = task.args
-            row['args'] = task_spec
+            row["args_url"] = task.args
+            row["args"] = task_spec
         return row
 
     tasks = jq.task_storage.get_tasks(job_id)
@@ -81,7 +99,7 @@ def list_tasks(jq: JobQueue, io, job_id: str, params_only: bool, fields: List[st
     filtered = process_records(records, fields, filter_expressions)
 
     if params_only:
-        records = [record['args']['parameters'] for record in records]
+        records = [record["args"]["parameters"] for record in records]
 
     write(filtered, output_mode, output_filename)
 
@@ -172,7 +190,7 @@ def write_csv(records, fd):
     w = csv.writer(fd)
     w.writerow(columns)
     for rec in records:
-        w.writerow([rec.get(column, '') for column in columns])
+        w.writerow([rec.get(column, "") for column in columns])
 
 
 def write_json(records, fd):
@@ -190,6 +208,7 @@ def write(records, mode, filename):
     else:
         assert mode == "json"
         write_json(records, fd)
+
 
 # def filter(records: List[dict] )
 

@@ -69,52 +69,58 @@ class TaskStatus(object):
 def task_to_entity(client, o):
     entity_key = client.key("Task", o.task_id)
     entity = datastore.Entity(key=entity_key)
-    entity['task_index'] = o.task_index
-    entity['job_id'] = o.job_id
-    entity['status'] = o.status
+    entity["task_index"] = o.task_index
+    entity["job_id"] = o.job_id
+    entity["status"] = o.status
     assert isinstance(o.status, str)
-    entity['owner'] = o.owner
-    entity['args'] = o.args
-    entity['failure_reason'] = o.failure_reason
-    entity['cluster'] = o.cluster
-    entity['monitor_address'] = o.monitor_address
-    entity['command_result_url'] = o.command_result_url
+    entity["owner"] = o.owner
+    entity["args"] = o.args
+    entity["failure_reason"] = o.failure_reason
+    entity["cluster"] = o.cluster
+    entity["monitor_address"] = o.monitor_address
+    entity["command_result_url"] = o.command_result_url
     history = []
     for h in o.history:
         e = datastore.Entity()
-        e['timestamp'] = h.timestamp
-        e['status'] = h.status
+        e["timestamp"] = h.timestamp
+        e["status"] = h.status
         history.append(e)
 
-    entity['history'] = history
-    entity['version'] = o.version
-    entity['exit_code'] = o.exit_code
-    entity['log_url'] = o.log_url
+    entity["history"] = history
+    entity["version"] = o.version
+    entity["exit_code"] = o.exit_code
+    entity["log_url"] = o.log_url
     return entity
 
 
 def entity_to_task(entity):
-    assert isinstance(entity['status'], str)
+    assert isinstance(entity["status"], str)
     history = []
-    for he in entity.get('history', []):
-        history.append(TaskHistory(timestamp=he['timestamp'], status=he['status'], owner=he.get(
-            'owner'), failure_reason=he.get('failure_reason')))
+    for he in entity.get("history", []):
+        history.append(
+            TaskHistory(
+                timestamp=he["timestamp"],
+                status=he["status"],
+                owner=he.get("owner"),
+                failure_reason=he.get("failure_reason"),
+            )
+        )
 
     return Task(
-        log_url=entity.get('log_url'),
+        log_url=entity.get("log_url"),
         task_id=entity.key.name,
-        task_index=entity['task_index'],
-        job_id=entity['job_id'],
-        status=entity['status'],
-        owner=entity['owner'],
-        args=entity['args'],
+        task_index=entity["task_index"],
+        job_id=entity["job_id"],
+        status=entity["status"],
+        owner=entity["owner"],
+        args=entity["args"],
         history=history,
-        version=entity['version'],
-        failure_reason=entity.get('failure_reason'),
-        command_result_url=entity.get('command_result_url'),
-        exit_code=entity.get('exit_code'),
+        version=entity["version"],
+        failure_reason=entity.get("failure_reason"),
+        command_result_url=entity.get("command_result_url"),
+        exit_code=entity.get("exit_code"),
         cluster=entity.get("cluster"),
-        monitor_address=entity.get('monitor_address')
+        monitor_address=entity.get("monitor_address"),
     )
 
 
@@ -152,17 +158,19 @@ class TaskStore:
         # do I need to use next_page?
         tasks = []
         for entity_task in tasks_it:
-            #log.info("fetched: %s", entity_task)
+            # log.info("fetched: %s", entity_task)
             if status is not None:
                 if entity_task["status"] != status:
                     log.warning(
-                        "Query returned something that did not match query: %s", entity_task)
+                        "Query returned something that did not match query: %s",
+                        entity_task,
+                    )
                     continue
             tasks.append(entity_to_task(entity_task))
             if max_fetch is not None and len(tasks) >= max_fetch:
                 break
         end_time = time.time()
-        log.debug("get_tasks took %s seconds", end_time-start_time)
+        log.debug("get_tasks took %s seconds", end_time - start_time)
         return tasks
 
     def get_tasks_for_cluster(self, cluster_name, status, max_fetch=None):
@@ -177,7 +185,7 @@ class TaskStore:
             if max_fetch is not None and len(tasks) >= max_fetch:
                 break
         end_time = time.time()
-        log.debug("get_tasks took %s seconds", end_time-start_time)
+        log.debug("get_tasks took %s seconds", end_time - start_time)
         return tasks
 
     def update_task(self, task):

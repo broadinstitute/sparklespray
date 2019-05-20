@@ -10,8 +10,11 @@ from .log import log
 
 use_gustil = False
 
+
 class IO:
-    def __init__(self, project, cas_url_prefix, credentials=None, compute_hash=compute_hash):
+    def __init__(
+        self, project, cas_url_prefix, credentials=None, compute_hash=compute_hash
+    ):
         assert project is not None
 
         self.buckets = {}
@@ -26,6 +29,7 @@ class IO:
     def bulk_exists_check(self, paths):
         from multiprocessing.pool import ThreadPool
         import threading
+
         my = threading.local()
 
         def init_thread():
@@ -35,7 +39,7 @@ class IO:
 
         def check(url):
             m = re.match("^gs://([^/]+)/(.*)$", url)
-            assert m != None, "invalid remote path: {}".format(path)
+            assert m != None, "invalid remote path: {}".format(url)
             bucket_name = m.group(1)
             path = m.group(2)
             bucket = my.client.bucket(bucket_name)
@@ -98,10 +102,13 @@ class IO:
             assert not must, "Could not find {}".format(path)
             return None
 
-    def put(self, src_filename, dst_url, must=True, skip_if_exists=False, is_public=False):
+    def put(
+        self, src_filename, dst_url, must=True, skip_if_exists=False, is_public=False
+    ):
         if must:
-            assert os.path.exists(
-                src_filename), "{} does not exist".format(src_filename)
+            assert os.path.exists(src_filename), "{} does not exist".format(
+                src_filename
+            )
 
         bucket, path = self._get_bucket_and_path(dst_url)
         blob = bucket.blob(path)
@@ -109,8 +116,9 @@ class IO:
             if is_public:
                 acl = blob.acl
                 if not acl.has_entity(acl.all()):
-                    log.info("Marking %s (%s) as publicly accessible",
-                             src_filename, dst_url)
+                    log.info(
+                        "Marking %s (%s) as publicly accessible", src_filename, dst_url
+                    )
                     acl.save_predefined("publicRead")
             log.info("Already in CAS cache, skipping upload of %s", src_filename)
             log.debug("skipping put %s -> %s", src_filename, dst_url)
@@ -121,13 +129,14 @@ class IO:
             else:
                 canned_acl = None
                 acl_params = []
-            log.info("put %s -> %s (acl: %s)",
-                     src_filename, dst_url, canned_acl)
+            log.info("put %s -> %s (acl: %s)", src_filename, dst_url, canned_acl)
             # if greater than 10MB ask gsutil to upload for us
             if use_gustil and os.path.getsize(src_filename) > 10 * 1024 * 1024:
                 import subprocess
+
                 subprocess.check_call(
-                    ['gsutil', 'cp'] + acl_params + [src_filename, dst_url])
+                    ["gsutil", "cp"] + acl_params + [src_filename, dst_url]
+                )
             else:
                 blob.upload_from_filename(src_filename)
                 if canned_acl:
