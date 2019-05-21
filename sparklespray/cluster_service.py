@@ -153,6 +153,20 @@ class Cluster:
         return False
 
     def stop_cluster(self, cluster_name: str):
+        node_reqs = self.node_req_store.get_node_reqs(cluster_name)
+        for i, node_req in enumerate(node_reqs):
+            if node_req.status in FINAL_NODE_STATES:
+                log.info(
+                    "Canceling node request %s (%s/%s)",
+                    node_req.operation_id,
+                    i,
+                    len(node_reqs),
+                )
+                try:
+                    self.cancel_add_node(node_req.operation_id)
+                except HttpError as ex:
+                    log.info("Got httpError canceling node request: %s", ex)
+
         instances = self.compute.get_cluster_instances(self.zones, cluster_name)
         if len(instances) == 0:
             log.warning(
