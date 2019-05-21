@@ -479,10 +479,13 @@ def clean(cluster: Cluster, jq: JobQueue, job_id: str, force: bool=False, force_
     return True
 
 
-def clean_cmd(cluster, jq, args):
+def clean_cmd(cluster : Cluster, jq, args):
     jobids = _get_jobids_from_pattern(jq, args.jobid_pattern)
     for jobid in jobids:
         log.info("Deleting %s", jobid)
+        cluster.cleanup_node_reqs(jobid)
+        if args.only_nodes:
+            continue
         clean(cluster, jq, jobid, args.force, args.force_pending)
 
 
@@ -650,6 +653,7 @@ def main(argv=None):
                         help="If specified will only attempt to remove jobs that match this pattern")
     parser.add_argument("--force_pending", "-p",
                         help="If set, will delete pending jobs", action="store_true")
+    parser.add_argument("--only-nodes", action="store_true", help="If set, will not delete the job, only completed node requests.")
 
     parser = subparser.add_parser("kill", help="Terminate the specified job")
     parser.set_defaults(func=kill_cmd)

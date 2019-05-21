@@ -18,6 +18,7 @@ from .node_req_store import (
     REQUESTED_NODE_STATES,
     NODE_REQ_STAGING,
     NODE_REQ_RUNNING,
+    FINAL_NODE_STATES,
 )
 from .compute_service import ComputeService
 from .node_service import NodeService, MachineSpec
@@ -36,6 +37,7 @@ from .datastore_batch import Batch
 from abc import abstractmethod
 
 from .log import log
+from googleapiclient.errors import HttpError
 
 # and image which has curl and sh installed, used to prep the worker node
 SETUP_IMAGE = "sequenceiq/alpine-curl"
@@ -191,6 +193,16 @@ class Cluster:
             p(".")
         p("\n")
 
+    def cleanup_node_reqs(self, job_id):
+        batch = Batch(self.client)
+
+        job = self.job_store.get_job(job_id)
+        assert job is not None
+
+        self.node_req_store.cleanup_cluster(job.cluster, batch=batch)
+
+        batch.flush()
+
     def delete_job(self, job_id: str):
         batch = Batch(self.client)
 
@@ -208,12 +220,6 @@ class Cluster:
         # delete tasks
         for task_id in task_ids:
             self.task_store.delete(task_id, batch=batch)
-
-        job = self.job_store.get_job(job_id)
-        assert job is not None
-
-        # clean up associated node requests
-        self.node_req_store.cleanup_cluster(job.cluster, batch=batch)
 
         self.job_store.delete(job_id, batch=batch)
         log.info(f"in delete_job flushing batch: {batch}")
