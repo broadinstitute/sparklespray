@@ -324,6 +324,13 @@ TODO: Write docs about setting up firewall rule to allow traffic on port
 sparkles status JOB_ID
 ```
 
+You can also see summary stats (execution times and memory usage) by adding the --stats parameter.
+
+```
+sparkles status JOB_ID --stats
+```
+
+
 ## Mark jobs as needing re-execution
 
 ```
@@ -334,6 +341,12 @@ sparkles reset JOB_ID
 
 ```
 sparkles show JOB_ID
+```
+
+There's also a more powerful query tool "list" which can export all attributes of all tasks and supports filtering.
+
+```
+sparkles list JOB_ID
 ```
 
 ## Poll the status of a job, adding nodes if necessary
