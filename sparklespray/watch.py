@@ -7,6 +7,7 @@ from .logclient import LogMonitor, CommunicationError
 from typing import Callable
 from .cluster_service import ClusterState
 from .txtui import print_log_content
+import datetime
 
 # from google.gax.errors import RetryError
 
@@ -68,23 +69,23 @@ def print_error_lines(lines):
         print(colored(line, "red"))
 
 
-import datetime
-
-
 def flush_stdout_from_complete_task(jq, io, task_id, offset):
     task = jq.task_storage.get_task(task_id)
     spec = json.loads(io.get_as_str(task.args))
 
     attempts = 0
     while True:
-        rest_of_stdout = io.get_as_str(spec["stdout_url"], start=offset)
+        rest_of_stdout = io.get_as_str(spec["stdout_url"], start=offset, must=False)
         if rest_of_stdout is not None:
             break
-        log.warning("Log doesn't appear to exist yet. Will try again...")
+        log.warning(
+            "Log %s doesn't appear to exist yet. Will try again...", spec["stdout_url"]
+        )
         time.sleep(5)
         attempts += 1
         if attempts > 10:
-            raise Exception("Log file never did appear. Aborting")
+            log.warning("Log file never did appear. Giving up trying to tail log")
+            return
 
     print_log_content(datetime.datetime.now(), rest_of_stdout)
 
