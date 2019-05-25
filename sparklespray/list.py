@@ -6,7 +6,7 @@ from .job_queue import JobQueue
 import attr
 import sys
 from .main import _resolve_jobid
-
+from .io import IO
 
 # def logs_cmd(jq: JobQueue, io: IO, args):
 #     jobid = _resolve_jobid(jq, args.jobid)
@@ -59,7 +59,7 @@ def add_list_cmd(subparser):
 
 def list_tasks(
     jq: JobQueue,
-    io,
+    io: IO,
     job_id: str,
     params_only: bool,
     fields: List[str],
@@ -84,16 +84,25 @@ def list_tasks(
     if params_only:
         needs_full_task_def = True
 
-    def to_record(task):
+    def to_record(task, task_specs_str):
         row = attr.asdict(task)
         if needs_full_task_def:
-            task_spec = json.loads(io.get_as_str(task.args))
+            assert task_specs_str is not None
+            task_spec = json.loads(task_specs_str)
             row["args_url"] = task.args
             row["args"] = task_spec
         return row
 
     tasks = jq.task_storage.get_tasks(job_id)
-    records = [to_record(task) for task in tasks]
+
+    task_spec_strs = {}
+    if needs_full_task_def:
+        task_spec_strs = io.bulk_get_as_str([task.args for task in tasks])
+
+    records = []
+    for i, task in enumerate(tasks):
+        # print("{}/{}".format(i, len(tasks)))
+        records.append(to_record(task, task_spec_strs.get(task.args)))
 
     # perform the filtering before applying params_only so we can do things like "find parameters of failed tasks"
     filtered = process_records(records, fields, filter_expressions)
