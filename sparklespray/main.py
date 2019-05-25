@@ -236,7 +236,8 @@ def status_cmd(jq: JobQueue, io: IO, cluster: Cluster, args):
                         task_time = entry.timestamp - claimed_time
                 claim_count_per_task.append(claimed_count)
                 
-                task_times.append(task_time)
+                if task_time is not None:
+                    task_times.append(task_time)
 
             claim_count_per_task.sort()
             n = len(claim_count_per_task)
@@ -250,7 +251,7 @@ def status_cmd(jq: JobQueue, io: IO, cluster: Cluster, args):
             ))
 
             task_times.sort()
-            n = len(tasks)
+            n = len(task_times)
             txtui.user_print("task count: {}, execution time quantiles (in minutes): {:.1f}, {:.1f}, {:.1f}, {:.1f}, {:.1f}, mean: {:.1f}".format(n,
                 task_times[0]/60,
                 task_times[int(n/4)]/60,
@@ -350,76 +351,6 @@ def _is_complete(status_counts):
         if not _is_terminal_status(status):
             all_terminal = True
     return all_terminal
-
-
-# class NodeRespawn:
-#     def __init__(self, cluster_status_fn, tasks_status_fn, get_pending_fn, max_nodes):
-#         self.max_restarts = tasks_status_fn().active_tasks
-#         self.cluster_status_fn = cluster_status_fn
-#         self.tasks_status_fn = tasks_status_fn
-#         self.last_cluster_status = None
-#         self.nodes_added = 0
-#         self.max_nodes = max_nodes
-#         self.get_pending_fn = get_pending_fn
-
-#     def reset_added_count(self):
-#         self.nodes_added = 0
-
-#     def reconcile_node_count(self, add_node_callback):
-#         # get latest status
-#         cluster_status = self.tasks_status_fn()
-#         if cluster_status == self.last_cluster_status:
-#             # don't try to reconcile if we see the identical as last time we polled. We might not
-#             # be able to see newly spawned nodes yet, so wait for the next poll
-#             return
-
-#         needed_nodes = cluster_status.active_tasks
-#         if self.max_nodes is not None:
-#             needed_nodes = min(self.max_nodes, needed_nodes)
-#         running_count = self.cluster_status_fn().running_count
-#         # for now, count pending requests as "running" because they eventually will
-#         #print("calling get_pending_fn")
-#         running_count += self.get_pending_fn()
-#         self.last_cluster_status = cluster_status
-
-#         # see if we're short and add nodes of the appropriate type
-#         if needed_nodes > running_count:
-#             nodes_to_add = needed_nodes - running_count
-#             capped_nodes_to_add = min(nodes_to_add, self.max_restarts - self.nodes_added)
-#             if capped_nodes_to_add == 0:
-#                 raise Exception("Wanted to add {} nodes, but we have reached our limit on how many nodes can be restarted ({})".format(nodes_to_add, self.max_restarts))
-#             else:
-#                 add_node_callback(capped_nodes_to_add)
-#                 self.nodes_added += capped_nodes_to_add
-#                 log.info("Added {} nodes (total: {}/{})".format(capped_nodes_to_add, self.nodes_added, self.max_restarts))
-
-# class TasksStatus:
-#     def __init__(self, tasks):
-#         self.tasks = tasks
-
-#     @property
-#     def active_tasks(self):
-#         # compute how many nodes are needed to run everything in parallel
-#         last_needed_nodes = 0
-#         for task in self.tasks:
-#             if task.status in [STATUS_CLAIMED, STATUS_PENDING]:
-#                 last_needed_nodes += 1
-#         return last_needed_nodes
-
-#     @property
-#     def failed_tasks(self):
-#         failures = 0
-#         for task in self.tasks:
-#             if task.status in [STATUS_FAILED]:
-#                 failures += 1
-#             elif task.status in [STATUS_COMPLETE]:
-#                 if str(task.exit_code) != "0":
-#                     failures += 1
-#         return failures
-
-#     @property
-#     def summary(self):
-#         return _summarize_task_statuses(self.tasks)
 
 
 def _resub_preempted(cluster, jq, jobid):
