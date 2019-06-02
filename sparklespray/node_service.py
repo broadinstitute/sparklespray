@@ -18,10 +18,7 @@ from .node_req_store import (
     NODE_REQ_FAILED,
 )
 from typing import List, DefaultDict, Tuple
-
-# from oauth2client.client import GoogleCredentials
-# from google.cloud import datastore
-# from kubeque.gcp import NODE_REQ_COMPLETE, NODE_REQ_RUNNING, NODE_REQ_SUBMITTED
+from .compute_service import DirCache
 
 from .log import log
 
@@ -164,9 +161,6 @@ class AddNodeStatus:
 
     def is_done(self) -> bool:
         return self.status["done"]
-
-
-from .compute_service import DirCache
 
 
 class NodeService:
@@ -316,6 +310,7 @@ class NodeService:
                         "imageUri": setup_image,
                         "commands": setup_parameters,
                         "mounts": mounts,
+                        "flags": ["ENABLE_FUSE"],
                     },
                     {
                         "imageUri": docker_image,

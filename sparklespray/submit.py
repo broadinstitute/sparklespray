@@ -168,14 +168,27 @@ def _parse_mem_limit(txt):
         return float(txt[:-1])
 
 
-def _make_cluster_name(job_name, image, machine_type, unique_name):
+def _make_cluster_name(job_name, image, machine_type, unique_name, bucket_names):
     import hashlib
+
+    bucket_names = list(bucket_names)
+    bucket_names.sort()
+    bucket_names_str = ",".join(bucket_names)
 
     if unique_name:
         return 'l-' + random_string(20)
     else:
-        return "c-" + hashlib.md5(f"{job_name}-{image}-{machine_type}-{sparklespray.__version__}".encode("utf8")).hexdigest()[:20]
+        return "c-" + hashlib.md5(f"{job_name}-{image}-{machine_type}-{sparklespray.__version__}-{bucket_names_str}".encode("utf8")).hexdigest()[:20]
 
+def _unique_buckets_from_tasks(tasks : List[dict]):
+    buckets = set()
+    for task in tasks:
+        for download in task['downloads']:
+            if download['src_url'].startswith("gs://"):
+                m = re.match("gs://([^/]+)/.*", download['src_url'])
+                assert m is not None
+                buckets.add(m.group(1))
+    return buckets
 
 def submit(jq: JobQueue, io: IO, cluster: Cluster, job_id: str, spec: dict, config: SubmitConfig, metadata: dict = {},
            clean_if_exists: bool=False, dry_run: bool=False, cluster_name=None):
@@ -206,6 +219,8 @@ def submit(jq: JobQueue, io: IO, cluster: Cluster, job_id: str, spec: dict, conf
     command_result_urls = []
     log_urls = []
 
+    bucket_names = _unique_buckets_from_tasks(tasks)
+
     # TODO: When len(tasks) is a fair size (>100) this starts taking a noticable amount of time.
     # Perhaps store tasks in a single blob?  Or do write with multiple requests in parallel?
     for task in tasks:
@@ -221,7 +236,7 @@ def submit(jq: JobQueue, io: IO, cluster: Cluster, job_id: str, spec: dict, conf
         image = config.image
         if cluster_name is None:
             cluster_name = _make_cluster_name(
-                job_id, image, config.machine_type, False)
+                job_id, image, config.machine_type, False, bucket_names)
 
         existing_job = jq.get_job(job_id, must=False)
         if existing_job is not None:
@@ -252,7 +267,8 @@ def submit(jq: JobQueue, io: IO, cluster: Cluster, job_id: str, spec: dict, conf
             docker_image=image,
             consume_exe_args=consume_exe_args,
             machine_specs=machine_specs,
-            monitor_port=monitor_port)
+            monitor_port=monitor_port,
+            bucket_names=bucket_names)
 
         max_preemptable_attempts = 0
         if preemptible:
@@ -492,11 +508,11 @@ def submit_cmd(jq, io, cluster, args, config):
         kubequeconsume_exe_path = config['kubequeconsume_exe_path']
         kubequeconsume_exe_obj_path = upload_map.add(hash_db.hash_filename, cas_url_prefix,
                                                      kubequeconsume_exe_path, is_public=True)
-        kubequeconsume_exe_url = _obj_path_to_url(kubequeconsume_exe_obj_path)
+#        kubequeconsume_exe_url = _obj_path_to_url(kubequeconsume_exe_obj_path)
         hash_db.persist()
 
         log.debug("upload_map = %s", upload_map)
-        log.info("kubeconsume at %s", kubequeconsume_exe_url)
+        log.info("kubeconsume at %s", kubequeconsume_exe_obj_path)
 
         # First check existance of files, so we can print out a single summary statement
         needs_upload = []
@@ -531,7 +547,7 @@ def submit_cmd(jq, io, cluster, args, config):
                                      'monitor_port', '6032')),
                                  zones=config['zones'],
                                  mount_point=config.get("mount", "/mnt/"),
-                                 kubequeconsume_url=kubequeconsume_exe_url,
+                                 kubequeconsume_url=kubequeconsume_exe_obj_path,
                                  gpu_count=gpu_count,
                                  target_node_count=target_node_count
                                  )

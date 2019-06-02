@@ -35,14 +35,14 @@ import os
 from .util import get_timestamp
 from .datastore_batch import Batch
 from abc import abstractmethod
+import json
 
 from .log import log
 from googleapiclient.errors import HttpError
 
 # and image which has curl and sh installed, used to prep the worker node
-SETUP_IMAGE = "sequenceiq/alpine-curl"
+SETUP_IMAGE = "pmontgom/sparkles-consume-setup:v1"
 
-import json
 
 # which step in the actions does kubeconsume run in
 CONSUMER_ACTION_ID = 2
@@ -292,25 +292,35 @@ class Cluster:
         consume_exe_args: List[str],
         machine_specs: MachineSpec,
         monitor_port: int,
+        bucket_names: List[str],
     ) -> dict:
         mount_point = machine_specs.mount_point
 
+        m = re.match("gs://([^/]+)/(.+)$", consume_exe_url)
+        assert m is not None
+        consume_exe_url_bucket, consume_exe_url_key = m.groups()
+
         consume_exe_path = os.path.join(mount_point, "consume")
         consume_data = os.path.join(mount_point, "data")
+
+        setup_parameters = ["sparkles-consume-setup", "--dir", consume_data]
+        for bucket_name in bucket_names:
+            setup_parameters.append("--bucket", bucket_name)
+        setup_parameters.extend(
+            [
+                "--ln",
+                os.path.join(
+                    consume_data, "bucket", consume_exe_url_bucket, consume_exe_url_key
+                ),
+                consume_exe_path,
+            ]
+        )
 
         return self.nodes.create_pipeline_json(
             jobid=jobid,
             cluster_name=cluster_name,
             setup_image=SETUP_IMAGE,
-            setup_parameters=[
-                "sh",
-                "-c",
-                "curl -o {consume_exe_path} {consume_exe_url} && chmod a+x {consume_exe_path} && mkdir {consume_data} && chmod a+rwx {consume_data}".format(
-                    consume_exe_url=consume_exe_url,
-                    consume_data=consume_data,
-                    consume_exe_path=consume_exe_path,
-                ),
-            ],
+            setup_parameters=setup_parameters,
             docker_image=docker_image,
             docker_command=[
                 consume_exe_path,

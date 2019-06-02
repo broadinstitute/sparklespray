@@ -21,7 +21,7 @@ setup(name='sparklespray',
       include_package_data=True,
       install_requires=[
           'termcolor==1.1.0',
-          'attrs==17.2.0',
+          'attrs==19.1.0',
           'googleapis-common-protos==1.5.9',
           'google-cloud-datastore==1.7.3',
           'google-cloud-storage==1.15.0',
