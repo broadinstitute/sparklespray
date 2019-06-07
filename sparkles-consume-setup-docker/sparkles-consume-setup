@@ -1,0 +1,48 @@
+#!/bin/bash
+
+set -ex
+
+while (( "$#" )); do
+    if [ "$1" == "--dir" ]; then 
+        datadir="$2"
+        shift
+        shift
+
+        echo "Making data dir $datadir"
+        mkdir -p "$datadir"
+        chmod -R a+rw "$datadir"
+
+    elif [ "$1" == "--bucket" ]; then
+        bucket="$2"
+        shift
+        shift
+
+        echo "Mounting $bucket at $datadir/bucket/$bucket"
+        mkdir -p "$datadir/bucket/$bucket"
+        gcsfuse -o ro --stat-cache-ttl 24h --type-cache-ttl 24h --file-mode 755 --implicit-dirs "$bucket" "$datadir/bucket/$bucket"
+
+    elif [ "$1" == "--ln" ]; then
+        src="$2"
+        dst="$3"
+        shift
+        shift
+        shift
+
+        echo "linking $src to $dst"
+        ln -s "$src" "$dst"
+    
+    elif [ "$1" == "--read" ]; then
+        src="$2"
+        shift
+        shift
+        # force a full read to perform a full download and cache result
+        cp "$src" /dev/null
+    else
+        echo "Unknown arg \"$1\". Aborting"
+        exit 1
+    fi
+done
+
+echo "Sparkles consume setup successfully exiting"
+exit 0
+

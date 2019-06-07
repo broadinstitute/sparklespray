@@ -1,0 +1,10 @@
+sample command:
+
+docker run -it -e GOOGLE_APPLICATION_CREDENTIALS=/creds/x -v ~/.sparkles-cache/service-keys/broad-achilles.json:/creds/x  pmontgom/sparkles-consume-setup:v1 bash
+
+sparkles-consume-setup \
+  --dir /mnt/data \
+  --bucket broad-achilles-kubeque \
+  --ln /mnt/data/bucket/broad-achilles-kubeque/test/cas/82bdddc279b74e91397894abe9c8434a47c1e002b514b8d5389e90be93e1eb9a /mnt/consume \
+  --read /mnt/consume
+
