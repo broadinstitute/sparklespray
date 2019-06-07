@@ -14,9 +14,10 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 
+	"crypto/x509"
+
 	"cloud.google.com/go/storage"
 	"golang.org/x/net/context"
-	"crypto/x509"
 )
 
 type IOClient interface {
@@ -76,15 +77,62 @@ func (ioc *GCSIOClient) UploadBytes(destURL string, data []byte) error {
 	return err
 }
 
-func (ioc *GCSIOClient) getObj(srcUrl string) (*storage.ObjectHandle, error) {
+func splitObjUrl(url string) (bucketName string, keyName string, err error) {
 	urlPattern := regexp.MustCompile("^gs://([^/]+)/(.+)$")
 
-	groups := urlPattern.FindStringSubmatch(srcUrl)
+	groups := urlPattern.FindStringSubmatch(url)
 	if groups == nil {
-		return nil, errors.New("invalid url: " + srcUrl)
+		return "", "", errors.New("invalid url: " + url)
 	}
-	bucketName := groups[1]
-	keyName := groups[2]
+	bucketName = groups[1]
+	keyName = groups[2]
+
+	return bucketName, keyName, nil
+}
+
+func getUniqueBuckets(urls []string) ([]string, error) {
+	var bucketsSet map[string]string
+
+	for _, url := range urls {
+		bucketName, _, err := splitObjUrl(url)
+		if err != nil {
+			return nil, err
+		}
+		bucketsSet[bucketName] = bucketName
+	}
+
+	bucketsList := make([]string, 0, len(bucketsSet))
+	for bucketName, _ := range bucketsSet {
+		bucketsList = append(bucketsList, bucketName)
+	}
+
+	return bucketsList, nil
+}
+
+type GCSFuseMounts struct {
+	// map from bucket name to filesystem where that bucket is mounted
+	rootDir string
+}
+
+func MountGCSBuckets(rootDir string) (*GCSFuseMounts, error) {
+	g := GCSFuseMounts{rootDir}
+
+	return &g, nil
+}
+
+func (g *GCSFuseMounts) GetPath(bucketName string, keyName string) string {
+	fullPath := path.Join(g.rootDir, bucketName, keyName)
+	if _, err := os.Stat(fullPath); os.IsNotExist(err) {
+		return ""
+	}
+	return fullPath
+}
+
+func (ioc *GCSIOClient) getObj(srcUrl string) (*storage.ObjectHandle, error) {
+	bucketName, keyName, err := splitObjUrl(srcUrl)
+	if err != nil {
+		return nil, err
+	}
 
 	bucket := ioc.client.Bucket(bucketName)
 	obj := bucket.Object(keyName)

@@ -180,14 +180,19 @@ def _make_cluster_name(job_name, image, machine_type, unique_name, bucket_names)
     else:
         return "c-" + hashlib.md5(f"{job_name}-{image}-{machine_type}-{sparklespray.__version__}-{bucket_names_str}".encode("utf8")).hexdigest()[:20]
 
-def _unique_buckets_from_tasks(tasks : List[dict]):
+def _unique_buckets_from_tasks(others : List[str], tasks : List[dict]):
+    others = list(others)
     buckets = set()
     for task in tasks:
         for download in task['downloads']:
             if download['src_url'].startswith("gs://"):
-                m = re.match("gs://([^/]+)/.*", download['src_url'])
-                assert m is not None
-                buckets.add(m.group(1))
+                others.append(download['src_url'])
+    
+    for other in others:
+        m = re.match("gs://([^/]+)/.*", other)
+        assert m is not None
+        buckets.add(m.group(1))
+        
     return buckets
 
 def submit(jq: JobQueue, io: IO, cluster: Cluster, job_id: str, spec: dict, config: SubmitConfig, metadata: dict = {},
@@ -219,7 +224,7 @@ def submit(jq: JobQueue, io: IO, cluster: Cluster, job_id: str, spec: dict, conf
     command_result_urls = []
     log_urls = []
 
-    bucket_names = _unique_buckets_from_tasks(tasks)
+    bucket_names = _unique_buckets_from_tasks([config.kubequeconsume_url], tasks)
 
     # TODO: When len(tasks) is a fair size (>100) this starts taking a noticable amount of time.
     # Perhaps store tasks in a single blob?  Or do write with multiple requests in parallel?

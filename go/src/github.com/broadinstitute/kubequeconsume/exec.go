@@ -62,11 +62,14 @@ type ResourceUsage struct {
 }
 
 type ResultStruct struct {
-	Command    string            `json:"command"`
-	Parameters map[string]string `json:"parameters,omitempty"`
-	ReturnCode string            `json:"return_code"`
-	Files      []*ResultFile     `json:"files"`
-	Usage      *ResourceUsage    `json:"resource_usage"`
+	Command          string            `json:"command"`
+	Parameters       map[string]string `json:"parameters,omitempty"`
+	ReturnCode       string            `json:"return_code"`
+	Files            []*ResultFile     `json:"files"`
+	Usage            *ResourceUsage    `json:"resource_usage"`
+	DownloadSeconds  float32           `json:"download_seconds"`
+	ExecutionSeconds float32           `json:"execution_seconds"`
+	UploadSeconds    float32           `json:"upload_seconds"`
 }
 
 type stringset map[string]bool
@@ -92,7 +95,24 @@ func copyFile(src, dst string) error {
 	return out.Close()
 }
 
-func downloadAll(ioc IOClient, workdir string, downloads []*TaskDownload, cacheDir string) (error, stringset) {
+func copyOrSym(src string, destination string, symlink bool) {
+	if symlink {
+		log.Printf("Symlinking %s -> %s", src, destination)
+		err := os.Symlink(src, destination)
+		if err != nil {
+			panic(fmt.Sprintf("symlink %s -> %s failed: %s", src, destination, err))
+		}
+	} else {
+		log.Printf("copying %s -> %s", src, destination)
+		err := copyFile(src, destination)
+		if err != nil {
+			// this should not be possible
+			panic(fmt.Sprintf("copyFile %s -> %s failed: %s", src, destination, err))
+		}
+	}
+}
+
+func downloadAll(ioc IOClient, workdir string, downloads []*TaskDownload, cacheDir string, gcsMounts *GCSFuseMounts) (error, stringset) {
 	if !path.IsAbs(workdir) {
 		panic("bad workdir")
 	}
@@ -102,8 +122,15 @@ func downloadAll(ioc IOClient, workdir string, downloads []*TaskDownload, cacheD
 		srcURL := dl.SrcURL
 		destination := path.Join(workdir, dl.Dst)
 
-		//parentDir := strings.ToLower(path.Base(path.Dir(srcURL)))
-		if dl.IsCASKey {
+		srcBucket, srcKey, err := splitObjUrl(srcURL)
+		if err != nil {
+			return fmt.Errorf("Could not split %s: %s", srcURL, err), downloaded
+		}
+		srcPath := gcsMounts.GetPath(srcBucket, srcKey)
+		if srcPath != "" {
+			log.Printf("using bucket mounted path: %s", srcPath)
+			copyOrSym(srcPath, destination, dl.SymlinkSafe)
+		} else if dl.IsCASKey {
 			casKey := path.Base(srcURL)
 			if _, err := os.Stat(cacheDir); os.IsNotExist(err) {
 				err = os.MkdirAll(cacheDir, 0777)
@@ -139,20 +166,7 @@ func downloadAll(ioc IOClient, workdir string, downloads []*TaskDownload, cacheD
 				}
 			}
 
-			if dl.SymlinkSafe {
-				log.Printf("Symlinking %s -> %s", cacheDest, destination)
-				err := os.Symlink(cacheDest, destination)
-				if err != nil {
-					panic(fmt.Sprintf("symlink %s -> %s failed: %s", cacheDest, destination, err))
-				}
-			} else {
-				log.Printf("copying %s -> %s", cacheDest, destination)
-				err := copyFile(cacheDest, destination)
-				if err != nil {
-					// this should not be possible
-					panic(fmt.Sprintf("copyFile %s -> %s failed: %s", cacheDest, destination, err))
-				}
-			}
+			copyOrSym(cacheDest, destination, dl.SymlinkSafe)
 
 		} else {
 			err := ioc.Download(srcURL, destination)
@@ -361,14 +375,18 @@ func getFilesWithMatchingMTimes(a map[string]time.Time, b map[string]time.Time) 
 	return matching
 }
 
-func executeTaskInDir(ioc IOClient, workdir string, taskId string, spec *TaskSpec, cachedir string, monitor *Monitor) (string, error) {
+func executeTaskInDir(ioc IOClient, workdir string, taskId string, spec *TaskSpec, cachedir string, monitor *Monitor, gcsMounts *GCSFuseMounts) (string, error) {
+	startTime := time.Now()
+
 	stdoutPath := path.Join(workdir, "stdout.txt")
 	execLifecycleScript("PreDownloadScript", workdir, spec.PreDownloadScript)
 
-	err, downloaded := downloadAll(ioc, workdir, spec.Downloads, cachedir)
+	err, downloaded := downloadAll(ioc, workdir, spec.Downloads, cachedir, gcsMounts)
 	if err != nil {
 		return "", err
 	}
+
+	downloadCompleteTime := time.Now()
 
 	downloadedInitialMTimes := getModificationTimes(downloaded)
 
@@ -398,6 +416,8 @@ func executeTaskInDir(ioc IOClient, workdir string, taskId string, spec *TaskSpe
 		return retcode, err
 	}
 
+	execCompleteTime := time.Now()
+
 	execLifecycleScript("PostExecScript", workdir, spec.PostExecScript)
 
 	downloadedFinalMTimes := getModificationTimes(downloaded)
@@ -411,17 +431,22 @@ func executeTaskInDir(ioc IOClient, workdir string, taskId string, spec *TaskSpe
 
 	addUpload(filesToUpload, stdoutPath, spec.StdoutURL)
 
-	err = writeResultFile(ioc, spec.CommandResultURL, retcode, resourceUsage, workdir, filesToUpload, spec.Command, spec.Parameters)
+	err = uploadMapped(ioc, filesToUpload)
 	if err != nil {
 		return retcode, err
 	}
 
-	err = uploadMapped(ioc, filesToUpload)
+	uploadComplete := time.Now()
+
+	err = writeResultFile(ioc, spec.CommandResultURL, retcode, resourceUsage, workdir, filesToUpload, spec.Command, spec.Parameters, startTime, downloadCompleteTime, execCompleteTime, uploadComplete)
+	if err != nil {
+		return retcode, err
+	}
 
 	return retcode, err
 }
 
-func executeTask(ioc IOClient, taskId string, taskSpec *TaskSpec, cacheDir string, tasksDir string, monitor *Monitor) (string, error) {
+func executeTask(ioc IOClient, taskId string, taskSpec *TaskSpec, cacheDir string, tasksDir string, monitor *Monitor, gcsMounts *GCSFuseMounts) (string, error) {
 	//	log.Printf("Job spec (%s) of claimed task: %s", json_url, json.dumps(spec, indent=2))
 
 	mode := os.FileMode(0700)
@@ -457,7 +482,7 @@ func executeTask(ioc IOClient, taskId string, taskSpec *TaskSpec, cacheDir strin
 		return "", err
 	}
 
-	retcode, err := executeTaskInDir(ioc, workDir, taskId, taskSpec, cacheDir, monitor)
+	retcode, err := executeTaskInDir(ioc, workDir, taskId, taskSpec, cacheDir, monitor, gcsMounts)
 	if err != nil {
 		return retcode, err
 	}
@@ -476,6 +501,10 @@ func uploadMapped(ioc IOClient, files map[string]string) error {
 	return nil
 }
 
+func timeDiffInSeconds(a time.Time, b time.Time) float32 {
+	return float32(b.Sub(a)) / float32(time.Second)
+}
+
 func writeResultFile(ioc IOClient,
 	CommandResultURL string,
 	retcode string,
@@ -483,7 +512,11 @@ func writeResultFile(ioc IOClient,
 	workdir string,
 	filesToUpload map[string]string,
 	command string,
-	parameters map[string]string) error {
+	parameters map[string]string,
+	startTime time.Time,
+	downloadCompeletedTime time.Time,
+	executeCompletedTime time.Time,
+	uploadCompletedTime time.Time) error {
 
 	files := make([]*ResultFile, 0, 100)
 	for src, dstURL := range filesToUpload {
@@ -496,10 +529,13 @@ func writeResultFile(ioc IOClient,
 	}
 
 	result := &ResultStruct{
-		Command:    command,
-		Parameters: parameters,
-		ReturnCode: retcode,
-		Files:      files,
+		Command:          command,
+		Parameters:       parameters,
+		ReturnCode:       retcode,
+		Files:            files,
+		DownloadSeconds:  timeDiffInSeconds(startTime, downloadCompeletedTime),
+		ExecutionSeconds: timeDiffInSeconds(downloadCompeletedTime, executeCompletedTime),
+		UploadSeconds:    timeDiffInSeconds(executeCompletedTime, uploadCompletedTime),
 		Usage: &ResourceUsage{
 			UserCPUTime:        resourceUsage.Utime,
 			SystemCPUTime:      resourceUsage.Stime,
@@ -539,11 +575,11 @@ func loadTaskSpec(ioc IOClient, taskURL string) (*TaskSpec, error) {
 	return &taskSpec, nil
 }
 
-func ExecuteTaskFromUrl(ioc IOClient, taskId string, taskURL string, cacheDir string, tasksDir string, monitor *Monitor) (string, error) {
+func ExecuteTaskFromUrl(ioc IOClient, taskId string, taskURL string, cacheDir string, tasksDir string, monitor *Monitor, gcsMounts *GCSFuseMounts) (string, error) {
 	taskSpec, err := loadTaskSpec(ioc, taskURL)
 	if err != nil {
 		return "", err
 	}
 
-	return executeTask(ioc, taskId, taskSpec, cacheDir, tasksDir, monitor)
+	return executeTask(ioc, taskId, taskSpec, cacheDir, tasksDir, monitor, gcsMounts)
 }

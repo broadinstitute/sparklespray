@@ -37,6 +37,8 @@ while (( "$#" )); do
         shift
         # force a full read to perform a full download and cache result
         cp "$src" /dev/null
+    elif [ "$1" == "--wait" ]; then
+        sleep 2592000 # just a long time. 30 days
     else
         echo "Unknown arg \"$1\". Aborting"
         exit 1

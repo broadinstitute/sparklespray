@@ -310,7 +310,7 @@ class NodeService:
                         "imageUri": setup_image,
                         "commands": setup_parameters,
                         "mounts": mounts,
-                        "flags": ["ENABLE_FUSE"],
+                        "flags": ["ENABLE_FUSE", "RUN_IN_BACKGROUND"],
                     },
                     {
                         "imageUri": docker_image,

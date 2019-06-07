@@ -125,6 +125,7 @@ class Cluster:
         job = self._get_job(job_id)
         pipeline_def = json.loads(job.kube_job_spec)
         operation_id = self.nodes.add_node(pipeline_def, preemptible, debug_log_url)
+        print("operation_id", operation_id)
         req = NodeReq(
             operation_id=operation_id,
             cluster_id=job.cluster,
@@ -294,6 +295,7 @@ class Cluster:
         monitor_port: int,
         bucket_names: List[str],
     ) -> dict:
+
         mount_point = machine_specs.mount_point
 
         m = re.match("gs://([^/]+)/(.+)$", consume_exe_url)
@@ -304,8 +306,9 @@ class Cluster:
         consume_data = os.path.join(mount_point, "data")
 
         setup_parameters = ["sparkles-consume-setup", "--dir", consume_data]
+        assert len(bucket_names) > 0
         for bucket_name in bucket_names:
-            setup_parameters.append("--bucket", bucket_name)
+            setup_parameters.extend(["--bucket", bucket_name])
         setup_parameters.extend(
             [
                 "--ln",
@@ -315,6 +318,31 @@ class Cluster:
                 consume_exe_path,
             ]
         )
+        setup_parameters.extend(["--read", consume_exe_path, "--wait"])
+
+        suff = " ".join(
+            [
+                consume_exe_path,
+                "consume",
+                "--cacheDir",
+                os.path.join(consume_data, "cache"),
+                "--tasksDir",
+                os.path.join(consume_data, "tasks"),
+                "--bucketDir",
+                os.path.join(consume_data, "bucket"),
+            ]
+            + consume_exe_args
+        )  # ,
+
+        print("suff", suff)
+        docker_command = [
+            "sh",
+            "-c",
+            f"count=1 ; while [ ! -e {consume_exe_path} ] ; do sleep 1 ; if [ $count -gt 30 ] ; then echo no {consume_exe_path}. aborting ; exit 10 ; fi ; count=`expr $count + 1` ; done && "
+            + suff,
+        ]
+
+        print("docker command", docker_command)
 
         return self.nodes.create_pipeline_json(
             jobid=jobid,
@@ -322,15 +350,7 @@ class Cluster:
             setup_image=SETUP_IMAGE,
             setup_parameters=setup_parameters,
             docker_image=docker_image,
-            docker_command=[
-                consume_exe_path,
-                "consume",
-                "--cacheDir",
-                os.path.join(consume_data, "cache"),
-                "--tasksDir",
-                os.path.join(consume_data, "tasks"),
-            ]
-            + consume_exe_args,
+            docker_command=docker_command,
             machine_specs=machine_specs,
             monitor_port=monitor_port,
         )

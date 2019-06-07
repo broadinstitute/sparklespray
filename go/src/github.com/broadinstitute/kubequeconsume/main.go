@@ -3,9 +3,13 @@ package kubequeconsume
 import (
 	"crypto/tls"
 	"crypto/x509"
+
+	// "fmt"
 	"log"
 	"net/http"
 	"os"
+
+	// "path"
 	"strings"
 	"time"
 
@@ -42,6 +46,7 @@ func Main() {
 				cli.StringFlag{Name: "tasksFile"},
 				cli.StringFlag{Name: "zones"},
 				cli.StringFlag{Name: "port"},
+				cli.StringFlag{Name: "bucketDir"},
 				cli.IntFlag{Name: "timeout", Value: 5}, // 5 minutes means the process will be killed after 10 minutes
 				cli.IntFlag{Name: "restimeout",
 					Value: 10}},
@@ -100,6 +105,7 @@ func consume(c *cli.Context) error {
 
 	projectID := c.String("projectId")
 	cacheDir := c.String("cacheDir")
+	bucketDir := c.String("bucketDir")
 	cluster := c.String("cluster")
 	tasksDir := c.String("tasksDir")
 	tasksFile := c.String("tasksFile")
@@ -169,8 +175,13 @@ func consume(c *cli.Context) error {
 		SleepOnEmpty:      1 * time.Second,  // how often to poll the queue if is empty
 		Owner:             owner}
 
+	gcsMounts, err := MountGCSBuckets(bucketDir)
+	if err != nil {
+		return err
+	}
+
 	executor := func(taskId string, taskParam string) (string, error) {
-		return ExecuteTaskFromUrl(ioc, taskId, taskParam, cacheDir, tasksDir, monitor)
+		return ExecuteTaskFromUrl(ioc, taskId, taskParam, cacheDir, tasksDir, monitor, gcsMounts)
 	}
 
 	Timeout := 1 * time.Second

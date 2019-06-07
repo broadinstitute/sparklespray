@@ -34,7 +34,7 @@ JOB_STATUS_KILLED = "killed"
 
 def job_to_entity(client, o):
     entity_key = client.key("Job", o.job_id)
-    entity = datastore.Entity(key=entity_key)
+    entity = datastore.Entity(key=entity_key, exclude_from_indexes=["kube_job_spec"])
     entity["tasks"] = o.tasks
     entity["cluster"] = o.cluster
     entity["kube_job_spec"] = o.kube_job_spec
