@@ -145,7 +145,8 @@ def load_config_from_dict(config):
             "account",
             "service_account_key",
             "credentials",
-            "bootDiskSizeGb",
+            "bootdisksizegb",  # deprecated name, replaced with boot_volume_in_gb
+            "boot_volume_in_gb",
             "preemptible",
             "local_work_dir",
             "gpu_count",

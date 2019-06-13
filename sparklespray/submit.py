@@ -35,7 +35,7 @@ CPU_REQUEST = "cpu"
 
 class SubmitConfig(BaseModel):
     preemptible: bool
-    bootDiskSizeGb: float
+    boot_volume_in_gb: float
     default_url_prefix: str
     machine_type: str
     image: str
@@ -196,7 +196,7 @@ def submit(jq: JobQueue, io: IO, cluster: Cluster, job_id: str, spec: dict, conf
         skip_kube_submit = True
 
     preemptible = config.preemptible
-    bootDiskSizeGb = config.bootDiskSizeGb
+    boot_volume_in_gb = config.boot_volume_in_gb
     default_url_prefix = config.default_url_prefix
     gpu_count = config.gpu_count
 
@@ -240,7 +240,7 @@ def submit(jq: JobQueue, io: IO, cluster: Cluster, job_id: str, spec: dict, conf
         consume_exe_args = ["--cluster", cluster_name, "--projectId", project,
                             "--zones", ",".join(config.zones), "--port", str(monitor_port)]
 
-        machine_specs = MachineSpec(boot_volume_in_gb=bootDiskSizeGb,
+        machine_specs = MachineSpec(boot_volume_in_gb=boot_volume_in_gb,
                                     mount_point=config.mount_point,
                                     machine_type=config.machine_type,
                                     gpu_count=gpu_count)
@@ -402,8 +402,14 @@ def add_submit_cmd(subparser):
                         help="Number of gpus on your VM", default=0)
 
 
-def _get_bootDiskSizeGb(config):
-    bootDiskSizeGb_flag = config.get("bootDiskSizeGb", "20")
+def _get_boot_volume_in_gb(config):
+    bootDiskSizeGb_flag = config.get("bootDiskSizeGb")
+    if bootDiskSizeGb_flag is None:
+        bootDiskSizeGb_flag = config.get("bootdisksizegb")
+    if bootDiskSizeGb_flag is None:
+        bootDiskSizeGb_flag = config.get("boot_volume_in_gb")
+    if bootDiskSizeGb_flag is None:
+        bootDiskSizeGb_flag = "20"
     bootDiskSizeGb = int(bootDiskSizeGb_flag)
     assert bootDiskSizeGb >= 10
     return bootDiskSizeGb
@@ -426,7 +432,7 @@ def submit_cmd(jq, io, cluster, args, config):
                 "setting 'preemptible' in config must either by 'y' or 'n' but was: {}".format(preemptible_flag))
         preemptible = preemptible_flag == 'y'
 
-    bootDiskSizeGb = _get_bootDiskSizeGb(config)
+    boot_volume_in_gb = _get_boot_volume_in_gb(config)
     default_url_prefix = config.get("default_url_prefix", "")
     work_dir = config.get("local_work_dir", os.path.expanduser(
         "~/.sparkles-cache/local_work_dir"))
@@ -522,7 +528,7 @@ def submit_cmd(jq, io, cluster, args, config):
     log.debug("spec: %s", json.dumps(spec, indent=2))
 
     submit_config = SubmitConfig(preemptible=preemptible,
-                                 bootDiskSizeGb=bootDiskSizeGb,
+                                 boot_volume_in_gb=boot_volume_in_gb,
                                  default_url_prefix=default_url_prefix,
                                  machine_type=machine_type,
                                  image=spec['image'],

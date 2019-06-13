@@ -31,7 +31,7 @@ def _test_datastore_api(job_store: JobStore, job_id: str):
 
 
 def validate_cmd(jq: JobQueue, io: IO, cluster: Cluster, config: dict):
-    from .submit import _get_bootDiskSizeGb
+    from .submit import _get_boot_volume_in_gb
 
     print(f"Validating config, using sparklespray {sparklespray.__version__}")
 
@@ -67,7 +67,7 @@ def validate_cmd(jq: JobQueue, io: IO, cluster: Cluster, config: dict):
     logging_url = config["default_url_prefix"] + "/node-logs"
 
     cluster.test_image(
-        config["default_image"], sample_url, logging_url, _get_bootDiskSizeGb(config)
+        config["default_image"], sample_url, logging_url, _get_boot_volume_in_gb(config)
     )
 
     print("Verification successful!")
