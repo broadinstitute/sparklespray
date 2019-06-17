@@ -410,6 +410,9 @@ def _get_boot_volume_in_gb(config):
         bootDiskSizeGb_flag = config.get("boot_volume_in_gb")
     if bootDiskSizeGb_flag is None:
         bootDiskSizeGb_flag = "20"
+    # check for G as the suffix, because we used to allow this
+    if bootDiskSizeGb_flag.lower().endswith("g"):
+        bootDiskSizeGb_flag = bootDiskSizeGb_flag[:-1]
     bootDiskSizeGb = int(bootDiskSizeGb_flag)
     assert bootDiskSizeGb >= 10
     return bootDiskSizeGb
