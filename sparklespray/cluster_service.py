@@ -378,6 +378,11 @@ class ClusterState:
                     # reflect the change in memory as well
                     node_req.status = new_status
 
+    def get_completed_node_names(self):
+        return [
+            x.instance_name for x in self.node_reqs if x.status in FINAL_NODE_STATES
+        ]
+
     def get_tasks(self):
         return self.tasks
 

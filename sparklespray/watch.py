@@ -8,11 +8,17 @@ from typing import Callable
 from .cluster_service import ClusterState
 from .txtui import print_log_content
 import datetime
+import subprocess
+import os
 
 # from google.gax.errors import RetryError
 
 
 class RetryError(Exception):
+    pass
+
+
+class TooManyNodeFailures(Exception):
     pass
 
 
@@ -90,6 +96,67 @@ def flush_stdout_from_complete_task(jq, io, task_id, offset):
     print_log_content(datetime.datetime.now(), rest_of_stdout)
 
 
+import collections
+
+
+class StartupFailureTracker:
+    def __init__(self, completed_node_names):
+        self.previously_completed = set(completed_node_names)
+        self.nodes_finished_without_running_anything = 0
+        self.prev_completed_node_names_count = None
+
+    def update(self, tasks, completed_node_names):
+        # fast path: if no names have been added, just return because nothing to do
+        if self.prev_completed_node_names_count == len(completed_node_names):
+            return
+
+        # record the count for next time
+        self.prev_completed_node_names_count = len(completed_node_names)
+
+        # find the number of tasks per node
+        task_count_by_node_name = collections.defaultdict(lambda: 0)
+        for task in tasks:
+            if task.owner is None:
+                continue
+            node_name = task.owner.split("/")[-1]
+            task_count_by_node_name[node_name] += 1
+
+        # find nodes which have newly completed
+        newly_completed = []
+        for node_name in completed_node_names:
+            if node_name not in self.previously_completed:
+                newly_completed.append(node_name)
+
+        # for each completion, check to see how many tasks were run
+        for node_name in newly_completed:
+            tasks_started = task_count_by_node_name[node_name]
+            log.info(
+                "Node %s completed after executing %d tasks", node_name, tasks_started
+            )
+            if tasks_started == 0:
+                self.nodes_finished_without_running_anything += 1
+
+        # print("task_count_by_node_name", task_count_by_node_name)
+        # print("previously_completed", self.previously_completed)
+        # print("newly_completed", newly_completed)
+
+        # for node_name in newly_completed:
+        #     tasks_started = task_count_by_node_name[node_name]
+        #     print(
+        #         "Node {} completed after executing {} tasks".format(
+        #             node_name, tasks_started
+        #         )
+        #     )
+
+        # remember which nodes we've checked
+        self.previously_completed.update(newly_completed)
+
+        # print(
+        #     "self.nodes_finished_without_running_anything",
+        #     self.nodes_finished_without_running_anything,
+        # )
+
+
 def _watch(
     job_id: str,
     state: ClusterState,
@@ -102,6 +169,8 @@ def _watch(
 ):
     log_monitor = None
     prev_summary = None
+
+    startup_failure_tracker = StartupFailureTracker(state.get_completed_node_names())
 
     while True:
         with _exception_guard(
@@ -122,13 +191,14 @@ def _watch(
             # if the status hasn't changed since last time then slow down polling
             poll_delay = min(poll_delay * 1.5, max_poll_delay)
 
-        if state.failed_node_req_count > 3:
-            log.error(
-                "%d node requests failed. Aborting...", state.failed_node_req_count
-            )
-            break
+        startup_failure_tracker.update(state.tasks, state.get_completed_node_names())
+        if startup_failure_tracker.nodes_finished_without_running_anything >= 5:
+            log.error("Too many nodes failed without starting any tasks. Aborting")
+            raise TooManyNodeFailures()
 
         poll_cluster()
+
+        # check each of the failed nodes to see if we have no tasks
 
         if log_monitor is None:
             if loglive:
@@ -181,10 +251,6 @@ def _watch(
 
 
 # TODO: Finish implementing. Use to start docker instance and watch progress
-
-
-import subprocess
-import os
 
 
 def start_docker_process(job_spec_str: str, consume_exe: str, work_dir: str):

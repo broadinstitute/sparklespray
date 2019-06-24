@@ -18,6 +18,7 @@ from .node_req_store import (
     NODE_REQ_FAILED,
 )
 from typing import List, DefaultDict, Tuple
+from .compute_service import DirCache
 
 # from oauth2client.client import GoogleCredentials
 # from google.cloud import datastore
@@ -164,9 +165,6 @@ class AddNodeStatus:
 
     def is_done(self) -> bool:
         return self.status["done"]
-
-
-from .compute_service import DirCache
 
 
 class NodeService:
