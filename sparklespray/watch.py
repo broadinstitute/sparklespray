@@ -172,6 +172,8 @@ def _watch(
 
     startup_failure_tracker = StartupFailureTracker(state.get_completed_node_names())
 
+    first_sign_of_concern = None
+
     while True:
         with _exception_guard(
             lambda: "summarizing status of job {} threw exception".format(job_id)
@@ -192,9 +194,17 @@ def _watch(
             poll_delay = min(poll_delay * 1.5, max_poll_delay)
 
         startup_failure_tracker.update(state.tasks, state.get_completed_node_names())
-        if startup_failure_tracker.nodes_finished_without_running_anything >= 5:
-            log.error("Too many nodes failed without starting any tasks. Aborting")
-            raise TooManyNodeFailures()
+        if startup_failure_tracker.nodes_finished_without_running_anything >= 10:
+            if first_sign_of_concern is None:
+                first_sign_of_concern = time.time()
+            else:
+                # Wait 30 seconds before we are sure that the jobs really haven't had their status updated. We might be 
+                # seeing that the nodes are completing before the tasks complete.
+                if time.time() - first_sign_of_concern > 30:
+                    log.error("Too many nodes failed without starting any tasks. Aborting")
+                    raise TooManyNodeFailures()
+        else:
+            first_sign_of_concern = None
 
         poll_cluster()
 
