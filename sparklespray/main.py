@@ -372,7 +372,11 @@ def _update_claimed_are_still_running(jq, cluster, job_id):
     return task_ids
 
 
-def clean(cluster: Cluster, jq: JobQueue, job_id: str, force: bool=False, force_pending: bool=False):
+def clean(cluster: Cluster, jq: JobQueue, job_id: str, force: bool=False, force_pending: bool=False, only_nodes: bool=False):
+    cluster.cleanup_node_reqs(job_id)
+    if only_nodes:
+        return
+
     if not force:
         # Check to not remove tasks that are claimed and still running
         tasks = cluster.task_store.get_tasks(job_id, status=STATUS_CLAIMED)
@@ -414,10 +418,7 @@ def clean_cmd(cluster : Cluster, jq, args):
     jobids = _get_jobids_from_pattern(jq, args.jobid_pattern)
     for jobid in jobids:
         log.info("Deleting %s", jobid)
-        cluster.cleanup_node_reqs(jobid)
-        if args.only_nodes:
-            continue
-        clean(cluster, jq, jobid, args.force, args.force_pending)
+        clean(cluster, jq, jobid, args.force, args.force_pending, only_nodes=args.only_nodes)
 
 
 def _update_if_owner_missing(cluster, jq, task):
