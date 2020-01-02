@@ -4,7 +4,7 @@ import sys
 
 
 from .io import IO
-from configparser import ConfigParser
+from configparser import RawConfigParser, NoSectionError, NoOptionError
 from .cluster_service import Cluster
 from .node_req_store import AddNodeReqStore
 from .task_store import TaskStore
@@ -21,6 +21,14 @@ SCOPES = [
 ]
 
 
+def _safe_get(config, section, key, default=None):
+    try:
+        return config.get(section, key)
+    except NoSectionError:
+        return default
+    except NoOptionError: 
+        return default
+
 def load_only_config_dict(
     config_file,
     gcloud_config_file="~/.config/gcloud/configurations/config_default",
@@ -31,13 +39,17 @@ def load_only_config_dict(
     gcloud_config_file = os.path.expanduser(gcloud_config_file)
     defaults = {}
     if os.path.exists(gcloud_config_file):
-        gcloud_config = ConfigParser()
+        gcloud_config = RawConfigParser()
         gcloud_config.read(gcloud_config_file)
+        zone = _safe_get(gcloud_config, "compute", "zone")
+        zones = []
+        if zone:
+            zones.append(zone)
         defaults = dict(
-            account=gcloud_config.get("core", "account"),
-            project=gcloud_config.get("core", "project"),
-            zones=[gcloud_config.get("compute", "zone")],
-            region=gcloud_config.get("compute", "region"),
+            account=_safe_get(gcloud_config, "core", "account"),
+            project=_safe_get(gcloud_config, "core", "project"),
+            zones=zone,
+            region=_safe_get(gcloud_config, "compute", "region"),
         )
         if verbose:
             print("Using defaults from {}: {}".format(gcloud_config_file, defaults))
@@ -48,7 +60,7 @@ def load_only_config_dict(
     if verbose:
         print("Using config: {}".format(config_file))
 
-    config = ConfigParser()
+    config = RawConfigParser()
     config.read(config_file)
     config_from_file = dict(config.items("config"))
     if "zones" in config_from_file:
