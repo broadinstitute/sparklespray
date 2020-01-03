@@ -1,30 +1,26 @@
-import time
-import logging
 import os
 import json
-import sys
-import csv
 import copy
 import argparse
-from typing import List
 import re
+
+from typing import List
 from pydantic import BaseModel
 
+import sparklespray
+
+from .csv_utils import read_csv_as_dicts
 from .util import random_string, url_join
 from .node_service import MachineSpec
 from .hasher import CachingHashFunction
 from .spec import make_spec_from_command, SrcDstPair
-from .logclient import LogMonitor
-from configparser import ConfigParser
 from .main import clean
-from .task_store import STATUS_PENDING
 from .util import get_timestamp
 from .job_queue import JobQueue
 from .cluster_service import Cluster
 from .io import IO
 from .watch import watch, local_watch
 from . import txtui
-import sparklespray
 from .watch import DockerFailedException
 
 from .log import log
@@ -267,9 +263,6 @@ def new_job_id():
     return get_timestamp() + "-" + uuid.uuid4().hex[:4]
 
 
-def read_parameters_from_csv(filename):
-    with open(filename, "rt") as fd:
-        return list(csv.DictReader(fd))
 
 
 def _split_source_dest(file):
@@ -469,7 +462,7 @@ def submit_cmd(jq, io, cluster, args, config):
         if args.seq is not None:
             parameters = [{"index": str(i)} for i in range(args.seq)]
         elif args.params is not None:
-            parameters = read_parameters_from_csv(args.params)
+            parameters = read_csv_as_dicts(args.params)
         else:
             parameters = [{}]
 
