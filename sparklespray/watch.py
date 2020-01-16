@@ -10,6 +10,7 @@ from .txtui import print_log_content
 import datetime
 import subprocess
 import os
+from .task_store import STATUS_COMPLETE
 
 # from google.gax.errors import RetryError
 
@@ -35,10 +36,13 @@ from .txtui import user_print
 def add_watch_cmd(subparser):
     parser = subparser.add_parser("watch", help="Monitor the job")
     parser.set_defaults(func=watch_cmd)
+    parser.set_defaults(loglive=True)
     parser.add_argument("jobid")
     parser.add_argument("--nodes", "-n", type=int, help="The target number of workers")
+    parser.add_argument("--verify", action="store_true", help="If set, before watching will confirm all finished jobs wrote their output. Any jobs whose output is missing will be reset")
+    parser.add_argument("--loglive", help="Stream output (on by default)", action="store_true", dest="loglive")
     parser.add_argument(
-        "--loglive", help="tail the first running task we can find", action="store_true"
+        "--no-loglive", help="tail the first running task we can find", action="store_false", dest="loglive"
     )
 
 
@@ -46,6 +50,8 @@ def watch_cmd(jq: JobQueue, io: IO, cluster: Cluster, args):
     from .main import _resolve_jobid
 
     jobid = _resolve_jobid(jq, args.jobid)
+    if args.verify:
+        check_completion(jq, io, jobid)
     watch(io, jq, jobid, cluster, target_nodes=args.nodes, loglive=args.loglive)
 
 
@@ -456,3 +462,21 @@ def watch(
     except KeyboardInterrupt:
         print("Interrupted -- Exiting, but your job will continue to run unaffected.")
         sys.exit(1)
+
+def check_completion(jq : JobQueue, io: IO, job_id: str):
+    successful_count = 0
+    completed_count = 0
+
+    tasks = jq.task_storage.get_tasks(job_id)
+    for task in tasks:
+        if task.status == STATUS_COMPLETE:
+            if (completed_count % 100 ) == 0:
+                print("Verified {} out of {} completed tasks successfully wrote output".format(successful_count, len(tasks)))
+            completed_count += 1
+            if io.exists(task.command_result_url):
+                #print("task {} completed successfully".format(task.task_id))
+                successful_count += 1
+            else:
+                print("task {} missing {}, resetting".format(task.task_id, task.command_result_url))
+                # look up owner -> operation id -> dump log
+                jq.reset_task(task.task_id)
