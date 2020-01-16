@@ -5,59 +5,60 @@ from sparklespray import pb_pb2 as sparklespray_dot_pb__pb2
 
 
 class MonitorStub(object):
-  # missing associated documentation comment in .proto file
-  pass
+    # missing associated documentation comment in .proto file
+    pass
 
-  def __init__(self, channel):
-    """Constructor.
+    def __init__(self, channel):
+        """Constructor.
 
     Args:
       channel: A grpc.Channel.
     """
-    self.ReadOutput = channel.unary_unary(
-        '/Monitor/ReadOutput',
-        request_serializer=sparklespray_dot_pb__pb2.ReadOutputRequest.SerializeToString,
-        response_deserializer=sparklespray_dot_pb__pb2.ReadOutputReply.FromString,
+        self.ReadOutput = channel.unary_unary(
+            "/Monitor/ReadOutput",
+            request_serializer=sparklespray_dot_pb__pb2.ReadOutputRequest.SerializeToString,
+            response_deserializer=sparklespray_dot_pb__pb2.ReadOutputReply.FromString,
         )
-    self.GetProcessStatus = channel.unary_unary(
-        '/Monitor/GetProcessStatus',
-        request_serializer=sparklespray_dot_pb__pb2.GetProcessStatusRequest.SerializeToString,
-        response_deserializer=sparklespray_dot_pb__pb2.GetProcessStatusReply.FromString,
+        self.GetProcessStatus = channel.unary_unary(
+            "/Monitor/GetProcessStatus",
+            request_serializer=sparklespray_dot_pb__pb2.GetProcessStatusRequest.SerializeToString,
+            response_deserializer=sparklespray_dot_pb__pb2.GetProcessStatusReply.FromString,
         )
 
 
 class MonitorServicer(object):
-  # missing associated documentation comment in .proto file
-  pass
-
-  def ReadOutput(self, request, context):
-    """Sends a greeting
-    """
-    context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-    context.set_details('Method not implemented!')
-    raise NotImplementedError('Method not implemented!')
-
-  def GetProcessStatus(self, request, context):
     # missing associated documentation comment in .proto file
     pass
-    context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-    context.set_details('Method not implemented!')
-    raise NotImplementedError('Method not implemented!')
+
+    def ReadOutput(self, request, context):
+        """Sends a greeting
+    """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details("Method not implemented!")
+        raise NotImplementedError("Method not implemented!")
+
+    def GetProcessStatus(self, request, context):
+        # missing associated documentation comment in .proto file
+        pass
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details("Method not implemented!")
+        raise NotImplementedError("Method not implemented!")
 
 
 def add_MonitorServicer_to_server(servicer, server):
-  rpc_method_handlers = {
-      'ReadOutput': grpc.unary_unary_rpc_method_handler(
-          servicer.ReadOutput,
-          request_deserializer=sparklespray_dot_pb__pb2.ReadOutputRequest.FromString,
-          response_serializer=sparklespray_dot_pb__pb2.ReadOutputReply.SerializeToString,
-      ),
-      'GetProcessStatus': grpc.unary_unary_rpc_method_handler(
-          servicer.GetProcessStatus,
-          request_deserializer=sparklespray_dot_pb__pb2.GetProcessStatusRequest.FromString,
-          response_serializer=sparklespray_dot_pb__pb2.GetProcessStatusReply.SerializeToString,
-      ),
-  }
-  generic_handler = grpc.method_handlers_generic_handler(
-      'Monitor', rpc_method_handlers)
-  server.add_generic_rpc_handlers((generic_handler,))
+    rpc_method_handlers = {
+        "ReadOutput": grpc.unary_unary_rpc_method_handler(
+            servicer.ReadOutput,
+            request_deserializer=sparklespray_dot_pb__pb2.ReadOutputRequest.FromString,
+            response_serializer=sparklespray_dot_pb__pb2.ReadOutputReply.SerializeToString,
+        ),
+        "GetProcessStatus": grpc.unary_unary_rpc_method_handler(
+            servicer.GetProcessStatus,
+            request_deserializer=sparklespray_dot_pb__pb2.GetProcessStatusRequest.FromString,
+            response_serializer=sparklespray_dot_pb__pb2.GetProcessStatusReply.SerializeToString,
+        ),
+    }
+    generic_handler = grpc.method_handlers_generic_handler(
+        "Monitor", rpc_method_handlers
+    )
+    server.add_generic_rpc_handlers((generic_handler,))

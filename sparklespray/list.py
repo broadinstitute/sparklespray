@@ -9,6 +9,7 @@ from .main import _resolve_jobid
 from .io import IO
 from .cluster_service import Cluster
 from .node_req_store import AddNodeReqStore
+
 # def logs_cmd(jq: JobQueue, io: IO, args):
 #     jobid = _resolve_jobid(jq, args.jobid)
 #     tasks = jq.task_storage.get_tasks(jobid)
@@ -261,7 +262,16 @@ def list_nodes_cmd(jq: JobQueue, cluster: Cluster, io, args):
     job = jq.get_job(job_id)
     cluster_id = job.cluster
 
-    list_nodes(cluster_id, cluster.node_req_store, io, job_id, fields, filters, args.format, args.output)
+    list_nodes(
+        cluster_id,
+        cluster.node_req_store,
+        io,
+        job_id,
+        fields,
+        filters,
+        args.format,
+        args.output,
+    )
 
 
 def list_nodes(
@@ -274,7 +284,6 @@ def list_nodes(
     output_mode: str,
     output_filename: str,
 ):
-
     def to_record(note_req: AddNodeReqStore):
         row = attr.asdict(node_req)
         return row
@@ -288,4 +297,3 @@ def list_nodes(
     filtered = process_records(records, fields, filter_expressions)
 
     write(filtered, output_mode, output_filename)
-

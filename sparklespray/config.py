@@ -26,8 +26,9 @@ def _safe_get(config, section, key, default=None):
         return config.get(section, key)
     except NoSectionError:
         return default
-    except NoOptionError: 
+    except NoOptionError:
         return default
+
 
 def load_only_config_dict(
     config_file,

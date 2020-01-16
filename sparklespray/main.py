@@ -5,7 +5,13 @@ import json
 import sys
 import attr
 import sparklespray
-from .task_store import STATUS_FAILED, STATUS_CLAIMED, STATUS_PENDING, STATUS_KILLED, STATUS_COMPLETE
+from .task_store import (
+    STATUS_FAILED,
+    STATUS_CLAIMED,
+    STATUS_PENDING,
+    STATUS_KILLED,
+    STATUS_COMPLETE,
+)
 from .util import get_timestamp, url_join
 from .job_store import JOB_STATUS_KILLED
 from .job_queue import JobQueue
@@ -29,8 +35,12 @@ def logs_cmd(jq: JobQueue, io: IO, args):
     jobid = _resolve_jobid(jq, args.jobid)
     tasks = jq.task_storage.get_tasks(jobid)
     if not args.all:
-        tasks = [t for t in tasks if t.status == STATUS_FAILED or (
-            t.exit_code is not None and str(t.exit_code) != "0")]
+        tasks = [
+            t
+            for t in tasks
+            if t.status == STATUS_FAILED
+            or (t.exit_code is not None and str(t.exit_code) != "0")
+        ]
     print("You can view any of these logs by using: gsutil cat <log_path>")
     print("task_id\texit_code\tlog_path\t")
     for t in tasks:
@@ -52,13 +62,17 @@ def show_cmd(jq: JobQueue, io: IO, args):
         tasks = jq.task_storage.get_tasks(jobid)
 
     if retcode is not None:
+
         def retcode_matches(exit_code):
             return exit_code is not None and int(exit_code) == retcode
 
         before_count = len(tasks)
         tasks = [task for task in tasks if retcode_matches(task.exit_code)]
-        log.info("Filtered {} tasks to {} tasks with exit code {}".format(
-            before_count, len(tasks), retcode))
+        log.info(
+            "Filtered {} tasks to {} tasks with exit code {}".format(
+                before_count, len(tasks), retcode
+            )
+        )
 
     if len(tasks) == 0:
         log.error("No tasks found")
@@ -70,14 +84,14 @@ def show_cmd(jq: JobQueue, io: IO, args):
 
         def make_simple_row(task):
             row = {}
-            row['sparklespray_task_id'] = task.task_id
-            row['sparklespray_exit_code'] = task.exit_code
-            row['sparklespray_failure_reason'] = task.failure_reason
-            row['sparklespray_status'] = task.status
+            row["sparklespray_task_id"] = task.task_id
+            row["sparklespray_exit_code"] = task.exit_code
+            row["sparklespray_failure_reason"] = task.failure_reason
+            row["sparklespray_status"] = task.status
 
             if args.params:
                 task_spec = json.loads(io.get_as_str(task.args))
-                task_parameters = task_spec.get('parameters', {})
+                task_parameters = task_spec.get("parameters", {})
                 row.update(task_parameters)
 
             return row
@@ -85,12 +99,12 @@ def show_cmd(jq: JobQueue, io: IO, args):
         def make_full_row(task):
             row = attr.asdict(task)
             task_spec = json.loads(io.get_as_str(task.args))
-            row['args_url'] = task.args
-            row['args'] = task_spec
+            row["args_url"] = task.args
+            row["args"] = task_spec
             return row
 
         def write_json_rows(rows, fd):
-            fd.write(json.dumps(rows, indent=3)+"\n")
+            fd.write(json.dumps(rows, indent=3) + "\n")
 
         def write_csv_rows(rows, fd):
             # find the union of all keys
@@ -135,20 +149,27 @@ def reset_cmd(jq: JobQueue, io: IO, cluster, args):
     else:
         for jobid in _get_jobids_from_pattern(jq, jobid_pattern):
             if args.all:
-                statuses_to_clear = [STATUS_CLAIMED,
-                                     STATUS_FAILED, STATUS_COMPLETE, STATUS_KILLED]
+                statuses_to_clear = [
+                    STATUS_CLAIMED,
+                    STATUS_FAILED,
+                    STATUS_COMPLETE,
+                    STATUS_KILLED,
+                ]
             else:
-                statuses_to_clear = [STATUS_CLAIMED,
-                                     STATUS_FAILED, STATUS_KILLED]
-            log.info("reseting %s by changing tasks with statuses (%s) -> %s", jobid, ",".join(statuses_to_clear),
-                     STATUS_PENDING)
-            updated = jq.reset(jobid, None,
-                               statuses_to_clear=statuses_to_clear)
+                statuses_to_clear = [STATUS_CLAIMED, STATUS_FAILED, STATUS_KILLED]
+            log.info(
+                "reseting %s by changing tasks with statuses (%s) -> %s",
+                jobid,
+                ",".join(statuses_to_clear),
+                STATUS_PENDING,
+            )
+            updated = jq.reset(jobid, None, statuses_to_clear=statuses_to_clear)
             log.info("updated %d tasks", updated)
 
 
 def _summarize_task_statuses(tasks):
     import collections
+
     complete = True
     counts = collections.defaultdict(lambda: 0)
     for task in tasks:
@@ -235,49 +256,57 @@ def status_cmd(jq: JobQueue, io: IO, cluster: Cluster, args):
                     elif entry.status == STATUS_COMPLETE:
                         task_time = entry.timestamp - claimed_time
                 claim_count_per_task.append(claimed_count)
-                
+
                 if task_time is not None:
                     task_times.append(task_time)
 
             claim_count_per_task.sort()
             n = len(claim_count_per_task)
-            txtui.user_print("Number of times a task was claimed quantiles: {}, {}, {}, {}, {}, mean: {:1f}".format(
-                claim_count_per_task[0],
-                claim_count_per_task[int(n/4)],
-                claim_count_per_task[int(n/2)],
-                claim_count_per_task[int(n*3/4)],
-                claim_count_per_task[n-1],
-                sum(claim_count_per_task)/n
-            ))
+            txtui.user_print(
+                "Number of times a task was claimed quantiles: {}, {}, {}, {}, {}, mean: {:1f}".format(
+                    claim_count_per_task[0],
+                    claim_count_per_task[int(n / 4)],
+                    claim_count_per_task[int(n / 2)],
+                    claim_count_per_task[int(n * 3 / 4)],
+                    claim_count_per_task[n - 1],
+                    sum(claim_count_per_task) / n,
+                )
+            )
 
             task_times.sort()
             n = len(task_times)
-            txtui.user_print("task count: {}, execution time quantiles (in minutes): {:.1f}, {:.1f}, {:.1f}, {:.1f}, {:.1f}, mean: {:.1f}".format(n,
-                task_times[0]/60,
-                task_times[int(n/4)]/60,
-                task_times[int(n/2)]/60,
-                task_times[int(n*3/4)]/60,
-                task_times[n-1]/60,
-                sum(task_times)/n/60
-            ))
+            txtui.user_print(
+                "task count: {}, execution time quantiles (in minutes): {:.1f}, {:.1f}, {:.1f}, {:.1f}, {:.1f}, mean: {:.1f}".format(
+                    n,
+                    task_times[0] / 60,
+                    task_times[int(n / 4)] / 60,
+                    task_times[int(n / 2)] / 60,
+                    task_times[int(n * 3 / 4)] / 60,
+                    task_times[n - 1] / 60,
+                    sum(task_times) / n / 60,
+                )
+            )
 
             txtui.user_print("Getting memory stats...")
             results = io.bulk_get_as_str(command_result_urls).values()
-            results = [ json.loads(body) for body in results if body is not None]
-            max_memory_size = [ x['resource_usage']['max_memory_size'] for x in results ]
+            results = [json.loads(body) for body in results if body is not None]
+            max_memory_size = [x["resource_usage"]["max_memory_size"] for x in results]
             max_memory_size.sort()
             n = len(max_memory_size)
-            txtui.user_print("max memory quantiles: {}, {}, {}, {}, {}, mean: {}".format(
-            max_memory_size[0],
-            max_memory_size[int(n/4)],
-            max_memory_size[int(n/2)],
-            max_memory_size[int(n*3/4)],
-            max_memory_size[n-1],
-            sum(max_memory_size)/n
-            ))
+            txtui.user_print(
+                "max memory quantiles: {}, {}, {}, {}, {}, mean: {}".format(
+                    max_memory_size[0],
+                    max_memory_size[int(n / 4)],
+                    max_memory_size[int(n / 2)],
+                    max_memory_size[int(n * 3 / 4)],
+                    max_memory_size[n - 1],
+                    sum(max_memory_size) / n,
+                )
+            )
+
+
 #            import pdb
 #            pdb.set_trace()
-
 
 
 def fetch_cmd(jq, io, args):
@@ -316,23 +345,23 @@ def fetch_cmd_(jq, io, jobid, dest_root, force=False, flat=False):
         # save parameters taken from spec
         # with open(os.path.join(dest, "parameters.json"), "wt") as fd:
         #     fd.write(json.dumps(spec['parameters']))
-        command_result_json = io.get_as_str(
-            spec['command_result_url'], must=False)
+        command_result_json = io.get_as_str(spec["command_result_url"], must=False)
         to_download = []
         if command_result_json is None:
-            log.warning("Results did not appear to be written yet at %s",
-                        spec['command_result_url'])
+            log.warning(
+                "Results did not appear to be written yet at %s",
+                spec["command_result_url"],
+            )
         else:
-            get(spec['stdout_url'], os.path.join(dest, "stdout.txt"))
+            get(spec["stdout_url"], os.path.join(dest, "stdout.txt"))
             command_result = json.loads(command_result_json)
             log.debug("command_result: %s", json.dumps(command_result))
-            for ul in command_result['files']:
-                to_download.append((ul['src'], ul['dst_url']))
+            for ul in command_result["files"]:
+                to_download.append((ul["src"], ul["dst_url"]))
 
         for src, dst_url in to_download:
             if include_index:
-                localpath = os.path.join(
-                    dest_root, str(task.task_index), src)
+                localpath = os.path.join(dest_root, str(task.task_index), src)
             else:
                 localpath = os.path.join(dest_root, src)
             pdir = os.path.dirname(localpath)
@@ -366,13 +395,22 @@ def _update_claimed_are_still_running(jq, cluster, job_id):
     task_ids = get_preempted(state)
     if len(task_ids) > 0:
         log.info(
-            "Resetting tasks which appear to have been preempted: %s", ", ".join(task_ids))
+            "Resetting tasks which appear to have been preempted: %s",
+            ", ".join(task_ids),
+        )
         for task_id in task_ids:
             jq.reset_task(task_id)
     return task_ids
 
 
-def clean(cluster: Cluster, jq: JobQueue, job_id: str, force: bool=False, force_pending: bool=False, only_nodes: bool=False):
+def clean(
+    cluster: Cluster,
+    jq: JobQueue,
+    job_id: str,
+    force: bool = False,
+    force_pending: bool = False,
+    only_nodes: bool = False,
+):
     cluster.cleanup_node_reqs(job_id)
     if only_nodes:
         return
@@ -382,19 +420,22 @@ def clean(cluster: Cluster, jq: JobQueue, job_id: str, force: bool=False, force_
         tasks = cluster.task_store.get_tasks(job_id, status=STATUS_CLAIMED)
         if len(tasks) > 0:
             # if some tasks are still marked 'claimed' verify that the owner is still running
-            reset_task_ids = _update_claimed_are_still_running(
-                jq, cluster, job_id)
+            reset_task_ids = _update_claimed_are_still_running(jq, cluster, job_id)
 
             still_running = []
             for task in tasks:
                 if task.task_id not in reset_task_ids:
                     still_running.append(task.task_id)
 
-            log.info("reset_task_ids=%s, still_running=%s",
-                     reset_task_ids, still_running)
+            log.info(
+                "reset_task_ids=%s, still_running=%s", reset_task_ids, still_running
+            )
             if len(still_running) > 0:
                 log.warning(
-                    "job %s is still running (%d tasks), cannot remove", job_id, len(still_running))
+                    "job %s is still running (%d tasks), cannot remove",
+                    job_id,
+                    len(still_running),
+                )
                 return False
 
         if not force_pending:
@@ -406,7 +447,8 @@ def clean(cluster: Cluster, jq: JobQueue, job_id: str, force: bool=False, force_
                 log.warning(
                     "Job {} has {} tasks that are still pending and active requests for VMs. If you want to force cleaning them,"
                     " please use 'sparkles kill {}'".format(
-                        job_id, nb_tasks_pending, job_id)
+                        job_id, nb_tasks_pending, job_id
+                    )
                 )
                 return False
 
@@ -414,11 +456,18 @@ def clean(cluster: Cluster, jq: JobQueue, job_id: str, force: bool=False, force_
     return True
 
 
-def clean_cmd(cluster : Cluster, jq, args):
+def clean_cmd(cluster: Cluster, jq, args):
     jobids = _get_jobids_from_pattern(jq, args.jobid_pattern)
     for jobid in jobids:
         log.info("Deleting %s", jobid)
-        clean(cluster, jq, jobid, args.force, args.force_pending, only_nodes=args.only_nodes)
+        clean(
+            cluster,
+            jq,
+            jobid,
+            args.force,
+            args.force_pending,
+            only_nodes=args.only_nodes,
+        )
 
 
 def _update_if_owner_missing(cluster, jq, task):
@@ -430,8 +479,12 @@ def _update_if_owner_missing(cluster, jq, task):
             new_status = STATUS_KILLED
         else:
             new_status = STATUS_PENDING
-        log.info("Task %s is owned by %s which does not appear to be running, resetting status from 'claimed' to '%s'",
-                 task.task_id, task.owner, new_status)
+        log.info(
+            "Task %s is owned by %s which does not appear to be running, resetting status from 'claimed' to '%s'",
+            task.task_id,
+            task.owner,
+            new_status,
+        )
         jq.reset_task(task.task_id, status=new_status)
 
 
@@ -452,8 +505,7 @@ def kill_cmd(jq: JobQueue, cluster, args):
 
         # if there are any sit sitting at pending, mark them as killed
         tasks = jq.task_storage.get_tasks(jobid, status=STATUS_PENDING)
-        txtui.user_print(
-            "Marking {} pending tasks as killed".format(len(tasks)))
+        txtui.user_print("Marking {} pending tasks as killed".format(len(tasks)))
         for task in tasks:
             jq.reset_task(task.task_id, status=STATUS_KILLED)
 
@@ -465,6 +517,7 @@ def version_cmd():
 
 def get_func_parameters(func):
     import inspect
+
     return inspect.getfullargspec(func)[0]
 
 
@@ -473,21 +526,19 @@ def dump_operation_cmd(cluster: Cluster, args):
     print(json.dumps(operation, indent="  "))
 
 
-
-
 def setup_cmd(args, config):
-    default_url_prefix = config['default_url_prefix']
+    default_url_prefix = config["default_url_prefix"]
     m = re.match("^gs://([^/]+)(?:/.*)?$", default_url_prefix)
     assert m != None, "invalid remote path: {}".format(default_url_prefix)
     bucket_name = m.group(1)
 
-    setup_project(config['project'],
-                  config['service_account_key'], bucket_name)
+    setup_project(config["project"], config["service_account_key"], bucket_name)
 
 
 def sparkles_main():
     # disable stdout/stderr buffering to work better when run non-interactively
     import sys, io
+
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, line_buffering=True)
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, line_buffering=True)
 
@@ -498,8 +549,10 @@ def sparkles_main():
 
 def main(argv=None):
     import warnings
+
     warnings.filterwarnings(
-        "ignore", "Your application has authenticated using end user credentials")
+        "ignore", "Your application has authenticated using end user credentials"
+    )
 
     from .submit import add_submit_cmd
     from .watch import add_watch_cmd
@@ -507,8 +560,9 @@ def main(argv=None):
 
     parse = argparse.ArgumentParser()
     parse.add_argument("--config", default=None)
-    parse.add_argument("--debug", action="store_true",
-                       help="If set, debug messages will be output")
+    parse.add_argument(
+        "--debug", action="store_true", help="If set, debug messages will be output"
+    )
     subparser = parse.add_subparsers()
 
     add_submit_cmd(subparser)
@@ -516,51 +570,76 @@ def main(argv=None):
     add_list_nodes_cmd(subparser)
 
     parser = subparser.add_parser(
-        "validate", help="Run a series of tests to confirm the configuration is valid")
+        "validate", help="Run a series of tests to confirm the configuration is valid"
+    )
     parser.set_defaults(func=validate_cmd)
 
-    parser = subparser.add_parser("reset",
-                                  help="Mark any 'claimed', 'killed' or 'failed' or jobs with non-zero exit jobs as ready for execution again.  Useful largely only during debugging issues with job submission. Potentially also useful for retrying after transient failures.")
+    parser = subparser.add_parser(
+        "reset",
+        help="Mark any 'claimed', 'killed' or 'failed' or jobs with non-zero exit jobs as ready for execution again.  Useful largely only during debugging issues with job submission. Potentially also useful for retrying after transient failures.",
+    )
     parser.set_defaults(func=reset_cmd)
     parser.add_argument("jobid_pattern")
-    parser.add_argument("--all", action="store_true",
-                        help="If set, will mark all tasks as 'pending', not just 'claimed', 'killed' or 'failed' tasks")
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="If set, will mark all tasks as 'pending', not just 'claimed', 'killed' or 'failed' tasks",
+    )
 
-    parser = subparser.add_parser("setup",
-                                  help="Configures the google project chosen in the config to be compatible with sparklespray. (requires gcloud installed in path)")
+    parser = subparser.add_parser(
+        "setup",
+        help="Configures the google project chosen in the config to be compatible with sparklespray. (requires gcloud installed in path)",
+    )
     parser.set_defaults(func=setup_cmd)
 
     parser = subparser.add_parser(
-        "dump-operation", help="primarily used for debugging. If a sparkles cannot turn on a node, this can be used to dump the details of the operation which requested the node.")
+        "dump-operation",
+        help="primarily used for debugging. If a sparkles cannot turn on a node, this can be used to dump the details of the operation which requested the node.",
+    )
     parser.set_defaults(func=dump_operation_cmd)
     parser.add_argument("operation_id")
 
-    parser = subparser.add_parser(
-        "logs", help="Print out logs from failed tasks"
-    )
+    parser = subparser.add_parser("logs", help="Print out logs from failed tasks")
     parser.set_defaults(func=logs_cmd)
     parser.add_argument("jobid")
     parser.add_argument(
-        "--all", help="If set, show paths to logs for all tasks instead of just failures",
-        action="store_true")
+        "--all",
+        help="If set, show paths to logs for all tasks instead of just failures",
+        action="store_true",
+    )
 
     parser = subparser.add_parser(
-        "show", help="Write to a csv file the parameters for each task")
+        "show", help="Write to a csv file the parameters for each task"
+    )
     parser.set_defaults(func=show_cmd)
     parser.add_argument("jobid")
     parser.add_argument(
-        "--out", help="The filename to write the output to. If not specified, writes to stdout")
+        "--out",
+        help="The filename to write the output to. If not specified, writes to stdout",
+    )
     parser.add_argument(
-        "--params", help="If set, include the parameters for each task", action="store_true")
+        "--params",
+        help="If set, include the parameters for each task",
+        action="store_true",
+    )
+    parser.add_argument("--csv", help="If set, will write as csv", action="store_true")
     parser.add_argument(
-        "--csv", help="If set, will write as csv", action="store_true")
+        "--detailed",
+        help="If set, will write full details as json",
+        action="store_true",
+    )
     parser.add_argument(
-        "--detailed", help="If set, will write full details as json", action="store_true")
-    parser.add_argument("--incomplete", "-i",
-                        help="By default, will list all parameters. If this flag is present, only those tasks which are not complete will be written to the csv",
-                        action="store_true")
+        "--incomplete",
+        "-i",
+        help="By default, will list all parameters. If this flag is present, only those tasks which are not complete will be written to the csv",
+        action="store_true",
+    )
     parser.add_argument(
-        "--exitcode", "-e", help="Only include those tasks with this return code", type=int)
+        "--exitcode",
+        "-e",
+        help="Only include those tasks with this return code",
+        type=int,
+    )
 
     #    parser = subparser.add_parser("retry", help="Resubmit any 'failed' jobs for execution again. (often after increasing memory required)")
     #    parser.set_defaults(func=retry_cmd)
@@ -570,7 +649,8 @@ def main(argv=None):
     #    parser.add_argument("--no-wait", action="store_false", dest="wait_for_completion", help="Exit immediately after submission instead of waiting for job to complete")
 
     parser = subparser.add_parser(
-        "status", help="Print the status for the tasks which make up the specified job")
+        "status", help="Print the status for the tasks which make up the specified job"
+    )
     parser.add_argument("--stats", action="store_true")
     parser.set_defaults(func=status_cmd)
     parser.add_argument("jobid_pattern", nargs="?")
@@ -578,30 +658,54 @@ def main(argv=None):
     add_watch_cmd(subparser)
 
     parser = subparser.add_parser(
-        "clean", help="Remove jobs which are not currently running from the database of jobs")
+        "clean",
+        help="Remove jobs which are not currently running from the database of jobs",
+    )
     parser.set_defaults(func=clean_cmd)
     parser.add_argument(
-        "--force", "-f", help="If set, will delete job regardless of whether it is running or not", action="store_true")
-    parser.add_argument("jobid_pattern", nargs="?",
-                        help="If specified will only attempt to remove jobs that match this pattern")
-    parser.add_argument("--force_pending", "-p",
-                        help="If set, will delete pending jobs", action="store_true")
-    parser.add_argument("--only-nodes", action="store_true", help="If set, will not delete the job, only completed node requests.")
+        "--force",
+        "-f",
+        help="If set, will delete job regardless of whether it is running or not",
+        action="store_true",
+    )
+    parser.add_argument(
+        "jobid_pattern",
+        nargs="?",
+        help="If specified will only attempt to remove jobs that match this pattern",
+    )
+    parser.add_argument(
+        "--force_pending",
+        "-p",
+        help="If set, will delete pending jobs",
+        action="store_true",
+    )
+    parser.add_argument(
+        "--only-nodes",
+        action="store_true",
+        help="If set, will not delete the job, only completed node requests.",
+    )
 
     parser = subparser.add_parser("kill", help="Terminate the specified job")
     parser.set_defaults(func=kill_cmd)
-    parser.add_argument("--keepcluster", action="store_true",
-                        help="If set will also terminate the nodes that the job is using to run. (This could impact other running jobs that use the same docker image)")
+    parser.add_argument(
+        "--keepcluster",
+        action="store_true",
+        help="If set will also terminate the nodes that the job is using to run. (This could impact other running jobs that use the same docker image)",
+    )
     parser.add_argument("jobid_pattern")
 
-    parser = subparser.add_parser(
-        "fetch", help="Download results from a completed job")
+    parser = subparser.add_parser("fetch", help="Download results from a completed job")
     parser.set_defaults(func=fetch_cmd)
     parser.add_argument("jobid")
-    parser.add_argument("--flat", action="store_true",
-                        help="Instead of writing each task into a seperate directory, write all files into the destination directory")
     parser.add_argument(
-        "--dest", help="The path to the directory where the results will be downloaded. If omitted a directory will be created with the job id")
+        "--flat",
+        action="store_true",
+        help="Instead of writing each task into a seperate directory, write all files into the destination directory",
+    )
+    parser.add_argument(
+        "--dest",
+        help="The path to the directory where the results will be downloaded. If omitted a directory will be created with the job id",
+    )
 
     parser = subparser.add_parser("version", help="print the version and exit")
     parser.set_defaults(func=version_cmd)
@@ -610,7 +714,7 @@ def main(argv=None):
 
     txtui.config_logging(100 if args.debug else 0)
 
-    if not hasattr(args, 'func'):
+    if not hasattr(args, "func"):
         parse.print_help()
         sys.exit(1)
 
@@ -621,7 +725,10 @@ def main(argv=None):
         args.func(args, config)
     else:
         func_param_names = get_func_parameters(args.func)
-        if len(set(["config", "jq", "io", "cluster"]).intersection(func_param_names)) > 0:
+        if (
+            len(set(["config", "jq", "io", "cluster"]).intersection(func_param_names))
+            > 0
+        ):
             config, jq, io, cluster = load_config(args.config)
         func_params = {}
         if "args" in func_param_names:
@@ -632,8 +739,8 @@ def main(argv=None):
             func_params["io"] = io
         if "jq" in func_param_names:
             func_params["jq"] = jq
-        if 'cluster' in func_param_names:
-            func_params['cluster'] = cluster
+        if "cluster" in func_param_names:
+            func_params["cluster"] = cluster
 
         return args.func(**func_params)
 

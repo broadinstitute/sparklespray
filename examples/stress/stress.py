@@ -16,7 +16,14 @@ args = parser.parse_args()
 for i in range(args.childcount):
     print("starting child {}".format(i))
     sys.stdout.flush()
-    cmd=['python', __file__, "--allocate", str(args.childalloc), "--runtime", str(args.childruntime)]
+    cmd = [
+        "python",
+        __file__,
+        "--allocate",
+        str(args.childalloc),
+        "--runtime",
+        str(args.childruntime),
+    ]
     print(cmd)
     subprocess.Popen(cmd)
 
@@ -30,7 +37,7 @@ if args.allocate:
         allocated[i] = 1
 
 if args.writesize:
-    buf = bytearray(100*1024)
+    buf = bytearray(100 * 1024)
     for i in range(len(buf)):
         buf[i] = 1
     written = 0
@@ -42,10 +49,10 @@ if args.writesize:
 start = time.time()
 while True:
     end = time.time()
-    if end-start > args.runtime:
+    if end - start > args.runtime:
         break
     a = 0
     for i in range(10000):
         a += i
 
-print("ran for", end-start, "seconds")
+print("ran for", end - start, "seconds")

@@ -39,10 +39,22 @@ def add_watch_cmd(subparser):
     parser.set_defaults(loglive=True)
     parser.add_argument("jobid")
     parser.add_argument("--nodes", "-n", type=int, help="The target number of workers")
-    parser.add_argument("--verify", action="store_true", help="If set, before watching will confirm all finished jobs wrote their output. Any jobs whose output is missing will be reset")
-    parser.add_argument("--loglive", help="Stream output (on by default)", action="store_true", dest="loglive")
     parser.add_argument(
-        "--no-loglive", help="tail the first running task we can find", action="store_false", dest="loglive"
+        "--verify",
+        action="store_true",
+        help="If set, before watching will confirm all finished jobs wrote their output. Any jobs whose output is missing will be reset",
+    )
+    parser.add_argument(
+        "--loglive",
+        help="Stream output (on by default)",
+        action="store_true",
+        dest="loglive",
+    )
+    parser.add_argument(
+        "--no-loglive",
+        help="tail the first running task we can find",
+        action="store_false",
+        dest="loglive",
     )
 
 
@@ -204,10 +216,12 @@ def _watch(
             if first_sign_of_concern is None:
                 first_sign_of_concern = time.time()
             else:
-                # Wait 30 seconds before we are sure that the jobs really haven't had their status updated. We might be 
+                # Wait 30 seconds before we are sure that the jobs really haven't had their status updated. We might be
                 # seeing that the nodes are completing before the tasks complete.
                 if time.time() - first_sign_of_concern > 30:
-                    log.error("Too many nodes failed without starting any tasks. Aborting")
+                    log.error(
+                        "Too many nodes failed without starting any tasks. Aborting"
+                    )
                     raise TooManyNodeFailures()
         else:
             first_sign_of_concern = None
@@ -463,20 +477,29 @@ def watch(
         print("Interrupted -- Exiting, but your job will continue to run unaffected.")
         sys.exit(1)
 
-def check_completion(jq : JobQueue, io: IO, job_id: str):
+
+def check_completion(jq: JobQueue, io: IO, job_id: str):
     successful_count = 0
     completed_count = 0
 
     tasks = jq.task_storage.get_tasks(job_id)
     for task in tasks:
         if task.status == STATUS_COMPLETE:
-            if (completed_count % 100 ) == 0:
-                print("Verified {} out of {} completed tasks successfully wrote output".format(successful_count, len(tasks)))
+            if (completed_count % 100) == 0:
+                print(
+                    "Verified {} out of {} completed tasks successfully wrote output".format(
+                        successful_count, len(tasks)
+                    )
+                )
             completed_count += 1
             if io.exists(task.command_result_url):
-                #print("task {} completed successfully".format(task.task_id))
+                # print("task {} completed successfully".format(task.task_id))
                 successful_count += 1
             else:
-                print("task {} missing {}, resetting".format(task.task_id, task.command_result_url))
+                print(
+                    "task {} missing {}, resetting".format(
+                        task.task_id, task.command_result_url
+                    )
+                )
                 # look up owner -> operation id -> dump log
                 jq.reset_task(task.task_id)

@@ -24,14 +24,15 @@ import codecs
 #     with open(filename, "rt") as fd:
 #         return list(csv.DictReader(fd))
 
+
 def read_csv_as_dicts(filename):
     # Check for BOM in case csv was written by excel
     with open(filename, "rb") as fd:
         possible_bom = fd.read(len(codecs.BOM_UTF8))
         if possible_bom == codecs.BOM_UTF8:
-            encoding = 'utf-8-sig'
+            encoding = "utf-8-sig"
         else:
-            encoding = 'ascii'
+            encoding = "ascii"
 
     with open(filename, "rt", encoding=encoding) as fd:
         return list(csv.DictReader(fd))
