@@ -106,7 +106,7 @@ def create_service_account(service_acct, project_id, key_path):
 #    time.sleep(60)
 
 
-def add_firewall_rule():
+def add_firewall_rule(project_id):
     """Add the sparkles firewall rule in VPC Network of Google Cloud"""
     # Create the FirewallRule object for manipulation easiness
     FirewallRule = namedtuple("FirewallRule", ["name", "protocol", "port"])
@@ -125,6 +125,8 @@ def add_firewall_rule():
             "firewall-rules",
             "describe",
             firewall_rule_obj.name,
+            "--project",
+            project_id,
         ]
         gcloud(gcloud_command)
         print("Firewall rule seems already set. Ignoring.")
@@ -143,6 +145,8 @@ def add_firewall_rule():
                 firewall_rule_obj.name,
                 "--allow",
                 protocol_and_port,
+                "--project",
+                project_id,
             ],
             suppress_warning=True,
         )
@@ -195,7 +199,7 @@ def setup_project(project_id, key_path, bucket_name):
 
     # Setup firewall using gcloud function
     print("Adding firewall rule...")
-    add_firewall_rule()
+    add_firewall_rule(project_id)
 
     if not can_reach_datastore_api(project_id, key_path):
         print(
