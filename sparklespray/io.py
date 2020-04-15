@@ -9,6 +9,7 @@ import logging
 from .log import log
 
 use_gustil = False
+import datetime
 
 
 class IO:
@@ -25,6 +26,11 @@ class IO:
             cas_url_prefix = cas_url_prefix[:-1]
         self.cas_url_prefix = cas_url_prefix
         self.compute_hash = compute_hash
+
+    def generate_signed_url(self, path, expiry=datetime.timedelta(days=30)):
+        bucket, key = self._get_bucket_and_path(path)
+        blob = bucket.get_blob(key)
+        return blob.generate_signed_url(expiry)
 
     def bulk_get_as_str(self, paths):
         from multiprocessing.pool import ThreadPool
@@ -127,9 +133,7 @@ class IO:
             assert not must, "Could not find {}".format(path)
             return None
 
-    def put(
-        self, src_filename, dst_url, must=True, skip_if_exists=False, is_public=False
-    ):
+    def put(self, src_filename, dst_url, must=True, skip_if_exists=False):
         if must:
             assert os.path.exists(src_filename), "{} does not exist".format(
                 src_filename
@@ -138,35 +142,17 @@ class IO:
         bucket, path = self._get_bucket_and_path(dst_url)
         blob = bucket.blob(path)
         if skip_if_exists and blob.exists():
-            if is_public:
-                acl = blob.acl
-                if not acl.has_entity(acl.all()):
-                    log.info(
-                        "Marking %s (%s) as publicly accessible", src_filename, dst_url
-                    )
-                    acl.save_predefined("publicRead")
             log.info("Already in CAS cache, skipping upload of %s", src_filename)
             log.debug("skipping put %s -> %s", src_filename, dst_url)
         else:
-            if is_public:
-                canned_acl = "publicRead"
-                acl_params = ["-a", "public-read"]
-            else:
-                canned_acl = None
-                acl_params = []
-            log.info("put %s -> %s (acl: %s)", src_filename, dst_url, canned_acl)
+            log.info("put %s -> %s", src_filename, dst_url)
             # if greater than 10MB ask gsutil to upload for us
             if use_gustil and os.path.getsize(src_filename) > 10 * 1024 * 1024:
                 import subprocess
 
-                subprocess.check_call(
-                    ["gsutil", "cp"] + acl_params + [src_filename, dst_url]
-                )
+                subprocess.check_call(["gsutil", "cp"] + [src_filename, dst_url])
             else:
                 blob.upload_from_filename(src_filename)
-                if canned_acl:
-                    acl = blob.acl
-                    acl.save_predefined(canned_acl)
 
     def _get_url_prefix(self):
         return "gs://"

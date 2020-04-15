@@ -3,12 +3,15 @@ import hashlib
 import json
 
 
-def hash_from_file(filename):
-    h = hashlib.sha256()
+def hashes_from_file(filename):
+    sha256 = hashlib.sha256()
+    md5 = hashlib.md5()
+
     with open(filename, "rb") as fd:
-        for chunk in iter(lambda: fd.read(100000), b""):
-            h.update(chunk)
-    return h.hexdigest()
+        for chunk in iter(lambda: fd.read(200000), b""):
+            sha256.update(chunk)
+            md5.update(chunk)
+    return sha256.hexdigest(), md5.hexdigest()
 
 
 class CachingHashFunction:
@@ -20,7 +23,15 @@ class CachingHashFunction:
             with open(filename, "rt") as fd:
                 self.cache = json.load(fd)
 
-    def hash_filename(self, filename):
+    def get_sha256(self, filename):
+        sha256, _ = self.get_hashes(filename)
+        return sha256
+
+    def get_md5(self, filename):
+        _, md5 = self.get_hashes(filename)
+        return md5
+
+    def get_hashes(self, filename):
         filename = os.path.normpath(filename)
         mtime = os.path.getmtime(filename)
         if filename in self.cache:
@@ -29,13 +40,14 @@ class CachingHashFunction:
                 "mtime" in cache_entry
                 and cache_entry["mtime"] == mtime
                 and "sha256" in cache_entry
+                and "md5" in cache_entry
             ):
-                return cache_entry["sha256"]
-        h = hash_from_file(filename)
-        cache_entry = dict(sha256=h, mtime=mtime)
+                return cache_entry["sha256"], cache_entry["md5"]
+        sha256, md5 = hashes_from_file(filename)
+        cache_entry = dict(sha256=sha256, md5=md5, mtime=mtime)
         self.cache[filename] = cache_entry
         self.dirty = True
-        return h
+        return sha256, md5
 
     def persist(self):
         if self.dirty:

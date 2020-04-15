@@ -40,6 +40,7 @@ class SubmitConfig(BaseModel):
     zones: List[str]
     mount_point: str
     kubequeconsume_url: str
+    kubequeconsume_md5: str
     gpu_count: int
     target_node_count: int
 
@@ -284,6 +285,7 @@ def submit(
             jobid=job_id,
             cluster_name=cluster_name,
             consume_exe_url=config.kubequeconsume_url,
+            consume_exe_md5=config.kubequeconsume_md5,
             docker_image=image,
             consume_exe_args=consume_exe_args,
             machine_specs=machine_specs,
@@ -385,13 +387,6 @@ def _parse_resources(resources_str):
         )
         spec[name] = value
     return spec
-
-
-def _obj_path_to_url(path):
-    m = re.match("gs://([^/]+)/(.+)$", path)
-    assert m is not None
-    bucket, key = m.groups()
-    return "https://{}.storage.googleapis.com/{}".format(bucket, key)
 
 
 def add_submit_cmd(subparser):
@@ -599,7 +594,7 @@ def submit_cmd(jq, io, cluster, args, config):
             dest_url=dest_url,
             cas_url=cas_url_prefix,
             parameters=parameters,
-            hash_function=hash_db.hash_filename,
+            hash_function=hash_db.get_sha256,
             src_wildcards=args.results_wildcards,
             extra_files=expand_files_to_upload(io, files_to_push),
             working_dir=args.working_dir,
@@ -608,12 +603,10 @@ def submit_cmd(jq, io, cluster, args, config):
 
         kubequeconsume_exe_path = config["kubequeconsume_exe_path"]
         kubequeconsume_exe_obj_path = upload_map.add(
-            hash_db.hash_filename,
-            cas_url_prefix,
-            kubequeconsume_exe_path,
-            is_public=True,
+            hash_db.get_sha256, cas_url_prefix, kubequeconsume_exe_path, is_public=True,
         )
-        kubequeconsume_exe_url = _obj_path_to_url(kubequeconsume_exe_obj_path)
+        kubequeconsume_exe_md5 = hash_db.get_md5(kubequeconsume_exe_path)
+        kubequeconsume_exe_url = io.generate_signed_url(kubequeconsume_exe_obj_path)
         hash_db.persist()
 
         log.debug("upload_map = %s", upload_map)
@@ -637,7 +630,7 @@ def submit_cmd(jq, io, cluster, args, config):
         )
         for filename, dest, is_public in needs_upload:
             log.debug(f"Uploading {filename}-> to {dest} (is_public={is_public}")
-            io.put(filename, dest, skip_if_exists=False, is_public=is_public)
+            io.put(filename, dest, skip_if_exists=False)
 
     log.debug("spec: %s", json.dumps(spec, indent=2))
 
@@ -652,6 +645,7 @@ def submit_cmd(jq, io, cluster, args, config):
         zones=config["zones"],
         mount_point=config.get("mount", "/mnt/"),
         kubequeconsume_url=kubequeconsume_exe_url,
+        kubequeconsume_md5=kubequeconsume_exe_md5,
         gpu_count=gpu_count,
         target_node_count=target_node_count,
     )

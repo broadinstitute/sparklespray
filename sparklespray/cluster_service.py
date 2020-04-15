@@ -288,6 +288,7 @@ class Cluster:
         jobid: str,
         cluster_name: str,
         consume_exe_url: str,
+        consume_exe_md5: str,
         docker_image: str,
         consume_exe_args: List[str],
         machine_specs: MachineSpec,
@@ -305,10 +306,11 @@ class Cluster:
             setup_parameters=[
                 "sh",
                 "-c",
-                "curl -o {consume_exe_path} {consume_exe_url} && chmod a+x {consume_exe_path} && mkdir {consume_data} && chmod a+rwx {consume_data}".format(
+                "echo \"{consume_exe_md5}  {consume_exe_path}\" > /tmp/expected-checksums && curl -o {consume_exe_path} '{consume_exe_url}' && md5sum -c /tmp/expected-checksums && chmod a+x {consume_exe_path} && mkdir {consume_data} && chmod a+rwx {consume_data}".format(
                     consume_exe_url=consume_exe_url,
                     consume_data=consume_data,
                     consume_exe_path=consume_exe_path,
+                    consume_exe_md5=consume_exe_md5,
                 ),
             ],
             docker_image=docker_image,
