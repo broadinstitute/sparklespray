@@ -10,14 +10,15 @@ for execution on GCE instances.
 To run a process or batch of processes via sparkles, you will need to:
 
 1. Create a docker image and upload into a repository that the cluster can access.
-(or use an existing image)
+   (or use an existing image)
 2. Submit the actual job (sparkles sub ...)
-3. You then may optionally download the output or leave it in google storage for later.  (sparkles fetch ...) 
+3. You then may optionally download the output or leave it in google storage for later. (sparkles fetch ...)
 
 ## Prerequisites
 
-Create a google project if you do not already have one you wish to use.  In the below, we'll assume the project id is
-"your-project". Also create a google bucket to store results. We'll assume
+Create a google project if you do not already have one you wish to use. In the below, we'll assume the project id is
+"your-project". Also create a google bucket to store results. **Note: Make sure object level permissions are enabled, not bucket-level permissions.**
+We'll assume
 the bucket name is "your-bucket" below.
 
 Add a firewall rule to your project: https://console.cloud.google.com/networking/firewalls => `Create firewall rule`
@@ -43,6 +44,7 @@ this, but I'm including conda because that's what I personally use and have
 tested with.
 
 Create the conda environment and activate it:
+
 ```
 conda create -n sparkles python=3.6
 source activate sparkles
@@ -73,7 +75,7 @@ machine_type=n1-standard-1
 zones=us-east1-b
 ```
 
-Be sure to replace "your-bucket" and "your-project" with the bucket name and 
+Be sure to replace "your-bucket" and "your-project" with the bucket name and
 your project id respectively. (The bucket is used to hold results from jobs
 and cache data pushed to nodes. You can either give a name of a nonexistant
 bucket, which will automatically be created when you run "setup" below, or
@@ -125,7 +127,7 @@ machine_type=n1-standard-1
 zones=us-east1-b
 ```
 
-You should replace "YOUR_
+You should replace "YOUR\_
 
 To run:
 
@@ -176,13 +178,13 @@ seconds.
 ### A note on resource requirements
 
 The CPUs and memory required are used as minimums and will determine the
-smallest machine type which satisfies the requirements. (The machine types are listed 
+smallest machine type which satisfies the requirements. (The machine types are listed
 here https://cloud.google.com/compute/docs/machine-types)
 The actual machine type chosen may have more memory/cpus than was required,
-and your process is free to use the additional resources. 
+and your process is free to use the additional resources.
 
 Expect that larger requirements will require more expensive instances in
-order to run. 
+order to run.
 
 If you are interested in how much memory your process actually used, you can
 see that information in the results.json file saved for each task.
@@ -199,7 +201,7 @@ Benchmarking will be coming is available [here](benchmark.html) to decide on you
 
 ## Submitting along with multiple files that are needed by job
 
-Files can automatically be uploaded from your local host on submission, and will be downloaded to the working directory before your job starts.  You can specify what files you'd like uploaded with the "-u" option.
+Files can automatically be uploaded from your local host on submission, and will be downloaded to the working directory before your job starts. You can specify what files you'd like uploaded with the "-u" option.
 
 For example:
 
@@ -207,7 +209,8 @@ For example:
 sparkles sub -n sample-job -u mandelbrot.py python3 mandelbrot.py 0 0 0.5
 ```
 
-will upload the latest mandelbrot.py and download it onto the remote machine before execution starts.   It's worth noting that this is equvilient to:
+will upload the latest mandelbrot.py and download it onto the remote machine before execution starts. It's worth noting that this is equvilient to:
+
 ```
 sparkles sub -n sample-job python3 '^mandelbrot.py' 0 0 0.5
 ```
@@ -215,14 +218,14 @@ sparkles sub -n sample-job python3 '^mandelbrot.py' 0 0 0.5
 If you have many files that your job depends on, it may be easier to list the files in a seperate file (one filename per line) and upload all of the files by specifying '-u @file_list'
 
 If a directory is specified then each file within that directory will be uploaded.
-When files are downloaded onto the remote node, they are always placed within the current working directory.  You can override that behavior by appending ":destination_path" onto the end of the filename.
+When files are downloaded onto the remote node, they are always placed within the current working directory. You can override that behavior by appending ":destination_path" onto the end of the filename.
 
-For example "-u /users/pgm/foo" will be stored on the execution host in "./foo".     However, if you specify the file as '-u /users/pgm/foo:pgm/foo' then it will be stored in ./pgm/foo
+For example "-u /users/pgm/foo" will be stored on the execution host in "./foo". However, if you specify the file as '-u /users/pgm/foo:pgm/foo' then it will be stored in ./pgm/foo
 
 ## Simulating a submission by running it locally
 
-The following will do all the upload data and bookkeeping normally done for jobs, but will not actually create a kubernetes job to run it.  Instead, after
-all data is uploaded, it will run the equivilent docker command locally to simulate execution.  This can be helpful for debugging issues.
+The following will do all the upload data and bookkeeping normally done for jobs, but will not actually create a kubernetes job to run it. Instead, after
+all data is uploaded, it will run the equivilent docker command locally to simulate execution. This can be helpful for debugging issues.
 
 ```
 sparkles sub --local python3 '^mandelbrot.py' 0 0 0.5
@@ -260,10 +263,10 @@ sparkles addnodes LAST 2
 
 ## Cleaning out old jobs
 
-Sparklespray remembers jobs until you explicitly remove them.  You can use the
+Sparklespray remembers jobs until you explicitly remove them. You can use the
 "clean" command to forget tracking information about a given job. Note, this
 does not delete the results stored in the bucket from that job, only delete
-data about the tasks that made up the job.  
+data about the tasks that made up the job.
 
 To remove all non-running jobs:
 
@@ -272,13 +275,12 @@ sparkles clean
 ```
 
 ## Killing a job
+
 The following will kill the last job (change LAST to a specific job id if
 you wish to kill a different job) and stop the nodes associated with that
 job.
 
-``
-sparkles kill LAST 
-``
+`sparkles kill LAST`
 
 ## Resubmitting failures
 
@@ -330,7 +332,6 @@ You can also see summary stats (execution times and memory usage) by adding the 
 sparkles status JOB_ID --stats
 ```
 
-
 ## Mark jobs as needing re-execution
 
 ```
@@ -369,11 +370,13 @@ packaged up into a tar.gz file. You can do this by running:
 $ sh build-consumer.sh
 
 # make the installable python package which will be saved in the dist
-# directory with the version on the end of the name. 
+# directory with the version on the end of the name.
 # (Example: dist/sparklespray-3.0.2.tar.gz)
 $ python setup.py sdist
 ```
+
 sparkles sub -u train_mlp_sm.py -u data -u benchmark_train_mlp.py --gpu n --gpu_count 0 -i tensorflow/tensorflow:latest-py3 --machine-type n1-standard-4 python benchmark_train_mlp.py --data_size small --test_description \'Machine type n1-standard-4, GPU count 0, small dataset\'
+
 ## Changing the protocol between "sparkles" and "consumer"
 
 The command line tool communicates with workers via gRPC. If a change is
