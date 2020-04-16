@@ -606,11 +606,9 @@ def submit_cmd(jq, io, cluster, args, config):
             hash_db.get_sha256, cas_url_prefix, kubequeconsume_exe_path, is_public=True,
         )
         kubequeconsume_exe_md5 = hash_db.get_md5(kubequeconsume_exe_path)
-        kubequeconsume_exe_url = io.generate_signed_url(kubequeconsume_exe_obj_path)
         hash_db.persist()
 
         log.debug("upload_map = %s", upload_map)
-        log.info("kubeconsume at %s", kubequeconsume_exe_url)
 
         # First check existance of files, so we can print out a single summary statement
         needs_upload = []
@@ -633,6 +631,10 @@ def submit_cmd(jq, io, cluster, args, config):
             io.put(filename, dest, skip_if_exists=False)
 
     log.debug("spec: %s", json.dumps(spec, indent=2))
+
+    # now that the executable is uploaded, we should be able to get a signed url for it
+    kubequeconsume_exe_url = io.generate_signed_url(kubequeconsume_exe_obj_path)
+    log.info("kubeconsume at %s", kubequeconsume_exe_url)
 
     submit_config = SubmitConfig(
         preemptible=preemptible,
