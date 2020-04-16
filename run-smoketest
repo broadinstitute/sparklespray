@@ -1,0 +1,5 @@
+#!/bin/bash
+set -ex
+
+pytest smoke_test.py -v -s
+coverage html
