@@ -21,6 +21,7 @@ services_to_add = [  # "storage.googleapis.com",
     "pubsub.googleapis.com",
     "storage-api.googleapis.com",
     "compute.googleapis.com",
+    "containerregistry.googleapis.com",
 ]
 
 roles_to_add = [
@@ -211,6 +212,9 @@ def setup_project(project_id, key_path, bucket_name):
         print("checking datastore again..")
         if can_reach_datastore_api(project_id, key_path):
             print("Success!")
+
+    print("Using gcloud to setup google authentication with Google Container Registry")
+    gcloud(["auth", "configure-docker"])
 
 
 def setup_bucket(project_id, service_account_key, bucket_name):
