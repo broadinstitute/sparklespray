@@ -28,3 +28,7 @@ sparklespray/bin/
 htmlcov
 
 go/src/github.com/broadinstitute/kubequeconsume/cli/main
+examples/foreach/sparkles-docker.log
+*.pickle
+unused-files
+sparkles-docker.log
