@@ -17,12 +17,8 @@ To run a process or batch of processes via sparkles, you will need to:
 ## Prerequisites
 
 Create a google project if you do not already have one you wish to use. In the below, we'll assume the project id is
-"your-project". Also create a google bucket to store results. **Note: Make sure object level permissions are enabled, not bucket-level permissions.**
-We'll assume
-the bucket name is "your-bucket" below.
-
-Add a firewall rule to your project: https://console.cloud.google.com/networking/firewalls => `Create firewall rule`
-=> name = sparklespray-monitor, targets = All instances of the network, source IP ranges = 0.0.0.0/0, check tcp port and enter value 6032
+"your-project". Also create a google bucket to store results.
+We'll assume the bucket name is "your-bucket" below.
 
 Install the Google Cloud SDK ( https://cloud.google.com/sdk/install ) and
 then set up gcloud:
@@ -84,8 +80,9 @@ an existing bucket as long as its in the same project.)
 Once you have a config file you can have sparkles use the gcloud command and
 the account you authenticated above to setup the project with everything
 that sparklespray requires. (Specifically, this command enables DataStore, Google
-Storage, and the Genomics Pipeline API and creates a role account which has
-access to those services.)
+Storage, Container Registry service and the Genomics Pipeline API and creates a role account which has
+access to those services. It will also enable docker to use google credentials when
+authentication to Google's Container Registry service.)
 
 ```
 sparkles setup
@@ -112,82 +109,185 @@ change "zones", and "default_image" based on your needs.
 
 ## Running jobs
 
-Submitting a sample job
-
-There's a sample script in the examples/sample-job directory. In order to
-run, you will need to make a '.sparkles' file in that directory with the
-following content:
+Let's take a trivial "echo hello" submission and look at the output.
 
 ```
-[config]
-default_url_prefix=gs://YOUR_BUCKET
-project=YOUR_PROJECT
-default_image=python
-machine_type=n1-standard-1
-zones=us-east1-b
+$ sparkles sub echo hello
+0 files (0 bytes) out of 1 files will be uploaded
+Submitting job: 20200417-225753-3a37
+tasks: pending (1), worker nodes:
+tasks: pending (1), worker nodes: submitted(type=preemptible) (1)
+tasks: pending (1), worker nodes: staging(type=preemptible) (1)
 ```
 
-You should replace "YOUR\_
-
-To run:
+Let's break this into parts. First the intial submission is executed to tell sparkles that we want to run "echo hello" on some host using our configuation information stored in `.sparkles`:
 
 ```
-> sparkles sub python '^mandelbrot.py' 0 0 0.5
-2017-09-15 09:49:48,062 Already in CAS cache, skipping upload of mandelbrot.py
-2017-09-15 09:49:48,171 Already in CAS cache, skipping upload of /Users/pmontgom/dev/sparkles/sparkles/bin/sparklesconsume
-2017-09-15 09:49:48,171 Submitting job with id: 20170915-094947-1fb5
-2017-09-15 09:49:48,386 Saved task definition batch containing 1 tasks
-2017-09-15 09:49:49,195 Saved job definition with 1 tasks
-2017-09-15 09:49:49,891 Adding initial node for cluster
-2017-09-15 09:49:50,554 Node's log will be written to: gs://broad-achilles-sparkles/test/kube/node-logs/EJCHtq7oKxjbzq-lrdL-xg8gtubt_vUYKg9wcm9kdWN0aW9uUXVldWU
-2017-09-15 09:49:50,554 Waiting for job to terminate
-2017-09-15 09:49:50,805 Tasks: pending: 1
-2017-09-15 09:49:50,976 Nodes: (no nodes)
-2017-09-15 09:50:01,603 Nodes: RUNNING: 1
-2017-09-15 09:51:04,076 Tasks: complete(code=0): 1
-2017-09-15 09:51:04,076 Done waiting for job to complete, results written to gs://broad-achilles-sparkles/test/kube/20170915-094947-1fb5
-2017-09-15 09:51:04,076 You can download results via 'gsutil rsync -r gs://broad-achilles-sparkles/test/kube/20170915-094947-1fb5 DEST_DIR'
+$ sparkles sub echo hello
 ```
 
-Note, it took about 10 seconds to get the first worker node started (@
-09:49) and then another minute for it to pull the docker container and start
-running the task. (The task itself, took less than a second and completed @ 9:51). However, if we submit a second job which has the same requirements
-(# number of CPUs required, same memory required, same docker image) then we
-can use the worker that is still running from this last invocation.
+The first line of output is telling us how many files needs to be uploaded to cloud storage before the job can start:
 
 ```
-> sparkles sub python '^mandelbrot.py' 0 0 0.4
-2017-09-15 09:51:18,430 Already in CAS cache, skipping upload of mandelbrot.py
-2017-09-15 09:51:18,538 Already in CAS cache, skipping upload of /Users/pmontgom/dev/sparkles/sparkles/bin/sparklesconsume
-2017-09-15 09:51:18,538 Submitting job with id: 20170915-095118-af10
-2017-09-15 09:51:18,735 Saved task definition batch containing 1 tasks
-2017-09-15 09:51:19,439 Saved job definition with 1 tasks
-2017-09-15 09:51:20,086 Cluster already exists, not adding node. Cluster status: RUNNING: 1
-2017-09-15 09:51:20,086 Waiting for job to terminate
-2017-09-15 09:51:20,361 Tasks: claimed: 1
-2017-09-15 09:51:20,524 Nodes: RUNNING: 1
-2017-09-15 09:51:25,632 Tasks: complete(code=0): 1
-2017-09-15 09:51:25,632 Done waiting for job to complete, results written to gs://broad-achilles-sparkles/test/kube/20170915-095118-af10
-2017-09-15 09:51:25,632 You can download results via 'gsutil rsync -r gs://broad-achilles-sparkles/test/kube/20170915-095118-af10 DEST_DIR'
+0 files (0 bytes) out of 1 files will be uploaded
 ```
 
-Note at 9:51 it recognizes there's already a worker running, so the task
-gets picked up right away at 09:51:20 and the whole process takes only 7
-seconds.
+In this case, there was one file (an internal file used by sparkles itself) but that file already had been uploaded before, and therefore already was residing in cloud storage. As a result 0 bytes actually needed to be uploaded.
 
-### A note on resource requirements
+Next, sparkles reports the name of the job being submitted. Since we did not name the job with the `-n` parameter, it generated a name of the format `timestamp-randomstring`. This job name is used to identify the job and required various other commands such as `sparkles kill` or `sparkles status`
 
-The CPUs and memory required are used as minimums and will determine the
-smallest machine type which satisfies the requirements. (The machine types are listed
-here https://cloud.google.com/compute/docs/machine-types)
-The actual machine type chosen may have more memory/cpus than was required,
-and your process is free to use the additional resources.
+```
+Submitting job: 20200417-225753-3a37
+```
 
-Expect that larger requirements will require more expensive instances in
-order to run.
+After the job is submitted, by default sparkles will start periodically poll the status of the job. Each time the state of the job changes, a line is printed. The initial line looks like the following:
 
-If you are interested in how much memory your process actually used, you can
-see that information in the results.json file saved for each task.
+```
+tasks: pending (1), worker nodes:
+```
+
+This line is reporting that this job has a single `task`, and there are no workers (VMs) availible to run the task.
+
+Since sparkles discovers there are no workers already running, but our job has a task to run, proceeds to request a single work by powering on a new VM. When this worker comes online, it will start executing any availible tasks.
+
+The next update for this job looks like:
+
+```
+tasks: pending (1), worker nodes: submitted(type=preemptible) (1)
+```
+
+Again, we still have a single task waiting to execute, but now there is one worker with the "submitted" status. Also, we can see that this worker is going to be running on a preemptible VM. After a little time an another update is displayed:
+
+```
+tasks: pending (1), worker nodes: staging(type=preemptible) (1)
+```
+
+The only change is the worker has switched from "submitted" to "staging" which means the VM has successfully powered on, and is being initialized. Once fully initialized the worker will find a task to run.
+
+Our next update reports:
+
+```
+Job finished. 1 tasks completed successfully, 0 tasks failed
+[22:59:21] hello
+Done waiting for job. You can download results via 'gsutil rsync -r gs://broad-achilles-kubeque/test-kube/20200417-225753-3a37 DEST_DIR'
+```
+
+In this case, the job finished before our next poll. The task was picked by the worker as soon as it finished initializing, and we can see the output with a timestamp on the following line. Lastly, since the job completed, sparkles reports where you can find the outputs from all tasks in the job.
+
+The outputs that are stored in cloud storage after the task completes are any files stored in the task's working directory (excluding those which were downloaded and placed before the start of the task)
+
+If we look in this folder we can see there's a single file:
+
+```
+$ gsutil ls gs://broad-achilles-kubeque/test-kube/20200417-225753-3a37
+gs://broad-achilles-kubeque/test-kube/20200417-225753-3a37/1/
+```
+
+We see there's a single folder named "1". We will have a single folder for each task that was executed.
+
+If we then look into that folder, we'll see two additional file:
+
+```
+$ gsutil ls gs://broad-achilles-kubeque/test-kube/20200417-225753-3a37/1/
+gs://broad-achilles-kubeque/test-kube/20200417-225753-3a37/1/result.json
+gs://broad-achilles-kubeque/test-kube/20200417-225753-3a37/1/stdout.txt
+```
+
+The `results.json` file is an internal file sparkles writes with some metrics about the task's execution (ie: memory used, exit code, etc) and stdout.txt contains everything writen to stderr or stdout from the task.
+
+Now let's try that again, except this time, let's write a script that:
+
+1. takes a little longer to run
+2. writes an output file
+
+This is a better simulation of what a typical job submission will look like.
+
+In this example, I'm making a shell script named "write_and_wait.sh" which contains the following:
+
+```
+echo writing output...
+echo hello > world.txt
+echo sleeping...
+sleep 10
+echo exiting...
+```
+
+This script is simply going to write the word "hello" to the file named "world.txt" and then wait 10 seconds before terminating.
+
+So, now let's submit this job for execution:
+
+```
+1 files (88 bytes) out of 2 files will be uploaded
+Submitting job: test-job
+tasks: pending (1), worker nodes:
+tasks: pending (1), worker nodes: submitted(type=preemptible) (1)
+tasks: pending (1), worker nodes: staging(type=preemptible) (1)
+tasks: claimed (1), worker nodes: running(type=preemptible) (1)
+Job finished. 1 tasks completed successfully, 0 tasks failed
+[23:24:35] writing output...
+           sleeping...
+           exiting...
+Done waiting for job. You can download results via 'gsutil rsync -r gs://broad-achilles-kubeque/test-kube/test-job DEST_DIR'
+```
+
+Again, let's break down what happened. There are a few extra command line parameters, which we'll go through:
+
+1. `-n test-job` was added to name the job `test-job`. See "reusing VMs" to see the advantage of always naming jobs.
+2. `-u write_and_wait.sh` was added to tell sparkles that we need this file on the remote host to run the command. Sparkles will take care of staging it on the remote worker before task starts.
+3. `sh write_and_wait.sh` is the command that will actually run for the task.
+
+Also in the output there's a change in the first line:
+
+```
+1 files (88 bytes) out of 2 files will be uploaded
+```
+
+We see that this time, there was an additional file that needs to be transfer to the remote host (`write_and_wait.sh`) and since sparkles has never seen this file, we'll need to upload the contents to cloud storage.
+
+Also, this time our job wrote some output, so let's look at the task's output folder in cloud storage:
+
+```
+$ gsutil ls gs://broad-achilles-kubeque/test-kube/test-job/1
+gs://broad-achilles-kubeque/test-kube/test-job/1/result.json
+gs://broad-achilles-kubeque/test-kube/test-job/1/stdout.txt
+gs://broad-achilles-kubeque/test-kube/test-job/1/world.txt
+```
+
+We can see our output file world.txt was automaticly recognized as an output and uploaded for us.
+
+Reusing VMs
+
+So far, each job submission has resulted in a new VM being powered on, which means that we have to wait a while before our script starts executing. If we are name the job and haven't changed anything that impacts the configuration of the worker we're using (ie: machine type, docker image, etc) then we can reuse VMs from past executions.
+
+Each time a batch of workers runs out of tasks to execute, one worker will stay online for an additional 10 minutes in case a subsequent job shows up. This is a frequent scenerio when developing, as one often needs to submit repeatly with small code changes, and this the use case that sparkles is optimized for.
+
+So now if we make a minor change to `write_and_wait.sh` and resubmit, we get the following:
+\$ sparkles sub -n test-job -u write_and_wait.sh sh write_and_wait.sh
+1 files (88 bytes) out of 2 files will be uploaded
+Submitting job: test-job
+tasks: claimed (1), worker nodes: running(type=preemptible) (1)
+[23:29:22][starting tail of log test-job.1]
+[23:29:24] writing output...
+sleeping...
+[23:29:24] Processes running in container: 5, total memory used: 0.345 GB, data memory used: 0.296 GB, shared used 0.034 GB, resident 0.073 GB
+Job finished. 1 tasks completed successfully, 0 tasks failed
+[23:29:58] writing output...
+sleeping...
+exiting...
+Done waiting for job. You can download results via 'gsutil rsync -r gs://broad-achilles-kubeque/test-kube/test-job DEST_DIR'
+
+```
+
+In this case, the job started almost immediately with no delay. You can also see the first status line:
+
+```
+
+tasks: claimed (1), worker nodes: running(type=preemptible) (1)
+
+```
+
+Didn't report that it didn't need to submit a request for a new worker, it immediately saw there already was one in the `running` state, and it immediately updated the task's state to `claimed` when it started running the task.
+
 
 ### GPU usage
 
@@ -206,13 +306,17 @@ Files can automatically be uploaded from your local host on submission, and will
 For example:
 
 ```
+
 sparkles sub -n sample-job -u mandelbrot.py python3 mandelbrot.py 0 0 0.5
+
 ```
 
 will upload the latest mandelbrot.py and download it onto the remote machine before execution starts. It's worth noting that this is equvilient to:
 
 ```
+
 sparkles sub -n sample-job python3 '^mandelbrot.py' 0 0 0.5
+
 ```
 
 If you have many files that your job depends on, it may be easier to list the files in a seperate file (one filename per line) and upload all of the files by specifying '-u @file_list'
@@ -228,37 +332,51 @@ The following will do all the upload data and bookkeeping normally done for jobs
 all data is uploaded, it will run the equivilent docker command locally to simulate execution. This can be helpful for debugging issues.
 
 ```
+
 sparkles sub --local python3 '^mandelbrot.py' 0 0 0.5
+
 ```
 
 Submit a sample job reserving 1G of memory (or you can update the memory
 settings in .sparkles)
 
 ```
+
 sparkles sub -r memory=1G -n sample-job python3 '^mandelbrot.py' 0 0 0.5
+
 ```
 
 Download the results
 
 ```
+
 sparkles fetch sample-job
+
 ```
 
 Submit multiple parameterized by csv file
 
 ```
+
 sparkles sub --params params.csv python3 '^mandelbrot.py' '{x_scale}' '{y_scale}' '{zoom}'
 sparkles sub --fetch results --params params.csv python3 '^mandelbrot.py' '{x_scale}' '{y_scale}' '{zoom}'
+
 ```
 
 Add additional machines to be used for a job:
 
 ```
+
 ## the following will add 2 more worker nodes which will be used by the last
+
 ## job submitted. Instead of the word "LAST" you can use a job id. Most
+
 ## commands which accept a jobid also understand "LAST" as a synonym for the
+
 ## last submitted job.
+
 sparkles addnodes LAST 2
+
 ```
 
 ## Cleaning out old jobs
@@ -271,7 +389,9 @@ data about the tasks that made up the job.
 To remove all non-running jobs:
 
 ```
+
 sparkles clean
+
 ```
 
 ## Killing a job
@@ -287,10 +407,15 @@ job.
 If you have a job that failed due to some transient failure, you can tell sparkles to take the tasks which did not complete successfully and mark them as 'pending' to try them again. (Note: Only run this after the job is finished running. If there are any tasks still running, marked 'claimed', this will reset those as well)
 
 ```
+
 # find all the incomplete tasks and mark them as ready to be run again
+
 > sparkles reset JOBID
+
 # Now, kick of executing the job again
+
 > sparkles watch JOBID
+
 ```
 
 That will work for transient failures. However, more often you may have failures that are deterministic and require you change something and then re-run.
@@ -304,12 +429,16 @@ parameters which had problems.
 ```
 
 # The first submission submits everything
+
 > sparkles sub --params parameters.csv process_file.py '{^filename}'
 
 # but, oh no! some of the jobs failed. After you've made your fix to
+
 # process_file.py, you can resubmit the failures:
+
 > sparkles list --params --filter exit_code!=0 -o missing-tasks.csv
 > sparkles sub --params missing-tasks.csv process_file.py '{^filename}'
+
 ```
 
 (If you want to see which parameters were associated with which task, that
@@ -323,37 +452,49 @@ TODO: Write docs about setting up firewall rule to allow traffic on port
 ## View the status of a job
 
 ```
+
 sparkles status JOB_ID
+
 ```
 
 You can also see summary stats (execution times and memory usage) by adding the --stats parameter.
 
 ```
+
 sparkles status JOB_ID --stats
+
 ```
 
 ## Mark jobs as needing re-execution
 
 ```
+
 sparkles reset JOB_ID
+
 ```
 
 ## Show details of tasks in the job
 
 ```
+
 sparkles show JOB_ID
+
 ```
 
 There's also a more powerful query tool "list" which can export all attributes of all tasks and supports filtering.
 
 ```
+
 sparkles list JOB_ID
+
 ```
 
 ## Poll the status of a job, adding nodes if necessary
 
 ```
+
 sparkles watch JOB_ID
+
 ```
 
 # Developing sparklespray
@@ -366,13 +507,19 @@ To build a new release need the "consumer" compiled, and the python code
 packaged up into a tar.gz file. You can do this by running:
 
 ```
+
 # compile the go code and save the binary as ./sparklespray/bin/kubequeconsume
-$ sh build-consumer.sh
+
+\$ sh build-consumer.sh
 
 # make the installable python package which will be saved in the dist
+
 # directory with the version on the end of the name.
+
 # (Example: dist/sparklespray-3.0.2.tar.gz)
-$ python setup.py sdist
+
+\$ python setup.py sdist
+
 ```
 
 sparkles sub -u train_mlp_sm.py -u data -u benchmark_train_mlp.py --gpu n --gpu_count 0 -i tensorflow/tensorflow:latest-py3 --machine-type n1-standard-4 python benchmark_train_mlp.py --data_size small --test_description \'Machine type n1-standard-4, GPU count 0, small dataset\'
@@ -384,13 +531,19 @@ made to the protocol, we need to regenerate the python and go code used by
 the client/server ends by running:
 
 ```
-$ sh scripts/build-grpc.sh # You might need to install protobuf first
+
+\$ sh scripts/build-grpc.sh # You might need to install protobuf first
+
 ```
 
 This will write generated code to the following files:
 
 ```
+
 ./go/src/github.com/broadinstitute/kubequeconsume/pb/pb.pb.go
 ./sparklespray/pb_pb2.py
 ./sparklespray/pb_pb2_grpc.py
+
+```
+
 ```
