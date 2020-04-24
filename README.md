@@ -69,6 +69,7 @@ project=your-project
 default_image=alpine
 machine_type=n1-standard-1
 zones=us-east1-b
+region=us-east1
 ```
 
 Be sure to replace "your-bucket" and "your-project" with the bucket name and
