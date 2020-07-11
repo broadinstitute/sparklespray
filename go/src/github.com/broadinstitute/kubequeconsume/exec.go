@@ -69,6 +69,11 @@ type ResultStruct struct {
 	Usage      *ResourceUsage    `json:"resource_usage"`
 }
 
+// The amount of time we're willing to wait for a file we uploaded to appear in cloud storage
+// Based on the docs, it sounds like it should be visible immediately, but adding some buffer
+// just in case we can't rely on that.
+const MaxUploadDelay = 30 * time.Second
+
 type stringset map[string]bool
 
 func copyFile(src, dst string) error {
@@ -473,6 +478,34 @@ func uploadMapped(ioc IOClient, files map[string]string) error {
 			return err
 		}
 	}
+
+	uploadCompleteTime := time.Now()
+
+	for _, dst := range files {
+		warningPrinted := false
+		for {
+			exists, err := ioc.IsExists(dst)
+			if err != nil {
+				return err
+			}
+
+			if exists {
+				if warningPrinted {
+					log.Printf("File now exists: %s", dst)
+				}
+				break
+			}
+
+			if time.Now().Sub(uploadCompleteTime) > MaxUploadDelay {
+				return fmt.Errorf("Attempted to upload %s but file is missing", dst)
+			}
+
+			log.Printf("Uploaded file is missing: %s. Will check again shortly", dst)
+			time.Sleep(5)
+		}
+	}
+
+	log.Printf("Confirmed %d files in cloud storage", len(files))
 	return nil
 }
 

@@ -14,9 +14,10 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 
+	"crypto/x509"
+
 	"cloud.google.com/go/storage"
 	"golang.org/x/net/context"
-	"crypto/x509"
 )
 
 type IOClient interface {
@@ -24,6 +25,7 @@ type IOClient interface {
 	UploadBytes(destURL string, data []byte) error
 	Download(srcURL string, destPath string) error
 	DownloadAsBytes(srcURL string) ([]byte, error)
+	IsExists(url string) (bool, error)
 }
 
 type GCSIOClient struct {
@@ -74,6 +76,23 @@ func (ioc *GCSIOClient) UploadBytes(destURL string, data []byte) error {
 
 	_, err = w.Write(data)
 	return err
+}
+
+func (ioc *GCSIOClient) IsExists(url string) (bool, error) {
+	obj, err := ioc.getObj(url)
+	if err != nil {
+		return false, err
+	}
+
+	_, err = obj.Attrs(ioc.ctx)
+
+	if err == storage.ErrObjectNotExist {
+		return false, nil
+	} else if err != nil {
+		return false, err
+	}
+
+	return true, nil
 }
 
 func (ioc *GCSIOClient) getObj(srcUrl string) (*storage.ObjectHandle, error) {

@@ -163,6 +163,7 @@ def load_config_from_dict(config):
             "preemptible",
             "local_work_dir",
             "gpu_count",
+            "gpu_type",
             "mount",
             "sparkles_config_path",
         ]

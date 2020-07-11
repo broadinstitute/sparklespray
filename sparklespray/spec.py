@@ -203,10 +203,14 @@ def make_spec_from_command(
     post_exec_script="ls -al",
     working_dir=".",
     allow_symlinks=False,
+    exclude_patterns=None,
 ):
 
     if src_wildcards is None:
         src_wildcards = ["**"]
+
+    if exclude_patterns is None:
+        exclude_patterns = []
 
     list_of_argvs = rewrite_argv_with_parameters(argv, parameters)
 
@@ -231,7 +235,7 @@ def make_spec_from_command(
                 command=dl_and_command.command,
                 uploads=dict(
                     include_patterns=src_wildcards,
-                    exclude_patterns=[],
+                    exclude_patterns=exclude_patterns,
                     dst_url=url_join(dest_url, str(task_i + 1)),
                 ),
                 parameters=parameters[task_i],

@@ -22,6 +22,7 @@ from .io import IO
 from .watch import watch, local_watch
 from . import txtui
 from .watch import DockerFailedException
+from typing import Optional
 
 from .log import log
 
@@ -42,6 +43,7 @@ class SubmitConfig(BaseModel):
     kubequeconsume_url: str
     kubequeconsume_md5: str
     gpu_count: int
+    gpu_type: Optional[str]
     target_node_count: int
 
 
@@ -223,7 +225,6 @@ def submit(
     preemptible = config.preemptible
     boot_volume_in_gb = config.boot_volume_in_gb
     default_url_prefix = config.default_url_prefix
-    gpu_count = config.gpu_count
 
     default_job_url_prefix = url_join(default_url_prefix, job_id)
     tasks = expand_tasks(spec, io, default_url_prefix, default_job_url_prefix)
@@ -278,7 +279,8 @@ def submit(
             boot_volume_in_gb=boot_volume_in_gb,
             mount_point=config.mount_point,
             machine_type=config.machine_type,
-            gpu_count=gpu_count,
+            gpu_count=config.gpu_count,
+            gpu_type=config.gpu_type,
         )
 
         pipeline_spec = cluster.create_pipeline_spec(
@@ -454,6 +456,15 @@ def add_submit_cmd(subparser):
         default=None,
         dest="results_wildcards",
     )
+
+    parser.add_argument(
+        "--ignore",
+        action="append",
+        help="Wildcard to used for identifying which files should be excluding files from upload at end of job. Can be specified multiple times",
+        default=None,
+        dest="exclude_wildcards",
+    )
+
     parser.add_argument(
         "--nodes",
         help="Max number of VMs to start up to run these tasks",
@@ -556,8 +567,14 @@ def submit_cmd(jq, io, cluster, args, config):
         machine_type = args.machine_type
 
     gpu_count = config.get("gpu_count", 0)
+    gpu_type = config.get("gpu_type", None)
     if args.gpu_count:
         gpu_count = args.gpu_count
+    if gpu_count:
+        if gpu_type is None:
+            raise Exception(
+                f"Requesting {gpu_count} GPUs but gpu_type is missing from config"
+            )
 
     cas_url_prefix = config["cas_url_prefix"]
     default_url_prefix = config["default_url_prefix"]
@@ -599,6 +616,7 @@ def submit_cmd(jq, io, cluster, args, config):
             extra_files=expand_files_to_upload(io, files_to_push),
             working_dir=args.working_dir,
             allow_symlinks=args.symlinks,
+            exclude_patterns=args.exclude_wildcards,
         )
 
         kubequeconsume_exe_path = config["kubequeconsume_exe_path"]
@@ -649,6 +667,7 @@ def submit_cmd(jq, io, cluster, args, config):
         kubequeconsume_url=kubequeconsume_exe_url,
         kubequeconsume_md5=kubequeconsume_exe_md5,
         gpu_count=gpu_count,
+        gpu_type=gpu_type,
         target_node_count=target_node_count,
     )
 

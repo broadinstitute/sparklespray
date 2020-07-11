@@ -583,7 +583,7 @@ def main(argv=None):
     parser.add_argument(
         "--all",
         action="store_true",
-        help="If set, will mark all tasks as 'pending', not just 'claimed', 'killed' or 'failed' tasks",
+        help="If set, will mark all tasks as 'pending', not just 'claimed', 'killed' or 'failed' tasks. The first parameter can be either a job ID or an individual task ID",
     )
 
     parser = subparser.add_parser(
