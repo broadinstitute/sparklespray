@@ -600,6 +600,7 @@ def submit_cmd(jq, io, cluster, args, config):
             ), "Cannot re-run a job if the name isn't specified"
             assert len(parameters) == 1, "Cannot re-run a job with more than one task"
             # Add the existing job directory to the list of files to download to the worker
+
             files_to_push.append(url_join(dest_url, "1") + ":.")
 
         hash_db = CachingHashFunction(

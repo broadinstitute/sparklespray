@@ -387,7 +387,7 @@ func executeTaskInDir(ioc IOClient, workdir string, taskId string, spec *TaskSpe
 		panic("bad commandWorkingDir")
 	}
 
-	stdout, err := os.OpenFile(stdoutPath, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0766)
+	stdout, err := os.OpenFile(stdoutPath, os.O_WRONLY|os.O_CREATE, 0766)
 	if err != nil {
 		return "", err
 	}
