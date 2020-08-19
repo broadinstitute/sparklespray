@@ -298,27 +298,17 @@ class Cluster:
 
         mount_point = machine_specs.mount_point
 
-        m = re.match("gs://([^/]+)/(.+)$", consume_exe_url)
-        assert m is not None
-        consume_exe_url_bucket, consume_exe_url_key = m.groups()
+#        m = re.match("gs://([^/]+)/(.+)$", consume_exe_url)
+#        assert m is not None
+        #        consume_exe_url_bucket, consume_exe_url_key = m.groups()
 
         consume_exe_path = os.path.join(mount_point, "consume")
         consume_data = os.path.join(mount_point, "data")
 
-        setup_parameters = ["sparkles-consume-setup", "--dir", consume_data]
+        setup_parameters = [consume_exe_path, "prepare", "--bucketDir", consume_data]
         assert len(bucket_names) > 0
         for bucket_name in bucket_names:
             setup_parameters.extend(["--bucket", bucket_name])
-        setup_parameters.extend(
-            [
-                "--ln",
-                os.path.join(
-                    consume_data, "bucket", consume_exe_url_bucket, consume_exe_url_key
-                ),
-                consume_exe_path,
-            ]
-        )
-        setup_parameters.extend(["--read", consume_exe_path, "--wait"])
 
         suff = " ".join(
             [
@@ -403,7 +393,7 @@ class ClusterState:
                 # print("fetched {} and status was {}".format(node_req.operation_id, new_status))
                 if new_status != node_req.status:
                     self.node_req_store.update_node_req_status(
-                        node_req.operation_id, op.status, op.instance_name
+                        node_req.operation_id, op.status, op.instance_name, op.zone
                     )
                     # reflect the change in memory as well
                     node_req.status = new_status

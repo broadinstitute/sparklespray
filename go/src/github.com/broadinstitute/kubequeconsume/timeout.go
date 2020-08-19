@@ -1,12 +1,17 @@
 package kubequeconsume
 
 import (
+	"fmt"
 	"log"
+	"net/http"
 	"sort"
 	"strings"
 	"time"
 
+	"cloud.google.com/go/datastore"
+	"golang.org/x/net/context"
 	compute "google.golang.org/api/compute/v1"
+	"google.golang.org/api/googleapi"
 )
 
 type Timeout interface {
@@ -26,19 +31,19 @@ type ClusterTimeout struct {
 	MaxStaleHostnames time.Duration
 
 	Service *compute.Service
-	Zones   []string
 	Project string
 	MyName  string
 
-	ReservationSize    int
 	ReservationTimeout time.Duration
 
+	client           *datastore.Client
 	LastHostnamePoll time.Time
 	IsReservedHost   bool
+	deadInstances    map[string]bool
 }
 
-func NewClusterTimeout(service *compute.Service, clusterName string, zones []string, project string, myname string,
-	timeout time.Duration, ReservationSize int, ReservationTimeout time.Duration) *ClusterTimeout {
+func NewClusterTimeout(service *compute.Service, clusterName string, project string, myname string,
+	timeout time.Duration, ReservationTimeout time.Duration, client *datastore.Client) *ClusterTimeout {
 
 	// The instance name may have zone included in the path. Drop everything but the final name
 	nameComponents := strings.Split(myname, "/")
@@ -46,12 +51,13 @@ func NewClusterTimeout(service *compute.Service, clusterName string, zones []str
 	t := &ClusterTimeout{
 		ClusterName:        clusterName,
 		Timeout:            timeout,
+		MaxStaleHostnames:  10 * time.Second,
 		Service:            service,
-		Zones:              zones,
 		Project:            project,
 		MyName:             nameComponents[len(nameComponents)-1],
-		ReservationSize:    ReservationSize,
-		ReservationTimeout: ReservationTimeout}
+		ReservationTimeout: ReservationTimeout,
+		client:             client,
+		deadInstances:      make(map[string]bool)}
 	t.UpdateIsReservedHost()
 	return t
 }
@@ -59,21 +65,16 @@ func NewClusterTimeout(service *compute.Service, clusterName string, zones []str
 func (ct *ClusterTimeout) UpdateIsReservedHost() {
 	ct.LastHostnamePoll = time.Now()
 
-	instances, err := ct.getInstances()
+	firstInstanceName, err := ct.getFirstRunningInstance()
 	if err != nil {
-		log.Printf("Got error from getInstances: %v", err)
+		log.Printf("Got error from getFirstRunningInstance: %v", err)
 		ct.IsReservedHost = false
 		return
 	}
 
-	names := make([]string, len(instances))
-	for i, instance := range instances {
-		names[i] = instance.Name
-	}
+	log.Printf("Found name of host to reserve: %s", firstInstanceName)
 
-	log.Printf("Found %d instances: %v", len(instances), names)
-
-	ct.IsReservedHost = isNameInTopN(names, ct.MyName, ct.ReservationSize)
+	ct.IsReservedHost = firstInstanceName == ct.MyName
 }
 
 func (ct *ClusterTimeout) Reset(timestamp time.Time) {
@@ -85,31 +86,63 @@ func (ct *ClusterTimeout) Reset(timestamp time.Time) {
 	ct.LastResetTimestamp = timestamp
 }
 
-func (ct *ClusterTimeout) getInstances() ([]*compute.Instance, error) {
-	instances := make([]*compute.Instance, 0, 100)
-	for _, zone := range ct.Zones {
-		log.Printf("Querying for instances in project %s, zone %s", ct.Project, zone)
-		zoneInstances, err := ct.Service.Instances.List(ct.Project, zone).Filter("labels.kubeque-cluster=" + ct.ClusterName).Do()
-		if err != nil {
-			return nil, err
-		}
-		for _, instance := range zoneInstances.Items {
-			instances = append(instances, instance)
-		}
-	}
-	return instances, nil
+type NodeReqList []*NodeReq
+
+func (nr NodeReqList) Len() int {
+	return len(nr)
+}
+func (nr NodeReqList) Less(i, j int) bool {
+	return nr[i].Sequence < nr[j].Sequence
 }
 
-func isNameInTopN(names []string, myname string, n int) bool {
-	sort.Strings(names)
+func (nr NodeReqList) Swap(i, j int) {
+	t := nr[i]
+	nr[i] = nr[j]
+	nr[j] = t
+}
 
-	nameIndex := sort.SearchStrings(names, myname)
-	if nameIndex >= len(names) || names[nameIndex] != myname {
-		log.Printf("Error: %s is not a running instance!", myname)
-		return false
+func (ct *ClusterTimeout) getFirstRunningInstance() (string, error) {
+	// find all node requests which have not yet been marked complete
+	q := datastore.NewQuery("NodeReq").Filter("status !=", "complete")
+	var nodeReqs []*NodeReq
+	_, err := ct.client.GetAll(context.Background(), q, &nodeReqs)
+
+	if err != nil {
+		return "", err
 	}
 
-	return nameIndex < n
+	sort.Sort(NodeReqList(nodeReqs))
+
+	for _, nodeReq := range nodeReqs {
+		nameAndZone := fmt.Sprintf("%s/%s", nodeReq.Zone, nodeReq.InstanceName)
+
+		if nodeReq.InstanceName != "" || ct.deadInstances[nameAndZone] {
+			// skip requests which are missing an instance name or instances that we've already checked and are dead
+			continue
+		}
+
+		instance, err := ct.Service.Instances.Get(ct.Project, nodeReq.Zone, nodeReq.InstanceName).Do()
+		// what is the error returned when an instance doesn't exist?
+		// remember this instance is dead so we don't keep rechecking
+		// what is the status of an instance stopped/running?
+		if IsNotFound(err) || instance.Status == "TERMINATED" || instance.Status == "STOPPING" || instance.Status == "STOPPED" {
+			// remember this instance isn't running to avoid polling it again
+			ct.deadInstances[nameAndZone] = true
+		}
+
+		if err == nil && instance.Status == "running" {
+			return instance.Name, nil
+		}
+
+	}
+
+	return "", nil
+}
+
+func IsNotFound(err error) bool {
+	ae, ok := err.(*googleapi.Error)
+	return ok && ae.Code == http.StatusNotFound
+
 }
 
 func (ct *ClusterTimeout) HasTimeoutExpired(timestamp time.Time) bool {

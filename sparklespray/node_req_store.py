@@ -25,6 +25,7 @@ class NodeReq(object):
     sequence = attr.ib()
     job_id = attr.ib()
     instance_name = attr.ib(default=None)
+    zone = attr.ib(default=None)
 
 
 def node_req_to_entity(client: datastore.Client, o: NodeReq) -> datastore.Entity:
@@ -37,6 +38,7 @@ def node_req_to_entity(client: datastore.Client, o: NodeReq) -> datastore.Entity
     entity["node_class"] = o.node_class
     entity["sequence"] = o.sequence
     entity["instance_name"] = o.instance_name
+    entity["zone"] = o.zone
     return entity
 
 
@@ -49,6 +51,7 @@ def entity_to_node_req(entity: datastore.Entity) -> NodeReq:
         sequence=entity["sequence"],
         job_id=entity.get("job_id"),
         instance_name=entity["instance_name"],
+        zone=entity["zone"],
     )
 
 
@@ -71,10 +74,11 @@ class AddNodeReqStore:
             results.append(node_req)
         return results
 
-    def update_node_req_status(self, operation_id, status, instance_name):
+    def update_node_req_status(self, operation_id, status, instance_name, zone):
         entity = self.client.get(self.client.key("NodeReq", operation_id))
         entity["status"] = status
         entity["instance_name"] = instance_name
+        entity["zone"] = zone
         self.client.put(entity)
 
     def cleanup_cluster(self, cluster_id: str, batch: Batch = None) -> None:

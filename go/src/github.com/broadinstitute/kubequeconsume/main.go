@@ -3,11 +3,11 @@ package kubequeconsume
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"fmt"
 
 	// "fmt"
 	"log"
 	"net/http"
-	"os"
 
 	// "path"
 	"strings"
@@ -17,43 +17,11 @@ import (
 	"golang.org/x/net/context"
 	"golang.org/x/oauth2/google"
 
-	"github.com/urfave/cli"
 	compute "google.golang.org/api/compute/v1"
 	"google.golang.org/api/option"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 )
-
-func Main() {
-	app := cli.NewApp()
-	app.Name = "kubequeconsume"
-	app.Version = "0.1"
-	app.Compiled = time.Now()
-	app.Authors = []cli.Author{
-		cli.Author{
-			Name:  "Philip Montgomery",
-			Email: "pmontgom@broadinstitute.org",
-		}}
-
-	app.Commands = []cli.Command{
-		cli.Command{
-			Name: "consume",
-			Flags: []cli.Flag{
-				cli.StringFlag{Name: "projectId"},
-				cli.StringFlag{Name: "cacheDir"},
-				cli.StringFlag{Name: "cluster"},
-				cli.StringFlag{Name: "tasksDir"},
-				cli.StringFlag{Name: "tasksFile"},
-				cli.StringFlag{Name: "zones"},
-				cli.StringFlag{Name: "port"},
-				cli.StringFlag{Name: "bucketDir"},
-				cli.IntFlag{Name: "timeout", Value: 5}, // 5 minutes means the process will be killed after 10 minutes
-				cli.IntFlag{Name: "restimeout",
-					Value: 10}},
-			Action: consume}}
-
-	app.Run(os.Args)
-}
 
 func initCerts() *x509.CertPool {
 	pool := x509.NewCertPool()
@@ -91,28 +59,16 @@ func clientWithCerts(ctx context.Context, certs *x509.CertPool, scope ...string)
 	return google.DefaultClient(ctx, scope...)
 }
 
-func consume(c *cli.Context) error {
+func Consume(projectID string, cacheDir string, bucketDir string,
+	cluster string, tasksDir string, tasksFile string,
+	port int, ReservationTimeoutMinutes int, watchdogTimeoutMinutes int) error {
 	log.Printf("Starting consume")
 	certs := initCerts()
 	http.DefaultTransport = &http.Transport{
 		TLSClientConfig: &tls.Config{RootCAs: certs},
 	}
-	// http.DefaultClient = &http.Client{
-	// 	Transport: &http.Transport{
-	// 		TLSClientConfig: &tls.Config{RootCAs: certs},
-	// 	},
-	// }
-
-	projectID := c.String("projectId")
-	cacheDir := c.String("cacheDir")
-	bucketDir := c.String("bucketDir")
-	cluster := c.String("cluster")
-	tasksDir := c.String("tasksDir")
-	tasksFile := c.String("tasksFile")
-	port := c.String("port")
-	zones := strings.Split(c.String("zones"), ",")
-	ReservationTimeout := time.Duration(c.Int("restimeout")) * time.Minute
-	watchdogTimeout := time.Duration(c.Int("timeout")) * time.Minute
+	ReservationTimeout := time.Duration(ReservationTimeoutMinutes) * time.Minute
+	watchdogTimeout := time.Duration(watchdogTimeoutMinutes) * time.Minute
 
 	EnableWatchdog(watchdogTimeout)
 
@@ -185,21 +141,11 @@ func consume(c *cli.Context) error {
 	}
 
 	Timeout := 1 * time.Second
-	ReservationSize := 1
 
 	service, err := compute.New(httpclient)
 	if err != nil {
 		log.Printf("Could not create compute service: %v", err)
 		return err
-	}
-
-	timeout := NewClusterTimeout(service, cluster, zones, projectID, owner, Timeout,
-		ReservationSize, ReservationTimeout)
-
-	var sleepUntilNotify func(sleepTime time.Duration)
-	sleepUntilNotify = func(sleepTime time.Duration) {
-		log.Printf("Going to sleep (max: %d milliseconds)", sleepTime/time.Millisecond)
-		time.Sleep(sleepTime)
 	}
 
 	transportCreds := grpc.WithTransportCredentials(credentials.NewClientTLSFromCert(certs, ""))
@@ -209,8 +155,17 @@ func consume(c *cli.Context) error {
 		return err
 	}
 
+	timeout := NewClusterTimeout(service, cluster, projectID, owner, Timeout,
+		ReservationTimeout, client)
+
+	var sleepUntilNotify func(sleepTime time.Duration)
+	sleepUntilNotify = func(sleepTime time.Duration) {
+		log.Printf("Going to sleep (max: %d milliseconds)", sleepTime/time.Millisecond)
+		time.Sleep(sleepTime)
+	}
+
 	monitorAddress := ""
-	if port != "" {
+	if port != 0 {
 		entityKey := datastore.NameKey("ClusterKeys", "sparklespray", nil)
 		var clusterKeys ClusterKeys
 		err := client.Get(ctx, entityKey, &clusterKeys)
@@ -219,12 +174,12 @@ func consume(c *cli.Context) error {
 			return err
 		}
 
-		err = monitor.StartServer(":"+port, clusterKeys.Cert, clusterKeys.PrivateKey, clusterKeys.SharedSecret)
+		err = monitor.StartServer(fmt.Sprintf(":%d", port), clusterKeys.Cert, clusterKeys.PrivateKey, clusterKeys.SharedSecret)
 		if err != nil {
 			log.Printf("Failed to start grpc server: %v", err)
 			return err
 		}
-		monitorAddress = externalIP + ":" + port
+		monitorAddress = fmt.Sprintf("%s:%d", externalIP, port)
 	}
 
 	var queue Queue

@@ -1,7 +1,7 @@
 package main
 
-import "github.com/broadinstitute/kubequeconsume"
+import "github.com/broadinstitute/kubequeconsume/cmd"
 
 func main() {
-	kubequeconsume.Main()
+	cmd.Execute()
 }

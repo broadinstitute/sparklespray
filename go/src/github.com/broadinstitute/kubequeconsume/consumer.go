@@ -22,6 +22,16 @@ type TaskHistory struct {
 	Owner         string  `datastore:"owner,noindex,omitempty"`
 }
 
+type NodeReq struct {
+	ClusterID    string `datastore:"cluster_id"`
+	InstanceName string `datastore:"instance_name"`
+	JobID        string `datastore:"job_id"`
+	NodeClass    string `datastore:"node_class"`
+	Sequence     string `datastore:"sequence"`
+	Status       string `datastore:"status"`
+	Zone         string `datastore:"zone"`
+}
+
 type Task struct {
 	// will be of the form: job_id + task_index
 	TaskID           string         `datastore:"task_id" json:"task_id"`
