@@ -1,0 +1,10 @@
+repos:
+  - repo: https://github.com/prettier/prettier
+    rev: "1.18.2"
+    hooks:
+      - id: prettier
+        exclude: '^.*\.(html|min\.js)$'
+  - repo: https://github.com/ambv/black
+    rev: stable
+    hooks:
+      - id: black

@@ -10,7 +10,9 @@ project=broad-achilles
 default_image=python
 machine_type=n1-standard-2
 zone=us-east1-b
-""".format(DEFAULT_URL)
+""".format(
+    DEFAULT_URL
+)
 
 SCRIPT = """#!/usr/bin/python
 import sys, os
@@ -31,7 +33,7 @@ with open("outdir/outdir2/output2.txt", "wt") as fd:
 
 
 def test_end_to_end(tmpdir):
-    dest_dir = tmpdir.join('dest')
+    dest_dir = tmpdir.join("dest")
     dest_dir.mkdir()
 
     # write out config file
@@ -68,11 +70,14 @@ def test_end_to_end(tmpdir):
 
     # sub_opts = ["--fetch", str(dest_dir)]
     # sub_opts += ['--local']
-    sub_opts = ['--local', '-n', 'test_end_to_end']
+    sub_opts = ["--local", "-n", "test_end_to_end"]
 
     try:
-        retcode = main(["--config", str(config_file), "sub"] + sub_opts + ['^./cat.py',
-                                                                           '^subdir/subdir/file', '^subdir2/file2', '^file3'])
+        retcode = main(
+            ["--config", str(config_file), "sub"]
+            + sub_opts
+            + ["^./cat.py", "^subdir/subdir/file", "^subdir2/file2", "^file3"]
+        )
         assert retcode == 0
     finally:
         # return to the original directory the test was running from regardless of execptions

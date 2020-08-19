@@ -289,6 +289,7 @@ class Cluster:
         jobid: str,
         cluster_name: str,
         consume_exe_url: str,
+        consume_exe_md5: str,
         docker_image: str,
         consume_exe_args: List[str],
         machine_specs: MachineSpec,
@@ -367,6 +368,7 @@ class ClusterState:
         self.node_req_store = node_req_store
         self.task_store = task_store
         self.failed_node_req_count = 0
+        self.unknown_instance_names = set()
         # self.add_node_statuses = [] # type: List[AddNodeStatus]
 
     def update(self):
@@ -397,6 +399,11 @@ class ClusterState:
                     )
                     # reflect the change in memory as well
                     node_req.status = new_status
+
+    def get_completed_node_names(self):
+        return [
+            x.instance_name for x in self.node_reqs if x.status in FINAL_NODE_STATES
+        ]
 
     def get_tasks(self):
         return self.tasks
@@ -465,11 +472,15 @@ class ClusterState:
             instance_name = task.get_instance_name()
 
             if instance_name not in node_req_by_instance_name:
-                log.warning(
-                    "instance {} was not listed among {}".format(
-                        instance_name, ", ".join(node_req_by_instance_name.keys())
+                if instance_name not in self.unknown_instance_names:
+                    log.warning(
+                        "instance {} was not listed among {} nodes".format(
+                            instance_name, len(node_req_by_instance_name)
+                        )
                     )
-                )
+                    # remember we don't know what this instance is and we should ignore it
+                    self.unknown_instance_names.add(instance_name)
+
             else:
                 node_req = node_req_by_instance_name[instance_name]
                 if node_req.status in [NODE_REQ_COMPLETE, NODE_REQ_FAILED]:

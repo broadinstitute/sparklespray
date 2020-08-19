@@ -1,8 +1,8 @@
 name: hello world
 resources:
-    minimumCpuCores: 1
-    minimumRamGb: 1
+  minimumCpuCores: 1
+  minimumRamGb: 1
 docker:
-    imageName: ubuntu
-    cmd: >
-      echo "success" > /data/output/greeting.txt
+  imageName: ubuntu
+  cmd: >
+    echo "success" > /data/output/greeting.txt

@@ -25,6 +25,7 @@ type IOClient interface {
 	UploadBytes(destURL string, data []byte) error
 	Download(srcURL string, destPath string) error
 	DownloadAsBytes(srcURL string) ([]byte, error)
+	IsExists(url string) (bool, error)
 }
 
 type GCSIOClient struct {
@@ -77,17 +78,47 @@ func (ioc *GCSIOClient) UploadBytes(destURL string, data []byte) error {
 	return err
 }
 
-func splitObjUrl(url string) (bucketName string, keyName string, err error) {
+func (ioc *GCSIOClient) IsExists(url string) (bool, error) {
+	obj, err := ioc.getObj(url)
+	if err != nil {
+		return false, err
+	}
+
+	_, err = obj.Attrs(ioc.ctx)
+
+	if err == storage.ErrObjectNotExist {
+		return false, nil
+	} else if err != nil {
+		return false, err
+	}
+
+	return true, nil
+}
+
+func (ioc *GCSIOClient) getObj(srcUrl string) (*storage.ObjectHandle, error) {
 	urlPattern := regexp.MustCompile("^gs://([^/]+)/(.+)$")
 
-	groups := urlPattern.FindStringSubmatch(url)
+	groups := urlPattern.FindStringSubmatch(srcUrl)
 	if groups == nil {
-		return "", "", errors.New("invalid url: " + url)
+		return nil, errors.New("invalid url: " + srcUrl)
 	}
-	bucketName = groups[1]
-	keyName = groups[2]
+	bucketName := groups[1]
+	keyName := groups[2]
 
 	return bucketName, keyName, nil
+}
+
+func splitObjUrl(url string) (bucketName string, keyName string, err error) {
+urlPattern := regexp.MustCompile("^gs://([^/]+)/(.+)$")
+
+groups := urlPattern.FindStringSubmatch(url)
+if groups == nil {
+return "", "", errors.New("invalid url: " + url)
+}
+bucketName = groups[1]
+keyName = groups[2]
+
+return bucketName, keyName, nil
 }
 
 func getUniqueBuckets(urls []string) ([]string, error) {

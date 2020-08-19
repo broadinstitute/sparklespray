@@ -1,29 +1,29 @@
 {
-    "image": "us.gcr.io/gcs-test-1136/ph-base",
-    "common": {
-        "log_path": "output.log",
-        "command_result_path": "result.json",
-        "command_result_url": "command_result.json",
-        "downloads": [
-            {
-                "src": "test-inputfile",
-                "dst": "message"
-            }
-        ],
-        "uploads": [
-            {
-                "src": "output.log",
-                "dst_url": "output.log"
-            },
-            {
-                "src": "m2",
-                "dst_url": "m2"
-            }
-        ]
-    },
-    "tasks": [
-        {
-            "command": "bash -c 'cat message message > m2'"
-        }
+  "image": "us.gcr.io/gcs-test-1136/ph-base",
+  "common": {
+    "log_path": "output.log",
+    "command_result_path": "result.json",
+    "command_result_url": "command_result.json",
+    "downloads": [
+      {
+        "src": "test-inputfile",
+        "dst": "message"
+      }
+    ],
+    "uploads": [
+      {
+        "src": "output.log",
+        "dst_url": "output.log"
+      },
+      {
+        "src": "m2",
+        "dst_url": "m2"
+      }
     ]
+  },
+  "tasks": [
+    {
+      "command": "bash -c 'cat message message > m2'"
+    }
+  ]
 }

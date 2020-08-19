@@ -28,20 +28,16 @@ class MachineSpec(object):
     boot_volume_in_gb = attr.ib()
     mount_point = attr.ib()
     machine_type = attr.ib()
-    gpu_count = attr.ib(default=0)
+    gpu_count = attr.ib()
+    gpu_type = attr.ib()
 
     def get_gpu(self):
         if self.gpu_count > 0:
             """Definition of GPU by version v2alpha1"""
-            def_gpu = {"type": "nvidia-tesla-p100", "count": self.gpu_count}
+            def_gpu = {"type": self.gpu_type, "count": self.gpu_count}
             return def_gpu
-        elif self.gpu_count == 0 or not self.gpu_count:
-            def_gpu = None
         else:
-            log.warn(
-                "GPU is not set properly. Please double check the README if you are trying to configure the GPU"
-            )
-            def_gpu = None
+            return None
 
 
 def get_random_string(length):

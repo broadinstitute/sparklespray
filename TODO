@@ -1,0 +1,21 @@
+add back "resub" for submitting with new resources
+add back local watch
+add back validate
+
+test addnodes
+test reset 
+test listparams
+test dumpjob
+test status
+
+(ok) test watch
+(ok) test sub
+(ok) clean
+(ok) kill 
+
+drop fetch?
+
+- Instructions for building kubeconsume executable
+- Follow up on issue with permissions (Currently can work around by granting owner access to service account)
+- Remove old config from README
+- Add note about enabling container registry
