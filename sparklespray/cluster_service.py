@@ -299,8 +299,8 @@ class Cluster:
 
         mount_point = machine_specs.mount_point
 
-#        m = re.match("gs://([^/]+)/(.+)$", consume_exe_url)
-#        assert m is not None
+        #        m = re.match("gs://([^/]+)/(.+)$", consume_exe_url)
+        #        assert m is not None
         #        consume_exe_url_bucket, consume_exe_url_key = m.groups()
 
         consume_exe_path = os.path.join(mount_point, "consume")

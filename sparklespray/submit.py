@@ -196,20 +196,22 @@ def _make_cluster_name(job_name, image, machine_type, unique_name, bucket_names)
             ).hexdigest()[:20]
         )
 
-def _unique_buckets_from_tasks(others : List[str], tasks : List[dict]):
+
+def _unique_buckets_from_tasks(others: List[str], tasks: List[dict]):
     others = list(others)
     buckets = set()
     for task in tasks:
-        for download in task['downloads']:
-            if download['src_url'].startswith("gs://"):
-                others.append(download['src_url'])
-    
+        for download in task["downloads"]:
+            if download["src_url"].startswith("gs://"):
+                others.append(download["src_url"])
+
     for other in others:
         m = re.match("gs://([^/]+)/.*", other)
         assert m is not None
         buckets.add(m.group(1))
-        
+
     return buckets
+
 
 def submit(
     jq: JobQueue,
@@ -312,7 +314,8 @@ def submit(
             consume_exe_args=consume_exe_args,
             machine_specs=machine_specs,
             monitor_port=monitor_port,
-            bucket_names=bucket_names)
+            bucket_names=bucket_names,
+        )
 
         max_preemptable_attempts = 0
         if preemptible:
