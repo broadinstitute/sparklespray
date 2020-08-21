@@ -57,7 +57,7 @@ class ComputeService:
                 .list(
                     project=self.project,
                     zone=zone,
-                    filter="labels.kubeque-cluster=" + cluster_name,
+                    filter="labels.sparkles-cluster=" + cluster_name,
                 )
                 .execute()
                 .get("items", [])

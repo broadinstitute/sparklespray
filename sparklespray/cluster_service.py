@@ -135,6 +135,7 @@ class Cluster:
             else NODE_REQ_CLASS_NORMAL,
             sequence=get_timestamp(),
             job_id=job_id,
+            debug_log=debug_log_url,
         )
         self.node_req_store.add_node_req(req)
         log.info(
@@ -344,10 +345,25 @@ class ClusterState:
                 new_status = op.status
                 if new_status == NODE_REQ_FAILED:
                     log.warning(
-                        "Node request (%s) failed: %s",
+                        "Node request %s failed (see sparkles.log for more information): %s",
                         node_req.operation_id,
                         op.error_message,
                     )
+
+                    raw_operation = self.cluster.get_raw_operation_details(
+                        node_req.operation_id
+                    )
+                    log.info(
+                        "Operation %s failed. See debug log at %s",
+                        node_req.operation_id,
+                        node_req.debug_log,
+                    )
+                    log.info(
+                        "Operation %s status:\n%s",
+                        node_req.operation_id,
+                        json.dumps(raw_operation, indent=2),
+                    )
+
                     self.failed_node_req_count += 1
                 # print("fetched {} and status was {}".format(node_req.operation_id, new_status))
                 if new_status != node_req.status:

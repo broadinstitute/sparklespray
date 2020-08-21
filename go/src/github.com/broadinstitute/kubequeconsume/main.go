@@ -61,7 +61,7 @@ func clientWithCerts(ctx context.Context, certs *x509.CertPool, scope ...string)
 
 func Consume(projectID string, cacheDir string, bucketDir string,
 	cluster string, tasksDir string, tasksFile string,
-	port int, ReservationTimeoutMinutes int, watchdogTimeoutMinutes int) error {
+	port int, ReservationTimeoutMinutes int, watchdogTimeoutMinutes int, isLocal bool) error {
 	log.Printf("Starting consume")
 	certs := initCerts()
 	http.DefaultTransport = &http.Transport{
@@ -87,7 +87,7 @@ func Consume(projectID string, cacheDir string, bucketDir string,
 		return err
 	}
 
-	isLocalRun := strings.HasPrefix(cluster, "local-")
+	isLocalRun := isLocal || strings.HasPrefix(cluster, "local-")
 	log.Printf("isLocal = %s (cluster=%s)", isLocalRun, cluster)
 	var owner string
 	var externalIP string

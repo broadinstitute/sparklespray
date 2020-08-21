@@ -26,6 +26,7 @@ class NodeReq(object):
     job_id = attr.ib()
     instance_name = attr.ib(default=None)
     zone = attr.ib(default=None)
+    debug_log = attr.ib(default=None)
 
 
 def node_req_to_entity(client: datastore.Client, o: NodeReq) -> datastore.Entity:
@@ -39,6 +40,7 @@ def node_req_to_entity(client: datastore.Client, o: NodeReq) -> datastore.Entity
     entity["sequence"] = o.sequence
     entity["instance_name"] = o.instance_name
     entity["zone"] = o.zone
+    entity["debug_log"] = o.debug_log
     return entity
 
 
@@ -52,6 +54,7 @@ def entity_to_node_req(entity: datastore.Entity) -> NodeReq:
         job_id=entity.get("job_id"),
         instance_name=entity["instance_name"],
         zone=entity["zone"],
+        debug_log=entity.get("debug_log"),
     )
 
 

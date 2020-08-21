@@ -182,44 +182,57 @@ def can_reach_datastore_api(project_id, key_path):
 
 
 def setup_project(
-    project_id, key_path, bucket_name, helper_image_name, helper_exe, gcsfuse_exe
+    project_id,
+    key_path,
+    bucket_name,
+    helper_image_name,
+    helper_exe,
+    gcsfuse_exe,
+    setup_account,
+    setup_firewall,
+    setup_docker_image,
 ):
-    # print("Enabling services for project {}...".format(project_id))
-    # enable_services(project_id)
-    # service_acct = "sparkles-" + random_string(10).lower()
-    # if not os.path.exists(key_path):
-    #     parent = os.path.dirname(key_path)
-    #     if not os.path.exists(parent):
-    #         os.makedirs(parent)
-    #     print(f"Creating service account and writing key to {key_path} ...")
-    #     create_service_account(service_acct, project_id, key_path)
-    # else:
-    #     print(
-    #         f"Not creating service account because key already exists at {key_path} Delete this and rerun if you wish to create a new service account."
-    #     )
+    if setup_account:
+        print("Enabling services for project {}...".format(project_id))
+        enable_services(project_id)
+        service_acct = "sparkles-" + random_string(10).lower()
+        if not os.path.exists(key_path):
+            parent = os.path.dirname(key_path)
+            if not os.path.exists(parent):
+                os.makedirs(parent)
+            print(f"Creating service account and writing key to {key_path} ...")
+            create_service_account(service_acct, project_id, key_path)
+        else:
+            print(
+                f"Not creating service account because key already exists at {key_path} Delete this and rerun if you wish to create a new service account."
+            )
 
-    # setup_bucket(project_id, key_path, bucket_name)
+        setup_bucket(project_id, key_path, bucket_name)
 
-    # # Setup firewall using gcloud function
-    # print("Adding firewall rule...")
-    # add_firewall_rule(project_id)
+        if not can_reach_datastore_api(project_id, key_path):
+            print(
+                'Go to https://console.cloud.google.com/datastore/setup?project={} to choose where to store your data will reside in and then set up will be complete. Select "Cloud Datastore" and then select a region close to you, and then "Create database".'.format(
+                    project_id
+                )
+            )
+            input("Hit enter once you've completed the above: ")
+            print("checking datastore again..")
+            if can_reach_datastore_api(project_id, key_path):
+                print("Success!")
 
-    # if not can_reach_datastore_api(project_id, key_path):
-    #     print(
-    #         'Go to https://console.cloud.google.com/datastore/setup?project={} to choose where to store your data will reside in and then set up will be complete. Select "Cloud Datastore" and then select a region close to you, and then "Create database".'.format(
-    #             project_id
-    #         )
-    #     )
-    #     input("Hit enter once you've completed the above: ")
-    #     print("checking datastore again..")
-    #     if can_reach_datastore_api(project_id, key_path):
-    #         print("Success!")
+        print(
+            "Using gcloud to setup google authentication with Google Container Registry"
+        )
+        gcloud(["auth", "configure-docker"])
 
-    # print("Using gcloud to setup google authentication with Google Container Registry")
-    # gcloud(["auth", "configure-docker"])
+    if setup_firewall:
+        # Setup firewall using gcloud function
+        print("Adding firewall rule...")
+        add_firewall_rule(project_id)
 
-    print("Building docker image used for setting up VMs")
-    prepare_helper_docker_image(helper_image_name, helper_exe, gcsfuse_exe)
+    if setup_docker_image:
+        print("Building docker image used for setting up VMs")
+        prepare_helper_docker_image(helper_image_name, helper_exe, gcsfuse_exe)
 
 
 def prepare_helper_docker_image(helper_image_name, helper_exe, gcsfuse_exe):

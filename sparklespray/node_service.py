@@ -229,7 +229,6 @@ class NodeService:
                 "flags": ["ALWAYS_RUN"],
             }
             pipeline_def["pipeline"]["actions"].append(cp_action)
-        # print(json.dumps(pipeline_def, indent=2))
 
         # Run the pipeline
         operation = self.service.pipelines().run(body=pipeline_def).execute()
@@ -332,7 +331,7 @@ class NodeService:
             os.path.join(consume_data, "buckets"),
             "--cluster",
             machine_specs.cluster_name,
-            "--projectId",
+            "--project",
             machine_specs.project,
             "--port",
             str(machine_specs.monitor_port),

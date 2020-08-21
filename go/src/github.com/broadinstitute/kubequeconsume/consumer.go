@@ -30,6 +30,7 @@ type NodeReq struct {
 	Sequence     string `datastore:"sequence"`
 	Status       string `datastore:"status"`
 	Zone         string `datastore:"zone"`
+	DebugLog     string `datastore:"debug_log"`
 }
 
 type Task struct {
@@ -117,6 +118,7 @@ func ConsumerRunLoop(ctx context.Context, queue Queue, sleepUntilNotify func(sle
 			}
 
 			if timeout.HasTimeoutExpired(now) {
+				log.Printf("HasTimeoutExpired returned true")
 				return nil
 			}
 			sleepUntilNotify(SleepOnEmpty)

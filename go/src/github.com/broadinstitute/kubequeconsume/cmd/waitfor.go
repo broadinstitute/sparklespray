@@ -25,6 +25,7 @@ var waitforCmd = &cobra.Command{
 		for {
 			_, err := os.Stat(filename)
 			if err == nil {
+				log.Printf("%s exists, exiting now", filename)
 				break
 			} else {
 				elapsed := time.Now().Sub(start)

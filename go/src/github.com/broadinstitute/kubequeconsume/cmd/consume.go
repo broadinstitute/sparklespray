@@ -5,15 +5,16 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var projectID = ""
-var cacheDir = ""
-var cluster = ""
-var tasksDir = ""
-var tasksFile = ""
-var port = 0
-var bucketDir = ""
-var timeout = 5
-var restimeout = 10
+var projectID string
+var cacheDir string
+var cluster string
+var tasksDir string
+var tasksFile string
+var port int
+var bucketDir string
+var timeout int
+var watchdogTimeoutMinutes int
+var islocal bool
 
 func init() {
 	rootCmd.AddCommand(consumeCmd)
@@ -25,8 +26,9 @@ func init() {
 	consumeCmd.Flags().StringVar(&tasksFile, "tasksFile", "", "")
 	consumeCmd.Flags().IntVar(&port, "port", 0, "")
 	consumeCmd.Flags().StringVar(&bucketDir, "bucketDir", "", "")
-	consumeCmd.Flags().IntVar(&timeout, "timeout", 5, "")
-	consumeCmd.Flags().IntVar(&restimeout, "restimeout", 10, "")
+	consumeCmd.Flags().IntVar(&timeout, "timeout", 10, "")
+	consumeCmd.Flags().IntVar(&watchdogTimeoutMinutes, "restimeout", 5, "")
+	consumeCmd.Flags().BoolVar(&islocal, "local", false, "")
 }
 
 var consumeCmd = &cobra.Command{
@@ -35,6 +37,6 @@ var consumeCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		kubequeconsume.Consume(projectID, cacheDir, bucketDir,
 			cluster, tasksDir, tasksFile,
-			port, timeout, restimeout)
+			port, timeout, watchdogTimeoutMinutes, islocal)
 	},
 }

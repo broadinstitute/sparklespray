@@ -14,7 +14,9 @@ var GCSFuseMountOptions = []string{"--foreground", "-o", "ro",
 
 func Prepare(gcsfuseExecutable string, prepBucketDir string, buckets []string, injectConsumeExe string) error {
 	// copy this executable into a path accessible by the 2nd container
+	log.Printf("Prepare started")
 	if injectConsumeExe != "" {
+		log.Printf("copying helper to %s", injectConsumeExe)
 		parentDir := path.Dir(injectConsumeExe)
 		if _, err := os.Stat(parentDir); os.IsNotExist(err) {
 			err = os.MkdirAll(parentDir, 0766)
@@ -38,11 +40,10 @@ func Prepare(gcsfuseExecutable string, prepBucketDir string, buckets []string, i
 		if err != nil {
 			return err
 		}
-
-		return nil
 	}
 
 	// now do the bucket mounts
+	log.Printf("Preparing %d bucket mounts", len(buckets))
 	for _, bucket := range buckets {
 		bucketDir := path.Join(prepBucketDir, bucket)
 		if _, err := os.Stat(bucketDir); os.IsNotExist(err) {
@@ -61,6 +62,7 @@ func Prepare(gcsfuseExecutable string, prepBucketDir string, buckets []string, i
 			log.Fatal(err)
 		}
 	}
+	log.Printf("Prepare complete")
 	return nil
 }
 

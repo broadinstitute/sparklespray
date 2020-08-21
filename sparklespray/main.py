@@ -539,6 +539,9 @@ def setup_cmd(args, config):
         config["sparkles_helper_image"],
         config["kubequeconsume_exe_path"],
         config["gscfuse_exe"],
+        setup_account=not args.only_docker_image,
+        setup_firewall=not args.only_docker_image,
+        setup_docker_image=True,
     )
 
 
@@ -596,6 +599,12 @@ def main(argv=None):
     parser = subparser.add_parser(
         "setup",
         help="Configures the google project chosen in the config to be compatible with sparklespray. (requires gcloud installed in path)",
+    )
+    parser.add_argument(
+        "--only-docker-image",
+        dest="only_docker_image",
+        action="store_true",
+        help="If set, only rebuilds helper docker image",
     )
     parser.set_defaults(func=setup_cmd)
 

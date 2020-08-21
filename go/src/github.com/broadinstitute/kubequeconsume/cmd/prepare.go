@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"log"
+
 	"github.com/broadinstitute/kubequeconsume"
 	"github.com/spf13/cobra"
 )
@@ -23,6 +25,9 @@ var prepareCmd = &cobra.Command{
 	Use:   "prepare",
 	Short: "set up gcsfuse mounts",
 	Run: func(cmd *cobra.Command, args []string) {
-		kubequeconsume.Prepare(gcsfuseExecutable, prepBucketDir, buckets, injectConsumeExe)
+		err := kubequeconsume.Prepare(gcsfuseExecutable, prepBucketDir, buckets, injectConsumeExe)
+		if err != nil {
+			log.Fatalf("Got error in prepare(%s, %s, %s, %v): %v", gcsfuseExecutable, prepBucketDir, buckets, injectConsumeExe, err)
+		}
 	},
 }
