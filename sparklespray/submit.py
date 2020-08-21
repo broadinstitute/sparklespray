@@ -40,8 +40,7 @@ class SubmitConfig(BaseModel):
     monitor_port: int
     zones: List[str]
     mount_point: str
-    kubequeconsume_url: str
-    kubequeconsume_md5: str
+    prepare_image: str
     gpu_count: int
     gpu_type: Optional[str]
     target_node_count: int
@@ -190,15 +189,15 @@ def _make_cluster_name(job_name, image, machine_type, unique_name, bucket_names)
         return (
             "c-"
             + hashlib.md5(
-                f"{job_name}-{image}-{machine_type}-{sparklespray.__version__}".encode(
+                f"{job_name}-{image}-{machine_type}-{sparklespray.__version__}-{bucket_names_str}".encode(
                     "utf8"
                 )
             ).hexdigest()[:20]
         )
 
 
-def _unique_buckets_from_tasks(others: List[str], tasks: List[dict]):
-    others = list(others)
+def _unique_buckets_from_tasks(tasks: List[dict]):
+    others = []
     buckets = set()
     for task in tasks:
         for download in task["downloads"]:
@@ -252,7 +251,7 @@ def submit(
     command_result_urls = []
     log_urls = []
 
-    bucket_names = _unique_buckets_from_tasks([config.kubequeconsume_url], tasks)
+    bucket_names = _unique_buckets_from_tasks(tasks)
 
     # TODO: When len(tasks) is a fair size (>100) this starts taking a noticable amount of time.
     # Perhaps store tasks in a single blob?  Or do write with multiple requests in parallel?
@@ -268,7 +267,9 @@ def submit(
     if not dry_run:
         image = config.image
         if cluster_name is None:
-            cluster_name = _make_cluster_name(job_id, image, config.machine_type, False)
+            cluster_name = _make_cluster_name(
+                job_id, image, config.machine_type, False, bucket_names
+            )
 
         existing_job = jq.get_job(job_id, must=False)
         if existing_job is not None:
@@ -286,16 +287,6 @@ def submit(
 
         project = config.project
         monitor_port = config.monitor_port
-        consume_exe_args = [
-            "--cluster",
-            cluster_name,
-            "--projectId",
-            project,
-            "--zones",
-            ",".join(config.zones),
-            "--port",
-            str(monitor_port),
-        ]
 
         machine_specs = MachineSpec(
             boot_volume_in_gb=boot_volume_in_gb,
@@ -303,17 +294,17 @@ def submit(
             machine_type=config.machine_type,
             gpu_count=config.gpu_count,
             gpu_type=config.gpu_type,
+            cluster_name=cluster_name,
+            project=project,
+            monitor_port=monitor_port,
         )
 
         pipeline_spec = cluster.create_pipeline_spec(
             jobid=job_id,
             cluster_name=cluster_name,
-            consume_exe_url=config.kubequeconsume_url,
-            consume_exe_md5=config.kubequeconsume_md5,
+            prepare_image=config.prepare_image,
             docker_image=image,
-            consume_exe_args=consume_exe_args,
             machine_specs=machine_specs,
-            monitor_port=monitor_port,
             bucket_names=bucket_names,
         )
 
@@ -643,13 +634,6 @@ def submit_cmd(jq, io, cluster, args, config):
             exclude_patterns=args.exclude_wildcards,
         )
 
-        kubequeconsume_exe_path = config["kubequeconsume_exe_path"]
-        kubequeconsume_exe_obj_path = upload_map.add(
-            hash_db.get_sha256, cas_url_prefix, kubequeconsume_exe_path, is_public=True,
-        )
-        kubequeconsume_exe_md5 = hash_db.get_md5(kubequeconsume_exe_path)
-        hash_db.persist()
-
         log.debug("upload_map = %s", upload_map)
 
         # First check existance of files, so we can print out a single summary statement
@@ -674,9 +658,7 @@ def submit_cmd(jq, io, cluster, args, config):
 
     log.debug("spec: %s", json.dumps(spec, indent=2))
 
-    # now that the executable is uploaded, we should be able to get a signed url for it
-    kubequeconsume_exe_url = io.generate_signed_url(kubequeconsume_exe_obj_path)
-    log.info("kubeconsume at %s", kubequeconsume_exe_url)
+    prepare_image = config["sparkles_helper_image"]
 
     submit_config = SubmitConfig(
         preemptible=preemptible,
@@ -688,8 +670,7 @@ def submit_cmd(jq, io, cluster, args, config):
         monitor_port=int(config.get("monitor_port", "6032")),
         zones=config["zones"],
         mount_point=config.get("mount", "/mnt/"),
-        kubequeconsume_url=kubequeconsume_exe_url,
-        kubequeconsume_md5=kubequeconsume_exe_md5,
+        prepare_image=prepare_image,
         gpu_count=gpu_count,
         gpu_type=gpu_type,
         target_node_count=target_node_count,
@@ -720,9 +701,7 @@ def submit_cmd(jq, io, cluster, args, config):
 
     if args.local:
         try:
-            successful_execution = local_watch(
-                job_id, kubequeconsume_exe_path, work_dir, cluster
-            )
+            successful_execution = local_watch(job_id, work_dir, cluster)
             finished = True
         except DockerFailedException:
             log.error(

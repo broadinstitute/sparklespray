@@ -288,62 +288,19 @@ class Cluster:
         self,
         jobid: str,
         cluster_name: str,
-        consume_exe_url: str,
-        consume_exe_md5: str,
+        prepare_image: str,
         docker_image: str,
-        consume_exe_args: List[str],
         machine_specs: MachineSpec,
-        monitor_port: int,
         bucket_names: List[str],
     ) -> dict:
-
-        mount_point = machine_specs.mount_point
-
-        #        m = re.match("gs://([^/]+)/(.+)$", consume_exe_url)
-        #        assert m is not None
-        #        consume_exe_url_bucket, consume_exe_url_key = m.groups()
-
-        consume_exe_path = os.path.join(mount_point, "consume")
-        consume_data = os.path.join(mount_point, "data")
-
-        setup_parameters = [consume_exe_path, "prepare", "--bucketDir", consume_data]
-        assert len(bucket_names) > 0
-        for bucket_name in bucket_names:
-            setup_parameters.extend(["--bucket", bucket_name])
-
-        suff = " ".join(
-            [
-                consume_exe_path,
-                "consume",
-                "--cacheDir",
-                os.path.join(consume_data, "cache"),
-                "--tasksDir",
-                os.path.join(consume_data, "tasks"),
-                "--bucketDir",
-                os.path.join(consume_data, "bucket"),
-            ]
-            + consume_exe_args
-        )  # ,
-
-        print("suff", suff)
-        docker_command = [
-            "sh",
-            "-c",
-            f"count=1 ; while [ ! -e {consume_exe_path} ] ; do sleep 1 ; if [ $count -gt 30 ] ; then echo no {consume_exe_path}. aborting ; exit 10 ; fi ; count=`expr $count + 1` ; done && "
-            + suff,
-        ]
-
-        print("docker command", docker_command)
 
         return self.nodes.create_pipeline_json(
             jobid=jobid,
             cluster_name=cluster_name,
-            setup_image=SETUP_IMAGE,
-            setup_parameters=setup_parameters,
+            setup_image=prepare_image,
             docker_image=docker_image,
-            docker_command=docker_command,
+            bucket_names=bucket_names,
             machine_specs=machine_specs,
-            monitor_port=monitor_port,
         )
 
     def get_cluster_mod(self, job_id):

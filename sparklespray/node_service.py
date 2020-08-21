@@ -30,6 +30,9 @@ class MachineSpec(object):
     machine_type = attr.ib()
     gpu_count = attr.ib()
     gpu_type = attr.ib()
+    cluster_name = attr.ib()
+    project = attr.ib()
+    monitor_port = attr.ib()
 
     def get_gpu(self):
         if self.gpu_count > 0:
@@ -78,6 +81,15 @@ def format_table(header, rows):
 class AddNodeStatus:
     def __init__(self, response: dict) -> None:
         self.response = response
+
+    @property
+    def zone(self):
+        events = self.response.get("metadata", {}).get("events")
+        for event in events:
+            instance = event.get("details", {}).get("zone")
+            if instance is not None:
+                return instance
+        return None
 
     @property
     def instance_name(self):
@@ -282,37 +294,75 @@ class NodeService:
         jobid: str,
         cluster_name: str,
         setup_image: str,
-        setup_parameters: List[str],
         docker_image: str,
-        docker_command: List[str],
+        bucket_names: List[str],
         machine_specs: MachineSpec,
-        monitor_port: int,
     ) -> dict:
         # labels have a few restrictions
         normalized_jobid = _normalize_label(jobid)
 
-        mounts = [
-            {
-                "disk": "ephemeralssd",
-                "path": machine_specs.mount_point,
-                "readOnly": False,
-            }
+        mount_point = machine_specs.mount_point
+        consume_data = os.path.join(mount_point, "data")
+
+        prepare_command = [
+            "/sparkles/sparkles-helper",
+            "prepare",
+            "--cpexe",
+            "/mnt/sparkles-helper",
+            "--bucketDir",
+            os.path.join(consume_data, "buckets"),
         ]
+        for bucket_name in bucket_names:
+            prepare_command.extend(["--bucket", bucket_name])
+
+        wait_for_prepare_command = [
+            "/sparkles/sparkles-helper",
+            "waitfor",
+            "/mnt/sparkles-helper",
+        ]
+
+        consumer_command = [
+            "/mnt/sparkles-helper",
+            "consume",
+            "--cacheDir",
+            os.path.join(consume_data, "cache"),
+            "--tasksDir",
+            os.path.join(consume_data, "tasks"),
+            "--bucketDir",
+            os.path.join(consume_data, "buckets"),
+            "--cluster",
+            machine_specs.cluster_name,
+            "--projectId",
+            machine_specs.project,
+            "--port",
+            str(machine_specs.monitor_port),
+        ]
+
+        print("consumer_command command", consumer_command)
+
+        mounts = [{"disk": "ephemeralssd", "path": mount_point, "readOnly": False,}]
 
         pipeline_def = {
             "pipeline": {
                 "actions": [
                     {
                         "imageUri": setup_image,
-                        "commands": setup_parameters,
+                        "commands": prepare_command,
                         "mounts": mounts,
                         "flags": ["ENABLE_FUSE", "RUN_IN_BACKGROUND"],
                     },
                     {
-                        "imageUri": docker_image,
-                        "commands": docker_command,
+                        "imageUri": setup_image,
+                        "commands": wait_for_prepare_command,
                         "mounts": mounts,
-                        "portMappings": {str(monitor_port): monitor_port},
+                    },
+                    {
+                        "imageUri": docker_image,
+                        "commands": consumer_command,
+                        "mounts": mounts,
+                        "portMappings": {
+                            str(machine_specs.monitor_port): machine_specs.monitor_port
+                        },
                     },
                 ],
                 "resources": {
@@ -329,19 +379,26 @@ class NodeService:
                             ],
                         },
                         "bootDiskSizeGb": machine_specs.boot_volume_in_gb,
-                        "accelerators": [machine_specs.get_gpu()],
-                        "nvidiaDriverVersion": "390.46",
                         "labels": {
-                            "kubeque-cluster": cluster_name,
+                            "sparkles-cluster": cluster_name,
                             "sparkles-job": normalized_jobid,
                         },
                     },
                 },
             },
             "labels": {
-                "kubeque-cluster": cluster_name,
+                "sparkles-cluster": cluster_name,
                 "sparkles-job": normalized_jobid,
             },
         }
+
+        gpu = machine_specs.get_gpu()
+        if gpu:
+            pipeline_def["pipeline"]["resources"].update(
+                {
+                    "accelerators": [machine_specs.get_gpu()],
+                    "nvidiaDriverVersion": "390.46",
+                }
+            )
 
         return pipeline_def

@@ -532,7 +532,14 @@ def setup_cmd(args, config):
     assert m != None, "invalid remote path: {}".format(default_url_prefix)
     bucket_name = m.group(1)
 
-    setup_project(config["project"], config["service_account_key"], bucket_name)
+    setup_project(
+        config["project"],
+        config["service_account_key"],
+        bucket_name,
+        config["sparkles_helper_image"],
+        config["kubequeconsume_exe_path"],
+        config["gscfuse_exe"],
+    )
 
 
 def sparkles_main():

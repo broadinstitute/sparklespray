@@ -280,11 +280,11 @@ def _watch(
         time.sleep(poll_delay)
 
 
-# TODO: Finish implementing. Use to start docker instance and watch progress
-
-
-def start_docker_process(job_spec_str: str, consume_exe: str, work_dir: str):
+def _run_job_spec_in_local_docker(job_spec_str: str, consume_exe: str, work_dir: str):
     job_spec = json.loads(job_spec_str)
+
+    print(json.dumps(job_spec, indent=2))
+
     actions = job_spec["pipeline"]["actions"]
     # action 0 is curl downloading consume
     consume_action = actions[1]
@@ -324,7 +324,6 @@ class DockerFailedException(Exception):
 
 def local_watch(
     job_id: str,
-    consume_exe: str,
     work_dir: str,
     cluster: Cluster,
     initial_poll_delay=1.0,
@@ -337,7 +336,9 @@ def local_watch(
     state = cluster.get_state(job_id)
     state.update()
 
-    proc = start_docker_process(job.kube_job_spec, consume_exe, work_dir)
+    log.warn("consume_exe is hardcoded")
+    consume_exe = "consumeexe"
+    proc = _run_job_spec_in_local_docker(job.kube_job_spec, consume_exe, work_dir)
 
     def poll_cluster():
         if proc.poll() is not None:

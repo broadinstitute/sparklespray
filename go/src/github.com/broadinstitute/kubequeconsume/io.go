@@ -95,30 +95,17 @@ func (ioc *GCSIOClient) IsExists(url string) (bool, error) {
 	return true, nil
 }
 
-func (ioc *GCSIOClient) getObj(srcUrl string) (*storage.ObjectHandle, error) {
+func splitObjUrl(url string) (bucketName string, keyName string, err error) {
 	urlPattern := regexp.MustCompile("^gs://([^/]+)/(.+)$")
 
-	groups := urlPattern.FindStringSubmatch(srcUrl)
+	groups := urlPattern.FindStringSubmatch(url)
 	if groups == nil {
-		return nil, errors.New("invalid url: " + srcUrl)
+		return "", "", errors.New("invalid url: " + url)
 	}
-	bucketName := groups[1]
-	keyName := groups[2]
+	bucketName = groups[1]
+	keyName = groups[2]
 
 	return bucketName, keyName, nil
-}
-
-func splitObjUrl(url string) (bucketName string, keyName string, err error) {
-urlPattern := regexp.MustCompile("^gs://([^/]+)/(.+)$")
-
-groups := urlPattern.FindStringSubmatch(url)
-if groups == nil {
-return "", "", errors.New("invalid url: " + url)
-}
-bucketName = groups[1]
-keyName = groups[2]
-
-return bucketName, keyName, nil
 }
 
 func getUniqueBuckets(urls []string) ([]string, error) {

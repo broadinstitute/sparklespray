@@ -12,15 +12,34 @@ var GCSFuseMountOptions = []string{"--foreground", "-o", "ro",
 	"--stat-cache-ttl", "24h", "--type-cache-ttl", "24h",
 	"--file-mode", "755", "--implicit-dirs"}
 
-func Prepare(gcsfuseExecutable string, prepBucketDir string, buckets []string, injectConsumeExe string) {
+func Prepare(gcsfuseExecutable string, prepBucketDir string, buckets []string, injectConsumeExe string) error {
 	// copy this executable into a path accessible by the 2nd container
 	if injectConsumeExe != "" {
 		parentDir := path.Dir(injectConsumeExe)
 		if _, err := os.Stat(parentDir); os.IsNotExist(err) {
-			os.MkdirAll(parentDir, 0766)
+			err = os.MkdirAll(parentDir, 0766)
+			if err != nil {
+				return err
+			}
 		}
-		copyFile(os.Args[0], injectConsumeExe)
-		os.Chmod(injectConsumeExe, 0755)
+		// do this by copying and moving to ensure the appearance of the file is atomic
+		injectConsumeExeTmp := injectConsumeExe + ".tmp"
+		err := copyFile(os.Args[0], injectConsumeExeTmp)
+		if err != nil {
+			return err
+		}
+
+		err = os.Chmod(injectConsumeExeTmp, 0755)
+		if err != nil {
+			return err
+		}
+
+		err = os.Rename(injectConsumeExeTmp, injectConsumeExe)
+		if err != nil {
+			return err
+		}
+
+		return nil
 	}
 
 	// now do the bucket mounts
@@ -42,6 +61,7 @@ func Prepare(gcsfuseExecutable string, prepBucketDir string, buckets []string, i
 			log.Fatal(err)
 		}
 	}
+	return nil
 }
 
 // func copyFile(src, dst string) error {

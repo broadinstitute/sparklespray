@@ -2,6 +2,7 @@ import logging
 import os
 import sys
 
+from sparklespray import __version__ as version
 
 from .io import IO
 from configparser import RawConfigParser, NoSectionError, NoOptionError
@@ -106,11 +107,22 @@ def load_only_config_dict(
         )
         sys.exit(1)
 
+    if "sparkles_helper_image" not in merged_config:
+        merged_config[
+            "sparkles_helper_image"
+        ] = "us.gcr.io/{}/sparkles-helper:{}".format(merged_config["project"], version)
+
     if "kubequeconsume_exe_path" not in merged_config:
         merged_config["kubequeconsume_exe_path"] = os.path.join(
             os.path.dirname(__file__), "bin/kubequeconsume"
         )
         assert os.path.exists(merged_config["kubequeconsume_exe_path"])
+
+    if "gscfuse_exe" not in merged_config:
+        merged_config["gscfuse_exe"] = os.path.join(
+            os.path.dirname(__file__), "bin/gcsfuse_0.30.0_amd64.deb"
+        )
+        assert os.path.exists(merged_config["gscfuse_exe"])
 
     if "cas_url_prefix" not in merged_config:
         merged_config["cas_url_prefix"] = merged_config["default_url_prefix"] + "/CAS/"
@@ -166,6 +178,8 @@ def load_config_from_dict(config):
             "gpu_type",
             "mount",
             "sparkles_config_path",
+            "sparkles_helper_image",
+            "gscfuse_exe",
         ]
     )
     unknown_parameters = set(config.keys()).difference(allowed_parameters)

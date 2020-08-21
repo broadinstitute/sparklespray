@@ -73,6 +73,14 @@
   version = "v2.0.0"
 
 [[projects]]
+  digest = "1:870d441fe217b8e689d7949fef6e43efbc787e50f200cb1e70dbca9204a1d6be"
+  name = "github.com/inconshreveable/mousetrap"
+  packages = ["."]
+  pruneopts = ""
+  revision = "76626ae9c91c4f2a10f34cad8ce83ea42c93bb75"
+  version = "v1.0"
+
+[[projects]]
   digest = "1:256484dbbcd271f9ecebc6795b2df8cad4c458dd0f5fd82a8c2fa0c29f233411"
   name = "github.com/pmezard/go-difflib"
   packages = ["difflib"]
@@ -81,20 +89,28 @@
   version = "v1.0.0"
 
 [[projects]]
+  digest = "1:bff75d4f1a2d2c4b8f4b46ff5ac230b80b5fa49276f615900cba09fe4c97e66e"
+  name = "github.com/spf13/cobra"
+  packages = ["."]
+  pruneopts = ""
+  revision = "a684a6d7f5e37385d954dd3b5a14fc6912c6ab9d"
+  version = "v1.0.0"
+
+[[projects]]
+  digest = "1:688428eeb1ca80d92599eb3254bdf91b51d7e232fead3a73844c1f201a281e51"
+  name = "github.com/spf13/pflag"
+  packages = ["."]
+  pruneopts = ""
+  revision = "2e9d26c8c37aae03e3f9d4e90b7116f5accb7cab"
+  version = "v1.0.5"
+
+[[projects]]
   digest = "1:c587772fb8ad29ad4db67575dad25ba17a51f072ff18a22b4f0257a4d9c24f75"
   name = "github.com/stretchr/testify"
   packages = ["assert"]
   pruneopts = ""
   revision = "f35b8ab0b5a2cef36673838d662e249dd9c94686"
   version = "v1.2.2"
-
-[[projects]]
-  digest = "1:e85837cb04b78f61688c6eba93ea9d14f60d611e2aaf8319999b1a60d2dafbfa"
-  name = "github.com/urfave/cli"
-  packages = ["."]
-  pruneopts = ""
-  revision = "cfb38830724cc34fedffe9a2a29fb54fa9169cd1"
-  version = "v1.20.0"
 
 [[projects]]
   digest = "1:8c8ec859c77fccd10a347b7219b597c4c21c448949e8bdf3fc3e6f4c78f952b4"
@@ -300,11 +316,12 @@
     "cloud.google.com/go/storage",
     "github.com/bmatcuk/doublestar",
     "github.com/golang/protobuf/proto",
+    "github.com/spf13/cobra",
     "github.com/stretchr/testify/assert",
-    "github.com/urfave/cli",
     "golang.org/x/net/context",
     "golang.org/x/oauth2/google",
     "google.golang.org/api/compute/v1",
+    "google.golang.org/api/googleapi",
     "google.golang.org/api/option",
     "google.golang.org/grpc",
     "google.golang.org/grpc/codes",

@@ -44,7 +44,7 @@ def _run_cmd(cmd, args, suppress_warning=False):
     except subprocess.CalledProcessError as e:
         if not suppress_warning:
             print("Command failed. Output:")
-            print(e.output)
+            print(e.output.decode("utf8"))
         raise
 
 
@@ -177,44 +177,71 @@ def can_reach_datastore_api(project_id, key_path):
                     attempt, max_attempts
                 )
             )
-            time.sleep(10)
+            time.sleep(20)
     raise Exception("Failed to confirm access to datastore")
 
 
-def setup_project(project_id, key_path, bucket_name):
-    print("Enabling services for project {}...".format(project_id))
-    enable_services(project_id)
-    service_acct = "sparkles-" + random_string(10).lower()
-    if not os.path.exists(key_path):
-        parent = os.path.dirname(key_path)
-        if not os.path.exists(parent):
-            os.makedirs(parent)
-        print(f"Creating service account and writing key to {key_path} ...")
-        create_service_account(service_acct, project_id, key_path)
-    else:
-        print(
-            f"Not creating service account because key already exists at {key_path} Delete this and rerun if you wish to create a new service account."
-        )
+def setup_project(
+    project_id, key_path, bucket_name, helper_image_name, helper_exe, gcsfuse_exe
+):
+    # print("Enabling services for project {}...".format(project_id))
+    # enable_services(project_id)
+    # service_acct = "sparkles-" + random_string(10).lower()
+    # if not os.path.exists(key_path):
+    #     parent = os.path.dirname(key_path)
+    #     if not os.path.exists(parent):
+    #         os.makedirs(parent)
+    #     print(f"Creating service account and writing key to {key_path} ...")
+    #     create_service_account(service_acct, project_id, key_path)
+    # else:
+    #     print(
+    #         f"Not creating service account because key already exists at {key_path} Delete this and rerun if you wish to create a new service account."
+    #     )
 
-    setup_bucket(project_id, key_path, bucket_name)
+    # setup_bucket(project_id, key_path, bucket_name)
 
-    # Setup firewall using gcloud function
-    print("Adding firewall rule...")
-    add_firewall_rule(project_id)
+    # # Setup firewall using gcloud function
+    # print("Adding firewall rule...")
+    # add_firewall_rule(project_id)
 
-    if not can_reach_datastore_api(project_id, key_path):
-        print(
-            'Go to https://console.cloud.google.com/datastore/setup?project={} to choose where to store your data will reside in and then set up will be complete. Select "Cloud Datastore" and then select a region close to you, and then "Create database".'.format(
-                project_id
+    # if not can_reach_datastore_api(project_id, key_path):
+    #     print(
+    #         'Go to https://console.cloud.google.com/datastore/setup?project={} to choose where to store your data will reside in and then set up will be complete. Select "Cloud Datastore" and then select a region close to you, and then "Create database".'.format(
+    #             project_id
+    #         )
+    #     )
+    #     input("Hit enter once you've completed the above: ")
+    #     print("checking datastore again..")
+    #     if can_reach_datastore_api(project_id, key_path):
+    #         print("Success!")
+
+    # print("Using gcloud to setup google authentication with Google Container Registry")
+    # gcloud(["auth", "configure-docker"])
+
+    print("Building docker image used for setting up VMs")
+    prepare_helper_docker_image(helper_image_name, helper_exe, gcsfuse_exe)
+
+
+def prepare_helper_docker_image(helper_image_name, helper_exe, gcsfuse_exe):
+    import tempfile
+    import shutil
+
+    with tempfile.TemporaryDirectory("sparkles-helper-build") as tmpdir:
+        shutil.copy(helper_exe, os.path.join(tmpdir, "sparkles-helper"))
+        shutil.copy(gcsfuse_exe, os.path.join(tmpdir, "gcsfuse_0.30.0_amd64.deb"))
+        with open(os.path.join(tmpdir, "Dockerfile"), "wt") as fd:
+            fd.write(
+                """
+FROM ubuntu:18.04
+RUN apt-get update 
+RUN mkdir /sparkles
+COPY sparkles-helper /sparkles
+COPY gcsfuse_0.30.0_amd64.deb /sparkles
+RUN apt -y install /sparkles/gcsfuse_0.30.0_amd64.deb
+            """
             )
-        )
-        input("Hit enter once you've completed the above: ")
-        print("checking datastore again..")
-        if can_reach_datastore_api(project_id, key_path):
-            print("Success!")
-
-    print("Using gcloud to setup google authentication with Google Container Registry")
-    gcloud(["auth", "configure-docker"])
+        _run_cmd("docker", ["build", "-t", helper_image_name, str(tmpdir)])
+        _run_cmd("docker", ["push", helper_image_name])
 
 
 def setup_bucket(project_id, service_account_key, bucket_name):
