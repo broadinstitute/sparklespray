@@ -1,20 +1,105 @@
 package kubequeconsume
 
 import (
-	"fmt"
+	"io/ioutil"
 	"log"
 	"os"
 	"os/exec"
 	"path"
+	"regexp"
+	"strings"
+	"time"
 )
 
 var GCSFuseMountOptions = []string{"--foreground", "-o", "ro",
 	"--stat-cache-ttl", "24h", "--type-cache-ttl", "24h",
 	"--file-mode", "755", "--implicit-dirs"}
 
+var whitespaceRegExp = regexp.MustCompile("\\s")
+
+func getActiveMountpoints() map[string]bool {
+	mountPoints := make(map[string]bool)
+	mountsBytes, err := ioutil.ReadFile("/proc/mounts")
+	if err != nil {
+		log.Fatalf("Could not read /proc/mounts: %v", err)
+	}
+	mounts := strings.Split(string(mountsBytes), "\n")
+	log.Printf("Mounts: %s", mounts)
+	for _, mount := range mounts {
+		fields := whitespaceRegExp.Split(mount, -1)
+		if len(fields) > 1 {
+			//log.Printf("Found mount: %s", fields[1])
+			mountPoints[fields[1]] = true
+		}
+	}
+	return mountPoints
+}
+
+func waitForMounts(bucketDirs []string) {
+	// how do we tell when the buckets have successfully mounted?
+	attempt := 0
+	for {
+		if attempt > 60 {
+			log.Fatalf("Giving up waiting for mounts")
+		}
+		attempt++
+
+		mountPoints := getActiveMountpoints()
+		allFound := true
+		for _, bucketDir := range bucketDirs {
+			if !mountPoints[bucketDir] {
+				allFound = false
+				log.Printf("Mount point %s not present", bucketDir)
+				break
+			}
+		}
+
+		if allFound {
+			break
+		}
+
+		log.Printf("Sleeping...")
+		time.Sleep(1 * time.Second)
+	}
+}
+
 func Prepare(gcsfuseExecutable string, prepBucketDir string, buckets []string, injectConsumeExe string) error {
-	// copy this executable into a path accessible by the 2nd container
 	log.Printf("Prepare started")
+
+	// Do the bucket mounts
+	log.Printf("Preparing %d bucket mounts", len(buckets))
+	bucketDirs := make([]string, 0, 100)
+	for _, bucket := range buckets {
+		bucketDir := path.Join(prepBucketDir, bucket)
+		bucketDirs = append(bucketDirs, bucketDir)
+
+		if _, err := os.Stat(bucketDir); os.IsNotExist(err) {
+			os.MkdirAll(bucketDir, 0766)
+		}
+
+		exeAsSlice := []string{gcsfuseExecutable}
+		command := append(exeAsSlice, GCSFuseMountOptions...)
+		command = append(command, bucket, bucketDir)
+		log.Printf("Mounting bucket: %v", command)
+		cmd := exec.Command(command[0], command[1:]...)
+		cmd.Stderr = os.Stderr
+		cmd.Stdout = os.Stdout
+
+		mountInBackground := func() {
+			err := cmd.Run()
+			if err != nil {
+				log.Fatalf("Mount of %s exited: %s", bucket, err)
+			}
+			log.Printf("Mount of %s exited cleanly", bucket)
+		}
+		go mountInBackground()
+	}
+
+	// wait for buckets to mount
+	waitForMounts(bucketDirs)
+
+	// copy this executable into a path accessible by the 2nd container
+	// this is used to also signal that all the mounting is done
 	if injectConsumeExe != "" {
 		log.Printf("copying helper to %s", injectConsumeExe)
 		parentDir := path.Dir(injectConsumeExe)
@@ -42,42 +127,12 @@ func Prepare(gcsfuseExecutable string, prepBucketDir string, buckets []string, i
 		}
 	}
 
-	// now do the bucket mounts
-	log.Printf("Preparing %d bucket mounts", len(buckets))
-	for _, bucket := range buckets {
-		bucketDir := path.Join(prepBucketDir, bucket)
-		if _, err := os.Stat(bucketDir); os.IsNotExist(err) {
-			os.MkdirAll(bucketDir, 0766)
-		}
-
-		exeAsSlice := []string{gcsfuseExecutable}
-		command := append(exeAsSlice, GCSFuseMountOptions...)
-		command = append(command, bucket, fmt.Sprintf("%s/%s", prepBucketDir, bucket))
-		log.Printf("Mounting bucket: %v", command)
-		cmd := exec.Command(command[0], command[1:]...)
-		cmd.Stderr = os.Stderr
-		cmd.Stdout = os.Stdout
-		err := cmd.Start()
-		if err != nil {
-			log.Fatal(err)
+	log.Printf("Prepare complete")
+	if len(buckets) > 0 {
+		log.Printf("Mounted buckets so sleeping forever to ensure gcsfuse continues to run")
+		for {
+			time.Sleep(time.Hour)
 		}
 	}
-	log.Printf("Prepare complete")
 	return nil
 }
-
-// func copyFile(src, dst string) error {
-// 	srcFile, err := os.Open(src)
-// 	if err != nil {
-// 		return 0, err
-// 	}
-// 	defer srcFile.Close()
-
-// 	dstFile, err := os.Create(dst)
-// 	if err != nil {
-// 		return 0, err
-// 	}
-// 	defer dstFile.Close()
-// 	_, err := io.Copy(dstFile, srcFile)
-// 	return err
-// }

@@ -140,10 +140,17 @@ func MountGCSBuckets(rootDir string) (*GCSFuseMounts, error) {
 
 func (g *GCSFuseMounts) GetPath(bucketName string, keyName string) string {
 	fullPath := path.Join(g.rootDir, bucketName, keyName)
-	if _, err := os.Stat(fullPath); os.IsNotExist(err) {
+	_, err := os.Stat(fullPath)
+	if err == nil {
+		// file exists
+		return fullPath
+	} else if os.IsNotExist(err) {
+		log.Printf("GetPath reports file is missing (g.rootDir=%s, bucketName=%s, keyName=%s)", g.rootDir, bucketName, keyName)
+		return ""
+	} else {
+		log.Printf("GetPath reports error: %s (g.rootDir=%s, bucketName=%s, keyName=%s)", err, g.rootDir, bucketName, keyName)
 		return ""
 	}
-	return fullPath
 }
 
 func (ioc *GCSIOClient) getObj(srcUrl string) (*storage.ObjectHandle, error) {

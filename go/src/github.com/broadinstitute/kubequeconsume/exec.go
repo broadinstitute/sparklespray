@@ -108,7 +108,7 @@ func copyOrSym(src string, destination string, symlink bool) {
 			panic(fmt.Sprintf("symlink %s -> %s failed: %s", src, destination, err))
 		}
 	} else {
-		log.Printf("copying %s -> %s", src, destination)
+		log.Printf("Copying %s -> %s", src, destination)
 		err := copyFile(src, destination)
 		if err != nil {
 			// this should not be possible
@@ -131,6 +131,7 @@ func downloadAll(ioc IOClient, workdir string, downloads []*TaskDownload, cacheD
 		if err != nil {
 			return fmt.Errorf("Could not split %s: %s", srcURL, err), downloaded
 		}
+
 		srcPath := gcsMounts.GetPath(srcBucket, srcKey)
 		if srcPath != "" {
 			log.Printf("using bucket mounted path: %s", srcPath)

@@ -246,14 +246,17 @@ def prepare_helper_docker_image(helper_image_name, helper_exe, gcsfuse_exe):
             fd.write(
                 """
 FROM ubuntu:18.04
-RUN apt-get update 
+RUN apt-get update && apt-get install -y ca-certificates fuse libfuse2
 RUN mkdir /sparkles
 COPY sparkles-helper /sparkles
 COPY gcsfuse_0.30.0_amd64.deb /sparkles
 RUN apt -y install /sparkles/gcsfuse_0.30.0_amd64.deb
             """
             )
-        _run_cmd("docker", ["build", "-t", helper_image_name, str(tmpdir)])
+        build_output = _run_cmd(
+            "docker", ["build", "-t", helper_image_name, str(tmpdir)]
+        )
+        print(build_output)
         _run_cmd("docker", ["push", helper_image_name])
 
 
