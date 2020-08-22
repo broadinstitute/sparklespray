@@ -44,6 +44,7 @@ class SubmitConfig(BaseModel):
     gpu_count: int
     gpu_type: Optional[str]
     target_node_count: int
+    use_fuse: bool
 
 
 class ExistingJobException(Exception):
@@ -251,7 +252,11 @@ def submit(
     command_result_urls = []
     log_urls = []
 
-    bucket_names = _unique_buckets_from_tasks(tasks)
+    bucket_names = set()
+
+    # if we're using fuse, include a list of buckets to mount
+    if config.use_fuse:
+        bucket_names.update(_unique_buckets_from_tasks(tasks))
 
     # TODO: When len(tasks) is a fair size (>100) this starts taking a noticable amount of time.
     # Perhaps store tasks in a single blob?  Or do write with multiple requests in parallel?
@@ -497,8 +502,10 @@ def add_submit_cmd(subparser):
         action="store_true",
     )
     parser.add_argument(
-        "--symlinks",
-        help="When localizing files, use symlinks instead of copying files into location. This should only be used when the uploaded files will not be modified by the job.",
+        "--use-fuse",
+        dest="use_fuse",
+        help="When localizing files, use gcsfuse instead of downloading and copying files into location. This should only be used when the uploaded files will not be modified by the job, but can be useful in cases where lots of files need to be localized "
+        " because job can start before all files are transfered to host. (All files will be read-only)",
         action="store_true",
     )
     parser.add_argument(
@@ -630,7 +637,7 @@ def submit_cmd(jq, io, cluster, args, config):
             src_wildcards=args.results_wildcards,
             extra_files=expand_files_to_upload(io, files_to_push),
             working_dir=args.working_dir,
-            allow_symlinks=args.symlinks,
+            allow_symlinks=args.use_fuse,  # if we are using fuse, allow symlinks to be used for all files
             exclude_patterns=args.exclude_wildcards,
         )
 
@@ -674,6 +681,7 @@ def submit_cmd(jq, io, cluster, args, config):
         gpu_count=gpu_count,
         gpu_type=gpu_type,
         target_node_count=target_node_count,
+        use_fuse=args.use_fuse,
     )
 
     cluster_name = None

@@ -13,7 +13,7 @@ import (
 
 var GCSFuseMountOptions = []string{"--foreground", "-o", "ro",
 	"--stat-cache-ttl", "24h", "--type-cache-ttl", "24h",
-	"--file-mode", "755", "--implicit-dirs"}
+	"--file-mode", "555", "--implicit-dirs"}
 
 var whitespaceRegExp = regexp.MustCompile("\\s")
 
