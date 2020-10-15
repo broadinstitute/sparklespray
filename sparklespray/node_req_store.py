@@ -74,7 +74,8 @@ class AddNodeReqStore:
     def update_node_req_status(self, operation_id, status, instance_name):
         entity = self.client.get(self.client.key("NodeReq", operation_id))
         entity["status"] = status
-        entity["instance_name"] = instance_name
+        if instance_name is not None:
+            entity["instance_name"] = instance_name
         self.client.put(entity)
 
     def cleanup_cluster(self, cluster_id: str, batch: Batch = None) -> None:

@@ -208,6 +208,12 @@ class Cluster:
         p("\n")
 
     def cleanup_node_reqs(self, job_id):
+        # before updating node requests, make sure the state has been updated to
+        # reflect which ones are actually still running and which are done.
+        # node_req_store.cleanup_cluster() assumes the states are up to date.
+        state = self.get_state(job_id)
+        state.update()
+
         batch = Batch(self.client)
 
         job = self.job_store.get_job(job_id)
@@ -365,18 +371,25 @@ class ClusterState:
         for node_req in self.node_reqs:
             if node_req.status not in [NODE_REQ_COMPLETE, NODE_REQ_FAILED]:
                 op = self.cluster.nodes.get_add_node_status(node_req.operation_id)
-                new_status = op.status
-                if new_status == NODE_REQ_FAILED:
-                    log.warning(
-                        "Node request (%s) failed: %s",
-                        node_req.operation_id,
-                        op.error_message,
-                    )
-                    self.failed_node_req_count += 1
-                # print("fetched {} and status was {}".format(node_req.operation_id, new_status))
+                if op is None:
+                    # if the operation is missing, google probably deleted it because it was old
+                    new_status = NODE_REQ_COMPLETE
+                    new_instance_name = None
+                else:
+                    new_status = op.status
+                    new_instance_name = op.instance_name
+                    if new_status == NODE_REQ_FAILED:
+                        log.warning(
+                            "Node request (%s) failed: %s",
+                            node_req.operation_id,
+                            op.error_message,
+                        )
+                        self.failed_node_req_count += 1
+                    # print("fetched {} and status was {}".format(node_req.operation_id, new_status))
+
                 if new_status != node_req.status:
                     self.node_req_store.update_node_req_status(
-                        node_req.operation_id, op.status, op.instance_name
+                        node_req.operation_id, new_status, new_instance_name
                     )
                     # reflect the change in memory as well
                     node_req.status = new_status

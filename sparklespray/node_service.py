@@ -9,6 +9,8 @@ import attr
 import os
 from collections import defaultdict
 import json
+import googleapiclient.errors
+
 from .compute_service import ComputeService
 from .node_req_store import (
     NODE_REQ_COMPLETE,
@@ -194,9 +196,16 @@ class NodeService:
         return response
 
     def get_add_node_status(self, operation_name: str) -> AddNodeStatus:
-        response = self.get_operation_details(operation_name)
-        with open("response.log", "a") as fd:
-            fd.write(json.dumps(response, indent=2) + "\n")
+        try:
+            response = self.get_operation_details(operation_name)
+        except googleapiclient.errors.HttpError as e:
+            # Google may have deleted the operation if it is too old and will 404. In these cases, return None.
+            # 400 is arrising because of the testing of this I designed. Perhaps I should remove that in the future.
+            if e.resp.status in [400, 404]:
+                return None
+            # if it's not a 404, then we don't know what's going on
+            raise e
+
         return AddNodeStatus(response)
 
     def cancel_add_node(self, operation_name: str):
@@ -269,6 +278,9 @@ class NodeService:
         out = sys.stdout
         while True:
             status = self.get_add_node_status(operation_name)
+            assert (
+                status is not None
+            ), f"operation should not have disappeared: {operation_name}"
             status_text = status.status
             if prev_status_text != status_text:
                 out.write(f"({status_text})")
@@ -278,6 +290,14 @@ class NodeService:
             out.flush()
             if status_text == NODE_REQ_COMPLETE:
                 break
+            if status_text not in (
+                NODE_REQ_RUNNING,
+                NODE_REQ_SUBMITTED,
+                NODE_REQ_STAGING,
+            ):
+                raise Exception(
+                    f"Unexpected status {status_text} for node created with operation {operation_name}. run sparkles dump-operation {operation_name} for debugging info"
+                )
             time.sleep(2)
         out.write("\n")
 
