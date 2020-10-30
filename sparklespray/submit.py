@@ -601,6 +601,14 @@ def submit_cmd(jq, io, cluster, args, config):
             assert len(parameters) == 1, "Cannot re-run a job with more than one task"
             # Add the existing job directory to the list of files to download to the worker
 
+            stdout_log = url_join(dest_url, "1/stdout.txt")
+            if io.exists(stdout_log):
+                print(
+                    "Since this job was submitted with --rerun, deleting {} before job starts".format(
+                        stdout_log
+                    )
+                )
+                io.delete(stdout_log)
             files_to_push.append(url_join(dest_url, "1") + ":.")
 
         hash_db = CachingHashFunction(

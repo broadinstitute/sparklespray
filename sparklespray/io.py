@@ -97,6 +97,11 @@ class IO:
         blob = bucket.blob(path)
         return blob.exists()
 
+    def delete(self, url):
+        bucket, path = self._get_bucket_and_path(url)
+        blob = bucket.blob(path)
+        blob.delete()
+
     def get_child_keys(self, src_url):
         bucket, path = self._get_bucket_and_path(src_url)
         keys = []
