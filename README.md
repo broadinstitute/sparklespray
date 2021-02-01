@@ -53,7 +53,7 @@ Download the [latest release tar file](https://github.com/broadinstitute/sparkle
 ```
 tar xzf sparklespray-LATEST_VERSION.tar.gz
 cd sparklespray-LATEST_VERSION
-python setup.py install
+pip install .
 ```
 
 This will add the `sparkles` command which is used for all operations.
