@@ -33,7 +33,7 @@ pydantic==0.11.2
 pyOpenSSL==18.0.0
 pytz==2019.1
 requests==2.21.0
-rsa==4.0
+rsa==4.1
 six==1.12.0
 sparklespray==3.5.1
 termcolor==1.1.0
