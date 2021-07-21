@@ -524,6 +524,18 @@ def _get_boot_volume_in_gb(config):
     return bootDiskSizeGb
 
 
+def get_preemptible_from_config(config):
+    preemptible_flag = config.get("preemptible", "n").lower()
+    if preemptible_flag not in ["y", "n"]:
+        raise Exception(
+            "setting 'preemptible' in config must either by 'y' or 'n' but was: {}".format(
+                preemptible_flag
+            )
+        )
+    preemptible = preemptible_flag == "y"
+    return preemptible
+
+
 def submit_cmd(jq, io, cluster, args, config):
     metadata = {}
 
@@ -535,14 +547,7 @@ def submit_cmd(jq, io, cluster, args, config):
     if args.preemptible:
         preemptible = True
     else:
-        preemptible_flag = config.get("preemptible", "n").lower()
-        if preemptible_flag not in ["y", "n"]:
-            raise Exception(
-                "setting 'preemptible' in config must either by 'y' or 'n' but was: {}".format(
-                    preemptible_flag
-                )
-            )
-        preemptible = preemptible_flag == "y"
+        preemptible = get_preemptible_from_config(config)
 
     boot_volume_in_gb = _get_boot_volume_in_gb(config)
     default_url_prefix = config.get("default_url_prefix", "")
@@ -630,7 +635,10 @@ def submit_cmd(jq, io, cluster, args, config):
 
         kubequeconsume_exe_path = config["kubequeconsume_exe_path"]
         kubequeconsume_exe_obj_path = upload_map.add(
-            hash_db.get_sha256, cas_url_prefix, kubequeconsume_exe_path, is_public=True,
+            hash_db.get_sha256,
+            cas_url_prefix,
+            kubequeconsume_exe_path,
+            is_public=True,
         )
         kubequeconsume_exe_md5 = hash_db.get_md5(kubequeconsume_exe_path)
         hash_db.persist()
@@ -720,7 +728,13 @@ def submit_cmd(jq, io, cluster, args, config):
         if not (args.dryrun or args.skip_kube_submit) and args.wait_for_completion:
             log.info("Waiting for job to terminate")
             successful_execution = watch(
-                io, jq, job_id, cluster, target_nodes=target_node_count, loglive=True
+                io,
+                jq,
+                job_id,
+                cluster,
+                target_nodes=target_node_count,
+                loglive=True,
+                preemptible=preemptible,
             )
             finished = True
 

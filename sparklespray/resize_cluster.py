@@ -78,15 +78,17 @@ class ResizeCluster:
             nodes_to_add = target_node_count - requested_nodes
             if nodes_to_add > 0:
                 log.info(
-                    "Currently targeting having {} nodes running, but we've only requested {} nodes. Adding {}".format(
-                        target_node_count, requested_nodes, nodes_to_add
+                    "Currently targeting having {} nodes running, but we've only requested {} nodes. Adding {}, remaining_preempt_attempts={}".format(
+                        target_node_count,
+                        requested_nodes,
+                        nodes_to_add,
+                        remaining_preempt_attempts,
                     )
                 )
-                for i in range(nodes_to_add):
+                for _ in range(nodes_to_add):
                     preemptable = remaining_preempt_attempts > 0
                     if preemptable:
                         remaining_preempt_attempts -= 1
-
                     cluster_mod.add_node(preemptable=preemptable)
                     modified = True
 

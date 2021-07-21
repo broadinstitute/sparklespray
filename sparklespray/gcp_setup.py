@@ -11,8 +11,7 @@ from google.oauth2 import service_account
 import google.api_core.exceptions
 import time
 from collections import namedtuple
-from google.api_core.exceptions import PermissionDenied
-
+from google.api_core.exceptions import PermissionDenied, Forbidden
 
 services_to_add = [  # "storage.googleapis.com",
     "datastore.googleapis.com",
@@ -61,6 +60,20 @@ def enable_services(project_id):
         gcloud(["services", "enable", service, "--project", project_id])
 
 
+def grant(service_acct, project_id, role):
+    gcloud(
+        [
+            "projects",
+            "add-iam-policy-binding",
+            project_id,
+            "--member",
+            f"serviceAccount:{service_acct}",
+            "--role",
+            role,
+        ]
+    )
+
+
 def create_service_account(service_acct, project_id, key_path):
     gcloud(
         [
@@ -76,17 +89,7 @@ def create_service_account(service_acct, project_id, key_path):
     )
 
     for role in roles_to_add:
-        gcloud(
-            [
-                "projects",
-                "add-iam-policy-binding",
-                project_id,
-                "--member",
-                f"serviceAccount:{service_acct}@{project_id}.iam.gserviceaccount.com",
-                "--role",
-                role,
-            ]
-        )
+        grant(f"{service_acct}@{project_id}.iam.gserviceaccount.com", project_id, role)
 
     gcloud(
         [
@@ -224,7 +227,28 @@ def setup_bucket(project_id, service_account_key, bucket_name):
 
     client = GSClient(project_id, credentials)
     bucket = client.bucket(bucket_name)
-    needs_create = not bucket.exists()
+
+    attempt = 1
+    max_attempts = 100
+    while True:
+        try:
+            needs_create = not bucket.exists()
+            break
+        except Forbidden:
+            attempt += 1
+            if attempt > max_attempts:
+                raise Exception(
+                    "Too many attempts. There's probably something else wrong with permissions"
+                )
+            print(
+                "Attempt {} out of {}: Got a Forbidden except accessing bucket {} with service account -- may just be a delay in permissions being applied. (It can take a few minutes for this to take effect) Retrying in 15 seconds...".format(
+                    attempt, max_attempts, bucket_name
+                )
+            )
+            time.sleep(15)
 
     if needs_create:
+        print(f"Bucket {bucket_name} does not exist. Creating...")
         bucket.create()
+    else:
+        print(f"Found existing bucket named {bucket_name}. Skipping creation")

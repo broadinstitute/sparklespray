@@ -58,13 +58,22 @@ def add_watch_cmd(subparser):
     )
 
 
-def watch_cmd(jq: JobQueue, io: IO, cluster: Cluster, args):
+def watch_cmd(jq: JobQueue, io: IO, cluster: Cluster, config, args):
     from .main import _resolve_jobid
+    from .submit import get_preemptible_from_config
 
     jobid = _resolve_jobid(jq, args.jobid)
     if args.verify:
         check_completion(jq, io, jobid)
-    watch(io, jq, jobid, cluster, target_nodes=args.nodes, loglive=args.loglive)
+    watch(
+        io,
+        jq,
+        jobid,
+        cluster,
+        target_nodes=args.nodes,
+        loglive=args.loglive,
+        preemptible=get_preemptible_from_config(config),
+    )
 
 
 @contextlib.contextmanager
@@ -382,6 +391,7 @@ def watch(
     initial_poll_delay=1.0,
     max_poll_delay=30.0,
     loglive=None,
+    preemptible=True,
 ):
     job = jq.get_job(job_id)
     flush_stdout_calls = [0]
@@ -394,7 +404,10 @@ def watch(
         target_nodes = job.target_node_count
         max_preemptable_attempts = job.max_preemptable_attempts
     else:
-        max_preemptable_attempts = target_nodes * 2
+        if preemptible:
+            max_preemptable_attempts = target_nodes * 2
+        else:
+            max_preemptable_attempts = 0
 
     log.info(
         "targeting %s nodes. First %s nodes will be preemptive (from job: %s, %s)",

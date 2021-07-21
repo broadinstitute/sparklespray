@@ -28,7 +28,7 @@ from .config import get_config_path, load_config, load_only_config_dict
 
 from .log import log
 from . import txtui
-from .gcp_setup import setup_project
+from .gcp_setup import setup_project, grant
 
 
 def logs_cmd(jq: JobQueue, io: IO, args):
@@ -526,6 +526,14 @@ def dump_operation_cmd(cluster: Cluster, args):
     print(json.dumps(operation, indent="  "))
 
 
+def grant_cmd(args, config):
+    credentials = config
+    role = args.role
+    project_id = args.project
+    service_acct = config.get("credentials").service_account_email
+    grant(service_acct, project_id, role)
+
+
 def setup_cmd(args, config):
     default_url_prefix = config["default_url_prefix"]
     m = re.match("^gs://([^/]+)(?:/.*)?$", default_url_prefix)
@@ -585,6 +593,14 @@ def main(argv=None):
         action="store_true",
         help="If set, will mark all tasks as 'pending', not just 'claimed', 'killed' or 'failed' tasks. The first parameter can be either a job ID or an individual task ID",
     )
+
+    parser = subparser.add_parser(
+        "grant",
+        help="Grants additional rights to service account that sparkles is using",
+    )
+    parser.add_argument("project")
+    parser.add_argument("role")
+    parser.set_defaults(func=grant_cmd)
 
     parser = subparser.add_parser(
         "setup",

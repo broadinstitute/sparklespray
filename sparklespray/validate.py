@@ -35,6 +35,7 @@ def validate_cmd(jq: JobQueue, io: IO, cluster: Cluster, config: dict):
 
     print(f"Validating config, using sparklespray {sparklespray.__version__}")
 
+    service_acct = config.get("credentials").service_account_email
     # censor the credential
     class Censored:
         def __repr__(self):
@@ -48,7 +49,11 @@ def validate_cmd(jq: JobQueue, io: IO, cluster: Cluster, config: dict):
 
     project_id = config["project"]
 
-    print("Verifying we can access google cloud storage")
+    print(f"Verifying we can access google cloud storage.")
+    print(
+        f"This should work as long as the buckets used are owned by the project '{project_id}'. If not you will need to explictly grant access to the buckets to the account {service_acct}. This can be done via 'sparkles grant'"
+    )
+
     sample_value = random_string(20)
     sample_url = io.write_str_to_cas(sample_value)
     fetched_value = io.get_as_str(sample_url)
@@ -63,7 +68,13 @@ def validate_cmd(jq: JobQueue, io: IO, cluster: Cluster, config: dict):
     cluster.test_pipeline_api()
 
     default_image = config["default_image"]
+
+    # m = re.match(r"(?:[^.]+.)gcr\.io/([^/])/.*")
+
     print(f'Verifying google genomics can launch image "{default_image}"')
+    print(
+        f'If this fails due to "permission denied", make sure that {service_acct} has been granted access to pull the docker image "{default_image}". You may need to explictly grant access via "sparkles grant" if the docker repo is owned by a different project than {project_id}.'
+    )
     logging_url = config["default_url_prefix"] + "/node-logs"
 
     cluster.test_image(
