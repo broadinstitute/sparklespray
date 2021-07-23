@@ -300,10 +300,10 @@ class Cluster:
         machine_specs: MachineSpec,
         monitor_port: int,
     ) -> dict:
-        mount_point = machine_specs.mount_point
+        work_root_dir = machine_specs.work_root_dir
 
-        consume_exe_path = os.path.join(mount_point, "consume")
-        consume_data = os.path.join(mount_point, "data")
+        consume_exe_path = os.path.join(work_root_dir, "consume")
+        consume_data = os.path.join(work_root_dir, "data")
 
         return self.nodes.create_pipeline_json(
             jobid=jobid,
@@ -312,11 +312,12 @@ class Cluster:
             setup_parameters=[
                 "sh",
                 "-c",
-                "echo \"{consume_exe_md5}  {consume_exe_path}\" > /tmp/expected-checksums && curl -o {consume_exe_path} '{consume_exe_url}' && md5sum -c /tmp/expected-checksums && chmod a+x {consume_exe_path} && mkdir {consume_data} && chmod a+rwx {consume_data}".format(
+                "echo \"{consume_exe_md5}  {consume_exe_path}\" > /tmp/expected-checksums && mkdir -p '{consume_exe_parent}' && curl -o {consume_exe_path} '{consume_exe_url}' && md5sum -c /tmp/expected-checksums && chmod a+x {consume_exe_path} && mkdir {consume_data} && chmod a+rwx {consume_data}".format(
                     consume_exe_url=consume_exe_url,
                     consume_data=consume_data,
                     consume_exe_path=consume_exe_path,
                     consume_exe_md5=consume_exe_md5,
+                    consume_exe_parent=os.path.dirname(consume_exe_path),
                 ),
             ],
             docker_image=docker_image,

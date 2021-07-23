@@ -39,7 +39,8 @@ class SubmitConfig(BaseModel):
     project: str
     monitor_port: int
     zones: List[str]
-    mount_point: str
+    ssd_mount_points: List[str]
+    work_root_dir: str
     kubequeconsume_url: str
     kubequeconsume_md5: str
     gpu_count: int
@@ -277,7 +278,8 @@ def submit(
 
         machine_specs = MachineSpec(
             boot_volume_in_gb=boot_volume_in_gb,
-            mount_point=config.mount_point,
+            ssd_mount_points=config.ssd_mount_points,
+            work_root_dir=config.work_root_dir,
             machine_type=config.machine_type,
             gpu_count=config.gpu_count,
             gpu_type=config.gpu_type,
@@ -573,6 +575,8 @@ def submit_cmd(jq, io, cluster, args, config):
 
     gpu_count = config.get("gpu_count", 0)
     gpu_type = config.get("gpu_type", None)
+    # if gpu_type is not None and gpu_type.lower() == "none":
+    #     gpu_type = None
     if args.gpu_count:
         gpu_count = args.gpu_count
     if gpu_count:
@@ -671,6 +675,11 @@ def submit_cmd(jq, io, cluster, args, config):
     kubequeconsume_exe_url = io.generate_signed_url(kubequeconsume_exe_obj_path)
     log.info("kubeconsume at %s", kubequeconsume_exe_url)
 
+    ssd_mount_count = int(config.get("ssd_mounts", "1"))
+    ssd_mount_points = []
+    for i in range(ssd_mount_count):
+        ssd_mount_points.append(config.get(f"ssd_mount_{i}", "/mnt/"))
+
     submit_config = SubmitConfig(
         preemptible=preemptible,
         boot_volume_in_gb=boot_volume_in_gb,
@@ -680,7 +689,8 @@ def submit_cmd(jq, io, cluster, args, config):
         project=config["project"],
         monitor_port=int(config.get("monitor_port", "6032")),
         zones=config["zones"],
-        mount_point=config.get("mount", "/mnt/"),
+        work_root_dir=config.get("mount", "/mnt/"),
+        ssd_mount_points=ssd_mount_points,
         kubequeconsume_url=kubequeconsume_exe_url,
         kubequeconsume_md5=kubequeconsume_exe_md5,
         gpu_count=gpu_count,

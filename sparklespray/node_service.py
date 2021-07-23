@@ -5,7 +5,7 @@ import random
 import string
 import sys
 import re
-import attr
+from pydantic import BaseModel
 import os
 from collections import defaultdict
 import json
@@ -19,7 +19,7 @@ from .node_req_store import (
     NODE_REQ_STAGING,
     NODE_REQ_FAILED,
 )
-from typing import List, DefaultDict, Tuple
+from typing import List, DefaultDict, Tuple, Optional
 from .compute_service import DirCache
 
 # from oauth2client.client import GoogleCredentials
@@ -29,13 +29,13 @@ from .compute_service import DirCache
 from .log import log
 
 
-@attr.s
-class MachineSpec(object):
-    boot_volume_in_gb = attr.ib()
-    mount_point = attr.ib()
-    machine_type = attr.ib()
-    gpu_count = attr.ib()
-    gpu_type = attr.ib()
+class MachineSpec(BaseModel):
+    boot_volume_in_gb: int
+    ssd_mount_points: List[str]
+    work_root_dir: str
+    machine_type: str
+    gpu_count: int
+    gpu_type: Optional[str]
 
     def get_gpu(self):
         if self.gpu_count > 0:
@@ -317,10 +317,11 @@ class NodeService:
 
         mounts = [
             {
-                "disk": "ephemeralssd",
-                "path": machine_specs.mount_point,
+                "disk": f"ephemeralssd{i}",
+                "path": x,
                 "readOnly": False,
             }
+            for i, x in enumerate(machine_specs.ssd_mount_points)
         ]
 
         pipeline_def = {
@@ -344,7 +345,10 @@ class NodeService:
                     "virtualMachine": {
                         "machineType": machine_specs.machine_type,
                         "preemptible": False,
-                        "disks": [{"name": "ephemeralssd", "type": "local-ssd"}],
+                        "disks": [
+                            {"name": f"ephemeralssd{i}", "type": "local-ssd"}
+                            for i, _ in enumerate(machine_specs.ssd_mount_points)
+                        ],
                         "serviceAccount": {
                             "email": "default",
                             "scopes": [

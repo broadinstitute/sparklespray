@@ -166,8 +166,14 @@ def load_config_from_dict(config):
             "gpu_type",
             "mount",
             "sparkles_config_path",
+            "ssd_mounts",
         ]
     )
+
+    ssd_mount_count = int(config.get("ssd_mounts", "1"))
+    for i in range(ssd_mount_count):
+        allowed_parameters.add(f"ssd_mount_{i}")
+
     unknown_parameters = set(config.keys()).difference(allowed_parameters)
     assert (
         len(unknown_parameters) == 0
