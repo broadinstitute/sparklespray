@@ -78,7 +78,11 @@ def validate_cmd(jq: JobQueue, io: IO, cluster: Cluster, config: dict):
     logging_url = config["default_url_prefix"] + "/node-logs"
 
     cluster.test_image(
-        config["default_image"], sample_url, logging_url, _get_boot_volume_in_gb(config)
+        config["default_image"],
+        sample_url,
+        logging_url,
+        _get_boot_volume_in_gb(config),
+        service_acct,
     )
 
     print("Verification successful!")

@@ -31,6 +31,7 @@ CPU_REQUEST = "cpu"
 
 
 class SubmitConfig(BaseModel):
+    service_account_email: str
     preemptible: bool
     boot_volume_in_gb: float
     default_url_prefix: str
@@ -277,6 +278,7 @@ def submit(
         ]
 
         machine_specs = MachineSpec(
+            service_account_email=config.service_account_email,
             boot_volume_in_gb=boot_volume_in_gb,
             ssd_mount_points=config.ssd_mount_points,
             work_root_dir=config.work_root_dir,
@@ -681,6 +683,7 @@ def submit_cmd(jq, io, cluster, args, config):
         ssd_mount_points.append(config.get(f"ssd_mount_{i}", "/mnt/"))
 
     submit_config = SubmitConfig(
+        service_account_email=config.get("credentials").service_account_email,
         preemptible=preemptible,
         boot_volume_in_gb=boot_volume_in_gb,
         default_url_prefix=default_url_prefix,

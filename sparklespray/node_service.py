@@ -30,6 +30,7 @@ from .log import log
 
 
 class MachineSpec(BaseModel):
+    service_account_email: str
     boot_volume_in_gb: int
     ssd_mount_points: List[str]
     work_root_dir: str
@@ -238,7 +239,13 @@ class NodeService:
         return operation["name"]
 
     def test_pipeline_submit_api(
-        self, setup_image, job_image, command, machine_type, boot_volume_in_gb
+        self,
+        setup_image,
+        job_image,
+        command,
+        machine_type,
+        boot_volume_in_gb,
+        service_account_email,
     ):
         normalized_jobid = "test-pipeline-submit-api"
         pipeline_def = {
@@ -254,7 +261,7 @@ class NodeService:
                         "machineType": machine_type,
                         "preemptible": False,
                         "serviceAccount": {
-                            "email": "default",
+                            "email": service_account_email,
                             "scopes": [
                                 "https://www.googleapis.com/auth/cloud-platform"
                             ],
@@ -357,6 +364,12 @@ class NodeService:
                         },
                         "bootDiskSizeGb": machine_specs.boot_volume_in_gb,
                         "accelerators": [machine_specs.get_gpu()],
+                        "serviceAccount": {
+                            "email": machine_specs.service_account_email,
+                            "scopes": [
+                                "https://www.googleapis.com/auth/cloud-platform"
+                            ],
+                        },
                         "nvidiaDriverVersion": "390.46",
                         "labels": {
                             "kubeque-cluster": cluster_name,

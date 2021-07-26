@@ -268,13 +268,21 @@ class Cluster:
         """Simple api call used to verify the service is enabled"""
         self.nodes.test_pipeline_api(self.project)
 
-    def test_image(self, docker_image, sample_url, logging_url, boot_volume_in_gb):
+    def test_image(
+        self,
+        docker_image,
+        sample_url,
+        logging_url,
+        boot_volume_in_gb,
+        service_account_email,
+    ):
         self.nodes.test_pipeline_submit_api(
             setup_image=SETUP_IMAGE,
             job_image=docker_image,
             command=["sh", "-c", "echo okay"],
             machine_type="n1-standard-2",
             boot_volume_in_gb=boot_volume_in_gb,
+            service_account_email=service_account_email,
         )
 
     def is_owner_running(self, owner: str) -> bool:
