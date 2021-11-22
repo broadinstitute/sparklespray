@@ -529,7 +529,7 @@ def _get_boot_volume_in_gb(config):
 
 
 def get_preemptible_from_config(config):
-    preemptible_flag = config.get("preemptible", "n").lower()
+    preemptible_flag = config.get("preemptible", "y").lower()
     if preemptible_flag not in ["y", "n"]:
         raise Exception(
             "setting 'preemptible' in config must either by 'y' or 'n' but was: {}".format(
