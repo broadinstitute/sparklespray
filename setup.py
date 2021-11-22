@@ -26,7 +26,7 @@ setup(
         "google-cloud-datastore==1.7.3",
         "google-cloud-storage==1.15.0",
         "grpcio-tools==1.13.0",
-        "pydantic==0.11.2",
+        "pydantic==1.6.2",
         "google-api-python-client==1.7.4",
         "pyOpenSSL==18.0.0",
     ],
