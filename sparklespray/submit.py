@@ -4,14 +4,14 @@ import copy
 import argparse
 import re
 
-from typing import List
+from typing import List, Optional, Tuple
 from pydantic import BaseModel
 
 import sparklespray
 
 from .csv_utils import read_csv_as_dicts
 from .util import random_string, url_join
-from .node_service import MachineSpec
+from .model import MachineSpec, PersistentDiskMount, SubmitConfig
 from .hasher import CachingHashFunction
 from .spec import make_spec_from_command, SrcDstPair
 from .main import clean
@@ -22,31 +22,11 @@ from .io import IO
 from .watch import watch, local_watch
 from . import txtui
 from .watch import DockerFailedException
-from typing import Optional
 
 from .log import log
 
 MEMORY_REQUEST = "memory"
 CPU_REQUEST = "cpu"
-
-
-class SubmitConfig(BaseModel):
-    service_account_email: str
-    preemptible: bool
-    boot_volume_in_gb: float
-    default_url_prefix: str
-    machine_type: str
-    image: str
-    project: str
-    monitor_port: int
-    zones: List[str]
-    ssd_mount_points: List[str]
-    work_root_dir: str
-    kubequeconsume_url: str
-    kubequeconsume_md5: str
-    gpu_count: int
-    gpu_type: Optional[str]
-    target_node_count: int
 
 
 class ExistingJobException(Exception):
@@ -281,6 +261,7 @@ def submit(
             service_account_email=config.service_account_email,
             boot_volume_in_gb=boot_volume_in_gb,
             ssd_mount_points=config.ssd_mount_points,
+            pd_mount_points=config.pd_mount_points,
             work_root_dir=config.work_root_dir,
             machine_type=config.machine_type,
             gpu_count=config.gpu_count,
@@ -677,10 +658,25 @@ def submit_cmd(jq, io, cluster, args, config):
     kubequeconsume_exe_url = io.generate_signed_url(kubequeconsume_exe_obj_path)
     log.info("kubeconsume at %s", kubequeconsume_exe_url)
 
-    ssd_mount_count = int(config.get("ssd_mounts", "1"))
     ssd_mount_points = []
-    for i in range(ssd_mount_count):
-        ssd_mount_points.append(config.get(f"ssd_mount_{i}", "/mnt/"))
+    pd_mount_points = []
+    ssd_mount_count = int(config.get("ssd_mounts", "1"))
+    if ssd_mount_count > 0:
+        if "pd_volume_in_gb" in config:
+            raise Exception(
+                "You cannot specify the size of a persistent volume if ssd_mounts > 0"
+            )
+        for i in range(ssd_mount_count):
+            ssd_mount_points.append(config.get(f"ssd_mount_{i}", "/mnt/"))
+    else:
+        if "pd_volume_in_gb" not in config:
+            raise Exception(
+                "if ssd_mounts == 0, you must specify the size of the volume used for storage via pd_volume_in_gb setting"
+            )
+        pd_volume_in_gb = config.get("pd_volume_in_gb")
+        pd_mount_points.append(
+            PersistentDiskMount(path="/mnt", size_in_gb=pd_volume_in_gb)
+        )
 
     submit_config = SubmitConfig(
         service_account_email=config.get("credentials").service_account_email,
@@ -694,6 +690,7 @@ def submit_cmd(jq, io, cluster, args, config):
         zones=config["zones"],
         work_root_dir=config.get("mount", "/mnt/"),
         ssd_mount_points=ssd_mount_points,
+        pd_mount_points=pd_mount_points,
         kubequeconsume_url=kubequeconsume_exe_url,
         kubequeconsume_md5=kubequeconsume_exe_md5,
         gpu_count=gpu_count,

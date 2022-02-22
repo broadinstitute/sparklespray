@@ -167,6 +167,7 @@ def load_config_from_dict(config):
             "mount",
             "sparkles_config_path",
             "ssd_mounts",
+            "pd_volume_in_gb",
         ]
     )
 

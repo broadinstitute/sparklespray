@@ -28,23 +28,7 @@ from .compute_service import DirCache
 
 from .log import log
 
-
-class MachineSpec(BaseModel):
-    service_account_email: str
-    boot_volume_in_gb: int
-    ssd_mount_points: List[str]
-    work_root_dir: str
-    machine_type: str
-    gpu_count: int
-    gpu_type: Optional[str]
-
-    def get_gpu(self):
-        if self.gpu_count > 0:
-            """Definition of GPU by version v2alpha1"""
-            def_gpu = {"type": self.gpu_type, "count": self.gpu_count}
-            return def_gpu
-        else:
-            return None
+from .model import PersistentDiskMount, SubmitConfig, MachineSpec
 
 
 def get_random_string(length):
@@ -329,6 +313,21 @@ class NodeService:
                 "readOnly": False,
             }
             for i, x in enumerate(machine_specs.ssd_mount_points)
+        ] + [
+            {
+                "disk": f"pddisk{i}",
+                "path": x.path,
+                "readOnly": False,
+            }
+            for i, x in enumerate(machine_specs.pd_mount_points)
+        ]
+
+        disks = [
+            {"name": f"ephemeralssd{i}", "type": "local-ssd"}
+            for i, _ in enumerate(machine_specs.ssd_mount_points)
+        ] + [
+            {"name": f"pddisk{i}", "sizeGb": x.size_in_gb, "type": "pd-standard"}
+            for i, x in enumerate(machine_specs.pd_mount_points)
         ]
 
         pipeline_def = {
@@ -352,10 +351,7 @@ class NodeService:
                     "virtualMachine": {
                         "machineType": machine_specs.machine_type,
                         "preemptible": False,
-                        "disks": [
-                            {"name": f"ephemeralssd{i}", "type": "local-ssd"}
-                            for i, _ in enumerate(machine_specs.ssd_mount_points)
-                        ],
+                        "disks": disks,
                         "serviceAccount": {
                             "email": "default",
                             "scopes": [
