@@ -263,6 +263,8 @@ So far, each job submission has resulted in a new VM being powered on, which mea
 Each time a batch of workers runs out of tasks to execute, one worker will stay online for an additional 10 minutes in case a subsequent job shows up. This is a frequent scenerio when developing, as one often needs to submit repeatly with small code changes, and this the use case that sparkles is optimized for.
 
 So now if we make a minor change to `write_and_wait.sh` and resubmit, we get the following:
+
+```
 \$ sparkles sub -n test-job -u write_and_wait.sh sh write_and_wait.sh
 1 files (88 bytes) out of 2 files will be uploaded
 Submitting job: test-job
