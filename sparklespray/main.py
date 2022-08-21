@@ -140,7 +140,7 @@ def show_cmd(jq: JobQueue, io: IO, args):
             write(rows, sys.stdout)
 
 
-def reset_cmd(jq: JobQueue, io: IO, cluster, args):
+def reset_cmd(jq: JobQueue, io: IO, cluster: Cluster, args):
     jobid_pattern = args.jobid_pattern
     if "." in jobid_pattern:
         task = jq.task_storage.get_task(jobid_pattern)
@@ -165,6 +165,10 @@ def reset_cmd(jq: JobQueue, io: IO, cluster, args):
             )
             updated = jq.reset(jobid, None, statuses_to_clear=statuses_to_clear)
             log.info("updated %d tasks", updated)
+
+            cluster.cleanup_node_reqs(jobid)
+            log.info("Cleaned up old node requests")
+
 
 
 def _summarize_task_statuses(tasks):

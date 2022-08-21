@@ -220,6 +220,7 @@ class Cluster:
         assert job is not None
 
         self.node_req_store.cleanup_cluster(job.cluster, batch=batch)
+        log.info(f"in cleanup_node_reqs flushing batch: {batch}")
 
         batch.flush()
 

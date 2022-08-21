@@ -188,7 +188,10 @@ class TaskStore:
         log.debug("get_tasks took %s seconds", end_time - start_time)
         return tasks
 
-    def update_task(self, task):
+    def update_task(self, task, batch=None):
+        if batch is None:
+            batch = self.immediate_batch
+
         original_version = task.version
         task.version = original_version + 1
         self.client.put(task_to_entity(self.client, task))

@@ -86,13 +86,13 @@ class AddNodeReqStore:
         query.add_filter("cluster_id", "=", cluster_id)
         query.add_filter("status", "=", NODE_REQ_COMPLETE)
         for entity in query.fetch():
-            self.client.delete(entity.key)
+            batch.delete(entity.key)
 
         query = self.client.query(kind="NodeReq")
         query.add_filter("cluster_id", "=", cluster_id)
         query.add_filter("status", "=", NODE_REQ_FAILED)
         for entity in query.fetch():
-            self.client.delete(entity.key)
+            batch.delete(entity.key)
 
             # def get_pending_node_req_count(self, job_id):
 

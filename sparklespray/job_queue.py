@@ -150,11 +150,13 @@ class JobQueue:
         # raise Exception()
 
         updated = 0
+        batch = Batch(self.client)
         for task in tasks:
             if owner is not None and owner != task.owner:
                 continue
-            self._reset_task(task, STATUS_PENDING)
+            self._reset_task(task, STATUS_PENDING, batch=batch)
             updated += 1
+        batch.flush()
 
         def mark_not_killed(job):
             job.status = JOB_STATUS_SUBMITTED
@@ -164,12 +166,12 @@ class JobQueue:
 
         return updated
 
-    def _reset_task(self, task, status):
+    def _reset_task(self, task, status, batch=None):
         now = time.time()
         task.owner = None
         task.status = status
         task.history.append(TaskHistory(timestamp=now, status="reset"))
-        self.task_storage.update_task(task)
+        self.task_storage.update_task(task, batch)
 
     def reset_task(self, task_id, status=STATUS_PENDING):
         task = self.task_storage.get_task(task_id)
