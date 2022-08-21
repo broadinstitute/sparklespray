@@ -281,7 +281,8 @@ def submit(
 
         max_preemptable_attempts = 0
         if preemptible:
-            max_preemptable_attempts = config.target_node_count * 2
+            assert config.max_preemptable_attempts_scale >= 1
+            max_preemptable_attempts = config.target_node_count * config.max_preemptable_attempts_scale
 
         jq.submit(
             job_id,
@@ -658,6 +659,8 @@ def submit_cmd(jq, io, cluster, args, config):
     kubequeconsume_exe_url = io.generate_signed_url(kubequeconsume_exe_obj_path)
     log.info("kubeconsume at %s", kubequeconsume_exe_url)
 
+    max_preemptable_attempts_scale = int(config.get("max_preemptable_attempts_scale", "2"))
+
     ssd_mount_points = []
     pd_mount_points = []
     ssd_mount_count = int(config.get("ssd_mounts", "1"))
@@ -696,6 +699,7 @@ def submit_cmd(jq, io, cluster, args, config):
         gpu_count=gpu_count,
         gpu_type=gpu_type,
         target_node_count=target_node_count,
+        max_preemptable_attempts_scale=max_preemptable_attempts_scale
     )
 
     cluster_name = None

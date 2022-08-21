@@ -25,6 +25,8 @@ class SubmitConfig(BaseModel):
     gpu_count: int
     gpu_type: Optional[str]
     target_node_count: int
+    max_preemptable_attempts_scale : int
+
 
 
 class MachineSpec(BaseModel):

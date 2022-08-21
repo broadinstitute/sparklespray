@@ -168,6 +168,7 @@ def load_config_from_dict(config):
             "sparkles_config_path",
             "ssd_mounts",
             "pd_volume_in_gb",
+            "max_preemptable_attempts_scale"
         ]
     )
 

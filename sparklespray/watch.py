@@ -66,6 +66,9 @@ def watch_cmd(jq: JobQueue, io: IO, cluster: Cluster, config, args):
     jobid = _resolve_jobid(jq, args.jobid)
     if args.verify:
         check_completion(jq, io, jobid)
+
+    max_preemptable_attempts_scale = int(config.get("max_preemptable_attempts_scale", "2"))
+
     watch(
         io,
         jq,
@@ -74,6 +77,7 @@ def watch_cmd(jq: JobQueue, io: IO, cluster: Cluster, config, args):
         target_nodes=args.nodes,
         loglive=args.loglive,
         preemptible=get_preemptible_from_config(config),
+        max_preemptable_attempts_scale=max_preemptable_attempts_scale
     )
 
 
@@ -322,6 +326,7 @@ def watch(
     max_poll_delay=30.0,
     loglive=None,
     preemptible=True,
+    max_preemptable_attempts_scale=2
 ):
     job = jq.get_job(job_id)
     flush_stdout_calls = [0]
@@ -335,7 +340,7 @@ def watch(
         max_preemptable_attempts = job.max_preemptable_attempts
     else:
         if preemptible:
-            max_preemptable_attempts = target_nodes * 2
+            max_preemptable_attempts = target_nodes * max_preemptable_attempts_scale
         else:
             max_preemptable_attempts = 0
 
