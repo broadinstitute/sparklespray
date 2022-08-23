@@ -1,0 +1,23 @@
+[tool.poetry]
+name = "sparklespray"
+version = "3.19.0"
+description = "CLI for submitting batch jobs to GCP for execution"
+authors = ["Philip Montgomery <pmontgom@broadinstitute.org>"]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+
+termcolor = "^1.1.0"
+google-cloud-datastore ="^1.7.3"
+google-cloud-storage = "^1.15.0"
+grpcio-tools = "*"
+pydantic="^0.11.2"
+google-api-python-client="^1.7.4"
+pyOpenSSL="^18.0.0"
+
+[tool.poetry.dev-dependencies]
+pytest = "^7.1.2"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
