@@ -19,7 +19,8 @@ jobs:
         go-version: 1.18
 
     - name: Build
-      run: go build -v go/src/...
+      run: go build -v go/src/github.com/broadinstitute/kubequeconsume/cli/main.go
 
     - name: Test
-      run: go test -v go/src/...
+      run: go test -v go/src/github.com/broadinstitute/kubequeconsume/...
+      
