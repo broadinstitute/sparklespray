@@ -1,7 +1,8 @@
 from google.cloud import datastore
-import attr
 from .datastore_batch import ImmediateBatch, Batch
 from typing import List
+from dataclasses import dataclass
+import dataclasses
 
 NODE_REQ_SUBMITTED = "submitted"
 NODE_REQ_STAGING = "staging"
@@ -16,15 +17,15 @@ NODE_REQ_CLASS_PREEMPTIVE = "preemptable"
 NODE_REQ_CLASS_NORMAL = "normal"
 
 
-@attr.s
-class NodeReq(object):
-    operation_id = attr.ib()
-    cluster_id = attr.ib()
-    status = attr.ib()
-    node_class = attr.ib()
-    sequence = attr.ib()
-    job_id = attr.ib()
-    instance_name = attr.ib(default=None)
+@dataclass
+class NodeReq:
+    operation_id : str
+    cluster_id :str
+    status :str
+    node_class :str
+    sequence : int
+    job_id  :str
+    instance_name  :str
 
 
 def node_req_to_entity(client: datastore.Client, o: NodeReq) -> datastore.Entity:

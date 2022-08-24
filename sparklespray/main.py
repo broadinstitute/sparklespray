@@ -1,9 +1,9 @@
+import dataclasses
 import re
 import logging
 import os
 import json
 import sys
-import attr
 import sparklespray
 from .task_store import (
     STATUS_FAILED,
@@ -51,9 +51,6 @@ def show_cmd(jq: JobQueue, io: IO, args):
     jobid = _resolve_jobid(jq, args.jobid)
     retcode = args.exitcode
 
-    # job = jq.get_job(jobid)
-    # job = attr.asdict(job)
-
     if args.incomplete:
         tasks = []
         for status in [STATUS_FAILED, STATUS_CLAIMED, STATUS_PENDING, STATUS_KILLED]:
@@ -97,7 +94,7 @@ def show_cmd(jq: JobQueue, io: IO, args):
             return row
 
         def make_full_row(task):
-            row = attr.asdict(task)
+            row = dataclasses.asdict(task)
             task_spec = json.loads(io.get_as_str(task.args))
             row["args_url"] = task.args
             row["args"] = task_spec

@@ -8,11 +8,10 @@ import re
 import hashlib
 import time
 import json
-import attr
 from typing import List
 import logging
 from .datastore_batch import ImmediateBatch, Batch
-
+from dataclasses import dataclass
 from .log import log
 
 STATUS_CLAIMED = "claimed"
@@ -24,32 +23,32 @@ STATUS_KILLED = "killed"
 INCOMPLETE_TASK_STATES = set([STATUS_CLAIMED, STATUS_PENDING])
 
 
-@attr.s
+@dataclass
 class TaskHistory(object):
-    timestamp = attr.ib()
-    status = attr.ib()
-    owner = attr.ib(default=None)
-    failure_reason = attr.ib(default=None)
+    timestamp :str
+    status :str
+    owner :str
+    failure_reason :str
 
 
-@attr.s
+@dataclass
 class Task(object):
     # will be of the form: job_id + task_index
-    task_id = attr.ib()
+    task_id :str
 
-    task_index = attr.ib()
-    job_id = attr.ib()
-    status = attr.ib()  # one of: pending, claimed, success, failed, lost
-    owner = attr.ib()
-    monitor_address = attr.ib()
-    args = attr.ib()
-    history = attr.ib()  # list of TaskHistory
-    command_result_url = attr.ib()
-    cluster = attr.ib()
-    log_url = attr.ib()
-    failure_reason = attr.ib(default=None)
-    version = attr.ib(default=1)
-    exit_code = attr.ib(default=None)
+    task_index :int
+    job_id :str
+    status  :str  # one of: pending, claimed, success, failed, lost
+    owner  :str
+    monitor_address :str
+    args  :str
+    history  :List  # list of TaskHistory
+    command_result_url :str
+    cluster :str
+    log_url :str
+    failure_reason  :str = None
+    version :int = 1
+    exit_code : int = None
 
     def get_instance_name(self):
         owner = self.owner
@@ -58,12 +57,12 @@ class Task(object):
         return owner.split("/")[-1]
 
 
-@attr.s
+@dataclass
 class TaskStatus(object):
-    node_status = attr.ib()
-    node = attr.ib()
-    task = attr.ib()
-    operation_id = attr.ib()
+    node_status :str
+    node :str
+    task :str
+    operation_id :str
 
 
 def task_to_entity(client, o):

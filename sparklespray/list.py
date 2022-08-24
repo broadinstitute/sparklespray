@@ -1,14 +1,15 @@
+from dataclasses import dataclass
 from typing import List
 import re
 import json
 import csv
 from .job_queue import JobQueue
-import attr
 import sys
 from .main import _resolve_jobid
 from .io import IO
 from .cluster_service import Cluster
 from .node_req_store import AddNodeReqStore
+import dataclasses
 
 # def logs_cmd(jq: JobQueue, io: IO, args):
 #     jobid = _resolve_jobid(jq, args.jobid)
@@ -87,7 +88,7 @@ def list_tasks(
         needs_full_task_def = True
 
     def to_record(task, task_specs_str):
-        row = attr.asdict(task)
+        row = dataclasses.asdict(task)
         if needs_full_task_def:
             assert task_specs_str is not None
             task_spec = json.loads(task_specs_str)
@@ -285,7 +286,7 @@ def list_nodes(
     output_filename: str,
 ):
     def to_record(note_req: AddNodeReqStore):
-        row = attr.asdict(node_req)
+        row = dataclasses.asdict(node_req)
         return row
 
     node_reqs = node_req_store.get_node_reqs(cluster_id)

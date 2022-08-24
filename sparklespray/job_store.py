@@ -7,25 +7,25 @@ import os
 import re
 import hashlib
 import json
-import attr
 from typing import List, Tuple, Optional
 from .task_store import task_to_entity
 from .datastore_batch import ImmediateBatch, Batch
 
 from .log import log
 
+from dataclasses import dataclass
 
-@attr.s
-class Job(object):
-    job_id = attr.ib()
-    tasks = attr.ib()
-    kube_job_spec = attr.ib()
-    metadata = attr.ib()
-    cluster = attr.ib()
-    status = attr.ib()
-    submit_time = attr.ib()
-    max_preemptable_attempts = attr.ib()
-    target_node_count = attr.ib(default=1)
+@dataclass
+class Job:
+    job_id : str
+    tasks : List
+    kube_job_spec : str
+    metadata : str
+    cluster : str
+    status : str
+    submit_time : str
+    max_preemptable_attempts : int
+    target_node_count : int = 1
 
 
 JOB_STATUS_SUBMITTED = "submitted"

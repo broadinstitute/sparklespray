@@ -25,7 +25,6 @@ from .datastore_batch import ImmediateBatch, Batch
 from contextlib import contextmanager
 import collections
 
-import attr
 import time
 from collections import namedtuple
 import sys
