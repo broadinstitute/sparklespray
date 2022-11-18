@@ -24,11 +24,11 @@ INCOMPLETE_TASK_STATES = set([STATUS_CLAIMED, STATUS_PENDING])
 
 
 @dataclass
-class TaskHistory(object):
+class TaskHistory:
     timestamp :str
     status :str
-    owner :str
-    failure_reason :str
+    owner :str = None
+    failure_reason :str = None
 
 
 @dataclass
