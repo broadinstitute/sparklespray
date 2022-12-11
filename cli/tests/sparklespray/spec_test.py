@@ -52,7 +52,9 @@ def test_expand_tasks():
     expected_tasks = [
         {
             "downloads": [
-                {"dst": "mandelbrot.py", "src_url": "gs://source1", "executable": True}
+                {"dst": "mandelbrot.py", "src_url": "gs://source1", "executable": True,                 'is_cas_key': False,
+                'symlink_safe': False,
+}
             ],
             "uploads": {
                 "include_patterns": ["**"],
@@ -66,7 +68,9 @@ def test_expand_tasks():
         },
         {
             "downloads": [
-                {"dst": "mandelbrot.py", "src_url": "gs://source1", "executable": True}
+                {"dst": "mandelbrot.py", "src_url": "gs://source1", "executable": True,                'is_cas_key': False,
+                'symlink_safe': False,
+}
             ],
             "uploads": {
                 "include_patterns": ["**"],
@@ -85,15 +89,12 @@ def test_expand_tasks():
 def test_simple_command():
     upload_mapping, spec = make_spec_from_command(
         ["bash", "-c", "date"],
+        cas_url="s3://bucket/cas",
         docker_image="us.gcr.io/bucket/dockerimage",
         dest_url="s3://bucket/dest",
     )
-    assert upload_mapping == {}
-    assert spec == {
-        "image": "us.gcr.io/bucket/dockerimage",
-        "common": {"uploads": [{"src_wildcard": "*", "dst_url": "s3://bucket/dest"}]},
-        "tasks": [{"command": "bash -c date", "downloads": []}],
-    }
+    assert upload_mapping.map == {}
+    assert spec == {'image': 'us.gcr.io/bucket/dockerimage', 'common': {'working_dir': '.', 'command_result_url': 'result.json', 'stdout_url': 'stdout.txt', 'pre-exec-script': 'ls -al', 'post-exec-script': 'ls -al'}, 'tasks': [{'downloads': [], 'command': 'bash -c date', 'uploads': {'include_patterns': ['**'], 'exclude_patterns': [], 'dst_url': 's3://bucket/dest/1'}, 'parameters': {}}]}
 
 
 def test_upload_files():
@@ -107,24 +108,9 @@ def test_upload_files():
         hash_function=dummy_hash,
         is_executable_function=lambda fn: fn.startswith("script"),
     )
-    assert upload_mapping == {"script_to_run.py": "s3://bucket/cas/" + script_hash}
-    assert spec == {
-        "image": "us.gcr.io/bucket/dockerimage",
-        "common": {"uploads": [{"src_wildcard": "*", "dst_url": "s3://bucket/dest"}]},
-        "tasks": [
-            {
-                "downloads": [
-                    {
-                        "src_url": "s3://bucket/cas/" + script_hash,
-                        "dst": "script_to_run.py",
-                        "executable": True,
-                    }
-                ],
-                "command": "script_to_run.py",
-            }
-        ],
-    }
-
+    assert upload_mapping.map == {"script_to_run.py": ("s3://bucket/cas/" + script_hash, False)}
+    assert spec == {'image': 'us.gcr.io/bucket/dockerimage', 'common': {'working_dir': '.', 'command_result_url': 'result.json', 'stdout_url': 'stdout.txt', 'pre-exec-script': 'ls -al', 'post-exec-script': 'ls -al'}, 'tasks': [{'downloads': [{'src_url': 's3://bucket/cas/'+script_hash, 'dst': 'script_to_run.py', 'executable': True, 'is_cas_key': True}], 'command': 'script_to_run.py', 'uploads': {'include_patterns': ['**'], 'exclude_patterns': [], 'dst_url': 's3://bucket/dest/1'}, 'parameters': {}}]}
+    
 
 def test_parameterized():
     script1_hash = dummy_hash("script1")
@@ -143,33 +129,10 @@ def test_parameterized():
         is_executable_function=lambda fn: fn.startswith("script"),
     )
 
-    assert upload_mapping == {
-        "script1": "s3://bucket/cas/" + script1_hash,
-        "script2": "s3://bucket/cas/" + script2_hash,
+    assert upload_mapping.map == {
+        "script1": ("s3://bucket/cas/" + script1_hash, False),
+        "script2": ("s3://bucket/cas/" + script2_hash, False),
     }
-    assert spec == {
-        "image": "us.gcr.io/bucket/dockerimage",
-        "common": {"uploads": [{"src_wildcard": "*", "dst_url": "s3://bucket/dest"}]},
-        "tasks": [
-            {
-                "downloads": [
-                    {
-                        "src_url": "s3://bucket/cas/" + script1_hash,
-                        "dst": "script1",
-                        "executable": True,
-                    }
-                ],
-                "command": "python script1 a",
-            },
-            {
-                "downloads": [
-                    {
-                        "src_url": "s3://bucket/cas/" + script2_hash,
-                        "dst": "script2",
-                        "executable": True,
-                    }
-                ],
-                "command": "python script2 b",
-            },
-        ],
-    }
+    assert spec == {'image': 'us.gcr.io/bucket/dockerimage', 'common': {'working_dir': '.', 'command_result_url': 'result.json', 'stdout_url': 'stdout.txt', 'pre-exec-script': 'ls -al', 'post-exec-script': 'ls -al'}, 'tasks': [{'downloads': [
+    {'src_url': 's3://bucket/cas/'+ script1_hash, 'dst': 'script1', 'executable': True, 'is_cas_key': True}], 'command': 'python script1 a', 'uploads': {'include_patterns': ['**'], 'exclude_patterns': [], 'dst_url': 's3://bucket/dest/1'}, 'parameters': {'script_name': 'script1', 'parameter': 'a'}}, {'downloads': [
+    {'src_url': 's3://bucket/cas/'+ script2_hash, 'dst': 'script2', 'executable': True, 'is_cas_key': True}], 'command': 'python script2 b', 'uploads': {'include_patterns': ['**'], 'exclude_patterns': [], 'dst_url': 's3://bucket/dest/2'}, 'parameters': {'script_name': 'script2', 'parameter': 'b'}}]}

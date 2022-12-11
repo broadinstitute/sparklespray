@@ -26,9 +26,11 @@ class MockClusterMod:
     def add_node(self, preemptable: bool) -> None:
         self.calls.append(("add", preemptable))
 
-    def cancel_last_node(self) -> None:
-        self.calls.append(("cancel",))
+#    def cancel_last_node(self) -> None:
+#        self.calls.append(("cancel",))
 
+    def cancel_nodes(self, state, needs_cancel):
+        self.calls.append(("cancel",))
 
 def test_increase_size():
     r = ResizeCluster(

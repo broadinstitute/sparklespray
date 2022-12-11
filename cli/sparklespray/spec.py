@@ -192,8 +192,8 @@ def is_executable(filename):
 def make_spec_from_command(
     argv,
     docker_image,
-    dest_url=None,
-    cas_url=None,
+    dest_url,
+    cas_url,
     parameters=[{}],
     hash_function=None,
     is_executable_function=is_executable,
