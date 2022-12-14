@@ -134,6 +134,7 @@ class Cluster:
             else NODE_REQ_CLASS_NORMAL,
             sequence=get_timestamp(),
             job_id=job_id,
+            instance_name=None
         )
         self.node_req_store.add_node_req(req)
         log.info(
@@ -152,6 +153,15 @@ class Cluster:
                 return True
         return False
 
+    def ensure_named_volumes_exist(pd_mounts : List[PersistentDiskMount):
+        for pd_mount in pd_mounts:
+            if pd_mount.name is None:
+                continue
+            volume = self.compute.get_volume_details(zone, pd_mount.name)
+            if volume is None:
+                print(f"Creating volume {pd_mount.name}")
+                self.compute.create_volume(zone, pd_mount.type, pd_mount.size, pd_mount.name)
+            
     def stop_cluster(self, cluster_name: str):
         node_reqs = self.node_req_store.get_node_reqs(cluster_name)
         for i, node_req in enumerate(node_reqs):
