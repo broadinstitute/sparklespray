@@ -1,18 +1,20 @@
 import os
+import pytest
+
+longrun = pytest.mark.skipif("not config.getoption('longrun')")
 
 from sparklespray.main import main
 
 DEFAULT_URL = "gs://broad-achilles-kubeque/test/kube"
 
-CONFIG = """[config]
-default_url_prefix={}
+CONFIG = f"""[config]
+default_url_prefix={DEFAULT_URL}
 project=broad-achilles
 default_image=python
 machine_type=n1-standard-2
-zone=us-east1-b
-""".format(
-    DEFAULT_URL
-)
+zones=us-central1-b
+region=us-central1
+"""
 
 SCRIPT = """#!/usr/bin/python
 import sys, os
@@ -33,8 +35,32 @@ with open("outdir/outdir2/output2.txt", "wt") as fd:
 
 import pytest
 
-@pytest.mark.skip(reason="test has a lot of hardcoded values. disabling for now")
-def test_end_to_end(tmpdir):
+@longrun
+def test_most_cmds_end_to_end(tmpdir):
+    # write out config file
+    config_file = tmpdir.join("config")
+    config_file.write(CONFIG)
+
+    shared_args = ["--config", str(config_file)]
+
+    def run(args):
+        retcode = main(
+         shared_args + args 
+         )
+        assert retcode == 0 or retcode is None
+    
+    run(["sub", "-n", "test-sparkles-sub-end-to-end", "bash", "-c", "echo hello"])
+    run(["status", "--stats", "test-sparkles-sub-end-to-end"])
+    run(["show", "test-sparkles-sub-end-to-end"])
+    run(["logs", "test-sparkles-sub-end-to-end"])
+    run(["kill", "test-sparkles-sub-end-to-end"])
+    run(["reset", "test-sparkles-sub-end-to-end"])
+    run(["clean", "--force", "test-sparkles-sub-end-to-end"])
+    run(["version"])
+    
+
+@longrun
+def test_local_end_to_end(tmpdir):
     dest_dir = tmpdir.join("dest")
     dest_dir.mkdir()
 
@@ -70,8 +96,6 @@ def test_end_to_end(tmpdir):
     cwd = os.getcwd()
     os.chdir(str(work_dir))
 
-    # sub_opts = ["--fetch", str(dest_dir)]
-    # sub_opts += ['--local']
     sub_opts = ["--local", "-n", "test_end_to_end"]
 
     try:
