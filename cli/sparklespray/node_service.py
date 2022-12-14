@@ -306,22 +306,24 @@ class NodeService:
         # labels have a few restrictions
         normalized_jobid = _normalize_label(jobid)
 
-        mounts = [
+        mounts = []
+        for i, x in enumerate(machine_specs.ssd_mount_points):
+            mounts.append(
             {
                 "disk": f"ephemeralssd{i}",
                 "path": x,
                 "readOnly": False,
-            }
-            for i, x in enumerate(machine_specs.ssd_mount_points)
-        ] + [
+            })
+
+        for i, x in enumerate(machine_specs.pd_mount_points):
+            mounts.append( 
             {
                 "disk": f"pddisk{i}",
                 "path": x.path,
                 "readOnly": False,
-            }
-            for i, x in enumerate(machine_specs.pd_mount_points)
-        ]
+            })
 
+        # TODO: fix this to support mounting named volumes
         disks = [
             {"name": f"ephemeralssd{i}", "type": "local-ssd"}
             for i, _ in enumerate(machine_specs.ssd_mount_points)

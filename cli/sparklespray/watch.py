@@ -423,8 +423,7 @@ def watch(
         return failures == 0
     except KeyboardInterrupt:
         print("Interrupted -- Exiting, but your job will continue to run unaffected.")
-        sys.exit(1)
-
+        return 20
 
 def check_completion(jq: JobQueue, io: IO, job_id: str):
     successful_count = 0

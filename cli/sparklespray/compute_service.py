@@ -5,6 +5,13 @@ from googleapiclient.discovery_cache.base import Cache
 import os
 import hashlib
 import tempfile
+import dataclasses import dataclass
+
+@dataclass
+class VolumeDetails:
+    type: str
+    size: float
+    status: str
 
 
 class DirCache(Cache):
@@ -38,7 +45,6 @@ class DirCache(Cache):
 class ComputeService:
     """ Facade/wrapper around GCS compute API
     """
-
     def __init__(self, project: str, credentials=None) -> None:
         self.compute = build(
             "compute",
@@ -49,6 +55,35 @@ class ComputeService:
         )
         self.project = project
 
+
+
+    def get_volume_details(self, zone, name):
+        response = self.compute.disks().get(project=self.project,zone=zone,disk=name).execute()
+        response = self.compute.disks().list(project=self.project,zone=zone, filter=f"name=\"{name}\"").execute()
+        disks = list(response.get('items', []))
+        if len(disks) == 0:
+            return None
+        assert len(disks) == 1
+        disk = disks[0]
+        return VolumeDetails(disk['type'], float(disk['sizeGb']), disk['status'])
+    
+    def create_volume(self, zone, type, size, name, wait=True):
+        assert type in ['pd-standard', 'pd-balanced', 'pd-ssd']
+        response = self.compute.disks().insert(project=self.project, zone=zone, body={
+            "name": name,
+            "sizeGb": size,
+            "type": f"projects/{self.project}/zones/{zone}/diskTypes/{type}",
+            }).execute()
+        # wait for drive to be created
+        while wait:
+            response = self.compute.disks().get(project=self.project,zone=zone,disk=name).execute()
+            if response['status'] == 'READY':
+                break
+            if response['status'] not in ['CREATING', 'RESTORING']:
+                raise Exception(f"bad status: {response}")
+            time.sleep(1)
+#        print(self.compute.disks().get(project=self.project,zone=zone,resourceId=response['id']).execute())
+        
     def get_cluster_instances(self, zones, cluster_name):
         instances = []
         for zone in zones:

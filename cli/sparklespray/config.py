@@ -15,6 +15,9 @@ from .util import url_join
 from google.oauth2 import service_account
 from .txtui import log
 
+class BadConfig(Exception):
+    pass
+
 SCOPES = [
     "https://www.googleapis.com/auth/genomics",
     "https://www.googleapis.com/auth/cloud-platform",
@@ -99,12 +102,11 @@ def load_only_config_dict(
             missing_values.append(property)
 
     if len(missing_values) > 0:
-        print(
+        raise BadConfig(
             "Missing the following parameters in {}: {}".format(
                 config_file, ", ".join(missing_values)
             )
         )
-        sys.exit(1)
 
     if "kubequeconsume_exe_path" not in merged_config:
         merged_config["kubequeconsume_exe_path"] = os.path.join(
@@ -166,15 +168,17 @@ def load_config_from_dict(config):
             "gpu_type",
             "mount",
             "sparkles_config_path",
-            "ssd_mounts",
+            "mount_count",
             "pd_volume_in_gb",
             "max_preemptable_attempts_scale"
         ]
     )
 
-    ssd_mount_count = int(config.get("ssd_mounts", "1"))
+    mount_count = int(config.get("mount_count", "1"))
     for i in range(ssd_mount_count):
-        allowed_parameters.add(f"ssd_mount_{i}")
+        allowed_parameters.add(f"mount_{i+1}_path")
+        allowed_parameters.add(f"mount_{i+1}_type")
+        allowed_parameters.add(f"mount_{i+1}_name")
 
     unknown_parameters = set(config.keys()).difference(allowed_parameters)
     assert (

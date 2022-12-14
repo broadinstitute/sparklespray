@@ -3,6 +3,7 @@ from typing import List, Optional
 
 
 class PersistentDiskMount(BaseModel):
+    name: str
     path: str
     size_in_gb: int
 

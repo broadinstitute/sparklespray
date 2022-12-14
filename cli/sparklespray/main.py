@@ -73,7 +73,7 @@ def show_cmd(jq: JobQueue, io: IO, args):
 
     if len(tasks) == 0:
         log.error("No tasks found")
-        sys.exit(1)
+        return 1
     else:
         log.info("Getting parameters from %d tasks" % len(tasks))
 

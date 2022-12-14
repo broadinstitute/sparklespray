@@ -145,20 +145,6 @@ def expand_tasks(spec, io, default_url_prefix, default_job_url_prefix):
     return tasks
 
 
-def _parse_cpu_request(txt):
-    import math
-
-    return int(math.ceil(float(txt)))
-
-
-def _parse_mem_limit(txt):
-    if txt[-1:] == "M":
-        return float(txt[:-1]) / 1000.0
-    else:
-        assert txt[-1:] == "G"
-        return float(txt[:-1])
-
-
 def _make_cluster_name(job_name, image, machine_type, unique_name):
     import hashlib
 
@@ -267,6 +253,8 @@ def submit(
             gpu_count=config.gpu_count,
             gpu_type=config.gpu_type,
         )
+
+        cluster.ensure_named_volumes_exist(config.pd_mount_points)
 
         pipeline_spec = cluster.create_pipeline_spec(
             jobid=job_id,
@@ -663,23 +651,18 @@ def submit_cmd(jq, io, cluster, args, config):
 
     ssd_mount_points = []
     pd_mount_points = []
-    ssd_mount_count = int(config.get("ssd_mounts", "1"))
-    if ssd_mount_count > 0:
-        if "pd_volume_in_gb" in config:
-            raise Exception(
-                "You cannot specify the size of a persistent volume if ssd_mounts > 0"
-            )
-        for i in range(ssd_mount_count):
-            ssd_mount_points.append(config.get(f"ssd_mount_{i}", "/mnt/"))
-    else:
-        if "pd_volume_in_gb" not in config:
-            raise Exception(
-                "if ssd_mounts == 0, you must specify the size of the volume used for storage via pd_volume_in_gb setting"
-            )
-        pd_volume_in_gb = config.get("pd_volume_in_gb")
-        pd_mount_points.append(
-            PersistentDiskMount(path="/mnt", size_in_gb=pd_volume_in_gb)
-        )
+    mount_count = int(config.get("mount_count", "1"))
+    for i in range(mount_count):
+        mount_path = config[f"mount_{i+1}_path"]
+        mount_type = config[f"mount_{i+1}_type"]
+        mount_name = config.get(f"mount_{i+1}_name")
+        mount_size_in_gb = config.get(f"mount_{i+1}_size_in_gb")
+        if mount_type == "local-ssd":
+            assert mount_name is None, "local SSDs are not allowed to have names"
+            assert mount_size_in_gb is None, "local SSDs are not allowed to have size choosen"
+            ssd_mount_points.append(mount_path)
+        else:
+            pd_mount_points.append(PersistentDiskMount(mount_name, mount_path, mount_size_in_gb))
 
     submit_config = SubmitConfig(
         service_account_email=config.get("credentials").service_account_email,
