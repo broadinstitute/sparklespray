@@ -25,7 +25,7 @@ from .node_service import NodeService, MachineSpec
 from .job_store import JobStore
 from .task_store import TaskStore
 from .job_queue import JobQueue
-from typing import List, Dict, DefaultDict, Optional
+from typing import List, Dict, DefaultDict, Optional, Set
 from collections import defaultdict
 from google.cloud import datastore
 import time
@@ -35,6 +35,7 @@ import os
 from .util import get_timestamp
 from .datastore_batch import Batch
 from abc import abstractmethod
+from .model import PersistentDiskMount
 
 from .log import log
 from googleapiclient.errors import HttpError
@@ -50,8 +51,7 @@ CONSUMER_ACTION_ID = 2
 
 class ClusterStatus:
     def __init__(self, instances: List[dict]) -> None:
-        # type: DefaultDict[str, int]
-        instances_per_key = defaultdict(lambda: 0)
+        instances_per_key: DefaultDict[str, int] = defaultdict(lambda: 0)
 
         running_count = 0
         for instance in instances:
@@ -134,7 +134,7 @@ class Cluster:
             else NODE_REQ_CLASS_NORMAL,
             sequence=get_timestamp(),
             job_id=job_id,
-            instance_name=None
+            instance_name=None,
         )
         self.node_req_store.add_node_req(req)
         log.info(
@@ -153,15 +153,17 @@ class Cluster:
                 return True
         return False
 
-    def ensure_named_volumes_exist(pd_mounts : List[PersistentDiskMount):
+    def ensure_named_volumes_exist(self, zone, pd_mounts: List[PersistentDiskMount]):
         for pd_mount in pd_mounts:
             if pd_mount.name is None:
                 continue
             volume = self.compute.get_volume_details(zone, pd_mount.name)
             if volume is None:
                 print(f"Creating volume {pd_mount.name}")
-                self.compute.create_volume(zone, pd_mount.type, pd_mount.size, pd_mount.name)
-            
+                self.compute.create_volume(
+                    zone, pd_mount.type, pd_mount.size_in_gb, pd_mount.name
+                )
+
     def stop_cluster(self, cluster_name: str):
         node_reqs = self.node_req_store.get_node_reqs(cluster_name)
         for i, node_req in enumerate(node_reqs):
@@ -375,7 +377,7 @@ class ClusterState:
         self.node_req_store = node_req_store
         self.task_store = task_store
         self.failed_node_req_count = 0
-        self.unknown_instance_names = set()
+        self.unknown_instance_names: Set[str] = set()
         # self.add_node_statuses = [] # type: List[AddNodeStatus]
 
     def update(self):

@@ -2,7 +2,18 @@ from google.cloud import datastore
 from typing import Set, Any, List
 
 
-class Batch:
+class Batcher:
+    def delete(self, key) -> None:
+        raise NotImplementedError()
+
+    def put(self, entity) -> None:
+        raise NotImplementedError()
+
+    def flush(self) -> None:
+        raise NotImplementedError()
+
+
+class Batch(Batcher):
     def __init__(self, client: datastore.Client, batch_size: int = 300) -> None:
         self.deletes = set()  # type: Set[Any]
         self.puts = []  # type: List[Any]
@@ -30,7 +41,7 @@ class Batch:
             self.client.put_multi(batch)
 
 
-class ImmediateBatch:
+class ImmediateBatch(Batcher):
     def __init__(self, client):
         self.client = client
 

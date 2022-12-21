@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import List
+from typing import List, Optional, Dict
 import re
 import json
 import csv
@@ -65,7 +65,7 @@ def list_tasks(
     io: IO,
     job_id: str,
     params_only: bool,
-    fields: List[str],
+    fields: Optional[List[str]],
     filter_expressions: List[str],
     output_mode: str,
     output_filename: str,
@@ -143,7 +143,9 @@ def _get(d: dict, path: str):
         if d is None:
             return None
         assert isinstance(d, dict)
-        d = d.get(e)
+        d2 = d.get(e)
+        assert isinstance(d2, dict)
+        d = d2
     return d
 
 
@@ -157,7 +159,7 @@ def _set(d: dict, path: str, value: str):
 
 
 def project(d: dict, fields: List[str]):
-    result = {}
+    result: Dict[str, str] = {}
     for field in fields:
         _set(result, field, _get(d, field))
     return result
@@ -256,9 +258,11 @@ def list_nodes_cmd(jq: JobQueue, cluster: Cluster, io, args):
     fields = None
     if args.fields is not None:
         fields = args.fields.split(",")
-    filters = []
+
+    filters: List[str] = []
     if args.filters is not None:
         filters = args.filters
+        assert isinstance(filters, list)
 
     job = jq.get_job(job_id)
     cluster_id = job.cluster
@@ -280,7 +284,7 @@ def list_nodes(
     node_req_store,
     io: IO,
     job_id: str,
-    fields: List[str],
+    fields: Optional[List[str]],
     filter_expressions: List[str],
     output_mode: str,
     output_filename: str,

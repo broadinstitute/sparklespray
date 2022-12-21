@@ -1,5 +1,5 @@
 from google.cloud import datastore
-
+from typing import Optional
 import random
 import string
 
@@ -10,7 +10,7 @@ class KeyStore:
     def __init__(self, client: datastore.Client) -> None:
         self.client = client
 
-    def get_cert_and_key(self) -> Tuple[bytes, bytes]:
+    def get_cert_and_key(self) -> Tuple[Optional[bytes], Optional[bytes]]:
         entity_key = self.client.key("ClusterKeys", "sparklespray")
         entity = self.client.get(entity_key)
         if entity is None:

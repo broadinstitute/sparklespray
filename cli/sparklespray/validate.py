@@ -17,37 +17,32 @@ def _test_datastore_api(job_store: JobStore, job_id: str):
         job_id=job_id,
         tasks=[],
         kube_job_spec=None,
-        metadata={},
+        metadata="",
         cluster=job_id,
         status=JOB_STATUS_KILLED,
-        submit_time=time.time(),
+        submit_time="",
         max_preemptable_attempts=2,
     )
 
     job_store.insert(job)
     fetched_job = job_store.get_job(job_id)
+    assert isinstance(fetched_job, Job)
     assert fetched_job.job_id == job_id
     job_store.delete(job_id)
 
 
-def validate_cmd(jq: JobQueue, io: IO, cluster: Cluster, config: dict):
+from .config import Config
+
+
+def validate_cmd(jq: JobQueue, io: IO, cluster: Cluster, config: Config):
     from .submit import _get_boot_volume_in_gb
 
     print(f"Validating config, using sparklespray {sparklespray.__version__}")
 
-    service_acct = config.get("credentials").service_account_email
-    # censor the credential
-    class Censored:
-        def __repr__(self):
-            return "<Censored>"
-
-    config_copy = dict(config)
-    if "credentials" in config_copy:
-        config_copy["credentials"] = Censored()
+    service_acct = config.credentials.service_account_email
     print("Printing config:")
-    pprint.pprint(config_copy)
-
-    project_id = config["project"]
+    pprint.pprint(config)
+    project_id = config.project
 
     print(f"Verifying we can access google cloud storage.")
     print(
@@ -67,7 +62,7 @@ def validate_cmd(jq: JobQueue, io: IO, cluster: Cluster, config: dict):
     print("Verifying we can access google genomics apis")
     cluster.test_pipeline_api()
 
-    default_image = config["default_image"]
+    default_image = config.image
 
     # m = re.match(r"(?:[^.]+.)gcr\.io/([^/])/.*")
 
@@ -75,10 +70,10 @@ def validate_cmd(jq: JobQueue, io: IO, cluster: Cluster, config: dict):
     print(
         f'If this fails due to "permission denied", make sure that {service_acct} has been granted access to pull the docker image "{default_image}". You may need to explictly grant access via "sparkles grant" if the docker repo is owned by a different project than {project_id}.'
     )
-    logging_url = config["default_url_prefix"] + "/node-logs"
+    logging_url = config.default_url_prefix + "/node-logs"
 
     cluster.test_image(
-        config["default_image"],
+        config.image,
         sample_url,
         logging_url,
         _get_boot_volume_in_gb(config),

@@ -14,7 +14,7 @@ from .task_store import (
 )
 from .util import get_timestamp, url_join
 from .job_store import JOB_STATUS_KILLED
-from .job_queue import JobQueue
+from .job_queue import JobQueue, Job
 from .cluster_service import Cluster
 from .io import IO
 from .watch import watch
@@ -24,7 +24,7 @@ from .validate import validate_cmd
 import csv
 import argparse
 
-from .config import get_config_path, load_config, load_only_config_dict
+from .config import get_config_path, load_config
 
 from .log import log
 from . import txtui
@@ -54,7 +54,7 @@ def show_cmd(jq: JobQueue, io: IO, args):
     if args.incomplete:
         tasks = []
         for status in [STATUS_FAILED, STATUS_CLAIMED, STATUS_PENDING, STATUS_KILLED]:
-            tasks.extend(jq.get_tasks(jobid, status=status))
+            tasks.extend(jq.task_storage.get_tasks(jobid, status=status))
     else:
         tasks = jq.task_storage.get_tasks(jobid)
 
@@ -165,7 +165,6 @@ def reset_cmd(jq: JobQueue, io: IO, cluster: Cluster, args):
 
             cluster.cleanup_node_reqs(jobid)
             log.info("Cleaned up old node requests")
-
 
 
 def _summarize_task_statuses(tasks):
@@ -442,6 +441,7 @@ def clean(
         if not force_pending:
             # Check to not remove tasks that are pending (waiting to be claimed)
             job = cluster.job_store.get_job(job_id)
+            assert isinstance(job, Job)
             tasks = cluster.task_store.get_tasks(job_id, status=STATUS_PENDING)
             nb_tasks_pending = len(tasks)
             if nb_tasks_pending > 0 and cluster.has_active_node_requests(job.cluster):

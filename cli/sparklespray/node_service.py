@@ -180,7 +180,7 @@ class NodeService:
         response = request.execute()
         return response
 
-    def get_add_node_status(self, operation_name: str) -> AddNodeStatus:
+    def get_add_node_status(self, operation_name: str) -> Optional[AddNodeStatus]:
         try:
             response = self.get_operation_details(operation_name)
         except googleapiclient.errors.HttpError as e:
@@ -215,7 +215,6 @@ class NodeService:
                 "flags": ["ALWAYS_RUN"],
             }
             pipeline_def["pipeline"]["actions"].append(cp_action)
-        # print(json.dumps(pipeline_def, indent=2))
 
         # Run the pipeline
         operation = self.service.pipelines().run(body=pipeline_def).execute()
@@ -307,21 +306,23 @@ class NodeService:
         normalized_jobid = _normalize_label(jobid)
 
         mounts = []
-        for i, x in enumerate(machine_specs.ssd_mount_points):
+        for i, ssd in enumerate(machine_specs.ssd_mount_points):
             mounts.append(
-            {
-                "disk": f"ephemeralssd{i}",
-                "path": x,
-                "readOnly": False,
-            })
+                {
+                    "disk": f"ephemeralssd{i}",
+                    "path": ssd,
+                    "readOnly": False,
+                }
+            )
 
-        for i, x in enumerate(machine_specs.pd_mount_points):
-            mounts.append( 
-            {
-                "disk": f"pddisk{i}",
-                "path": x.path,
-                "readOnly": False,
-            })
+        for i, pd in enumerate(machine_specs.pd_mount_points):
+            mounts.append(
+                {
+                    "disk": f"pddisk{i}",
+                    "path": pd.path,
+                    "readOnly": False,
+                }
+            )
 
         # TODO: fix this to support mounting named volumes
         disks = [

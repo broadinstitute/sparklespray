@@ -4,7 +4,7 @@ import logging
 import contextlib
 import json
 from .logclient import LogMonitor, CommunicationError
-from typing import Callable
+from typing import Callable, Optional
 from .cluster_service import ClusterState
 from .txtui import print_log_content
 import datetime
@@ -29,6 +29,7 @@ from .io import IO
 from .job_queue import JobQueue
 from .cluster_service import Cluster
 from . import txtui
+from .job_store import Job
 
 from .log import log
 from .txtui import user_print
@@ -67,7 +68,9 @@ def watch_cmd(jq: JobQueue, io: IO, cluster: Cluster, config, args):
     if args.verify:
         check_completion(jq, io, jobid)
 
-    max_preemptable_attempts_scale = int(config.get("max_preemptable_attempts_scale", "2"))
+    max_preemptable_attempts_scale = int(
+        config.get("max_preemptable_attempts_scale", "2")
+    )
 
     watch(
         io,
@@ -77,7 +80,7 @@ def watch_cmd(jq: JobQueue, io: IO, cluster: Cluster, config, args):
         target_nodes=args.nodes,
         loglive=args.loglive,
         preemptible=get_preemptible_from_config(config),
-        max_preemptable_attempts_scale=max_preemptable_attempts_scale
+        max_preemptable_attempts_scale=max_preemptable_attempts_scale,
     )
 
 
@@ -106,6 +109,7 @@ def print_error_lines(lines):
     for line in lines:
         print(colored(line, "red"))
 
+
 def flush_stdout_from_complete_task(jq, io, task_id, offset):
     task = jq.task_storage.get_task(task_id)
     spec = json.loads(io.get_as_str(task.args))
@@ -129,6 +133,7 @@ def flush_stdout_from_complete_task(jq, io, task_id, offset):
 
 from .startup_failure_tracker import StartupFailureTracker
 
+
 def _watch(
     job_id: str,
     state: ClusterState,
@@ -137,7 +142,7 @@ def _watch(
     loglive: bool,
     cluster: Cluster,
     poll_cluster: Callable[[], None],
-    flush_stdout_from_complete_task: Callable[[str, int], None] = None,
+    flush_stdout_from_complete_task: Optional[Callable[[str, int], None]] = None,
 ):
     log_monitor = None
     prev_summary = None
@@ -165,7 +170,9 @@ def _watch(
             # if the status hasn't changed since last time then slow down polling
             poll_delay = min(poll_delay * 1.5, max_poll_delay)
 
-        startup_failure_tracker.update(time.time(), state.tasks, state.get_completed_node_names())
+        startup_failure_tracker.update(
+            time.time(), state.tasks, state.get_completed_node_names()
+        )
         if startup_failure_tracker.is_too_many_failures(time.time()):
             raise TooManyNodeFailures()
 
@@ -276,10 +283,12 @@ def local_watch(
     loglive = True
 
     job = cluster.job_store.get_job(job_id)
+    assert isinstance(job, Job)
 
     state = cluster.get_state(job_id)
     state.update()
 
+    assert isinstance(job.kube_job_spec, str)
     proc = start_docker_process(job.kube_job_spec, consume_exe, work_dir)
 
     def poll_cluster():
@@ -326,7 +335,7 @@ def watch(
     max_poll_delay=30.0,
     loglive=None,
     preemptible=True,
-    max_preemptable_attempts_scale=2
+    max_preemptable_attempts_scale=2,
 ):
     job = jq.get_job(job_id)
     flush_stdout_calls = [0]
@@ -424,6 +433,7 @@ def watch(
     except KeyboardInterrupt:
         print("Interrupted -- Exiting, but your job will continue to run unaffected.")
         return 20
+
 
 def check_completion(jq: JobQueue, io: IO, job_id: str):
     successful_count = 0

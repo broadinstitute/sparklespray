@@ -8,7 +8,7 @@ import re
 import hashlib
 import time
 import json
-from typing import List
+from typing import List, Optional
 import logging
 from .datastore_batch import ImmediateBatch, Batch
 from dataclasses import dataclass
@@ -25,30 +25,30 @@ INCOMPLETE_TASK_STATES = set([STATUS_CLAIMED, STATUS_PENDING])
 
 @dataclass
 class TaskHistory:
-    timestamp :str
-    status :str
-    owner :str = None
-    failure_reason :str = None
+    timestamp: str
+    status: str
+    owner: Optional[str] = None
+    failure_reason: Optional[str] = None
 
 
 @dataclass
 class Task(object):
     # will be of the form: job_id + task_index
-    task_id :str
+    task_id: str
 
-    task_index :int
-    job_id :str
-    status  :str  # one of: pending, claimed, success, failed, lost
-    owner  :str
-    monitor_address :str
-    args  :str
-    history  :List  # list of TaskHistory
-    command_result_url :str
-    cluster :str
-    log_url :str
-    failure_reason  :str = None
-    version :int = 1
-    exit_code : int = None
+    task_index: int
+    job_id: str
+    status: str  # one of: pending, claimed, success, failed, lost
+    owner: str
+    monitor_address: str
+    args: str
+    history: List  # list of TaskHistory
+    command_result_url: str
+    cluster: str
+    log_url: str
+    failure_reason: Optional[str] = None
+    version: int = 1
+    exit_code: Optional[int] = None
 
     def get_instance_name(self):
         owner = self.owner
@@ -59,10 +59,10 @@ class Task(object):
 
 @dataclass
 class TaskStatus(object):
-    node_status :str
-    node :str
-    task :str
-    operation_id :str
+    node_status: str
+    node: str
+    task: str
+    operation_id: str
 
 
 def task_to_entity(client, o):

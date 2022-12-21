@@ -15,17 +15,18 @@ from .log import log
 
 from dataclasses import dataclass
 
+
 @dataclass
 class Job:
-    job_id : str
-    tasks : List
-    kube_job_spec : str
-    metadata : str
-    cluster : str
-    status : str
-    submit_time : str
-    max_preemptable_attempts : int
-    target_node_count : int = 1
+    job_id: str
+    tasks: List
+    kube_job_spec: Optional[str]
+    metadata: str
+    cluster: str
+    status: str
+    submit_time: str
+    max_preemptable_attempts: int
+    target_node_count: int = 1
 
 
 JOB_STATUS_SUBMITTED = "submitted"

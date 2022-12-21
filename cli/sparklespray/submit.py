@@ -254,7 +254,8 @@ def submit(
             gpu_type=config.gpu_type,
         )
 
-        cluster.ensure_named_volumes_exist(config.pd_mount_points)
+        assert len(config.zones) == 1
+        cluster.ensure_named_volumes_exist(config.zones[0], config.pd_mount_points)
 
         pipeline_spec = cluster.create_pipeline_spec(
             jobid=job_id,
@@ -270,7 +271,9 @@ def submit(
         max_preemptable_attempts = 0
         if preemptible:
             assert config.max_preemptable_attempts_scale >= 1
-            max_preemptable_attempts = config.target_node_count * config.max_preemptable_attempts_scale
+            max_preemptable_attempts = (
+                config.target_node_count * config.max_preemptable_attempts_scale
+            )
 
         jq.submit(
             job_id,
@@ -647,7 +650,9 @@ def submit_cmd(jq, io, cluster, args, config):
     kubequeconsume_exe_url = io.generate_signed_url(kubequeconsume_exe_obj_path)
     log.info("kubeconsume at %s", kubequeconsume_exe_url)
 
-    max_preemptable_attempts_scale = int(config.get("max_preemptable_attempts_scale", "2"))
+    max_preemptable_attempts_scale = int(
+        config.get("max_preemptable_attempts_scale", "2")
+    )
 
     ssd_mount_points = []
     pd_mount_points = []
@@ -659,10 +664,14 @@ def submit_cmd(jq, io, cluster, args, config):
         mount_size_in_gb = config.get(f"mount_{i+1}_size_in_gb")
         if mount_type == "local-ssd":
             assert mount_name is None, "local SSDs are not allowed to have names"
-            assert mount_size_in_gb is None, "local SSDs are not allowed to have size choosen"
+            assert (
+                mount_size_in_gb is None
+            ), "local SSDs are not allowed to have size choosen"
             ssd_mount_points.append(mount_path)
         else:
-            pd_mount_points.append(PersistentDiskMount(mount_name, mount_path, mount_size_in_gb))
+            pd_mount_points.append(
+                PersistentDiskMount(mount_name, mount_path, mount_size_in_gb)
+            )
 
     submit_config = SubmitConfig(
         service_account_email=config.get("credentials").service_account_email,
@@ -682,7 +691,7 @@ def submit_cmd(jq, io, cluster, args, config):
         gpu_count=gpu_count,
         gpu_type=gpu_type,
         target_node_count=target_node_count,
-        max_preemptable_attempts_scale=max_preemptable_attempts_scale
+        max_preemptable_attempts_scale=max_preemptable_attempts_scale,
     )
 
     cluster_name = None

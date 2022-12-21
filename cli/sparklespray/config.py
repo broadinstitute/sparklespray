@@ -2,7 +2,7 @@ import logging
 import os
 import sys
 
-
+from .model import PersistentDiskMount
 from .io import IO
 from configparser import RawConfigParser, NoSectionError, NoOptionError
 from .cluster_service import Cluster
@@ -14,14 +14,90 @@ from google.cloud import datastore
 from .util import url_join
 from google.oauth2 import service_account
 from .txtui import log
+from typing import List, Optional
+import dataclasses
+from google.auth.credentials import Credentials
+
 
 class BadConfig(Exception):
     pass
+
 
 SCOPES = [
     "https://www.googleapis.com/auth/genomics",
     "https://www.googleapis.com/auth/cloud-platform",
 ]
+
+
+from dataclasses import dataclass
+
+
+@dataclass
+class PrepConfig:
+    sparkles_config_path: Optional[str] = None
+    image: Optional[str] = None
+    machine_type: Optional[str] = None
+    cas_url_prefix: Optional[str] = None
+    default_url_prefix: Optional[str] = None
+    kubequeconsume_exe_path: Optional[str] = None
+    project: Optional[str] = None
+    zones: Optional[List[str]] = None
+    region: Optional[str] = None
+    account: Optional[str] = None
+    service_account_key: Optional[str] = None
+    credentials: Optional[str] = None
+    boot_volume_in_gb: Optional[int] = None
+    local_work_dir: Optional[int] = None
+    max_preemptable_attempts_scale: Optional[int] = None
+    mounts: Optional[List[PersistentDiskMount]] = None
+    debug_log_prefix: Optional[str] = None
+
+
+@dataclass
+class Config:
+    sparkles_config_path: str
+    image: str
+    machine_type: str
+    cas_url_prefix: str
+    default_url_prefix: str
+    kubequeconsume_exe_path: str
+    project: str
+    zones: List[str]
+    region: str
+    account: str
+    service_account_key: str
+    boot_volume_in_gb: int
+    local_work_dir: int
+    max_preemptable_attempts_scale: int
+    mount: str
+    debug_log_prefix: str
+    credentials: Credentials = dataclasses.field(repr=False)
+
+
+class ConfigAdapter:
+    def __init__(self):
+        pass
+
+    #        self.config
+
+    def _safe_get(config, section, key, default=None):
+        try:
+            return config.get(section, key)
+        except NoSectionError:
+            return default
+        except NoOptionError:
+            return default
+
+
+NO_DEFAULT = object()
+
+
+@dataclass
+class GCloudConfig:
+    zones: List[str] = []
+    account: Optional[str] = None
+    region: Optional[str] = None
+    project: Optional[str] = None
 
 
 def _safe_get(config, section, key, default=None):
@@ -33,30 +109,33 @@ def _safe_get(config, section, key, default=None):
         return default
 
 
-def load_only_config_dict(
-    config_file,
-    gcloud_config_file="~/.config/gcloud/configurations/config_default",
-    verbose=False,
-):
+def _parse_gcloud_config(gcloud_config_file: str, verbose: bool) -> GCloudConfig:
+    gcloud_config = RawConfigParser()
+    gcloud_config.read(gcloud_config_file)
+    zone = _safe_get(gcloud_config, "compute", "zone")
+    zones = []
+    if zone:
+        zones.append(zone)
+    account = _safe_get(gcloud_config, "core", "account")
+    project = _safe_get(gcloud_config, "core", "project")
+    region = _safe_get(gcloud_config, "compute", "region")
+
+    config = GCloudConfig(zones=zones, account=account, region=region, project=project)
+    if verbose:
+        print("Using defaults from {}: {}".format(gcloud_config_file, config))
+    return config
+
+
+def load_config(
+    config_file: str,
+    gcloud_config_file: str = "~/.config/gcloud/configurations/config_default",
+    verbose: bool = False,
+) -> Config:
 
     # first load defaults from gcloud config
     gcloud_config_file = os.path.expanduser(gcloud_config_file)
-    defaults = {}
     if os.path.exists(gcloud_config_file):
-        gcloud_config = RawConfigParser()
-        gcloud_config.read(gcloud_config_file)
-        zone = _safe_get(gcloud_config, "compute", "zone")
-        zones = []
-        if zone:
-            zones.append(zone)
-        defaults = dict(
-            account=_safe_get(gcloud_config, "core", "account"),
-            project=_safe_get(gcloud_config, "core", "project"),
-            zones=zone,
-            region=_safe_get(gcloud_config, "compute", "region"),
-        )
-        if verbose:
-            print("Using defaults from {}: {}".format(gcloud_config_file, defaults))
+        gcloud_config = _parse_gcloud_config(gcloud_config_file, verbose)
 
     config_file = get_config_path(config_file)
     config_file = os.path.expanduser(config_file)
@@ -64,23 +143,33 @@ def load_only_config_dict(
     if verbose:
         print("Using config: {}".format(config_file))
 
-    config = RawConfigParser()
-    config.read(config_file)
-    config_from_file = dict(config.items("config"))
-    if "zones" in config_from_file:
-        config_from_file["zones"] = [
-            x.strip() for x in config_from_file["zones"].split(",")
-        ]
+    config_parser = RawConfigParser()
+    config_parser.read(config_file)
+    config_dict = dict(config_parser.items("config"))
 
-    merged_config = dict(defaults)
-    merged_config.update(config_from_file)
-    merged_config["sparkles_config_path"] = config_file
+    def consume(name, default=NO_DEFAULT, parser=str):
+        if name in config_dict:
+            value = parser(config_dict[name])
+            del config_dict[name]
+        else:
+            if default is NO_DEFAULT:
+                raise BadConfig(f"Missing {name} in config")
+            else:
+                value = default
+        return value
+
+    config = PrepConfig()
+    config.zones = consume(
+        "zones",
+        default=gcloud_config.zones,
+        parser=lambda value: [x.strip() for x in value.split(",")],
+    )
+    config.sparkles_config_path = config_file
 
     for unused_property in ["default_resource_cpu", "default_resource_memory"]:
-        if unused_property in merged_config:
-            log.warning(
-                "'%s' in config file but no longer used. Use 'machine_type' instead",
-                unused_property,
+        if unused_property in config_dict:
+            raise BadConfig(
+                "'{unused_property}' in config file but no longer used. Use 'machine_type' instead"
             )
 
     missing_values = []
@@ -94,102 +183,115 @@ def load_only_config_dict(
         "account",
     ]
     for property in required_properties:
-        if (
-            property not in merged_config
-            or merged_config[property] == ""
-            or merged_config[property] is None
-        ):
+        value = None
+        if property in config_dict:
+            value = consume(property)
+        else:
+            if hasattr(gcloud_config, property):
+                value = getattr(gcloud_config, property)
+
+        if value == "" or value is None:
             missing_values.append(property)
 
     if len(missing_values) > 0:
         raise BadConfig(
-            "Missing the following parameters in {}: {}".format(
-                config_file, ", ".join(missing_values)
+            "Missing the following required parameters in {config_file}: {', '.join(missing_values)}"
+        )
+
+    config.kubequeconsume_exe_path = consume(
+        "kubequeconsume_exe_path",
+        os.path.join(os.path.dirname(__file__), "bin/kubequeconsume"),
+    )
+    assert config.default_url_prefix is not None
+    config.cas_url_prefix = consume(
+        "cas_url_prefix", config.default_url_prefix + "/CAS/"
+    )
+
+    assert isinstance(config.zones, list)
+
+    config.service_account_key = consume(
+        "service_account_key",
+        default=os.path.expanduser(
+            f"~/.sparkles-cache/service-keys/{config.project}.json",
+        ),
+    )
+
+    config.max_preemptable_attempts_scale = consume(
+        "max_preemptable_attempts_scale", 2, int
+    )
+
+    #    config.
+    #    allowed_parameters = set(
+    #        [
+    #            "default_image",
+    #            "machine_type",
+    #            "cas_url_prefix",
+    #            "default_url_prefix",
+    #            "kubequeconsume_exe_path",
+    #            "project",
+    #            "zones",
+    #            "region",
+    #            "account",
+    #            "service_account_key",
+    #            "credentials",
+    #            "bootdisksizegb",  # deprecated name, replaced with boot_volume_in_gb
+    #            "boot_volume_in_gb",
+    #            "preemptible",
+    #            "local_work_dir",
+    #            "mount",
+    #            "sparkles_config_path",
+    #            "mount_count",
+    #            "pd_volume_in_gb",
+    #            "max_preemptable_attempts_scale"
+    #        ]
+    #    )
+
+    mount_count = consume("mount_count", 1, int)
+    mounts = []
+    for i in range(mount_count):
+        path = consume(f"mount_{i+1}_path")
+        type = consume(f"mount_{i+1}_type")
+        name = consume(f"mount_{i+1}_name", None)
+        size_in_gb = consume(f"mount_{i+1}_size_in_gb")
+        mounts.append(
+            PersistentDiskMount(path=path, type=type, name=name, size_in_gb=size_in_gb)
+        )
+
+    config.mounts = mounts
+
+    config.debug_log_prefix = consume(
+        "debug_log_prefix", url_join(consume("default_url_prefix"), "node-logs")
+    )
+
+    unknown_parameters = config_dict.keys()
+    if len(unknown_parameters) != 0:
+        raise BadConfig(
+            "The following parameters in config are unrecognized: {}".format(
+                ", ".join(unknown_parameters)
             )
         )
 
-    if "kubequeconsume_exe_path" not in merged_config:
-        merged_config["kubequeconsume_exe_path"] = os.path.join(
-            os.path.dirname(__file__), "bin/kubequeconsume"
-        )
-        assert os.path.exists(merged_config["kubequeconsume_exe_path"])
-
-    if "cas_url_prefix" not in merged_config:
-        merged_config["cas_url_prefix"] = merged_config["default_url_prefix"] + "/CAS/"
-
-    assert isinstance(merged_config["zones"], list)
-
-    project_id = merged_config["project"]
-    service_account_key = os.path.expanduser(
-        merged_config.get(
-            "service_account_key", f"~/.sparkles-cache/service-keys/{project_id}.json"
-        )
-    )
-    merged_config["service_account_key"] = service_account_key
-
-    return merged_config
+    return Config(**dataclasses.asdict(config))
 
 
-def load_config(config_file):
-    merged_config = load_only_config_dict(config_file)
-    service_account_key = merged_config["service_account_key"]
+def create_services(config_file: str):
+    config = load_config(config_file)
+    service_account_key = config.service_account_key
     if not os.path.exists(service_account_key):
         raise Exception("Could not find service account key at %s", service_account_key)
 
-    merged_config[
-        "credentials"
-    ] = service_account.Credentials.from_service_account_file(
+    config.credentials = service_account.Credentials.from_service_account_file(
         service_account_key, scopes=SCOPES
     )
 
-    jq, io, cluster = load_config_from_dict(merged_config)
-    return merged_config, jq, io, cluster
+    jq, io, cluster = create_services_from_config(config)
+    return config, jq, io, cluster
 
 
-def load_config_from_dict(config):
-    allowed_parameters = set(
-        [
-            "default_image",
-            "machine_type",
-            "cas_url_prefix",
-            "default_url_prefix",
-            "kubequeconsume_exe_path",
-            "project",
-            "zones",
-            "region",
-            "account",
-            "service_account_key",
-            "credentials",
-            "bootdisksizegb",  # deprecated name, replaced with boot_volume_in_gb
-            "boot_volume_in_gb",
-            "preemptible",
-            "local_work_dir",
-            "gpu_count",
-            "gpu_type",
-            "mount",
-            "sparkles_config_path",
-            "mount_count",
-            "pd_volume_in_gb",
-            "max_preemptable_attempts_scale"
-        ]
-    )
-
-    mount_count = int(config.get("mount_count", "1"))
-    for i in range(ssd_mount_count):
-        allowed_parameters.add(f"mount_{i+1}_path")
-        allowed_parameters.add(f"mount_{i+1}_type")
-        allowed_parameters.add(f"mount_{i+1}_name")
-
-    unknown_parameters = set(config.keys()).difference(allowed_parameters)
-    assert (
-        len(unknown_parameters) == 0
-    ), "The following parameters in config are unrecognized: {}".format(
-        ", ".join(unknown_parameters)
-    )
-
-    credentials = config["credentials"]
-    project_id = config["project"]
-    io = IO(project_id, config["cas_url_prefix"], credentials)
+def create_services_from_config(config: Config):
+    credentials = config.credentials
+    project_id = config.project
+    io = IO(project_id, config.cas_url_prefix, credentials)
 
     client = datastore.Client(project_id, credentials=credentials)
     job_store = JobStore(client)
@@ -197,12 +299,11 @@ def load_config_from_dict(config):
     jq = JobQueue(client, job_store, task_store)
 
     node_req_store = AddNodeReqStore(client)
-    debug_log_prefix = config.get(
-        "debug_log_prefix", url_join(config["default_url_prefix"], "node-logs")
-    )
+    debug_log_prefix = config.debug_log_prefix
+
     cluster = Cluster(
-        config["project"],
-        config["zones"],
+        config.project,
+        config.zones,
         node_req_store=node_req_store,
         job_store=job_store,
         task_store=task_store,

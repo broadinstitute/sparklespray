@@ -6,6 +6,7 @@ class PersistentDiskMount(BaseModel):
     name: str
     path: str
     size_in_gb: int
+    type: str
 
 
 class SubmitConfig(BaseModel):
@@ -26,8 +27,7 @@ class SubmitConfig(BaseModel):
     gpu_count: int
     gpu_type: Optional[str]
     target_node_count: int
-    max_preemptable_attempts_scale : int
-
+    max_preemptable_attempts_scale: int
 
 
 class MachineSpec(BaseModel):
