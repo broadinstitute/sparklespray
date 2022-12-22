@@ -7,7 +7,7 @@ import os
 import re
 import hashlib
 import json
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Dict
 from .task_store import task_to_entity
 from .datastore_batch import ImmediateBatch, Batch
 
@@ -21,10 +21,10 @@ class Job:
     job_id: str
     tasks: List
     kube_job_spec: Optional[str]
-    metadata: str
+    metadata: Dict[str, str]
     cluster: str
     status: str
-    submit_time: str
+    submit_time: float
     max_preemptable_attempts: int
     target_node_count: int = 1
 

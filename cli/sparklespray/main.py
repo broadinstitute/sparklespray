@@ -24,7 +24,7 @@ from .validate import validate_cmd
 import csv
 import argparse
 
-from .config import get_config_path, load_config
+from .config import get_config_path, load_config, create_services, Config
 
 from .log import log
 from . import txtui
@@ -309,7 +309,7 @@ def status_cmd(jq: JobQueue, io: IO, cluster: Cluster, args):
 #            pdb.set_trace()
 
 
-def fetch_cmd(jq, io, args):
+def fetch_cmd(jq : JobQueue, io : IO, args):
     jobid = _resolve_jobid(jq, args.jobid)
     if args.dest is None:
         dest = jobid
@@ -318,13 +318,13 @@ def fetch_cmd(jq, io, args):
     fetch_cmd_(jq, io, jobid, dest, flat=args.flat)
 
 
-def fetch_cmd_(jq, io, jobid, dest_root, force=False, flat=False):
+def fetch_cmd_(jq: JobQueue, io :IO, jobid : str, dest_root : str, force=False, flat=False):
     def get(src, dst, **kwargs):
         if os.path.exists(dst) and not force:
             log.warning("%s exists, skipping download", dst)
         return io.get(src, dst, **kwargs)
 
-    tasks = jq.get_tasks(jobid)
+    tasks = jq.task_storage.get_tasks(jobid)
 
     if not os.path.exists(dest_root):
         os.mkdir(dest_root)
@@ -527,21 +527,21 @@ def dump_operation_cmd(cluster: Cluster, args):
     print(json.dumps(operation, indent="  "))
 
 
-def grant_cmd(args, config):
+def grant_cmd(args, config : Config):
     credentials = config
     role = args.role
     project_id = args.project
-    service_acct = config.get("credentials").service_account_email
+    service_acct = config.credentials.service_account_email
     grant(service_acct, project_id, role)
 
 
-def setup_cmd(args, config):
-    default_url_prefix = config["default_url_prefix"]
+def setup_cmd(args, config : Config):
+    default_url_prefix = config.default_url_prefix
     m = re.match("^gs://([^/]+)(?:/.*)?$", default_url_prefix)
-    assert m != None, "invalid remote path: {}".format(default_url_prefix)
+    assert m is not None, "invalid remote path: {}".format(default_url_prefix)
     bucket_name = m.group(1)
 
-    setup_project(config["project"], config["service_account_key"], bucket_name)
+    setup_project(config.project, config.service_account_key, bucket_name)
 
 
 def sparkles_main():
@@ -746,7 +746,7 @@ def main(argv=None):
             len(set(["config", "jq", "io", "cluster"]).intersection(func_param_names))
             > 0
         ):
-            config, jq, io, cluster = load_config(args.config)
+            config, jq, io, cluster = create_services(args.config)
         func_params = {}
         if "args" in func_param_names:
             func_params["args"] = args

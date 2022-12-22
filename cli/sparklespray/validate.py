@@ -17,10 +17,10 @@ def _test_datastore_api(job_store: JobStore, job_id: str):
         job_id=job_id,
         tasks=[],
         kube_job_spec=None,
-        metadata="",
+        metadata={},
         cluster=job_id,
         status=JOB_STATUS_KILLED,
-        submit_time="",
+        submit_time=time.time(),
         max_preemptable_attempts=2,
     )
 
@@ -62,7 +62,7 @@ def validate_cmd(jq: JobQueue, io: IO, cluster: Cluster, config: Config):
     print("Verifying we can access google genomics apis")
     cluster.test_pipeline_api()
 
-    default_image = config.image
+    default_image = config.default_image
 
     # m = re.match(r"(?:[^.]+.)gcr\.io/([^/])/.*")
 
@@ -73,7 +73,7 @@ def validate_cmd(jq: JobQueue, io: IO, cluster: Cluster, config: Config):
     logging_url = config.default_url_prefix + "/node-logs"
 
     cluster.test_image(
-        config.image,
+        config.default_image,
         sample_url,
         logging_url,
         _get_boot_volume_in_gb(config),

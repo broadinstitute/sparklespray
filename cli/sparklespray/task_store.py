@@ -25,7 +25,7 @@ INCOMPLETE_TASK_STATES = set([STATUS_CLAIMED, STATUS_PENDING])
 
 @dataclass
 class TaskHistory:
-    timestamp: str
+    timestamp: float
     status: str
     owner: Optional[str] = None
     failure_reason: Optional[str] = None
@@ -39,8 +39,8 @@ class Task(object):
     task_index: int
     job_id: str
     status: str  # one of: pending, claimed, success, failed, lost
-    owner: str
-    monitor_address: str
+    owner: Optional[str]
+    monitor_address: Optional[str]
     args: str
     history: List  # list of TaskHistory
     command_result_url: str

@@ -14,7 +14,7 @@ from google.cloud import datastore
 from .util import url_join
 from google.oauth2 import service_account
 from .txtui import log
-from typing import List, Optional
+from typing import List, Optional, Tuple
 import dataclasses
 from google.auth.credentials import Credentials
 
@@ -22,6 +22,11 @@ from google.auth.credentials import Credentials
 class BadConfig(Exception):
     pass
 
+class MissingRequired(BadConfig):
+    pass
+
+class UnknownParameters(BadConfig):
+    pass
 
 SCOPES = [
     "https://www.googleapis.com/auth/genomics",
@@ -35,7 +40,7 @@ from dataclasses import dataclass
 @dataclass
 class PrepConfig:
     sparkles_config_path: Optional[str] = None
-    image: Optional[str] = None
+    default_image: Optional[str] = None
     machine_type: Optional[str] = None
     cas_url_prefix: Optional[str] = None
     default_url_prefix: Optional[str] = None
@@ -47,7 +52,7 @@ class PrepConfig:
     service_account_key: Optional[str] = None
     credentials: Optional[str] = None
     boot_volume_in_gb: Optional[int] = None
-    local_work_dir: Optional[int] = None
+    local_work_dir: Optional[str] = None
     max_preemptable_attempts_scale: Optional[int] = None
     mounts: Optional[List[PersistentDiskMount]] = None
     debug_log_prefix: Optional[str] = None
@@ -56,7 +61,7 @@ class PrepConfig:
 @dataclass
 class Config:
     sparkles_config_path: str
-    image: str
+    default_image: str
     machine_type: str
     cas_url_prefix: str
     default_url_prefix: str
@@ -67,9 +72,9 @@ class Config:
     account: str
     service_account_key: str
     boot_volume_in_gb: int
-    local_work_dir: int
+    local_work_dir: str
     max_preemptable_attempts_scale: int
-    mount: str
+    mounts: List[PersistentDiskMount]
     debug_log_prefix: str
     credentials: Credentials = dataclasses.field(repr=False)
 
@@ -94,7 +99,7 @@ NO_DEFAULT = object()
 
 @dataclass
 class GCloudConfig:
-    zones: List[str] = []
+    zones: List[str] = dataclasses.field(default_factory=list)
     account: Optional[str] = None
     region: Optional[str] = None
     project: Optional[str] = None
@@ -136,6 +141,8 @@ def load_config(
     gcloud_config_file = os.path.expanduser(gcloud_config_file)
     if os.path.exists(gcloud_config_file):
         gcloud_config = _parse_gcloud_config(gcloud_config_file, verbose)
+    else:
+        gcloud_config = GCloudConfig()
 
     config_file = get_config_path(config_file)
     config_file = os.path.expanduser(config_file)
@@ -146,11 +153,14 @@ def load_config(
     config_parser = RawConfigParser()
     config_parser.read(config_file)
     config_dict = dict(config_parser.items("config"))
+    config_used = set()
 
     def consume(name, default=NO_DEFAULT, parser=str):
+        assert name not in config_used, f"Consumed {name} twice"
+        config_used.add(name)
+
         if name in config_dict:
             value = parser(config_dict[name])
-            del config_dict[name]
         else:
             if default is NO_DEFAULT:
                 raise BadConfig(f"Missing {name} in config")
@@ -178,7 +188,6 @@ def load_config(
         "project",
         "default_image",
         "machine_type",
-        "zones",
         "region",
         "account",
     ]
@@ -192,10 +201,12 @@ def load_config(
 
         if value == "" or value is None:
             missing_values.append(property)
+        
+        setattr(config, property, value)
 
     if len(missing_values) > 0:
-        raise BadConfig(
-            "Missing the following required parameters in {config_file}: {', '.join(missing_values)}"
+        raise MissingRequired(
+            f"Missing the following required parameters in {config_file}: {', '.join(missing_values)}"
         )
 
     config.kubequeconsume_exe_path = consume(
@@ -249,10 +260,17 @@ def load_config(
     mount_count = consume("mount_count", 1, int)
     mounts = []
     for i in range(mount_count):
-        path = consume(f"mount_{i+1}_path")
-        type = consume(f"mount_{i+1}_type")
+        if i == 0:
+            path = consume(f"mount_{i+1}_path", "/work")
+            type = consume(f"mount_{i+1}_type", "ssd")
+        else:
+            path = consume(f"mount_{i+1}_path")
+            type = consume(f"mount_{i+1}_type")
         name = consume(f"mount_{i+1}_name", None)
-        size_in_gb = consume(f"mount_{i+1}_size_in_gb")
+        if type != "ssd":
+            size_in_gb = consume(f"mount_{i+1}_size_in_gb")
+        else:
+            size_in_gb = None
         mounts.append(
             PersistentDiskMount(path=path, type=type, name=name, size_in_gb=size_in_gb)
         )
@@ -260,12 +278,12 @@ def load_config(
     config.mounts = mounts
 
     config.debug_log_prefix = consume(
-        "debug_log_prefix", url_join(consume("default_url_prefix"), "node-logs")
+        "debug_log_prefix", url_join(config.default_url_prefix, "node-logs")
     )
 
-    unknown_parameters = config_dict.keys()
+    unknown_parameters = set(config_dict.keys()).difference(config_used)
     if len(unknown_parameters) != 0:
-        raise BadConfig(
+        raise UnknownParameters(
             "The following parameters in config are unrecognized: {}".format(
                 ", ".join(unknown_parameters)
             )
@@ -274,7 +292,7 @@ def load_config(
     return Config(**dataclasses.asdict(config))
 
 
-def create_services(config_file: str):
+def create_services(config_file: str) -> Tuple[Config, JobQueue, IO, Cluster]:
     config = load_config(config_file)
     service_account_key = config.service_account_key
     if not os.path.exists(service_account_key):

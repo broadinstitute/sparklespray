@@ -3,6 +3,7 @@ from .datastore_batch import ImmediateBatch, Batch, Batcher
 from typing import List
 from dataclasses import dataclass
 import dataclasses
+from typing import Optional
 
 NODE_REQ_SUBMITTED = "submitted"
 NODE_REQ_STAGING = "staging"

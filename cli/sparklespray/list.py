@@ -136,17 +136,17 @@ def process_records(records, fields, filter_expressions):
     return filtered
 
 
-def _get(d: dict, path: str):
+def _get(d: dict, path: str) -> Optional[str]:
     "Given a dotted path, traverse through nested dictionaries to return field. If any step is missing, return None"
     elements = path.split(".")
-    for e in elements:
-        if d is None:
-            return None
+    for e in elements[:-1]:
         assert isinstance(d, dict)
         d2 = d.get(e)
+        if d2 is None:
+            return None
         assert isinstance(d2, dict)
         d = d2
-    return d
+    return d.get(elements[-1])
 
 
 def _set(d: dict, path: str, value: str):
@@ -161,7 +161,8 @@ def _set(d: dict, path: str, value: str):
 def project(d: dict, fields: List[str]):
     result: Dict[str, str] = {}
     for field in fields:
-        _set(result, field, _get(d, field))
+        v = _get(d, field)
+        _set(result, field, "" if v is None else v)
     return result
 
 

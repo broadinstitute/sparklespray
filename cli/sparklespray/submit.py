@@ -4,7 +4,7 @@ import copy
 import argparse
 import re
 
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Any, Dict
 from pydantic import BaseModel
 
 import sparklespray
@@ -22,6 +22,7 @@ from .io import IO
 from .watch import watch, local_watch
 from . import txtui
 from .watch import DockerFailedException
+from .config import Config
 
 from .log import log
 
@@ -168,7 +169,7 @@ def submit(
     job_id: str,
     spec: dict,
     config: SubmitConfig,
-    metadata: dict = {},
+    metadata: Dict[str, str] = {},
     clean_if_exists: bool = False,
     dry_run: bool = False,
     cluster_name=None,
@@ -513,13 +514,13 @@ def get_preemptible_from_config(config):
     return preemptible
 
 
-def submit_cmd(jq, io, cluster, args, config):
-    metadata = {}
+def submit_cmd(jq : JobQueue, io : IO, cluster: Cluster, args : Any, config: Config):
+    metadata : Dict[str, str]= {}
 
     if args.image:
         image = args.image
     else:
-        image = config["default_image"]
+        image = config.default_image
 
     if args.preemptible:
         preemptible = True
@@ -527,10 +528,8 @@ def submit_cmd(jq, io, cluster, args, config):
         preemptible = get_preemptible_from_config(config)
 
     boot_volume_in_gb = _get_boot_volume_in_gb(config)
-    default_url_prefix = config.get("default_url_prefix", "")
-    work_dir = config.get(
-        "local_work_dir", os.path.expanduser("~/.sparkles-cache/local_work_dir")
-    )
+    default_url_prefix = config.default_url_prefix
+    work_dir = config.local_work_dir
 
     job_id = args.name
     if job_id is None:
@@ -544,24 +543,12 @@ def submit_cmd(jq, io, cluster, args, config):
             return 0
 
     target_node_count = args.nodes
-    machine_type = config["machine_type"]
+    machine_type = config.machine_type
     if args.machine_type:
         machine_type = args.machine_type
 
-    gpu_count = config.get("gpu_count", 0)
-    gpu_type = config.get("gpu_type", None)
-    # if gpu_type is not None and gpu_type.lower() == "none":
-    #     gpu_type = None
-    if args.gpu_count:
-        gpu_count = args.gpu_count
-    if gpu_count:
-        if gpu_type is None:
-            raise Exception(
-                f"Requesting {gpu_count} GPUs but gpu_type is missing from config"
-            )
-
-    cas_url_prefix = config["cas_url_prefix"]
-    default_url_prefix = config["default_url_prefix"]
+    cas_url_prefix = config.cas_url_prefix
+    default_url_prefix = config.default_url_prefix
 
     if args.file:
         assert len(args.command) == 0
@@ -596,7 +583,7 @@ def submit_cmd(jq, io, cluster, args, config):
             files_to_push.append(url_join(dest_url, "1") + ":.")
 
         hash_db = CachingHashFunction(
-            config.get("cache_db_path", ".kubeque-cached-file-hashes")
+            config.cache_db_path
         )
         upload_map, spec = make_spec_from_command(
             args.command,
@@ -612,7 +599,7 @@ def submit_cmd(jq, io, cluster, args, config):
             exclude_patterns=args.exclude_wildcards,
         )
 
-        kubequeconsume_exe_path = config["kubequeconsume_exe_path"]
+        kubequeconsume_exe_path = config.kubequeconsume_exe_path
         kubequeconsume_exe_obj_path = upload_map.add(
             hash_db.get_sha256,
             cas_url_prefix,
@@ -650,46 +637,37 @@ def submit_cmd(jq, io, cluster, args, config):
     kubequeconsume_exe_url = io.generate_signed_url(kubequeconsume_exe_obj_path)
     log.info("kubeconsume at %s", kubequeconsume_exe_url)
 
-    max_preemptable_attempts_scale = int(
-        config.get("max_preemptable_attempts_scale", "2")
-    )
+    max_preemptable_attempts_scale = config.max_preemptable_attempts_scale
 
     ssd_mount_points = []
     pd_mount_points = []
-    mount_count = int(config.get("mount_count", "1"))
-    for i in range(mount_count):
-        mount_path = config[f"mount_{i+1}_path"]
-        mount_type = config[f"mount_{i+1}_type"]
-        mount_name = config.get(f"mount_{i+1}_name")
-        mount_size_in_gb = config.get(f"mount_{i+1}_size_in_gb")
-        if mount_type == "local-ssd":
-            assert mount_name is None, "local SSDs are not allowed to have names"
+    for mount in config.mounts:
+        if mount.type == "local-ssd":
+            assert mount.name is None, "local SSDs are not allowed to have names"
             assert (
-                mount_size_in_gb is None
+                mount.size_in_gb is None
             ), "local SSDs are not allowed to have size choosen"
-            ssd_mount_points.append(mount_path)
+            ssd_mount_points.append(mount.path)
         else:
             pd_mount_points.append(
-                PersistentDiskMount(mount_name, mount_path, mount_size_in_gb)
+                PersistentDiskMount(type=mount.type, name=mount.name, path=mount.path, size_in_gb=mount.size_in_gb)
             )
 
     submit_config = SubmitConfig(
-        service_account_email=config.get("credentials").service_account_email,
+        service_account_email=config.credentials.service_account_email,
         preemptible=preemptible,
         boot_volume_in_gb=boot_volume_in_gb,
         default_url_prefix=default_url_prefix,
         machine_type=machine_type,
         image=spec["image"],
-        project=config["project"],
-        monitor_port=int(config.get("monitor_port", "6032")),
-        zones=config["zones"],
-        work_root_dir=config.get("mount", "/mnt/"),
+        project=config.project,
+        monitor_port=config.monitor_port,
+        zones=config.zones,
+        work_root_dir=config.mount,
         ssd_mount_points=ssd_mount_points,
         pd_mount_points=pd_mount_points,
         kubequeconsume_url=kubequeconsume_exe_url,
         kubequeconsume_md5=kubequeconsume_exe_md5,
-        gpu_count=gpu_count,
-        gpu_type=gpu_type,
         target_node_count=target_node_count,
         max_preemptable_attempts_scale=max_preemptable_attempts_scale,
     )

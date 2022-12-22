@@ -28,7 +28,7 @@ import collections
 import time
 from collections import namedtuple
 import sys
-
+from typing import Dict, List
 CLAIM_TIMEOUT = 5
 
 from .log import log
@@ -181,13 +181,13 @@ class JobQueue:
         job_id,
         args,
         kube_job_spec,
-        metadata,
+        metadata : Dict[str, str],
         cluster,
         target_node_count,
         max_preemptable_attempts,
     ):
         kube_job_spec = json.dumps(kube_job_spec)
-        tasks = []
+        tasks : List[Task] = []
         now = time.time()
 
         batch = Batch(self.client)
