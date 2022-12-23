@@ -91,7 +91,7 @@ class AddNodeReqStore:
         self.client.put(entity)
 
     def cleanup_cluster(self, cluster_id: str, batch: Optional[Batch] = None) -> None:
-        _batch: Batcher
+        _batch: Batcher = batch
         if _batch is None:
             _batch = self.immediate_batch
         else:

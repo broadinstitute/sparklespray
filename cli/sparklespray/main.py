@@ -16,7 +16,7 @@ from .util import get_timestamp, url_join
 from .job_store import JOB_STATUS_KILLED
 from .job_queue import JobQueue, Job
 from .cluster_service import Cluster
-from .io import IO
+from .io_helper import IO
 from .watch import watch
 from .resize_cluster import GetPreempted
 from . import txtui
@@ -24,7 +24,7 @@ from .validate import validate_cmd
 import csv
 import argparse
 
-from .config import get_config_path, load_config, create_services, Config
+from .config import get_config_path, load_config, create_services, Config, BadConfig
 
 from .log import log
 from . import txtui
@@ -746,7 +746,11 @@ def main(argv=None):
             len(set(["config", "jq", "io", "cluster"]).intersection(func_param_names))
             > 0
         ):
-            config, jq, io, cluster = create_services(args.config)
+            try:
+                config, jq, io, cluster = create_services(args.config)
+            except BadConfig as ex:
+                print(f"Failure loading config: {ex}")
+                return 1
         func_params = {}
         if "args" in func_param_names:
             func_params["args"] = args

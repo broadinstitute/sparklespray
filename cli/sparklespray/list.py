@@ -6,7 +6,7 @@ import csv
 from .job_queue import JobQueue
 import sys
 from .main import _resolve_jobid
-from .io import IO
+from .io_helper import IO
 from .cluster_service import Cluster
 from .node_req_store import AddNodeReqStore
 import dataclasses

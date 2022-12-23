@@ -8,7 +8,7 @@ from typing import List, Optional, Tuple, Any, Dict
 from pydantic import BaseModel
 
 import sparklespray
-
+from .model import LOCAL_SSD
 from .csv_utils import read_csv_as_dicts
 from .util import random_string, url_join
 from .model import MachineSpec, PersistentDiskMount, SubmitConfig
@@ -18,11 +18,12 @@ from .main import clean
 from .util import get_timestamp
 from .job_queue import JobQueue
 from .cluster_service import Cluster
-from .io import IO
+from .io_helper import IO
 from .watch import watch, local_watch
 from . import txtui
 from .watch import DockerFailedException
 from .config import Config
+from .gcp_utils import create_pipeline_spec
 
 from .log import log
 
@@ -191,7 +192,6 @@ def submit(
     if dry_run:
         skip_kube_submit = True
 
-    preemptible = config.preemptible
     boot_volume_in_gb = config.boot_volume_in_gb
     default_url_prefix = config.default_url_prefix
 
@@ -247,18 +247,18 @@ def submit(
         machine_specs = MachineSpec(
             service_account_email=config.service_account_email,
             boot_volume_in_gb=boot_volume_in_gb,
-            ssd_mount_points=config.ssd_mount_points,
-            pd_mount_points=config.pd_mount_points,
+            mounts=config.mounts,
             work_root_dir=config.work_root_dir,
             machine_type=config.machine_type,
-            gpu_count=config.gpu_count,
-            gpu_type=config.gpu_type,
         )
 
-        assert len(config.zones) == 1
-        cluster.ensure_named_volumes_exist(config.zones[0], config.pd_mount_points)
+        if len(config.mounts) > 1:
+            assert len(config.zones) == 1, "Cannot create jobs in multiple zones if you are mounting PD volumes"
+            cluster.ensure_named_volumes_exist(config.zones[0], config.pd_mount_points)
 
-        pipeline_spec = cluster.create_pipeline_spec(
+        pipeline_spec = create_pipeline_spec(
+            project=cluster.project,
+            zones=cluster.zones,
             jobid=job_id,
             cluster_name=cluster_name,
             consume_exe_url=config.kubequeconsume_url,
@@ -269,12 +269,9 @@ def submit(
             monitor_port=monitor_port,
         )
 
-        max_preemptable_attempts = 0
-        if preemptible:
-            assert config.max_preemptable_attempts_scale >= 1
-            max_preemptable_attempts = (
-                config.target_node_count * config.max_preemptable_attempts_scale
-            )
+        max_preemptable_attempts = (
+            config.target_node_count * config.max_preemptable_attempts_scale
+        )
 
         jq.submit(
             job_id,
@@ -475,43 +472,7 @@ def add_submit_cmd(subparser):
         help="If set, will download all of the files from previous execution of this job to worker before running",
         action="store_true",
     )
-    parser.add_argument(
-        "--preemptible",
-        action="store_true",
-        help="If set, will try to turn on nodes initally as preemptible nodes",
-    )
     parser.add_argument("command", nargs=argparse.REMAINDER)
-    parser.add_argument(
-        "--gpu_count", type=int, help="Number of gpus on your VM", default=0
-    )
-
-
-def _get_boot_volume_in_gb(config):
-    bootDiskSizeGb_flag = config.get("bootDiskSizeGb")
-    if bootDiskSizeGb_flag is None:
-        bootDiskSizeGb_flag = config.get("bootdisksizegb")
-    if bootDiskSizeGb_flag is None:
-        bootDiskSizeGb_flag = config.get("boot_volume_in_gb")
-    if bootDiskSizeGb_flag is None:
-        bootDiskSizeGb_flag = "20"
-    # check for G as the suffix, because we used to allow this
-    if bootDiskSizeGb_flag.lower().endswith("g"):
-        bootDiskSizeGb_flag = bootDiskSizeGb_flag[:-1]
-    bootDiskSizeGb = int(bootDiskSizeGb_flag)
-    assert bootDiskSizeGb >= 10
-    return bootDiskSizeGb
-
-
-def get_preemptible_from_config(config):
-    preemptible_flag = config.get("preemptible", "y").lower()
-    if preemptible_flag not in ["y", "n"]:
-        raise Exception(
-            "setting 'preemptible' in config must either by 'y' or 'n' but was: {}".format(
-                preemptible_flag
-            )
-        )
-    preemptible = preemptible_flag == "y"
-    return preemptible
 
 
 def submit_cmd(jq : JobQueue, io : IO, cluster: Cluster, args : Any, config: Config):
@@ -522,12 +483,7 @@ def submit_cmd(jq : JobQueue, io : IO, cluster: Cluster, args : Any, config: Con
     else:
         image = config.default_image
 
-    if args.preemptible:
-        preemptible = True
-    else:
-        preemptible = get_preemptible_from_config(config)
-
-    boot_volume_in_gb = _get_boot_volume_in_gb(config)
+    boot_volume_in_gb = config.boot_volume_in_gb
     default_url_prefix = config.default_url_prefix
     work_dir = config.local_work_dir
 
@@ -639,23 +595,8 @@ def submit_cmd(jq : JobQueue, io : IO, cluster: Cluster, args : Any, config: Con
 
     max_preemptable_attempts_scale = config.max_preemptable_attempts_scale
 
-    ssd_mount_points = []
-    pd_mount_points = []
-    for mount in config.mounts:
-        if mount.type == "local-ssd":
-            assert mount.name is None, "local SSDs are not allowed to have names"
-            assert (
-                mount.size_in_gb is None
-            ), "local SSDs are not allowed to have size choosen"
-            ssd_mount_points.append(mount.path)
-        else:
-            pd_mount_points.append(
-                PersistentDiskMount(type=mount.type, name=mount.name, path=mount.path, size_in_gb=mount.size_in_gb)
-            )
-
     submit_config = SubmitConfig(
         service_account_email=config.credentials.service_account_email,
-        preemptible=preemptible,
         boot_volume_in_gb=boot_volume_in_gb,
         default_url_prefix=default_url_prefix,
         machine_type=machine_type,
@@ -663,9 +604,8 @@ def submit_cmd(jq : JobQueue, io : IO, cluster: Cluster, args : Any, config: Con
         project=config.project,
         monitor_port=config.monitor_port,
         zones=config.zones,
-        work_root_dir=config.mount,
-        ssd_mount_points=ssd_mount_points,
-        pd_mount_points=pd_mount_points,
+        work_root_dir=config.work_root_dir,
+        mounts=config.mounts,
         kubequeconsume_url=kubequeconsume_exe_url,
         kubequeconsume_md5=kubequeconsume_exe_md5,
         target_node_count=target_node_count,

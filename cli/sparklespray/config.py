@@ -2,8 +2,8 @@ import logging
 import os
 import sys
 
-from .model import PersistentDiskMount
-from .io import IO
+from .model import PersistentDiskMount, LOCAL_SSD
+from .io_helper import IO
 from configparser import RawConfigParser, NoSectionError, NoOptionError
 from .cluster_service import Cluster
 from .node_req_store import AddNodeReqStore
@@ -56,6 +56,9 @@ class PrepConfig:
     max_preemptable_attempts_scale: Optional[int] = None
     mounts: Optional[List[PersistentDiskMount]] = None
     debug_log_prefix: Optional[str] = None
+    monitor_port: Optional[int] = None
+    work_root_dir: Optional[str] = None
+    cache_db_path: Optional[str] = None
 
 
 @dataclass
@@ -76,8 +79,10 @@ class Config:
     max_preemptable_attempts_scale: int
     mounts: List[PersistentDiskMount]
     debug_log_prefix: str
+    work_root_dir : str
+    monitor_port: int
+    cache_db_path : str
     credentials: Credentials = dataclasses.field(repr=False)
-
 
 class ConfigAdapter:
     def __init__(self):
@@ -175,7 +180,8 @@ def load_config(
         parser=lambda value: [x.strip() for x in value.split(",")],
     )
     config.sparkles_config_path = config_file
-
+    config.monitor_port = consume("monitor_port", 6032, int)
+    config.work_root_dir=consume("work_root_dir", "/mnt/")
     for unused_property in ["default_resource_cpu", "default_resource_memory"]:
         if unused_property in config_dict:
             raise BadConfig(
@@ -217,6 +223,8 @@ def load_config(
     config.cas_url_prefix = consume(
         "cas_url_prefix", config.default_url_prefix + "/CAS/"
     )
+
+    config.boot_volume_in_gb = consume("boot_volume_in_gb", 20, int)
 
     assert isinstance(config.zones, list)
 
@@ -261,22 +269,21 @@ def load_config(
     mounts = []
     for i in range(mount_count):
         if i == 0:
-            path = consume(f"mount_{i+1}_path", "/work")
-            type = consume(f"mount_{i+1}_type", "ssd")
+            path = consume(f"mount_{i+1}_path", "/mnt")
+            type = consume(f"mount_{i+1}_type", LOCAL_SSD)
         else:
             path = consume(f"mount_{i+1}_path")
             type = consume(f"mount_{i+1}_type")
         name = consume(f"mount_{i+1}_name", None)
-        if type != "ssd":
-            size_in_gb = consume(f"mount_{i+1}_size_in_gb")
-        else:
-            size_in_gb = None
+        size_in_gb = consume(f"mount_{i+1}_size_in_gb", 100, int)
         mounts.append(
             PersistentDiskMount(path=path, type=type, name=name, size_in_gb=size_in_gb)
         )
 
-    config.mounts = mounts
+    # TODO: Add validation that no two mounts have the same path and that workdir lines up with at least one mount
 
+    config.mounts = mounts
+    config.cache_db_path = consume("cache_db_path", ".kubeque-cached-file-hashes")
     config.debug_log_prefix = consume(
         "debug_log_prefix", url_join(config.default_url_prefix, "node-logs")
     )

@@ -1,5 +1,6 @@
 from sparklespray.config import load_config, UnknownParameters, MissingRequired
 import pytest
+from sparklespray.model import PersistentDiskMount
 
 def test_basic_config(tmpdir):
     config_file = tmpdir.join("config")
@@ -23,6 +24,7 @@ account=apple
     assert config.default_image=="python"
     assert config.zones == ["us-central1-b"]
     assert config.region == "us-central1"
+    assert config.mounts == [PersistentDiskMount(path='/work', size_in_gb=100, type='local-ssd')]
 
 def test_extra_args(tmpdir):
     config_file = tmpdir.join("config")

@@ -40,9 +40,6 @@ from .model import PersistentDiskMount
 from .log import log
 from googleapiclient.errors import HttpError
 
-# and image which has curl and sh installed, used to prep the worker node
-SETUP_IMAGE = "sequenceiq/alpine-curl"
-
 import json
 
 # which step in the actions does kubeconsume run in
@@ -310,50 +307,6 @@ class Cluster:
         # assert project_id == self.project, "project_id ({}) != self.project ({})".format(project_id, self.project)
         return self.compute.get_instance_status(zone, instance_name) == "RUNNING"
 
-    def create_pipeline_spec(
-        self,
-        jobid: str,
-        cluster_name: str,
-        consume_exe_url: str,
-        consume_exe_md5: str,
-        docker_image: str,
-        consume_exe_args: List[str],
-        machine_specs: MachineSpec,
-        monitor_port: int,
-    ) -> dict:
-        work_root_dir = machine_specs.work_root_dir
-
-        consume_exe_path = os.path.join(work_root_dir, "consume")
-        consume_data = os.path.join(work_root_dir, "data")
-
-        return self.nodes.create_pipeline_json(
-            jobid=jobid,
-            cluster_name=cluster_name,
-            setup_image=SETUP_IMAGE,
-            setup_parameters=[
-                "sh",
-                "-c",
-                "echo \"{consume_exe_md5}  {consume_exe_path}\" > /tmp/expected-checksums && mkdir -p '{consume_exe_parent}' && curl -o {consume_exe_path} '{consume_exe_url}' && md5sum -c /tmp/expected-checksums && chmod a+x {consume_exe_path} && mkdir {consume_data} && chmod a+rwx {consume_data}".format(
-                    consume_exe_url=consume_exe_url,
-                    consume_data=consume_data,
-                    consume_exe_path=consume_exe_path,
-                    consume_exe_md5=consume_exe_md5,
-                    consume_exe_parent=os.path.dirname(consume_exe_path),
-                ),
-            ],
-            docker_image=docker_image,
-            docker_command=[
-                consume_exe_path,
-                "consume",
-                "--cacheDir",
-                os.path.join(consume_data, "cache"),
-                "--tasksDir",
-                os.path.join(consume_data, "tasks"),
-            ]
-            + consume_exe_args,
-            machine_specs=machine_specs,
-            monitor_port=monitor_port,
-        )
 
     def get_cluster_mod(self, job_id):
         return ClusterMod(job_id, self, self.debug_log_prefix)

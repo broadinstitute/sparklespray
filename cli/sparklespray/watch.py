@@ -25,7 +25,7 @@ class TooManyNodeFailures(Exception):
 
 
 from .resize_cluster import ResizeCluster, GetPreempted
-from .io import IO
+from .io_helper import IO
 from .job_queue import JobQueue
 from .cluster_service import Cluster
 from . import txtui
@@ -231,39 +231,66 @@ def _watch(
 
 
 # TODO: Finish implementing. Use to start docker instance and watch progress
-
+import tempfile
+import json
 
 def start_docker_process(job_spec_str: str, consume_exe: str, work_dir: str):
     job_spec = json.loads(job_spec_str)
+
+    print(json.dumps(job_spec,indent=2))
+    # the goal of this is to emulate how the google pipelines API will interpret this
+    # job.
+
+    # start by setting up the volumes
+    volume_by_name = {}
+    volumes = job_spec["pipeline"]["resources"]["virtualMachine"]["volumes"]
+    tmpdirs = []
+    for volume in volumes:
+        if "persistentDisk" in volume:
+            tmpdir = tempfile.TemporaryDirectory(dir=".", prefix="pdtmp-")
+            tmpdirs.append(tmpdir)
+            path = os.path.abspath(tmpdir.name)
+            print(f"Created temp folder {path} for volume")
+        elif "existingDisk" in volume:
+            path = volume["existingDisk"]["disk"]
+            path = os.path.abspath(path)
+            assert os.path.exists(path)
+        else:
+            raise Exception("Unknown type of volume")
+        print(f"Using {path} for the volume {volume['volume']}")
+        volume_by_name[volume['volume']] = path
+
     actions = job_spec["pipeline"]["actions"]
-    # action 0 is curl downloading consume
-    consume_action = actions[1]
-    docker_image = consume_action["imageUri"]
-    docker_command = consume_action["commands"]
-    docker_portmapping = consume_action["portMappings"]
-
-    assert docker_command[0] == "/mnt/consume"
-
-    # TODO: Add options for google creds
-    docker_options = [
-        "-v",
+    for index, action in enumerate(actions):
+        docker_command = ["docker", "run", "--platform","linux/amd64", "-v",
         os.path.expanduser("~/.config/gcloud") + ":/google-creds",
         "-e",
         "GOOGLE_APPLICATION_CREDENTIALS=/google-creds/application_default_credentials.json",
-        "-v",
-        f"{consume_exe}:/mnt/consume",
-        "-v",
-        f"{work_dir}:/mnt",
-    ]
+        ]
 
-    for src_port, dst_port in docker_portmapping.items():
-        docker_options.extend(["-p", f"{src_port}:{dst_port}"])
+        for mount in action["mounts"]:
+            docker_command.extend(["-v",
+            f"{volume_by_name[mount['disk']]}:{mount['path']}"])
 
-    cmd = ["docker", "run"] + docker_options + [docker_image] + docker_command
+        portMappings = action.get('portMappings')
+        if portMappings:
+            for src_port, dst_port in portMappings.items():
+                docker_command.extend(["-p", f"{src_port}:{dst_port}"])
 
-    with open("sparkles-docker.log", "a") as docker_log:
-        docker_log.write("Executing: {}".format(cmd))
-        proc = subprocess.Popen(cmd, stderr=subprocess.STDOUT, stdout=docker_log)
+        docker_command.append(action["imageUri"])
+        docker_command.extend(action["commands"])
+
+        with open("sparkles-docker.log", "a") as docker_log:
+            docker_log = sys.stdout
+            docker_log.write(f"Executing: {docker_command}\n")
+            proc = subprocess.Popen(docker_command, stderr=subprocess.STDOUT, stdout=docker_log)
+
+            if index < len(actions):
+                # if this isn't the last job (the consume action) run now and wait for completion
+                retcode = proc.wait()
+                if retcode != 0:
+                    raise Exception(f"docker command {docker_command} failed: retcode = {retcode}")
+                continue
 
     return proc
 

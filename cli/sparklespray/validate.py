@@ -5,10 +5,11 @@ from .log import log
 import pprint
 from .util import random_string
 from .job_queue import JobQueue
-from .io import IO
+from .io_helper import IO
 from .cluster_service import Cluster
 from .job_store import JobStore, Job, JOB_STATUS_KILLED
 import time
+from .config import Config
 
 
 def _test_datastore_api(job_store: JobStore, job_id: str):
@@ -31,7 +32,6 @@ def _test_datastore_api(job_store: JobStore, job_id: str):
     job_store.delete(job_id)
 
 
-from .config import Config
 
 
 def validate_cmd(jq: JobQueue, io: IO, cluster: Cluster, config: Config):
@@ -63,8 +63,6 @@ def validate_cmd(jq: JobQueue, io: IO, cluster: Cluster, config: Config):
     cluster.test_pipeline_api()
 
     default_image = config.default_image
-
-    # m = re.match(r"(?:[^.]+.)gcr\.io/([^/])/.*")
 
     print(f'Verifying google genomics can launch image "{default_image}"')
     print(
