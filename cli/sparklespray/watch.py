@@ -12,6 +12,7 @@ import subprocess
 import os
 from .task_store import STATUS_COMPLETE
 import collections
+from .config import Config
 
 # from google.gax.errors import RetryError
 
@@ -60,17 +61,14 @@ def add_watch_cmd(subparser):
     )
 
 
-def watch_cmd(jq: JobQueue, io: IO, cluster: Cluster, config, args):
+def watch_cmd(jq: JobQueue, io: IO, cluster: Cluster, config: Config, args):
     from .main import _resolve_jobid
-    from .submit import get_preemptible_from_config
 
     jobid = _resolve_jobid(jq, args.jobid)
     if args.verify:
         check_completion(jq, io, jobid)
 
-    max_preemptable_attempts_scale = int(
-        config.get("max_preemptable_attempts_scale", "2")
-    )
+    max_preemptable_attempts_scale = config.max_preemptable_attempts_scale
 
     watch(
         io,
@@ -79,7 +77,6 @@ def watch_cmd(jq: JobQueue, io: IO, cluster: Cluster, config, args):
         cluster,
         target_nodes=args.nodes,
         loglive=args.loglive,
-        preemptible=get_preemptible_from_config(config),
         max_preemptable_attempts_scale=max_preemptable_attempts_scale,
     )
 
@@ -151,6 +148,7 @@ def _watch(
 
     first_sign_of_concern = None
 
+    poll_delay = initial_poll_delay
     while True:
         with _exception_guard(
             lambda: "summarizing status of job {} threw exception".format(job_id)
@@ -234,10 +232,11 @@ def _watch(
 import tempfile
 import json
 
+
 def start_docker_process(job_spec_str: str, consume_exe: str, work_dir: str):
     job_spec = json.loads(job_spec_str)
 
-    print(json.dumps(job_spec,indent=2))
+    print(json.dumps(job_spec, indent=2))
     # the goal of this is to emulate how the google pipelines API will interpret this
     # job.
 
@@ -258,21 +257,28 @@ def start_docker_process(job_spec_str: str, consume_exe: str, work_dir: str):
         else:
             raise Exception("Unknown type of volume")
         print(f"Using {path} for the volume {volume['volume']}")
-        volume_by_name[volume['volume']] = path
+        volume_by_name[volume["volume"]] = path
 
+    proc = None
     actions = job_spec["pipeline"]["actions"]
     for index, action in enumerate(actions):
-        docker_command = ["docker", "run", "--platform","linux/amd64", "-v",
-        os.path.expanduser("~/.config/gcloud") + ":/google-creds",
-        "-e",
-        "GOOGLE_APPLICATION_CREDENTIALS=/google-creds/application_default_credentials.json",
+        docker_command = [
+            "docker",
+            "run",
+            "--platform",
+            "linux/amd64",
+            "-v",
+            os.path.expanduser("~/.config/gcloud") + ":/google-creds",
+            "-e",
+            "GOOGLE_APPLICATION_CREDENTIALS=/google-creds/application_default_credentials.json",
         ]
 
         for mount in action["mounts"]:
-            docker_command.extend(["-v",
-            f"{volume_by_name[mount['disk']]}:{mount['path']}"])
+            docker_command.extend(
+                ["-v", f"{volume_by_name[mount['disk']]}:{mount['path']}"]
+            )
 
-        portMappings = action.get('portMappings')
+        portMappings = action.get("portMappings")
         if portMappings:
             for src_port, dst_port in portMappings.items():
                 docker_command.extend(["-p", f"{src_port}:{dst_port}"])
@@ -281,17 +287,22 @@ def start_docker_process(job_spec_str: str, consume_exe: str, work_dir: str):
         docker_command.extend(action["commands"])
 
         with open("sparkles-docker.log", "a") as docker_log:
-            docker_log = sys.stdout
+            # docker_log = sys.stdout
             docker_log.write(f"Executing: {docker_command}\n")
-            proc = subprocess.Popen(docker_command, stderr=subprocess.STDOUT, stdout=docker_log)
+            proc = subprocess.Popen(
+                docker_command, stderr=subprocess.STDOUT, stdout=docker_log
+            )
 
             if index < len(actions):
                 # if this isn't the last job (the consume action) run now and wait for completion
                 retcode = proc.wait()
                 if retcode != 0:
-                    raise Exception(f"docker command {docker_command} failed: retcode = {retcode}")
+                    raise Exception(
+                        f"docker command {docker_command} failed: retcode = {retcode}"
+                    )
                 continue
 
+    assert proc is not None
     return proc
 
 
@@ -361,10 +372,10 @@ def watch(
     initial_poll_delay=1.0,
     max_poll_delay=30.0,
     loglive=None,
-    preemptible=True,
     max_preemptable_attempts_scale=2,
 ):
     job = jq.get_job(job_id)
+    assert job is not None
     flush_stdout_calls = [0]
 
     def flush_stdout(task_id, offset):
@@ -375,10 +386,7 @@ def watch(
         target_nodes = job.target_node_count
         max_preemptable_attempts = job.max_preemptable_attempts
     else:
-        if preemptible:
-            max_preemptable_attempts = target_nodes * max_preemptable_attempts_scale
-        else:
-            max_preemptable_attempts = 0
+        max_preemptable_attempts = target_nodes * max_preemptable_attempts_scale
 
     log.info(
         "targeting %s nodes. First %s nodes will be preemptive (from job: %s, %s)",

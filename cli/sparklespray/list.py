@@ -59,7 +59,7 @@ def add_list_cmd(subparser):
         action="store_true",
     )
 
-
+from typing import Any
 def list_tasks(
     jq: JobQueue,
     io: IO,
@@ -87,7 +87,7 @@ def list_tasks(
     if params_only:
         needs_full_task_def = True
 
-    def to_record(task, task_specs_str):
+    def to_record(task, task_specs_str) -> Dict[str, Any]:
         row = dataclasses.asdict(task)
         if needs_full_task_def:
             assert task_specs_str is not None
@@ -111,7 +111,7 @@ def list_tasks(
     filtered = process_records(records, fields, filter_expressions)
 
     if params_only:
-        filtered = [record["args"]["parameters"] for record in filtered]
+        filtered = [record["args"]["parameters"] for record in filtered] # type: ignore
 
     write(filtered, output_mode, output_filename)
 
@@ -266,6 +266,7 @@ def list_nodes_cmd(jq: JobQueue, cluster: Cluster, io, args):
         assert isinstance(filters, list)
 
     job = jq.get_job(job_id)
+    assert job is not None
     cluster_id = job.cluster
 
     list_nodes(

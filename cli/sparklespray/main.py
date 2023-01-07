@@ -29,7 +29,7 @@ from .config import get_config_path, load_config, create_services, Config, BadCo
 from .log import log
 from . import txtui
 from .gcp_setup import setup_project, grant
-
+from .task_store import Task
 
 def logs_cmd(jq: JobQueue, io: IO, args):
     jobid = _resolve_jobid(jq, args.jobid)
@@ -79,7 +79,7 @@ def show_cmd(jq: JobQueue, io: IO, args):
 
         rows = []
 
-        def make_simple_row(task):
+        def make_simple_row(task : Task):
             row = {}
             row["sparklespray_task_id"] = task.task_id
             row["sparklespray_exit_code"] = task.exit_code
@@ -87,15 +87,15 @@ def show_cmd(jq: JobQueue, io: IO, args):
             row["sparklespray_status"] = task.status
 
             if args.params:
-                task_spec = json.loads(io.get_as_str(task.args))
+                task_spec = json.loads(io.get_as_str_must(task.args))
                 task_parameters = task_spec.get("parameters", {})
                 row.update(task_parameters)
 
             return row
 
-        def make_full_row(task):
+        def make_full_row(task : Task):
             row = dataclasses.asdict(task)
-            task_spec = json.loads(io.get_as_str(task.args))
+            task_spec = json.loads(io.get_as_str_must(task.args))
             row["args_url"] = task.args
             row["args"] = task_spec
             return row
@@ -309,7 +309,7 @@ def status_cmd(jq: JobQueue, io: IO, cluster: Cluster, args):
 #            pdb.set_trace()
 
 
-def fetch_cmd(jq : JobQueue, io : IO, args):
+def fetch_cmd(jq: JobQueue, io: IO, args):
     jobid = _resolve_jobid(jq, args.jobid)
     if args.dest is None:
         dest = jobid
@@ -318,7 +318,9 @@ def fetch_cmd(jq : JobQueue, io : IO, args):
     fetch_cmd_(jq, io, jobid, dest, flat=args.flat)
 
 
-def fetch_cmd_(jq: JobQueue, io :IO, jobid : str, dest_root : str, force=False, flat=False):
+def fetch_cmd_(
+    jq: JobQueue, io: IO, jobid: str, dest_root: str, force=False, flat=False
+):
     def get(src, dst, **kwargs):
         if os.path.exists(dst) and not force:
             log.warning("%s exists, skipping download", dst)
@@ -332,7 +334,7 @@ def fetch_cmd_(jq: JobQueue, io :IO, jobid : str, dest_root : str, force=False, 
     include_index = not flat
 
     for task in tasks:
-        spec = json.loads(io.get_as_str(task.args))
+        spec = json.loads(io.get_as_str_must(task.args))
         log.debug("task %d spec: %s", task.task_index, spec)
 
         if include_index:
@@ -527,7 +529,7 @@ def dump_operation_cmd(cluster: Cluster, args):
     print(json.dumps(operation, indent="  "))
 
 
-def grant_cmd(args, config : Config):
+def grant_cmd(args, config: Config):
     credentials = config
     role = args.role
     project_id = args.project
@@ -535,7 +537,7 @@ def grant_cmd(args, config : Config):
     grant(service_acct, project_id, role)
 
 
-def setup_cmd(args, config : Config):
+def setup_cmd(args, config: Config):
     default_url_prefix = config.default_url_prefix
     m = re.match("^gs://([^/]+)(?:/.*)?$", default_url_prefix)
     assert m is not None, "invalid remote path: {}".format(default_url_prefix)
@@ -568,10 +570,11 @@ def main(argv=None):
     from .list import add_list_cmd, add_list_nodes_cmd
 
     parse = argparse.ArgumentParser()
-    parse.add_argument("--config", default=None)
+    parse.add_argument("-c","--config", default=None)
     parse.add_argument(
         "--debug", action="store_true", help="If set, debug messages will be output"
     )
+    parse.add_argument("-o","--override", action="append", dest="overrides", help="override a parameter in the config file. Value should be -o 'param=value'")
     subparser = parse.add_subparsers()
 
     add_submit_cmd(subparser)
@@ -729,6 +732,14 @@ def main(argv=None):
 
     args = parse.parse_args(argv)
 
+    overrides = {}
+    assert args.overrides is not None
+    if args.overrides is not None:
+        for override in args.overrides:
+            m = re.match("([^=]+)=(.*)", override)
+            assert m, f"Could not parse override: {override}"
+            overrides[m.group(1)] = m.group(2)
+
     txtui.config_logging(100 if args.debug else 0)
 
     if not hasattr(args, "func"):
@@ -738,19 +749,16 @@ def main(argv=None):
     if args.func == setup_cmd:
         # special case, because this is the one command which must work before the service account
         # is set up.
-        config = load_only_config_dict(args.config, verbose=True)
+        config = load_config(args.config, verbose=True, overrides=overrides)
         args.func(args, config)
     else:
         func_param_names = get_func_parameters(args.func)
-        if (
-            len(set(["config", "jq", "io", "cluster"]).intersection(func_param_names))
-            > 0
-        ):
-            try:
-                config, jq, io, cluster = create_services(args.config)
-            except BadConfig as ex:
-                print(f"Failure loading config: {ex}")
-                return 1
+        try:
+            config, jq, io, cluster = create_services(args.config, overrides=overrides)
+        except BadConfig as ex:
+            print(f"Failure loading config: {ex}")
+            return 1
+
         func_params = {}
         if "args" in func_param_names:
             func_params["args"] = args

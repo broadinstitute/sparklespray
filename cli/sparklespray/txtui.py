@@ -45,11 +45,11 @@ def config_logging(verbosity):
     to_stderr = logging.StreamHandler()
     to_stderr.setFormatter(trim_fmt)
     to_stderr.setLevel(logging.WARNING)
-    handlers.append(to_stderr)
+    handlers.append(to_stderr) # type: ignore
     log.setLevel(logging.INFO)
     if verbosity > 0:
         to_stderr.setLevel(logging.DEBUG)
     else:
         logging.getLogger("googleapiclient.discovery").setLevel(logging.WARN)
 
-    logging.root.handlers = handlers
+    logging.root.handlers = handlers # type: ignore

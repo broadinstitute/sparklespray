@@ -2,7 +2,7 @@ import logging
 import os
 import sys
 
-from .model import PersistentDiskMount, LOCAL_SSD
+from .model import PersistentDiskMount, LOCAL_SSD, ExistingDiskMount, DiskMountT
 from .io_helper import IO
 from configparser import RawConfigParser, NoSectionError, NoOptionError
 from .cluster_service import Cluster
@@ -14,19 +14,23 @@ from google.cloud import datastore
 from .util import url_join
 from google.oauth2 import service_account
 from .txtui import log
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Dict
 import dataclasses
 from google.auth.credentials import Credentials
+from typing import Callable, Any
 
 
 class BadConfig(Exception):
     pass
 
+
 class MissingRequired(BadConfig):
     pass
 
+
 class UnknownParameters(BadConfig):
     pass
+
 
 SCOPES = [
     "https://www.googleapis.com/auth/genomics",
@@ -54,7 +58,7 @@ class PrepConfig:
     boot_volume_in_gb: Optional[int] = None
     local_work_dir: Optional[str] = None
     max_preemptable_attempts_scale: Optional[int] = None
-    mounts: Optional[List[PersistentDiskMount]] = None
+    mounts: Optional[List[DiskMountT]] = None
     debug_log_prefix: Optional[str] = None
     monitor_port: Optional[int] = None
     work_root_dir: Optional[str] = None
@@ -77,30 +81,16 @@ class Config:
     boot_volume_in_gb: int
     local_work_dir: str
     max_preemptable_attempts_scale: int
-    mounts: List[PersistentDiskMount]
+    mounts: List[DiskMountT]
     debug_log_prefix: str
-    work_root_dir : str
+    work_root_dir: str
     monitor_port: int
-    cache_db_path : str
+    cache_db_path: str
     credentials: Credentials = dataclasses.field(repr=False)
 
-class ConfigAdapter:
-    def __init__(self):
-        pass
-
-    #        self.config
-
-    def _safe_get(config, section, key, default=None):
-        try:
-            return config.get(section, key)
-        except NoSectionError:
-            return default
-        except NoOptionError:
-            return default
-
-
-NO_DEFAULT = object()
-
+class NoDefault:
+    pass
+NO_DEFAULT = NoDefault()
 
 @dataclass
 class GCloudConfig:
@@ -136,8 +126,12 @@ def _parse_gcloud_config(gcloud_config_file: str, verbose: bool) -> GCloudConfig
     return config
 
 
+from typing import TypeVar, Generic, Union
+T = TypeVar('T')
+
 def load_config(
     config_file: str,
+    overrides: Dict[str, str],
     gcloud_config_file: str = "~/.config/gcloud/configurations/config_default",
     verbose: bool = False,
 ) -> Config:
@@ -158,30 +152,36 @@ def load_config(
     config_parser = RawConfigParser()
     config_parser.read(config_file)
     config_dict = dict(config_parser.items("config"))
-    config_used = set()
 
-    def consume(name, default=NO_DEFAULT, parser=str):
+    print("orig_config", config_dict)
+    print("overrides", overrides)
+    config_dict.update(overrides)
+
+    config_used = set()
+    def consume(name: str, default : Union[NoDefault, T]=NO_DEFAULT, parser : Callable[[str], T]=str) -> T:
         assert name not in config_used, f"Consumed {name} twice"
         config_used.add(name)
 
         if name in config_dict:
             value = parser(config_dict[name])
         else:
-            if default is NO_DEFAULT:
+            if isinstance(default, NoDefault):
                 raise BadConfig(f"Missing {name} in config")
             else:
                 value = default
         return value
 
     config = PrepConfig()
-    config.zones = consume(
+    zones = consume(
         "zones",
         default=gcloud_config.zones,
         parser=lambda value: [x.strip() for x in value.split(",")],
     )
+    assert isinstance(zones, list)
+    config.zones = zones
     config.sparkles_config_path = config_file
     config.monitor_port = consume("monitor_port", 6032, int)
-    config.work_root_dir=consume("work_root_dir", "/mnt/")
+    config.work_root_dir = consume("work_root_dir", "/mnt/")
     for unused_property in ["default_resource_cpu", "default_resource_memory"]:
         if unused_property in config_dict:
             raise BadConfig(
@@ -207,7 +207,7 @@ def load_config(
 
         if value == "" or value is None:
             missing_values.append(property)
-        
+
         setattr(config, property, value)
 
     if len(missing_values) > 0:
@@ -274,10 +274,17 @@ def load_config(
         else:
             path = consume(f"mount_{i+1}_path")
             type = consume(f"mount_{i+1}_type")
-        name = consume(f"mount_{i+1}_name", None)
         size_in_gb = consume(f"mount_{i+1}_size_in_gb", 100, int)
-        mounts.append(
-            PersistentDiskMount(path=path, type=type, name=name, size_in_gb=size_in_gb)
+        breakpoint()
+        name = consume(f"mount_{i+1}_name", None)
+        assert name is not None
+        if name is not None:
+            mounts.append(
+            ExistingDiskMount(name=name, path=path, type=type, size_in_gb=size_in_gb)
+        )
+        else:
+            mounts.append(
+            PersistentDiskMount(path=path, type=type, size_in_gb=size_in_gb)
         )
 
     # TODO: Add validation that no two mounts have the same path and that workdir lines up with at least one mount
@@ -287,6 +294,9 @@ def load_config(
     config.debug_log_prefix = consume(
         "debug_log_prefix", url_join(config.default_url_prefix, "node-logs")
     )
+
+    # make sure that the directory that is used for the working directory is one
+    # of the
 
     unknown_parameters = set(config_dict.keys()).difference(config_used)
     if len(unknown_parameters) != 0:
@@ -299,8 +309,8 @@ def load_config(
     return Config(**dataclasses.asdict(config))
 
 
-def create_services(config_file: str) -> Tuple[Config, JobQueue, IO, Cluster]:
-    config = load_config(config_file)
+def create_services(config_file: str, overrides: Dict[str, str] ) -> Tuple[Config, JobQueue, IO, Cluster]:
+    config = load_config(config_file, overrides)
     service_account_key = config.service_account_key
     if not os.path.exists(service_account_key):
         raise Exception("Could not find service account key at %s", service_account_key)

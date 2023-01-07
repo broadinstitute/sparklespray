@@ -29,6 +29,7 @@ import time
 from collections import namedtuple
 import sys
 from typing import Dict, List
+
 CLAIM_TIMEOUT = 5
 
 from .log import log
@@ -99,13 +100,6 @@ class JobQueue:
     def get_jobids(self, job_id_wildcard="*"):
         job_ids = self.job_storage.get_job_ids()
         return [job_id for job_id in job_ids if fnmatch(job_id, job_id_wildcard)]
-
-    #     def get_kube_job_spec(self, job_id):
-    #         job = self.storage.get_job(job_id)
-    #         return job.kube_job_spec
-
-    # def delete_job(self, job_id):
-    #     self.job_storage.delete(job_id)
 
     def kill_job(self, job_id):
         def mark_killed(job):
@@ -181,13 +175,13 @@ class JobQueue:
         job_id,
         args,
         kube_job_spec,
-        metadata : Dict[str, str],
+        metadata: Dict[str, str],
         cluster,
         target_node_count,
         max_preemptable_attempts,
     ):
         kube_job_spec = json.dumps(kube_job_spec)
-        tasks : List[Task] = []
+        tasks: List[Task] = []
         now = time.time()
 
         batch = Batch(self.client)

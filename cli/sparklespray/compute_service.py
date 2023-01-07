@@ -1,4 +1,6 @@
-from apiclient.discovery import build
+from googleapiclient.discovery import build
+#from apiclient.discovery import build
+import googleapiclient.errors
 from googleapiclient.errors import HttpError
 
 from googleapiclient.discovery_cache.base import Cache
@@ -6,7 +8,7 @@ import os
 import hashlib
 import tempfile
 from dataclasses import dataclass
-
+import time
 
 @dataclass
 class VolumeDetails:
@@ -57,24 +59,20 @@ class ComputeService:
         self.project = project
 
     def get_volume_details(self, zone, name):
-        response = (
-            self.compute.disks()
-            .get(project=self.project, zone=zone, disk=name)
-            .execute()
-        )
-        response = (
-            self.compute.disks()
-            .list(project=self.project, zone=zone, filter=f'name="{name}"')
-            .execute()
-        )
-        disks = list(response.get("items", []))
-        if len(disks) == 0:
-            return None
-        assert len(disks) == 1
-        disk = disks[0]
-        return VolumeDetails(disk["type"], float(disk["sizeGb"]), disk["status"])
+        try:
+            response = (
+                self.compute.disks()
+                .get(project=self.project, zone=zone, disk=name)
+                .execute()
+            )
+        except googleapiclient.errors.HttpError as ex:
+            if ex.status_code == 404:
+                return None
+            raise
+        disk = response
+        return VolumeDetails(disk["type"].split("/")[-1], float(disk["sizeGb"]), disk["status"])
 
-    def create_volume(self, zone, type, size, name, wait=True):
+    def create_volume(self, zone, type, size, name):
         assert type in ["pd-standard", "pd-balanced", "pd-ssd"]
         response = (
             self.compute.disks()
@@ -90,7 +88,7 @@ class ComputeService:
             .execute()
         )
         # wait for drive to be created
-        while wait:
+        while True:
             response = (
                 self.compute.disks()
                 .get(project=self.project, zone=zone, disk=name)
@@ -101,8 +99,46 @@ class ComputeService:
             if response["status"] not in ["CREATING", "RESTORING"]:
                 raise Exception(f"bad status: {response}")
             time.sleep(1)
+ 
+        # now that the PD has been created, we need to create a VM which will create the filesystem
+        # on the disk.
+        self.format_volume(zone, name)
 
-    #        print(self.compute.disks().get(project=self.project,zone=zone,resourceId=response['id']).execute())
+    def format_volume(self, zone, name):
+        raise Exception("unimplemented")
+        # response = (
+        #     self.compute.instances
+        #     .insert(
+        #         project=self.project,
+        #         zone=zone,
+        #         body={
+        #             "name": temp_name,
+        #             "description": "Temporary VM used to initialize filesystem on new volume",
+        #             "machineType": DEFAULT_TEMP_VM_MACHINE_TYPE,
+        #             "zone": zone, 
+        #             "disks": [
+        #                 {
+        #                     "boot": True,
+        #                     "initializeParams": {
+        #                         "sourceImage": "family/debian-9"
+        #                     },
+        #                     "autoDelete": True
+        #                 },
+        #                 {
+        #                     "boot": False,
+        #                     "initializeParams": {
+        #                         "diskName": name
+        #                     },
+        #                                                 "autoDelete": False
+
+        #                 }
+        #             ],
+        #             "metadata": {"boot":""}
+        #         },
+        #     )
+        #     .execute()
+        # )
+
 
     def get_cluster_instances(self, zones, cluster_name):
         instances = []

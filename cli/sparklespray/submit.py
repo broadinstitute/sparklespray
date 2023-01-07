@@ -146,20 +146,23 @@ def expand_tasks(spec, io, default_url_prefix, default_job_url_prefix):
         tasks.append(task)
     return tasks
 
-
-def _make_cluster_name(job_name, image, machine_type, unique_name):
+def _make_cluster_name(job_name : str, image : str, machine_spec : MachineSpec, unique_name: bool):
+    breakpoint()
     import hashlib
 
     if unique_name:
         return "l-" + random_string(20)
     else:
+        machine_json = json.dumps(machine_spec.as_dict(), sort_keys=True)
+        print(f"machine_json: {machine_json}")
+        hash = hashlib.md5()
+        hash.update(f"{job_name}-{image}-{sparklespray.__version__}".encode(
+                "utf8"
+            ))
+        hash.update(machine_json.encode("utf8"))
         return (
-            "c-"
-            + hashlib.md5(
-                f"{job_name}-{image}-{machine_type}-{sparklespray.__version__}".encode(
-                    "utf8"
-                )
-            ).hexdigest()[:20]
+
+            f"c-{hash.hexdigest()[:20]}"
         )
 
 
@@ -212,10 +215,18 @@ def submit(
         else:
             log.debug("task post expand: %s", json.dumps(task, indent=2))
 
+    machine_specs = MachineSpec(
+        service_account_email=config.service_account_email,
+        boot_volume_in_gb=boot_volume_in_gb,
+        mounts=config.mounts,
+        work_root_dir=config.work_root_dir,
+        machine_type=config.machine_type,
+    )
+
     if not dry_run:
         image = config.image
         if cluster_name is None:
-            cluster_name = _make_cluster_name(job_id, image, config.machine_type, False)
+            cluster_name = _make_cluster_name(job_id, image, machine_specs, False)
 
         existing_job = jq.get_job(job_id, must=False)
         if existing_job is not None:
@@ -244,17 +255,11 @@ def submit(
             str(monitor_port),
         ]
 
-        machine_specs = MachineSpec(
-            service_account_email=config.service_account_email,
-            boot_volume_in_gb=boot_volume_in_gb,
-            mounts=config.mounts,
-            work_root_dir=config.work_root_dir,
-            machine_type=config.machine_type,
-        )
-
         if len(config.mounts) > 1:
-            assert len(config.zones) == 1, "Cannot create jobs in multiple zones if you are mounting PD volumes"
-            cluster.ensure_named_volumes_exist(config.zones[0], config.pd_mount_points)
+            assert (
+                len(config.zones) == 1
+            ), "Cannot create jobs in multiple zones if you are mounting PD volumes"
+        cluster.ensure_named_volumes_exist(config.zones[0], config.mounts)
 
         pipeline_spec = create_pipeline_spec(
             project=cluster.project,
@@ -268,6 +273,10 @@ def submit(
             machine_specs=machine_specs,
             monitor_port=monitor_port,
         )
+
+        # print(config)
+        # print(json.dumps(pipeline_spec, indent=2))
+        # raise Exception()
 
         max_preemptable_attempts = (
             config.target_node_count * config.max_preemptable_attempts_scale
@@ -475,8 +484,8 @@ def add_submit_cmd(subparser):
     parser.add_argument("command", nargs=argparse.REMAINDER)
 
 
-def submit_cmd(jq : JobQueue, io : IO, cluster: Cluster, args : Any, config: Config):
-    metadata : Dict[str, str]= {}
+def submit_cmd(jq: JobQueue, io: IO, cluster: Cluster, args: Any, config: Config):
+    metadata: Dict[str, str] = {}
 
     if args.image:
         image = args.image
@@ -506,86 +515,80 @@ def submit_cmd(jq : JobQueue, io : IO, cluster: Cluster, args : Any, config: Con
     cas_url_prefix = config.cas_url_prefix
     default_url_prefix = config.default_url_prefix
 
-    if args.file:
-        assert len(args.command) == 0
-        spec = json.load(open(args.file, "rt"))
+    if args.seq is not None:
+        parameters = [{"index": str(i)} for i in range(args.seq)]
+    elif args.params is not None:
+        parameters = read_csv_as_dicts(args.params)
     else:
-        if args.seq is not None:
-            parameters = [{"index": str(i)} for i in range(args.seq)]
-        elif args.params is not None:
-            parameters = read_csv_as_dicts(args.params)
-        else:
-            parameters = [{}]
+        parameters = [{}]
 
-        assert len(args.command) != 0
+    assert len(args.command) != 0
 
-        dest_url = url_join(default_url_prefix, job_id)
-        files_to_push = list(args.push)
-        if args.rerun:
-            assert (
-                args.name is not None
-            ), "Cannot re-run a job if the name isn't specified"
-            assert len(parameters) == 1, "Cannot re-run a job with more than one task"
-            # Add the existing job directory to the list of files to download to the worker
+    dest_url = url_join(default_url_prefix, job_id)
+    files_to_push = list(args.push)
+    if args.rerun:
+        assert (
+            args.name is not None
+        ), "Cannot re-run a job if the name isn't specified"
+        assert len(parameters) == 1, "Cannot re-run a job with more than one task"
+        # Add the existing job directory to the list of files to download to the worker
 
-            stdout_log = url_join(dest_url, "1/stdout.txt")
-            if io.exists(stdout_log):
-                print(
-                    "Since this job was submitted with --rerun, deleting {} before job starts".format(
-                        stdout_log
-                    )
+        stdout_log = url_join(dest_url, "1/stdout.txt")
+        if io.exists(stdout_log):
+            print(
+                "Since this job was submitted with --rerun, deleting {} before job starts".format(
+                    stdout_log
                 )
-                io.delete(stdout_log)
-            files_to_push.append(url_join(dest_url, "1") + ":.")
+            )
+            io.delete(stdout_log)
+        files_to_push.append(url_join(dest_url, "1") + ":.")
 
-        hash_db = CachingHashFunction(
-            config.cache_db_path
-        )
-        upload_map, spec = make_spec_from_command(
-            args.command,
-            image,
-            dest_url=dest_url,
-            cas_url=cas_url_prefix,
-            parameters=parameters,
-            hash_function=hash_db.get_sha256,
-            src_wildcards=args.results_wildcards,
-            extra_files=expand_files_to_upload(io, files_to_push),
-            working_dir=args.working_dir,
-            allow_symlinks=args.symlinks,
-            exclude_patterns=args.exclude_wildcards,
-        )
+    hash_db = CachingHashFunction(config.cache_db_path)
+    upload_map, spec = make_spec_from_command(
+        args.command,
+        image,
+        dest_url=dest_url,
+        cas_url=cas_url_prefix,
+        parameters=parameters,
+        hash_function=hash_db.get_sha256,
+        src_wildcards=args.results_wildcards,
+        extra_files=expand_files_to_upload(io, files_to_push),
+        working_dir=args.working_dir,
+        allow_symlinks=args.symlinks,
+        exclude_patterns=args.exclude_wildcards,
+    )
 
-        kubequeconsume_exe_path = config.kubequeconsume_exe_path
-        kubequeconsume_exe_obj_path = upload_map.add(
-            hash_db.get_sha256,
-            cas_url_prefix,
-            kubequeconsume_exe_path,
-            is_public=True,
-        )
-        kubequeconsume_exe_md5 = hash_db.get_md5(kubequeconsume_exe_path)
-        hash_db.persist()
+    kubequeconsume_exe_path = config.kubequeconsume_exe_path
+    kubequeconsume_exe_obj_path = upload_map.add(
+        hash_db.get_sha256,
+        cas_url_prefix,
+        kubequeconsume_exe_path,
+        is_public=True,
+    )
+    kubequeconsume_exe_md5 = hash_db.get_md5(kubequeconsume_exe_path)
+    hash_db.persist()
 
-        log.debug("upload_map = %s", upload_map)
+    log.debug("upload_map = %s", upload_map)
 
-        # First check existance of files, so we can print out a single summary statement
-        needs_upload = []
-        needs_upload_bytes = 0
-        pending_uploads = upload_map.uploads()
+    # First check existance of files, so we can print out a single summary statement
+    needs_upload = []
+    needs_upload_bytes = 0
+    pending_uploads = upload_map.uploads()
 
-        key_exists = io.bulk_exists_check([dest for _, dest, _ in pending_uploads])
+    key_exists = io.bulk_exists_check([dest for _, dest, _ in pending_uploads])
 
-        for filename, dest, is_public in pending_uploads:
-            if not key_exists[dest]:
-                needs_upload.append((filename, dest, is_public))
-                needs_upload_bytes += os.path.getsize(filename)
+    for filename, dest, is_public in pending_uploads:
+        if not key_exists[dest]:
+            needs_upload.append((filename, dest, is_public))
+            needs_upload_bytes += os.path.getsize(filename)
 
-        # now upload those which did not exist
-        txtui.user_print(
-            f"{len(needs_upload)} files ({needs_upload_bytes} bytes) out of {len(upload_map.uploads())} files will be uploaded"
-        )
-        for filename, dest, is_public in needs_upload:
-            log.debug(f"Uploading {filename}-> to {dest} (is_public={is_public}")
-            io.put(filename, dest, skip_if_exists=False)
+    # now upload those which did not exist
+    txtui.user_print(
+        f"{len(needs_upload)} files ({needs_upload_bytes} bytes) out of {len(upload_map.uploads())} files will be uploaded"
+    )
+    for filename, dest, is_public in needs_upload:
+        log.debug(f"Uploading {filename}-> to {dest} (is_public={is_public}")
+        io.put(filename, dest, skip_if_exists=False)
 
     log.debug("spec: %s", json.dumps(spec, indent=2))
 
@@ -595,6 +598,8 @@ def submit_cmd(jq : JobQueue, io : IO, cluster: Cluster, args : Any, config: Con
 
     max_preemptable_attempts_scale = config.max_preemptable_attempts_scale
 
+    breakpoint()
+    mount_ = config.mounts
     submit_config = SubmitConfig(
         service_account_email=config.credentials.service_account_email,
         boot_volume_in_gb=boot_volume_in_gb,
@@ -605,12 +610,13 @@ def submit_cmd(jq : JobQueue, io : IO, cluster: Cluster, args : Any, config: Con
         monitor_port=config.monitor_port,
         zones=config.zones,
         work_root_dir=config.work_root_dir,
-        mounts=config.mounts,
+        mounts=mount_,
         kubequeconsume_url=kubequeconsume_exe_url,
         kubequeconsume_md5=kubequeconsume_exe_md5,
         target_node_count=target_node_count,
         max_preemptable_attempts_scale=max_preemptable_attempts_scale,
     )
+    assert mount_ == submit_config.mounts
 
     cluster_name = None
     if args.local:
@@ -652,13 +658,7 @@ def submit_cmd(jq : JobQueue, io : IO, cluster: Cluster, args : Any, config: Con
         if not (args.dryrun or args.skip_kube_submit) and args.wait_for_completion:
             log.info("Waiting for job to terminate")
             successful_execution = watch(
-                io,
-                jq,
-                job_id,
-                cluster,
-                target_nodes=target_node_count,
-                loglive=True,
-                preemptible=preemptible,
+                io, jq, job_id, cluster, target_nodes=target_node_count, loglive=True
             )
             finished = True
 

@@ -35,6 +35,7 @@ with open("outdir/outdir2/output2.txt", "wt") as fd:
 
 import pytest
 
+
 @longrun
 def test_most_cmds_end_to_end(tmpdir):
     # write out config file
@@ -44,11 +45,9 @@ def test_most_cmds_end_to_end(tmpdir):
     shared_args = ["--config", str(config_file)]
 
     def run(args):
-        retcode = main(
-         shared_args + args 
-         )
+        retcode = main(shared_args + args)
         assert retcode == 0 or retcode is None
-    
+
     run(["sub", "-n", "test-sparkles-sub-end-to-end", "bash", "-c", "echo hello"])
     run(["status", "--stats", "test-sparkles-sub-end-to-end"])
     run(["show", "test-sparkles-sub-end-to-end"])
@@ -57,7 +56,7 @@ def test_most_cmds_end_to_end(tmpdir):
     run(["reset", "test-sparkles-sub-end-to-end"])
     run(["clean", "--force", "test-sparkles-sub-end-to-end"])
     run(["version"])
-    
+
 
 @longrun
 def test_local_end_to_end(tmpdir):

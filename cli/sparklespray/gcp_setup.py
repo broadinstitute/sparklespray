@@ -184,7 +184,7 @@ def can_reach_datastore_api(project_id, key_path):
     raise Exception("Failed to confirm access to datastore")
 
 
-def setup_project(project_id : str, key_path: str, bucket_name : str):
+def setup_project(project_id: str, key_path: str, bucket_name: str):
     print("Enabling services for project {}...".format(project_id))
     enable_services(project_id)
     service_acct = "sparkles-" + random_string(10).lower()

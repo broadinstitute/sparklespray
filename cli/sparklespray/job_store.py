@@ -88,7 +88,7 @@ class JobStore:
         entity = job_to_entity(self.client, job)
         batch.put(entity)
 
-    def get_job_ids(self) -> List[Job]:
+    def get_job_ids(self) -> List[str]:
         query = self.client.query(kind="Job")
         jobs_it = query.fetch()
         jobids = []

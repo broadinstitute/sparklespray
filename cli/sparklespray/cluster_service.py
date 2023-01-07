@@ -35,7 +35,7 @@ import os
 from .util import get_timestamp
 from .datastore_batch import Batch
 from abc import abstractmethod
-from .model import PersistentDiskMount
+from .model import PersistentDiskMount, DiskMount, ExistingDiskMount, DiskMountT
 
 from .log import log
 from googleapiclient.errors import HttpError
@@ -108,6 +108,7 @@ class Cluster:
 
     def get_state(self, job_id):
         job = self.job_store.get_job(job_id)
+        assert job is not None
         return ClusterState(
             job_id, job.cluster, self.task_store, self.node_req_store, self
         )
@@ -150,16 +151,16 @@ class Cluster:
                 return True
         return False
 
-    def ensure_named_volumes_exist(self, zone, pd_mounts: List[PersistentDiskMount]):
+    def ensure_named_volumes_exist(self, zone, pd_mounts: List[DiskMountT]):
+        breakpoint()
         for pd_mount in pd_mounts:
-            if pd_mount.name is None:
-                continue
-            volume = self.compute.get_volume_details(zone, pd_mount.name)
-            if volume is None:
-                print(f"Creating volume {pd_mount.name}")
-                self.compute.create_volume(
-                    zone, pd_mount.type, pd_mount.size_in_gb, pd_mount.name
-                )
+            if isinstance(pd_mount, ExistingDiskMount):
+                volume = self.compute.get_volume_details(zone, pd_mount.name)
+                if volume is None:
+                    print(f"Creating volume {pd_mount.name}")
+                    self.compute.create_volume(
+                        zone, pd_mount.type, pd_mount.size_in_gb, pd_mount.name
+                    )
 
     def stop_cluster(self, cluster_name: str):
         node_reqs = self.node_req_store.get_node_reqs(cluster_name)
@@ -278,35 +279,34 @@ class Cluster:
         """Simple api call used to verify the service is enabled"""
         self.nodes.test_pipeline_api(self.project)
 
-    def test_image(
-        self,
-        docker_image,
-        sample_url,
-        logging_url,
-        boot_volume_in_gb,
-        service_account_email,
-    ):
-        self.nodes.test_pipeline_submit_api(
-            setup_image=SETUP_IMAGE,
-            job_image=docker_image,
-            command=["sh", "-c", "echo okay"],
-            machine_type="n1-standard-2",
-            boot_volume_in_gb=boot_volume_in_gb,
-            service_account_email=service_account_email,
-        )
+    # def test_image(
+    #     self,
+    #     docker_image,
+    #     sample_url,
+    #     logging_url,
+    #     boot_volume_in_gb,
+    #     service_account_email,
+    # ):
+    #     self.nodes.test_pipeline_submit_api(
+    #         setup_image=SETUP_IMAGE,
+    #         job_image=docker_image,
+    #         command=["sh", "-c", "echo okay"],
+    #         machine_type="n1-standard-2",
+    #         boot_volume_in_gb=boot_volume_in_gb,
+    #         service_account_email=service_account_email,
+    #     )
 
-    def is_owner_running(self, owner: str) -> bool:
-        if owner == "localhost":
-            return False
+    # def is_owner_running(self, owner: str) -> bool:
+    #     if owner == "localhost":
+    #         return False
 
-        m = re.match("projects/([^/]+)/zones/([^/]+)/([^/]+)", owner)
-        assert (
-            m is not None
-        ), "Expected a instance name with zone but got owner={}".format(owner)
-        project_id, zone, instance_name = m.groups()
-        # assert project_id == self.project, "project_id ({}) != self.project ({})".format(project_id, self.project)
-        return self.compute.get_instance_status(zone, instance_name) == "RUNNING"
-
+    #     m = re.match("projects/([^/]+)/zones/([^/]+)/([^/]+)", owner)
+    #     assert (
+    #         m is not None
+    #     ), "Expected a instance name with zone but got owner={}".format(owner)
+    #     project_id, zone, instance_name = m.groups()
+    #     # assert project_id == self.project, "project_id ({}) != self.project ({})".format(project_id, self.project)
+    #     return self.compute.get_instance_status(zone, instance_name) == "RUNNING"
 
     def get_cluster_mod(self, job_id):
         return ClusterMod(job_id, self, self.debug_log_prefix)
@@ -439,6 +439,7 @@ class ClusterState:
 
         for task in claimed_tasks:
             instance_name = task.get_instance_name()
+            assert instance_name is not None
 
             if instance_name not in node_req_by_instance_name:
                 if instance_name not in self.unknown_instance_names:

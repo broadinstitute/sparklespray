@@ -24,7 +24,7 @@ class NodeReq:
     cluster_id: str
     status: str
     node_class: str
-    sequence: int
+    sequence: str
     job_id: str
     instance_name: Optional[str]
 
@@ -91,8 +91,8 @@ class AddNodeReqStore:
         self.client.put(entity)
 
     def cleanup_cluster(self, cluster_id: str, batch: Optional[Batch] = None) -> None:
-        _batch: Batcher = batch
-        if _batch is None:
+        _batch: Batcher
+        if batch is None:
             _batch = self.immediate_batch
         else:
             assert isinstance(batch, Batcher)

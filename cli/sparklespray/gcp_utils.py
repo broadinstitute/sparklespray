@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Dict, Any
 from .model import MachineSpec, LOCAL_SSD, PersistentDiskMount, ExistingDiskMount
 import re
 import os
@@ -6,12 +6,14 @@ import os
 # and image which has curl and sh installed, used to prep the worker node
 SETUP_IMAGE = "sequenceiq/alpine-curl"
 
+
 def normalize_label(label):
     label = label.lower()
     label = re.sub("[^a-z0-9]+", "-", label)
     if re.match("[^a-z].*", label) is not None:
         label = "x-" + label
     return label
+
 
 def create_pipeline_json(
     project: str,
@@ -32,9 +34,14 @@ def create_pipeline_json(
     volumes = []
     for i, pd in enumerate(machine_specs.mounts):
         if isinstance(pd, ExistingDiskMount):
-            volumes.append( {"volume": f"disk{i}", "existingDisk": {"disk": pd.name}} )
+            volumes.append({"volume": f"disk{i}", "existingDisk": {"disk": pd.name}})
         elif isinstance(pd, PersistentDiskMount):
-            volumes.append( {"volume": f"disk{i}", "persistentDisk" : {"sizeGb": pd.size_in_gb, "type": pd.type}} )
+            volumes.append(
+                {
+                    "volume": f"disk{i}",
+                    "persistentDisk": {"sizeGb": pd.size_in_gb, "type": pd.type},
+                }
+            )
         else:
             raise ValueError("{pd} was neither an ")
 
@@ -46,26 +53,26 @@ def create_pipeline_json(
             }
         )
 
-    actions = []
+    actions: List[Dict[str, Any]] = []
 
     for setup_command in setup_commands:
         actions.append(
-                        # set up directories
-                    {
-                        "imageUri": setup_image,
-                        "commands": setup_command,
-                        "mounts": mounts,
-                    }
-                )
+            # set up directories
+            {
+                "imageUri": setup_image,
+                "commands": setup_command,
+                "mounts": mounts,
+            }
+        )
 
-    actions.append (
-                        # start consumer
-                {
-                    "imageUri": docker_image,
-                    "commands": docker_command,
-                    "mounts": mounts,
-                    "portMappings": {str(monitor_port): monitor_port},
-                },
+    actions.append(
+        # start consumer
+        {
+            "imageUri": docker_image,
+            "commands": docker_command,
+            "mounts": mounts,
+            "portMappings": {str(monitor_port): monitor_port},
+        }
     )
 
     pipeline_def = {
@@ -80,16 +87,12 @@ def create_pipeline_json(
                     "volumes": volumes,
                     "serviceAccount": {
                         "email": "default",
-                        "scopes": [
-                            "https://www.googleapis.com/auth/cloud-platform"
-                        ],
+                        "scopes": ["https://www.googleapis.com/auth/cloud-platform"],
                     },
                     "bootDiskSizeGb": machine_specs.boot_volume_in_gb,
                     "serviceAccount": {
                         "email": machine_specs.service_account_email,
-                        "scopes": [
-                            "https://www.googleapis.com/auth/cloud-platform"
-                        ],
+                        "scopes": ["https://www.googleapis.com/auth/cloud-platform"],
                     },
                     "labels": {
                         "kubeque-cluster": cluster_name,
@@ -105,6 +108,7 @@ def create_pipeline_json(
     }
 
     return pipeline_def
+
 
 def create_pipeline_spec(
     project: str,
@@ -131,13 +135,13 @@ def create_pipeline_spec(
         ["chmod", "a+rwx", exe_dir],
         ["curl", "-o", consume_exe_path, consume_exe_url],
         # verify checksum of downloaded file
-        ["sh", "-c", f"echo \"{consume_exe_md5}  {consume_exe_path}\" > {checksum_path}"],
+        ["sh", "-c", f'echo "{consume_exe_md5}  {consume_exe_path}" > {checksum_path}'],
         ["md5sum", "-c", checksum_path],
         # mark file as executable
         ["chmod", "a+x", consume_exe_path],
         # set up directory that'll be used by consume exe
         ["mkdir", "-p", consume_data],
-        ["chmod", "a+rwx", consume_data]
+        ["chmod", "a+rwx", consume_data],
     ]
 
     return create_pipeline_json(

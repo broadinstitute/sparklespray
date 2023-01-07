@@ -32,11 +32,7 @@ def _test_datastore_api(job_store: JobStore, job_id: str):
     job_store.delete(job_id)
 
 
-
-
 def validate_cmd(jq: JobQueue, io: IO, cluster: Cluster, config: Config):
-    from .submit import _get_boot_volume_in_gb
-
     print(f"Validating config, using sparklespray {sparklespray.__version__}")
 
     service_acct = config.credentials.service_account_email
@@ -70,12 +66,13 @@ def validate_cmd(jq: JobQueue, io: IO, cluster: Cluster, config: Config):
     )
     logging_url = config.default_url_prefix + "/node-logs"
 
-    cluster.test_image(
-        config.default_image,
-        sample_url,
-        logging_url,
-        _get_boot_volume_in_gb(config),
-        service_acct,
-    )
+    raise Exception("unimplemented")
+    # cluster.test_image(
+    #     config.default_image,
+    #     sample_url,
+    #     logging_url,
+    #     config.boot_volume_in_gb,
+    #     service_acct,
+    # )
 
     print("Verification successful!")

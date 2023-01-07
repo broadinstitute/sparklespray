@@ -1,6 +1,6 @@
 import time
 from .model import LOCAL_SSD
-from apiclient.discovery import build
+from googleapiclient.discovery import build
 import logging
 import random
 import string
@@ -73,7 +73,7 @@ class AddNodeStatus:
 
     @property
     def instance_name(self):
-        events = self.response.get("metadata", {}).get("events")
+        events = self.response.get("metadata", {}).get("events", [])
         for event in events:
             instance = event.get("details", {}).get("instance")
             if instance is not None:
@@ -97,7 +97,7 @@ class AddNodeStatus:
             if instance_name is None:
                 return NODE_REQ_SUBMITTED
             else:
-                events = self.response.get("metadata", {}).get("events")
+                events = self.response.get("metadata", {}).get("events", [])
                 for event in events:
                     if event["details"].get("actionId") == CONSUMER_ACTION_ID:
                         return NODE_REQ_RUNNING
@@ -115,40 +115,6 @@ class AddNodeStatus:
             return None
 
         return self.response["error"]["message"]
-
-    def get_event_summary(self, since=None):
-        log = []
-        events = self.status["metadata"]["events"]
-        # TODO: Better yet, sort by timestamp
-        events = list(reversed(events))
-        if since is not None:
-            assert isinstance(since, AddNodeStatus)
-            events = events[len(since.status["metadata"]["events"]) :]
-
-        for event in events:
-            if (
-                event["details"]["@type"]
-                == "type.googleapis.com/google.genomics.v2alpha1.ContainerStoppedEvent"
-            ):
-                actionId = event["details"]["actionId"]
-                action = self.status["metadata"]["pipeline"]["actions"][actionId - 1]
-                log.append(
-                    "Completed ({}): {}".format(
-                        action["imageUri"], repr(action["commands"])
-                    )
-                )
-                log.append(event["description"])
-                log.append(
-                    "exitStatus: {}, stderr:".format(event["details"]["exitStatus"])
-                )
-                log.append(event["details"]["stderr"])
-            else:
-                # if event['details']['@type'] != 'type.googleapis.com/google.genomics.v2alpha1.ContainerStartedEvent':
-                log.append(event["description"])
-        return "\n".join(log)
-
-    def is_done(self) -> bool:
-        return self.status["done"]
 
 
 class NodeService:
@@ -198,7 +164,7 @@ class NodeService:
         request = self.service.projects().operations().cancel(name=operation_name)
         request.execute()
 
-    def add_node(self, pipeline_def: dict, preemptible: bool, debug_log_url: str):
+    def add_node(self, pipeline_def: dict, preemptible: bool, debug_log_url: Optional[str]):
         "Returns operation name"
         # make a deep copy
         pipeline_def = json.loads(json.dumps(pipeline_def))
@@ -291,4 +257,3 @@ class NodeService:
                 )
             time.sleep(2)
         out.write("\n")
-
