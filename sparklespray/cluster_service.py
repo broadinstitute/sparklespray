@@ -267,7 +267,9 @@ class Cluster:
     #
     def test_pipeline_api(self):
         """Simple api call used to verify the service is enabled"""
-        self.nodes.test_pipeline_api(self.project)
+        assert len(self.zones) == 1
+        region = self.zones[0][:-2]
+        self.nodes.test_pipeline_api(self.project, region)
 
     def test_image(
         self,

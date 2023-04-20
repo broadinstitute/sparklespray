@@ -42,3 +42,34 @@ while True:
         break
     print(status.status)
     time.sleep(5)
+
+    def get_event_summary(self, since=None):
+        log = []
+        events = self.status["metadata"]["events"]
+        # TODO: Better yet, sort by timestamp
+        events = list(reversed(events))
+        if since is not None:
+            assert isinstance(since, AddNodeStatus)
+            events = events[len(since.status["metadata"]["events"]) :]
+
+        for event in events:
+            if (
+                event["details"]["@type"]
+                == "type.googleapis.com/google.genomics.v2alpha1.ContainerStoppedEvent"
+            ):
+                actionId = event["details"]["actionId"]
+                action = self.status["metadata"]["pipeline"]["actions"][actionId - 1]
+                log.append(
+                    "Completed ({}): {}".format(
+                        action["imageUri"], repr(action["commands"])
+                    )
+                )
+                log.append(event["description"])
+                log.append(
+                    "exitStatus: {}, stderr:".format(event["details"]["exitStatus"])
+                )
+                log.append(event["details"]["stderr"])
+            else:
+                # if event['details']['@type'] != 'type.googleapis.com/google.genomics.v2alpha1.ContainerStartedEvent':
+                log.append(event["description"])
+        return "\n".join(log)

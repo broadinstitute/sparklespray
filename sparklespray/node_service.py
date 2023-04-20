@@ -72,9 +72,9 @@ class AddNodeStatus:
 
     @property
     def instance_name(self):
-        events = self.response.get("metadata", {}).get("events")
+        events = self.response.get("metadata", {}).get("events", [])
         for event in events:
-            instance = event.get("details", {}).get("instance")
+            instance = event.get("workerAssigned", {}).get("instance")
             if instance is not None:
                 return instance
         return None
@@ -85,8 +85,10 @@ class AddNodeStatus:
     @property
     def status(self):
         from .cluster_service import CONSUMER_ACTION_ID
-
-        if self.response["done"]:
+        
+        #print(self.response)
+        
+        if self.response.get("done", False):
             if "error" in self.response:
                 return NODE_REQ_FAILED
             else:
@@ -98,7 +100,7 @@ class AddNodeStatus:
             else:
                 events = self.response.get("metadata", {}).get("events")
                 for event in events:
-                    if event["details"].get("actionId") == CONSUMER_ACTION_ID:
+                    if event.get("containerStarted", {}).get("actionId") == CONSUMER_ACTION_ID:
                         return NODE_REQ_RUNNING
                 return NODE_REQ_STAGING
             #
@@ -115,68 +117,42 @@ class AddNodeStatus:
 
         return self.response["error"]["message"]
 
-    def get_event_summary(self, since=None):
-        log = []
-        events = self.status["metadata"]["events"]
-        # TODO: Better yet, sort by timestamp
-        events = list(reversed(events))
-        if since is not None:
-            assert isinstance(since, AddNodeStatus)
-            events = events[len(since.status["metadata"]["events"]) :]
-
-        for event in events:
-            if (
-                event["details"]["@type"]
-                == "type.googleapis.com/google.genomics.v2alpha1.ContainerStoppedEvent"
-            ):
-                actionId = event["details"]["actionId"]
-                action = self.status["metadata"]["pipeline"]["actions"][actionId - 1]
-                log.append(
-                    "Completed ({}): {}".format(
-                        action["imageUri"], repr(action["commands"])
-                    )
-                )
-                log.append(event["description"])
-                log.append(
-                    "exitStatus: {}, stderr:".format(event["details"]["exitStatus"])
-                )
-                log.append(event["details"]["stderr"])
-            else:
-                # if event['details']['@type'] != 'type.googleapis.com/google.genomics.v2alpha1.ContainerStartedEvent':
-                log.append(event["description"])
-        return "\n".join(log)
-
     def is_done(self) -> bool:
-        return self.status["done"]
+        return self.status.get("done", False)
 
 
 class NodeService:
     def __init__(self, project: str, zones: List[str], credentials=None) -> None:
         self.service = build(
-            "genomics",
-            "v2alpha1",
+            "lifesciences",
+            "v2beta",
             credentials=credentials,
             cache_discovery=True,
             cache=DirCache(".sparkles-cache/services"),
         )
         self.zones = zones
         self.project = project
+        assert len(zones) == 1
+        self.region = zones[0][:-2]
 
-    def test_pipeline_api(self, project_id):
+    def test_pipeline_api(self, project_id, location):
         request = (
             self.service.projects()
+            .locations()
             .operations()
             .list(
-                name=f"projects/{project_id}/operations",
+                name=f"projects/{project_id}/locations/{location}",
                 filter='labels.invalid= "invalid"',
             )
         )
         response = request.execute()
-        assert "operations" in response
+        assert response == {}
+        #breakpoint()
+        #assert "operations" in response
         # print(response)
 
     def get_operation_details(self, operation_name: str) -> dict:
-        request = self.service.projects().operations().get(name=operation_name)
+        request = self.service.projects().locations().operations().get(name=operation_name)
         response = request.execute()
         return response
 
@@ -215,10 +191,9 @@ class NodeService:
                 "flags": ["ALWAYS_RUN"],
             }
             pipeline_def["pipeline"]["actions"].append(cp_action)
-        # print(json.dumps(pipeline_def, indent=2))
 
         # Run the pipeline
-        operation = self.service.pipelines().run(body=pipeline_def).execute()
+        operation = self.service.projects().locations().pipelines().run(parent=f"projects/{self.project}/locations/{self.region}",body=pipeline_def).execute()
 
         return operation["name"]
 
@@ -239,7 +214,6 @@ class NodeService:
                     {"imageUri": job_image, "commands": command},
                 ],
                 "resources": {
-                    "projectId": self.project,
                     "zones": self.zones,
                     "virtualMachine": {
                         "machineType": machine_type,
