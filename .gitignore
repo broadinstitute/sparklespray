@@ -1,4 +1,4 @@
-cli/kubequeconsume
+cli/sparklespray/bin/kubequeconsume
 vendor
 *~
 .*
