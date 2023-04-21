@@ -153,8 +153,6 @@ def load_config(
     config_parser.read(config_file)
     config_dict = dict(config_parser.items("config"))
 
-    print("orig_config", config_dict)
-    print("overrides", overrides)
     config_dict.update(overrides)
 
     config_used = set()

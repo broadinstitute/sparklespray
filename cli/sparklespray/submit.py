@@ -153,7 +153,7 @@ def _make_cluster_name(job_name : str, image : str, machine_spec : MachineSpec, 
         return "l-" + random_string(20)
     else:
         machine_json = json.dumps(machine_spec.as_dict(), sort_keys=True)
-        print(f"machine_json: {machine_json}")
+        # print(f"machine_json: {machine_json}")
         hash = hashlib.md5()
         hash.update(f"{job_name}-{image}-{sparklespray.__version__}".encode(
                 "utf8"
