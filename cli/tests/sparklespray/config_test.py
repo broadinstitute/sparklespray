@@ -18,7 +18,7 @@ account=apple
     )
 
     config = load_config(
-        config_file=str(config_file), gcloud_config_file=str(tmpdir.join("invalid"))
+        config_file=str(config_file), overrides={}, gcloud_config_file=str(tmpdir.join("invalid"))
     )
 
     assert config.default_url_prefix == "gs://bananas/1000"
@@ -27,7 +27,7 @@ account=apple
     assert config.zones == ["us-central1-b"]
     assert config.region == "us-central1"
     assert config.mounts == [
-        PersistentDiskMount(path="/work", size_in_gb=100, type="local-ssd")
+        PersistentDiskMount(path="/mnt", size_in_gb=100, type="local-ssd")
     ]
 
 
@@ -48,7 +48,7 @@ extra_arg=yes
 
     with pytest.raises(UnknownParameters):
         load_config(
-            config_file=str(config_file), gcloud_config_file=str(tmpdir.join("invalid"))
+            config_file=str(config_file), overrides={}, gcloud_config_file=str(tmpdir.join("invalid"))
         )
 
 
@@ -66,5 +66,5 @@ region=us-central1
 
     with pytest.raises(MissingRequired):
         load_config(
-            config_file=str(config_file), gcloud_config_file=str(tmpdir.join("invalid"))
+            config_file=str(config_file), overrides={}, gcloud_config_file=str(tmpdir.join("invalid"))
         )

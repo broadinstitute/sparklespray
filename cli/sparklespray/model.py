@@ -9,6 +9,15 @@ DEFAULT_SSD_SIZE = (
 
 class DiskMount(BaseModel):
     path: str
+
+
+
+class ExistingDiskMount(DiskMount):
+    name: str
+
+
+class PersistentDiskMount(DiskMount):
+    size_in_gb: int
     type: str
 
     @validator("type")
@@ -16,16 +25,6 @@ class DiskMount(BaseModel):
         if v not in ALLOWED_DISK_TYPES:
             raise ValueError(f"{v} was not one of {ALLOWED_DISK_TYPES}")
         return v
-
-
-class ExistingDiskMount(DiskMount):
-    name: str
-    # used to create the volume if it does not exist
-    size_in_gb: int
-
-
-class PersistentDiskMount(DiskMount):
-    size_in_gb: int
 
 from typing import TypeVar
 DiskMountT = Union[ExistingDiskMount, PersistentDiskMount] # TypeVar("DiskMountT", bound=DiskMount)

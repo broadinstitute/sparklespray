@@ -147,7 +147,6 @@ def expand_tasks(spec, io, default_url_prefix, default_job_url_prefix):
     return tasks
 
 def _make_cluster_name(job_name : str, image : str, machine_spec : MachineSpec, unique_name: bool):
-    breakpoint()
     import hashlib
 
     if unique_name:
@@ -598,7 +597,6 @@ def submit_cmd(jq: JobQueue, io: IO, cluster: Cluster, args: Any, config: Config
 
     max_preemptable_attempts_scale = config.max_preemptable_attempts_scale
 
-    breakpoint()
     mount_ = config.mounts
     submit_config = SubmitConfig(
         service_account_email=config.credentials.service_account_email,

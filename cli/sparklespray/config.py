@@ -275,12 +275,10 @@ def load_config(
             path = consume(f"mount_{i+1}_path")
             type = consume(f"mount_{i+1}_type")
         size_in_gb = consume(f"mount_{i+1}_size_in_gb", 100, int)
-        breakpoint()
         name = consume(f"mount_{i+1}_name", None)
-        assert name is not None
         if name is not None:
             mounts.append(
-            ExistingDiskMount(name=name, path=path, type=type, size_in_gb=size_in_gb)
+            ExistingDiskMount(name=name, path=path)
         )
         else:
             mounts.append(

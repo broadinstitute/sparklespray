@@ -733,7 +733,6 @@ def main(argv=None):
     args = parse.parse_args(argv)
 
     overrides = {}
-    assert args.overrides is not None
     if args.overrides is not None:
         for override in args.overrides:
             m = re.match("([^=]+)=(.*)", override)

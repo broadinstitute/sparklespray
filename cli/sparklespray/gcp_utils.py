@@ -31,17 +31,22 @@ def create_pipeline_json(
     normalized_jobid = normalize_label(jobid)
 
     mounts = []
-    volumes = []
+#    volumes = []
+    disks = []
     for i, pd in enumerate(machine_specs.mounts):
         if isinstance(pd, ExistingDiskMount):
-            volumes.append({"volume": f"disk{i}", "existingDisk": {"disk": pd.name}})
+            # only allowed with life science API
+            #volumes.append({"volume": f"disk{i}", "disk": {"disk": pd.name}})
+            raise Exception("Mounting existing volumes is not allowed at this time")
         elif isinstance(pd, PersistentDiskMount):
-            volumes.append(
-                {
-                    "volume": f"disk{i}",
-                    "persistentDisk": {"sizeGb": pd.size_in_gb, "type": pd.type},
-                }
-            )
+            # only allowed with life science API
+            # volumes.append(
+            #     {
+            #         "volume": f"disk{i}",
+            #         "disk": {"sizeGb": pd.size_in_gb, "type": pd.type},
+            #     }
+            # )
+            disks.append({"type": pd.type, "sizeGb": pd.size_in_gb, "name": f"disk{i}"})
         else:
             raise ValueError("{pd} was neither an ")
 
@@ -84,7 +89,9 @@ def create_pipeline_json(
                 "virtualMachine": {
                     "machineType": machine_specs.machine_type,
                     "preemptible": False,
-                    "volumes": volumes,
+                    # this seems to only be allowed in life science API
+                    # "volumes": volumes,
+                    "disks": disks,
                     "serviceAccount": {
                         "email": "default",
                         "scopes": ["https://www.googleapis.com/auth/cloud-platform"],

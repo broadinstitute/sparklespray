@@ -152,15 +152,10 @@ class Cluster:
         return False
 
     def ensure_named_volumes_exist(self, zone, pd_mounts: List[DiskMountT]):
-        breakpoint()
         for pd_mount in pd_mounts:
             if isinstance(pd_mount, ExistingDiskMount):
                 volume = self.compute.get_volume_details(zone, pd_mount.name)
-                if volume is None:
-                    print(f"Creating volume {pd_mount.name}")
-                    self.compute.create_volume(
-                        zone, pd_mount.type, pd_mount.size_in_gb, pd_mount.name
-                    )
+                assert volume, f"Requested mounting of an existing volume ({pd_mount.name}) but it does not exist in zone {zone}"
 
     def stop_cluster(self, cluster_name: str):
         node_reqs = self.node_req_store.get_node_reqs(cluster_name)

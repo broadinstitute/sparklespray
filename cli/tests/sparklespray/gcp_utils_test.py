@@ -22,33 +22,33 @@ def test_pd_standard():
     machine_specs = MachineSpec(
         service_account_email="test@sample.com",
         boot_volume_in_gb=100,
-        pd_mount_points=[
+        mounts=[
             PersistentDiskMount(path="/d1", size_in_gb=200, type="pd-standard")
         ],
         work_root_dir="/mnt",
         machine_type="machinetype",
+
     )
 
     pipeline_spec = _create_pipeline_spec(machine_specs)
 
     expected_mounts = [{"disk": "disk0", "path": "/d1", "readOnly": False}]
-    excepted_volumes = [{"volume": "disk0", "sizeGb": 200, "type": "pd-standard"}]
+    excepted_volumes = [{"volume": "disk0", "disk": { "sizeGb": 200, "type": "pd-standard" }}]
     for action in pipeline_spec["pipeline"]["actions"]:
         assert action["mounts"] == expected_mounts
+
     assert "disks" not in pipeline_spec["pipeline"]["resources"]["virtualMachine"]
     assert (
         pipeline_spec["pipeline"]["resources"]["virtualMachine"]["volumes"]
         == excepted_volumes
     )
-    breakpoint()
-    print("x")
 
 
 def test_existing_mount():
     machine_specs = MachineSpec(
         service_account_email="test@sample.com",
         boot_volume_in_gb=100,
-        pd_mount_points=[ExistingDiskMount(name="d1", path="/d1")],
+        mounts=[ExistingDiskMount(name="d1", path="/d1")],
         work_root_dir="/mnt",
         machine_type="machinetype",
     )
@@ -56,7 +56,7 @@ def test_existing_mount():
     pipeline_spec = _create_pipeline_spec(machine_specs)
 
     expected_mounts = [{"disk": "disk0", "path": "/d1", "readOnly": False}]
-    excepted_volumes = [{"volume": "disk0", "existingDisk": {"disk": "d1"}}]
+    excepted_volumes = [{"volume": "disk0", "disk": {"disk": "d1"}}]
     for action in pipeline_spec["pipeline"]["actions"]:
         assert action["mounts"] == expected_mounts
     assert "disks" not in pipeline_spec["pipeline"]["resources"]["virtualMachine"]
