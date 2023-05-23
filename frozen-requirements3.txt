@@ -47,7 +47,7 @@ pyOpenSSL==21.0.0
 pyparsing==2.4.7
 pytz==2021.1
 PyYAML==5.4.1
-requests==2.25.1
+requests==2.31.0
 rsa==4.7.2
 six==1.15.0
 -e git+git@github.com:broadinstitute/sparklespray.git@9f097e7321078a3cc93d7e5e3538ab6955836c1b#egg=sparklespray
