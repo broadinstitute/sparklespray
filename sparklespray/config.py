@@ -110,7 +110,7 @@ def load_only_config_dict(
         merged_config["kubequeconsume_exe_path"] = os.path.join(
             os.path.dirname(__file__), "bin/kubequeconsume"
         )
-        assert os.path.exists(merged_config["kubequeconsume_exe_path"])
+        assert os.path.exists(merged_config["kubequeconsume_exe_path"]), f"Could not find {merged_config['kubequeconsume_exe_path']}. This most commonly happens when one doesn't install from the packaged releases at https://github.com/broadinstitute/sparklespray/releases"
 
     if "cas_url_prefix" not in merged_config:
         merged_config["cas_url_prefix"] = merged_config["default_url_prefix"] + "/CAS/"
