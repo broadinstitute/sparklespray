@@ -1,1 +1,7 @@
-__version__ = "3.19.0"
+import importlib.metadata
+
+try:
+    __version__ = importlib.metadata.version("sparklespray")
+except importlib.metadata.PackageNotFoundError:
+    __version__ = "unknown"
+
