@@ -2,7 +2,7 @@ name: Go
 
 on:
   push:
-    branches: [ "master" ]
+    branches: [ "poetry" ]
   pull_request:
     branches: [ "master" ]
 
@@ -19,7 +19,8 @@ jobs:
         go-version: 1.18
 
     - name: Build
-      run: go build -v go/src/...
+      run: cd go/src/github.com/broadinstitute/kubequeconsume && go build -v ./...
 
     - name: Test
-      run: go test -v go/src/...
+      run: cd go/src/github.com/broadinstitute/kubequeconsume && go test -v ./...
+      

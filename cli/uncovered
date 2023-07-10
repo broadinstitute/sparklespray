@@ -1,0 +1,12 @@
+logs_cmd
+show_cmd
+reset_cmd
+status_cmd
+fetch_cmd
+fetch_cmd_
+clean_cmd
+kill
+version
+grant
+setup
+main

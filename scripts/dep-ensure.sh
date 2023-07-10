@@ -6,6 +6,7 @@ if [ ! -e go/src/github.com/broadinstitute/kubequeconsume/vendor ] ; then
     #dep ensure "$@"
     
     docker run --rm \
+        --platform linux/amd64\
         -v $(pwd):/go/src/github.com/broadinstitute/kubequeconsume \
         -w /go/src/github.com/broadinstitute/kubequeconsume \
         -v $(pwd)/.caches/dep:/go/pkg/dep \

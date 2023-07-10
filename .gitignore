@@ -1,4 +1,4 @@
-cli/kubequeconsume
+cli/sparklespray/bin/kubequeconsume
 vendor
 *~
 .*
@@ -31,3 +31,5 @@ go/src/github.com/broadinstitute/kubequeconsume/cli/main
 sparkles-docker.log
 unused-files
 sparklespray.code-workspace
+main
+kubequeconsume
