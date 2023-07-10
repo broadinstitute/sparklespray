@@ -61,10 +61,10 @@ class AddNodeReqStore:
         self.client.put(node_req_to_entity(self.client, req))
 
     def get_node_reqs(self, cluster_id: str, status: str = None) -> List[NodeReq]:
-        query = self.client.query(kind="NodeReq")
-        query.add_filter("cluster_id", "=", cluster_id)
+        filters = [("cluster_id", "=", cluster_id)]
         if status is not None:
-            query.add_filter("status", "=", status)
+            filters.append(("status", "=", status))
+        query = self.client.query(kind="NodeReq", filters=filters)
         results = []
         for entity in query.fetch():
             node_req = entity_to_node_req(entity)
@@ -82,15 +82,11 @@ class AddNodeReqStore:
         if batch is None:
             batch = self.immediate_batch
 
-        query = self.client.query(kind="NodeReq")
-        query.add_filter("cluster_id", "=", cluster_id)
-        query.add_filter("status", "=", NODE_REQ_COMPLETE)
+        query = self.client.query(kind="NodeReq", filters=[("cluster_id", "=", cluster_id), ("status", "=", NODE_REQ_COMPLETE)])
         for entity in query.fetch():
             batch.delete(entity.key)
 
-        query = self.client.query(kind="NodeReq")
-        query.add_filter("cluster_id", "=", cluster_id)
-        query.add_filter("status", "=", NODE_REQ_FAILED)
+        query = self.client.query(kind="NodeReq", filters=[("cluster_id", "=", cluster_id), ("status", "=", NODE_REQ_FAILED)])
         for entity in query.fetch():
             batch.delete(entity.key)
 

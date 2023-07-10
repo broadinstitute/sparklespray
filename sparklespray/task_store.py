@@ -148,11 +148,12 @@ class TaskStore:
         batch.delete(key)
 
     def get_tasks(self, job_id=None, status=None, max_fetch=None) -> List[Task]:
-        query = self.client.query(kind="Task")
+        filters=[]
         if job_id is not None:
-            query.add_filter("job_id", "=", job_id)
+            filters.append(["job_id", "=", job_id])
         if status is not None:
-            query.add_filter("status", "=", status)
+            filters.append(["status", "=", status])
+        query = self.client.query(kind="Task", filters=filters)
         start_time = time.time()
         tasks_it = query.fetch(limit=max_fetch)
         # do I need to use next_page?

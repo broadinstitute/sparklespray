@@ -152,6 +152,7 @@ class NodeService:
         # print(response)
 
     def get_operation_details(self, operation_name: str) -> dict:
+        _sanity_check_operation_name(operation_name)
         request = self.service.projects().locations().operations().get(name=operation_name)
         response = request.execute()
         return response
@@ -188,11 +189,12 @@ class NodeService:
             cp_action = {
                 "imageUri": "google/cloud-sdk:alpine",
                 "commands": ["gsutil", "cp", "/google/logs/output", debug_log_url],
-                "flags": ["ALWAYS_RUN"],
+                "alwaysRun": True,
             }
             pipeline_def["pipeline"]["actions"].append(cp_action)
 
         # Run the pipeline
+        log.info("%s", f"submitting pipeline run: {json.dumps(pipeline_def, indent=3)}")
         operation = self.service.projects().locations().pipelines().run(parent=f"projects/{self.project}/locations/{self.region}",body=pipeline_def).execute()
 
         return operation["name"]
@@ -320,7 +322,6 @@ class NodeService:
                     },
                 ],
                 "resources": {
-                    "projectId": self.project,
                     "zones": self.zones,
                     "virtualMachine": {
                         "machineType": machine_specs.machine_type,
@@ -333,14 +334,12 @@ class NodeService:
                             ],
                         },
                         "bootDiskSizeGb": machine_specs.boot_volume_in_gb,
-                        "accelerators": [machine_specs.get_gpu()],
                         "serviceAccount": {
                             "email": machine_specs.service_account_email,
                             "scopes": [
                                 "https://www.googleapis.com/auth/cloud-platform"
                             ],
                         },
-                        "nvidiaDriverVersion": "390.46",
                         "labels": {
                             "kubeque-cluster": cluster_name,
                             "sparkles-job": normalized_jobid,
@@ -355,3 +354,8 @@ class NodeService:
         }
 
         return pipeline_def
+
+def _sanity_check_operation_name(operation_name):
+    m = re.match("projects/([^/]+)/operations/\\d+", operation_name)
+    if m is not None:
+        raise Exception(f"Operation ID {operation_name} appears to be from an older version of sparkles (which used an older google API). This job cannot be manipulated with this version of sparkles")

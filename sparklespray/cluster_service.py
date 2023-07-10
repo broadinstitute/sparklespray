@@ -267,7 +267,7 @@ class Cluster:
     #
     def test_pipeline_api(self):
         """Simple api call used to verify the service is enabled"""
-        assert len(self.zones) == 1
+        assert len(self.zones) == 1, "With the switch to the google's life science API, we can now only use one zone"
         region = self.zones[0][:-2]
         self.nodes.test_pipeline_api(self.project, region)
 
