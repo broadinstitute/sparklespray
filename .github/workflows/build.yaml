@@ -5,9 +5,8 @@ on:
       paths:
          - "*.py"
          - "**/*.py"
-         - .github/workflows/pyright-ratchet.yaml
+         - .github/workflows/build.yaml
          - "**/*.go"
-         - .github/workflows/go.yml
 
 env:
   PYTHON_VERSION: "3.11"
