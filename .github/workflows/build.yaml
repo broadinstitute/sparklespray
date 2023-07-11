@@ -30,9 +30,16 @@ jobs:
     - name: build executable
       run: bash scripts/build-static-exe.sh
 
+    - name: Upload executable
+      uses: actions/upload-artifact@v3
+      with:
+        name: kubequeconsume-exe-${{ github.run_number }}
+        path: cli/sparklespray/bin/kubequeconsume
+        retention-days: 5
 #    - name: Test
 #      run: cd go/src/github.com/broadinstitute/kubequeconsume && go test -v ./...
 
+          
   check-pyright:
     runs-on: ubuntu-latest
 
@@ -60,14 +67,54 @@ jobs:
         with:
           poetry-version: ${{ env.POETRY_VERSION }}
       - name: Install dependencies
-        run: |
-          cd cli
-          poetry install
+        run: poetry install
+        working-directory: cli
       - name: Run pyratchet
-        run: |
-          cd cli 
-          poetry run pyright-ratchet run pyright
+        working-directory: cli
+        run:   poetry run pyright-ratchet run pyright
       - name: Run tests
-        run: |
-          cd cli
-          poetry run pytest
+        run: poetry run pytest
+        working-directory: cli
+
+  build-package:
+    needs: [check-pyright, build-go]
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      # the following logic for caching taken from https://gist.github.com/gh640/233a6daf68e9e937115371c0ecd39c61
+      # Poetry cache depends on OS, Python version and Poetry version.
+      - name: Cache Poetry cache
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pypoetry
+          key: poetry-cache-${{ runner.os }}-${{ steps.setup_python.outputs.python-version }}-${{ env.POETRY_VERSION }}
+      # virtualenv cache should depends on OS, Python version and `poetry.lock` (and optionally workflow files).
+      - name: Cache Packages
+        uses: actions/cache@v3
+        with:
+          path: ~/.local
+          key: poetry-local-${{ runner.os }}-${{ steps.setup_python.outputs.python-version }}-${{ hashFiles('**/poetry.lock') }}-${{ hashFiles('.github/workflows/*.yml') }}
+      - name: Set up poetry
+        uses: abatilo/actions-poetry@v2
+        with:
+          poetry-version: ${{ env.POETRY_VERSION }}
+      - name: Download executable
+        uses: actions/download-artifact@v3
+        with:
+          name: kubequeconsume-exe-${{ github.run_number }}
+          path: cli/sparklespray/bin/kubequeconsume
+      - name: Build package
+        run: poetry run build
+        working-directory: cli
+      - name: Upload executable
+        uses: actions/upload-artifact@v3
+        with:
+          name: sparklespray-${{ github.run_number }}.tar.gz
+          path: cli/dist/sparklespray-*.tar.gz
+          retention-days: 5
+            
