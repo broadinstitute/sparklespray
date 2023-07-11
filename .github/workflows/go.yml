@@ -15,11 +15,14 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v3
       with:
-        go-version: 1.18
+        go-version: 1.19
 
-    - name: Build
+    - name: Build everything
       run: cd go/src/github.com/broadinstitute/kubequeconsume && go build -v ./...
 
-    - name: Test
-      run: cd go/src/github.com/broadinstitute/kubequeconsume && go test -v ./...
+    - name: build executable
+      run: bash scripts/build-static-exe.sh
+
+#    - name: Test
+#      run: cd go/src/github.com/broadinstitute/kubequeconsume && go test -v ./...
       

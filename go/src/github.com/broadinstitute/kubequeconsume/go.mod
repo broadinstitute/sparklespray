@@ -5,7 +5,7 @@ go 1.19
 require (
 	cloud.google.com/go v0.26.0
 	github.com/bmatcuk/doublestar v1.1.1
-	github.com/golang/protobuf v1.2.0
+	github.com/golang/protobuf v1.5.0
 	github.com/stretchr/testify v1.2.2
 	github.com/urfave/cli v1.20.0
 	golang.org/x/net v0.0.0-20180925072008-f04abc6bdfa7
@@ -27,4 +27,5 @@ require (
 	golang.org/x/text v0.3.0 // indirect
 	google.golang.org/appengine v1.2.0 // indirect
 	google.golang.org/genproto v0.0.0-20180924164928-221a8d4f7494 // indirect
+	google.golang.org/protobuf v1.31.0 // indirect
 )
