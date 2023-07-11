@@ -106,7 +106,7 @@ jobs:
         uses: actions/download-artifact@v3
         with:
           name: kubequeconsume-exe-${{ github.run_number }}
-          path: cli/sparklespray/bin/kubequeconsume
+          path: cli/sparklespray/bin
       - name: get package version
         run: (echo -n 'package_version=' && poetry version -s) >> "$GITHUB_ENV"
         working-directory: cli
@@ -119,7 +119,7 @@ jobs:
       - name: Upload sparklespray-${{ env.package_version }}.tar.gz package
         uses: actions/upload-artifact@v3
         with:
-          name: sparklespray-${{ env.package_version }}.tar.gz
+          name: sparklespray-${{ env.package_version }}
           path: cli/dist/sparklespray-*.tar.gz
           retention-days: 5
             
