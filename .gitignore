@@ -2,6 +2,7 @@ cli/sparklespray/bin/kubequeconsume
 vendor
 *~
 .*
+!.github
 kubequeconsume/kubeque/__pycache__
 
 *~
