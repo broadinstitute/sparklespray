@@ -39,7 +39,7 @@ jobs:
 #      run: cd go/src/github.com/broadinstitute/kubequeconsume && go test -v ./...
 
           
-  check-pyright:
+  test-python:
     runs-on: ubuntu-latest
 
     steps:
@@ -76,7 +76,7 @@ jobs:
         working-directory: cli
 
   build-package:
-    needs: [check-pyright, build-go]
+    needs: [test-python, build-go]
     runs-on: ubuntu-latest
 
     steps:
@@ -108,7 +108,7 @@ jobs:
           name: kubequeconsume-exe-${{ github.run_number }}
           path: cli/sparklespray/bin/kubequeconsume
       - name: Build package
-        run: poetry run build
+        run: poetry build
         working-directory: cli
       - name: Upload executable
         uses: actions/upload-artifact@v3
