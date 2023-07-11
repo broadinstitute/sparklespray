@@ -1,0 +1,25 @@
+cluster_service.py: error: "get" is not a known member of "None" (reportOptionalMemberAccess)
+config.py: error: Expected 1 positional argument (reportGeneralTypeIssues)
+io_helper.py: error: "generate_signed_url" is not a known member of "None" (reportOptionalMemberAccess)
+io_helper.py: error: Operator "+" not supported for types "Literal['gs://']" and "Unknown | None"
+io_helper.py: error: Operator "+" not supported for types "Literal['gs://']" and "Unknown | None"
+io_helper.py: error: Operator "+" not supported for types "Literal['gs://']" and "Unknown | None"
+main.py: error: Cannot access member "service_account_email" for type "Credentials"
+node_req_store.py: error: Expression of type "None" cannot be assigned to parameter of type "str"
+node_req_store.py: error: "name" is not a known member of "None" (reportOptionalMemberAccess)
+node_req_store.py: error: Argument of type "tuple[Literal['status'], Literal['='], str]" cannot be assigned to parameter "__object" of type "tuple[Literal['cluster_id'], Literal['='], str]" in function "append"
+node_req_store.py: error: Object of type "None" is not subscriptable (reportOptionalSubscript)
+node_req_store.py: error: Object of type "None" is not subscriptable (reportOptionalSubscript)
+node_service.py: error: Cannot access member "get" for type "Literal['failed']"
+node_service.py: error: Cannot access member "get" for type "Literal['complete']"
+node_service.py: error: Cannot access member "get" for type "Literal['submitted']"
+node_service.py: error: Cannot access member "get" for type "Literal['running']"
+node_service.py: error: Cannot access member "get" for type "Literal['staging']"
+node_service.py: error: Cannot access member "ssd_mount_points" for type "MachineSpec"
+node_service.py: error: Cannot access member "pd_mount_points" for type "MachineSpec"
+node_service.py: error: Cannot access member "ssd_mount_points" for type "MachineSpec"
+node_service.py: error: Cannot access member "pd_mount_points" for type "MachineSpec"
+pb_pb2_grpc.py: error: "experimental" is not a known member of module "grpc" (reportGeneralTypeIssues)
+pb_pb2_grpc.py: error: "experimental" is not a known member of module "grpc" (reportGeneralTypeIssues)
+submit.py: error: Cannot access member "service_account_email" for type "Credentials"
+validate.py: error: Cannot access member "service_account_email" for type "Credentials"

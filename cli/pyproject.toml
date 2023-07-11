@@ -27,6 +27,7 @@ mypy = "^0.991"
 types-protobuf = "^4.21.0.2"
 mypy-protobuf = "^3.4.0"
 pylint = "^2.15.9"
+pyright-ratchet = {git = "https://github.com/pgm/pyright-ratchet.git"}
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]
