@@ -302,7 +302,7 @@ def load_config(
             )
         )
 
-    assert os.path.exists(config.kubequeconsume_exe_path, f"Could not find {config.kubequeconsume_exe_path}. This most commonly happens when one doesn't "
+    assert os.path.exists(config.kubequeconsume_exe_path), (f"Could not find {config.kubequeconsume_exe_path}. This most commonly happens when one doesn't "
                           "install from the packaged releases at https://github.com/broadinstitute/sparklespray/releases")
     return Config(**dataclasses.asdict(config))
 
