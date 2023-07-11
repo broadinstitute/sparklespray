@@ -259,6 +259,8 @@ def submit(
                 len(config.zones) == 1
             ), "Cannot create jobs in multiple zones if you are mounting PD volumes"
         cluster.ensure_named_volumes_exist(config.zones[0], config.mounts)
+        assert os.path.exists(config.kubequeconsume_exe_path), (f"Could not find {config.kubequeconsume_exe_path}. This most commonly happens when one doesn't "
+                        "install from the packaged releases at https://github.com/broadinstitute/sparklespray/releases")
 
         pipeline_spec = create_pipeline_spec(
             project=cluster.project,
