@@ -8,7 +8,7 @@ require (
 	github.com/golang/protobuf v1.5.0
 	github.com/stretchr/testify v1.2.2
 	github.com/urfave/cli v1.20.0
-	golang.org/x/net v0.0.0-20180925072008-f04abc6bdfa7
+	golang.org/x/net v0.7.0
 	golang.org/x/oauth2 v0.0.0-20180821212333-d2e6202438be
 	google.golang.org/api v0.0.0-20180925145026-e5ba110cb6cd
 	google.golang.org/grpc v1.15.0
@@ -24,8 +24,8 @@ require (
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	go.opencensus.io v0.17.0 // indirect
 	golang.org/x/sync v0.0.0-20180314180146-1d60e4601c6f // indirect
-	golang.org/x/sys v0.0.0-20220722155257-8c9f86f7a55f // indirect
-	golang.org/x/text v0.3.8 // indirect
+	golang.org/x/sys v0.5.0 // indirect
+	golang.org/x/text v0.7.0 // indirect
 	google.golang.org/appengine v1.2.0 // indirect
 	google.golang.org/genproto v0.0.0-20180924164928-221a8d4f7494 // indirect
 )
