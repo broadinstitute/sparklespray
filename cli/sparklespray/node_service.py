@@ -132,7 +132,7 @@ class NodeService:
         )
         self.zones = zones
         self.project = project
-        assert len(zones) == 1
+        assert len(zones) == 1, f"Expected one zone, but zones = {zones}"
         self.region = zones[0][:-2]
 
     def test_pipeline_api(self, project_id, location):
