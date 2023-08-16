@@ -1,4 +1,4 @@
-name: python-and-go
+name: build
 
 on: 
   push:
@@ -29,6 +29,9 @@ jobs:
     - name: build executable
       run: bash scripts/build-static-exe.sh
 
+    - name: print md5sum 
+      run: md5 cli/sparklespray/bin/kubequeconsume && ls -s cli/sparklespray/bin/kubequeconsume
+      
     - name: Upload executable
       uses: actions/upload-artifact@v3
       with:
@@ -107,6 +110,8 @@ jobs:
         with:
           name: kubequeconsume-exe-${{ github.run_number }}
           path: cli/sparklespray/bin
+      - name: print md5sum 
+        run: md5 cli/sparklespray/bin/kubequeconsume && ls -s cli/sparklespray/bin/kubequeconsume
       - name: get package version
         run: (echo -n 'package_version=' && poetry version -s) >> "$GITHUB_ENV"
         working-directory: cli
