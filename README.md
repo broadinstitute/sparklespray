@@ -507,7 +507,9 @@ the "consumer" process which runs on each worker and takes jobs from the
 queue. The python code is used by the "sparkles" command line tool.
 
 To build a new release need the "consumer" compiled, and the python code
-packaged up into a tar.gz file. You can do this by running:
+packaged up into a tar.gz file. This is automatically done by the github
+action on this repo. If you go to the action run page, there should be
+an "Artifacts" section where you can download the built tar.gz file.
 
 ```
 

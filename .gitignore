@@ -33,4 +33,4 @@ sparkles-docker.log
 unused-files
 sparklespray.code-workspace
 main
-kubequeconsume
+cli/sparklespray/bin/kubequeconsume
