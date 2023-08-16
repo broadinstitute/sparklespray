@@ -1,4 +1,4 @@
-name: pyright-ratchet
+name: python-and-go
 
 on: 
   push:
