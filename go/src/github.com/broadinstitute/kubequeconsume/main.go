@@ -23,7 +23,7 @@ import (
 func Main() {
 	app := cli.NewApp()
 	app.Name = "kubequeconsume"
-	app.Version = "0.1"
+	app.Version = "4.0.2"
 	app.Compiled = time.Now()
 	app.Authors = []cli.Author{
 		cli.Author{
