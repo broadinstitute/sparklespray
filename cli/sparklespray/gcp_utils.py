@@ -84,7 +84,7 @@ def create_pipeline_json(
         "pipeline": {
             "actions": actions,
             "resources": {
-                "projectId": project,
+                # "projectId": project,
                 "zones": zones,
                 "virtualMachine": {
                     "machineType": machine_specs.machine_type,
