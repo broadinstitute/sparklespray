@@ -16,7 +16,7 @@ from google.api_core.exceptions import PermissionDenied, Forbidden
 services_to_add = [  # "storage.googleapis.com",
     "datastore.googleapis.com",
     "storage-component.googleapis.com",
-    "genomics.googleapis.com",
+    "lifesciences.googleapis.com",
     "pubsub.googleapis.com",
     "storage-api.googleapis.com",
     "compute.googleapis.com",
@@ -27,7 +27,7 @@ roles_to_add = [
     "roles/owner",  # Eventually drop this
     "roles/compute.admin",
     "roles/datastore.user",
-    "roles/genomics.pipelinesRunner",
+    "roles/lifesciences.workflowsRunner",
     "roles/pubsub.editor",
     "roles/storage.admin",
 ]

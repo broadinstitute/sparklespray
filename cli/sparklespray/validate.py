@@ -55,12 +55,12 @@ def validate_cmd(jq: JobQueue, io: IO, cluster: Cluster, config: Config):
     )
     _test_datastore_api(jq.job_storage, sample_value)
 
-    print("Verifying we can access google genomics apis")
+    print("Verifying we can access google lifesciences apis")
     cluster.test_pipeline_api()
 
     default_image = config.default_image
 
-    print(f'Verifying google genomics can launch image "{default_image}"')
+    print(f'Verifying google lifesciences can launch image "{default_image}"')
     print(
         f'If this fails due to "permission denied", make sure that {service_acct} has been granted access to pull the docker image "{default_image}". You may need to explictly grant access via "sparkles grant" if the docker repo is owned by a different project than {project_id}.'
     )
