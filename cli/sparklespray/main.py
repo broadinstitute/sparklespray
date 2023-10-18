@@ -564,6 +564,9 @@ def main(argv=None):
     warnings.filterwarnings(
         "ignore", "Your application has authenticated using end user credentials"
     )
+    # silence this annoying warning that is coming from google's library, and we don't have control over (google/cloud/datastore/query.py:234)
+
+    warnings.filterwarnings("ignore", "Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.")
 
     from .submit import add_submit_cmd
     from .watch import add_watch_cmd
@@ -775,3 +778,4 @@ def main(argv=None):
 
 if __name__ == "__main__":
     main(sys.argv[1:])
+
