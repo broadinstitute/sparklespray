@@ -293,17 +293,17 @@ class Cluster:
     #         service_account_email=service_account_email,
     #     )
 
-    # def is_owner_running(self, owner: str) -> bool:
-    #     if owner == "localhost":
-    #         return False
+    def is_owner_running(self, owner: str) -> bool:
+         if owner == "localhost":
+             return False
 
-    #     m = re.match("projects/([^/]+)/zones/([^/]+)/([^/]+)", owner)
-    #     assert (
-    #         m is not None
-    #     ), "Expected a instance name with zone but got owner={}".format(owner)
-    #     project_id, zone, instance_name = m.groups()
-    #     # assert project_id == self.project, "project_id ({}) != self.project ({})".format(project_id, self.project)
-    #     return self.compute.get_instance_status(zone, instance_name) == "RUNNING"
+         m = re.match("projects/([^/]+)/zones/([^/]+)/([^/]+)", owner)
+         assert (
+             m is not None
+         ), "Expected a instance name with zone but got owner={}".format(owner)
+         project_id, zone, instance_name = m.groups()
+         # assert project_id == self.project, "project_id ({}) != self.project ({})".format(project_id, self.project)
+         return self.compute.get_instance_status(zone, instance_name) == "RUNNING"
 
     def get_cluster_mod(self, job_id):
         return ClusterMod(job_id, self, self.debug_log_prefix)
