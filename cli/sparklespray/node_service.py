@@ -171,7 +171,7 @@ class NodeService:
         return AddNodeStatus(response)
 
     def cancel_add_node(self, operation_name: str):
-        request = self.service.projects().operations().cancel(name=operation_name)
+        request = self.service.projects().locations().operations().cancel(name=operation_name)
         request.execute()
 
     def add_node(self, pipeline_def: dict, preemptible: bool, debug_log_url: Optional[str]):
