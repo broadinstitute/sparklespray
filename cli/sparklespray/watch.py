@@ -146,7 +146,13 @@ def _watch(
 
     startup_failure_tracker = StartupFailureTracker(state.get_completed_node_names())
 
-    first_sign_of_concern = None
+    # how many completions do we need to see before we can estimate the rate of completion?
+    min_completion_timestamps = 10
+    # how many completions do we want to use to estimate our rate at most
+    max_completion_timestamps = 50
+    # a log of the timestamp of each completion in order it occurred
+    completion_timestamps = []
+    prev_completion_count = None
 
     poll_delay = initial_poll_delay
     while True:
@@ -158,7 +164,27 @@ def _watch(
         if state.is_done():
             break
 
-        summary = state.get_summary()
+        completion_count = state.get_failed_task_count() + state.get_successful_task_count()
+        if prev_completion_count is None:
+            prev_completion_count = completion_count
+        else:
+            now = time.time()
+            for _ in range(completion_count - prev_completion_count):
+                completion_timestamps.append(now)
+            # if we have too many samples, drop the oldest
+            while len(completion_timestamps) > max_completion_timestamps:
+                del completion_timestamps[0]
+            prev_completion_count = completion_count
+
+        completion_rate = None
+        if len(completion_timestamps) > min_completion_timestamps:
+            completion_window = time.time() - completion_timestamps[0]
+            if completion_window > 0:
+                # only compute the completion rate if the time over which we measured is non-zero
+                # otherwise we get a division by zero
+                completion_rate = len(completion_timestamps)/completion_window
+
+        summary = state.get_summary(completion_rate=completion_rate)
         if prev_summary != summary:
             user_print(summary)
             prev_summary = summary

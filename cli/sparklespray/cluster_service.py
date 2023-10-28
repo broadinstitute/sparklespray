@@ -381,7 +381,7 @@ class ClusterState:
         by_id = {x.task_id: x for x in self.tasks}
         return by_id[task_id].status == STATUS_CLAIMED
 
-    def get_summary(self) -> str:
+    def get_summary(self, completion_rate=Optional[float]) -> str:
         # compute status of tasks
         by_status: Dict[str, int] = defaultdict(lambda: 0)
         for t in self.tasks:
@@ -408,10 +408,15 @@ class ClusterState:
             by_status[label] += 1
         statuses = sorted(by_status.keys())
         node_status = ", ".join(
-            ["{} ({})".format(status, by_status[status]) for status in statuses]
+            [f"{status} ({by_status[status]})" for status in statuses]
         )
 
-        return "tasks: {}, worker nodes: {}".format(task_status, node_status)
+        msg = f"tasks: {task_status}, worker nodes: {node_status}"
+        if completion_rate:
+            incomplete_task_count = self.get_incomplete_task_count()
+            remaining_estimate_in_seconds = incomplete_task_count/completion_rate
+            msg += f", eta: {(remaining_estimate_in_seconds/60):.1f} minutes to complete remaining {incomplete_task_count} tasks"
+        return msg
 
     def get_incomplete_task_count(self) -> int:
         return len([t for t in self.tasks if t.status in INCOMPLETE_TASK_STATES])
