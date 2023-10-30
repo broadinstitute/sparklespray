@@ -414,7 +414,7 @@ class ClusterState:
         msg = f"tasks: {task_status}, worker nodes: {node_status}"
         if completion_rate:
             incomplete_task_count = self.get_incomplete_task_count()
-            remaining_estimate_in_seconds = incomplete_task_count/completion_rate
+            remaining_estimate_in_seconds = float(incomplete_task_count)/completion_rate
             msg += f", eta: {(remaining_estimate_in_seconds/60):.1f} minutes to complete remaining {incomplete_task_count} tasks"
         return msg
 
