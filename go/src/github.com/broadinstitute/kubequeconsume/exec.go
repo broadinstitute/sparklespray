@@ -107,6 +107,11 @@ func downloadAll(ioc IOClient, workdir string, downloads []*TaskDownload, cacheD
 		srcURL := dl.SrcURL
 		destination := path.Join(workdir, dl.Dst)
 
+		if _, err := os.Stat(destination); err == nil {
+			log.Printf("Skipping download of %s -> %s because file already exists.", srcURL, destination)
+			continue
+		}
+
 		//parentDir := strings.ToLower(path.Base(path.Dir(srcURL)))
 		if dl.IsCASKey {
 			casKey := path.Base(srcURL)
@@ -120,6 +125,7 @@ func downloadAll(ioc IOClient, workdir string, downloads []*TaskDownload, cacheD
 			cacheDest := path.Join(cacheDir, casKey)
 
 			if _, err := os.Stat(cacheDest); os.IsNotExist(err) {
+				log.Printf("Downloading %s -> %s", srcURL, destination)
 				err = ioc.Download(srcURL, cacheDest)
 				if err != nil {
 					return err, downloaded
@@ -160,6 +166,7 @@ func downloadAll(ioc IOClient, workdir string, downloads []*TaskDownload, cacheD
 			}
 
 		} else {
+			log.Printf("Downloading %s -> %s", srcURL, destination)
 			err := ioc.Download(srcURL, destination)
 			if err != nil {
 				return err, downloaded
@@ -370,9 +377,26 @@ func executeTaskInDir(ioc IOClient, workdir string, taskId string, spec *TaskSpe
 	stdoutPath := path.Join(workdir, "stdout.txt")
 	execLifecycleScript("PreDownloadScript", workdir, spec.PreDownloadScript)
 
+	stdout, err := os.OpenFile(stdoutPath, os.O_WRONLY|os.O_CREATE, 0766)
+	if err != nil {
+		return "", err
+	}
+
+	if monitor != nil {
+		monitor.StartWatchingLog(taskId, stdoutPath)
+	}
+
+	if len(spec.Downloads) > 0 {
+		stdout.WriteString(fmt.Sprintf("sparkles: Downloading %d files...\n", len(spec.Downloads)))
+	}
+
 	err, downloaded := downloadAll(ioc, workdir, spec.Downloads, cachedir)
 	if err != nil {
 		return "", err
+	}
+
+	if len(spec.Downloads) > 0 {
+		stdout.WriteString(fmt.Sprintf("sparkles: download complete.\n"))
 	}
 
 	downloadedInitialMTimes := getModificationTimes(downloaded)
@@ -385,15 +409,6 @@ func executeTaskInDir(ioc IOClient, workdir string, taskId string, spec *TaskSpe
 	}
 	if path.IsAbs(commandWorkingDir) {
 		panic("bad commandWorkingDir")
-	}
-
-	stdout, err := os.OpenFile(stdoutPath, os.O_WRONLY|os.O_CREATE, 0766)
-	if err != nil {
-		return "", err
-	}
-
-	if monitor != nil {
-		monitor.StartWatchingLog(taskId, stdoutPath)
 	}
 
 	cwdDir := path.Join(workdir, commandWorkingDir)
