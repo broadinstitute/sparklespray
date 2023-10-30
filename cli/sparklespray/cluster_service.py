@@ -381,7 +381,7 @@ class ClusterState:
         by_id = {x.task_id: x for x in self.tasks}
         return by_id[task_id].status == STATUS_CLAIMED
 
-    def get_summary(self, completion_rate=Optional[float]) -> str:
+    def get_summary(self, completion_rate: Optional[float] = None) -> str:
         # compute status of tasks
         by_status: Dict[str, int] = defaultdict(lambda: 0)
         for t in self.tasks:
