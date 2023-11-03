@@ -243,9 +243,16 @@ def load_config(
         ),
     )
 
-    config.max_preemptable_attempts_scale = consume(
-        "max_preemptable_attempts_scale", 2, int
-    )
+    preemptible_yn = consume("preemptible", "y")
+    assert preemptible_yn.lower() in ['y', 'n'], f"expected preemptible should be either y or n but value was: {preemptible_yn}"
+    if preemptible_yn.lower() == "n":
+        assert "max_preemptable_attempts_scale" not in config_dict, f"Cannot specify both preemptible=n and max_preemptable_attempts_scale"
+
+        config.max_preemptable_attempts_scale = 0
+    else:
+        config.max_preemptable_attempts_scale = consume(
+            "max_preemptable_attempts_scale", 2, int
+        )
 
     #    config.
     #    allowed_parameters = set(
