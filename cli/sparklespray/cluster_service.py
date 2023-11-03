@@ -170,10 +170,17 @@ class Cluster:
                     i,
                     len(node_reqs),
                 )
-                try:
-                    self.cancel_add_node(node_req.operation_id)
-                except HttpError as ex:
-                    log.info("Got httpError canceling node request: %s", ex)
+                # if we are trying to stop a cluster that was created with an old version of sparkles
+                # which used the old pipeline API, don't even try to cancel the operation. Instead
+                # just warn the use of the situation and move on. Typically the operation terminated log ago
+                # and the person didn't upgrade sparkles in the middle of running a job.
+                if re.match("projects/[^/]+/operations/[^/]+", node_req.operation_id):
+                    log.warn(f"Cannot cancel past request to add a node because the operation_id ({ node_req.operation_id}) looks like it was created with the old deprecated google API. Assuming this node terminated long ago and moving on.")
+                else:
+                    try:
+                        self.cancel_add_node(node_req.operation_id)
+                    except HttpError as ex:
+                        log.info("Got httpError canceling node request: %s", ex)
 
         instances = self.compute.get_cluster_instances(self.zones, cluster_name)
         if len(instances) == 0:
