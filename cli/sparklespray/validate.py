@@ -66,13 +66,13 @@ def validate_cmd(jq: JobQueue, io: IO, cluster: Cluster, config: Config):
     )
     logging_url = config.default_url_prefix + "/node-logs"
 
-    raise Exception("unimplemented")
-    # cluster.test_image(
-    #     config.default_image,
-    #     sample_url,
-    #     logging_url,
-    #     config.boot_volume_in_gb,
-    #     service_acct,
-    # )
+    cluster.test_image(
+        project=project_id,
+        zones=config.zones,
+        docker_image=config.default_image,
+        debug_log_url=logging_url,
+        machine_specs=config.create_machine_specs(),
+        monitor_port=config.monitor_port
+    )
 
     print("Verification successful!")

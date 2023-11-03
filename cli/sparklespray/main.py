@@ -530,7 +530,6 @@ def dump_operation_cmd(cluster: Cluster, args):
 
 
 def grant_cmd(args, config: Config):
-    credentials = config
     role = args.role
     project_id = args.project
     service_acct = config.credentials.service_account_email

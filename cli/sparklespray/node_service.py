@@ -73,7 +73,7 @@ class AddNodeStatus:
 
     @property
     def instance_name(self):
-        events = self.response.get("metadata", {}).get("events", [])
+        events = self.events
         for event in events:
             instance = event.get("workerAssigned", {}).get("instance")
             if instance is not None:
@@ -82,6 +82,19 @@ class AddNodeStatus:
 
         # print(self.response)
         # return self.response['metadata']['runtimeMetadata']['computeEngine']['instanceName']
+
+    @property
+    def events(self):
+        events = self.response.get("metadata", {}).get("events", [])
+        return events
+    
+    @property
+    def last_event_description(self):
+        events = sorted(self.events, key=lambda x: x['timestamp'])
+        if len(events) == 0:
+            return None
+
+        return events[-1].get("description", "<missing description>")
 
     @property
     def status(self):

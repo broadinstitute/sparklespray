@@ -45,6 +45,9 @@ import json
 # which step in the actions does kubeconsume run in
 CONSUMER_ACTION_ID = 2
 
+def _unique_id():
+    import uuid
+    return str(uuid.uuid4())
 
 class ClusterStatus:
     def __init__(self, instances: List[dict]) -> None:
@@ -255,43 +258,64 @@ class Cluster:
     def cancel_add_node(self, operation_id: str):
         self.nodes.cancel_add_node(operation_id)
 
-    # def get_node_req_status(self, operation_id):
-    #     raise Exception("unimp")
-    #     request = self.service.projects.operations().get(name=operation_id)
-    #     response = request.execute()
-    #
-    #     runtimeMetadata = response.get("metadata", {}).get("runtimeMetadata", {})
-    #     if "computeEngine" in runtimeMetadata:
-    #         if response['done']:
-    #             return NODE_REQ_COMPLETE
-    #         else:
-    #             return NODE_REQ_RUNNING
-    #     else:
-    #         log.info("Operation %s is not yet started. Events: %s", operation_id, response["metadata"]["events"])
-    #         return NODE_REQ_SUBMITTED
-    #
     def test_pipeline_api(self):
         """Simple api call used to verify the service is enabled"""
         assert len(self.zones) == 1, "With the switch to the google's life science API, we can now only use one zone"
         region = self.zones[0][:-2]
-        self.nodes.test_pipeline_api(self.project, region)
 
-    # def test_image(
-    #     self,
-    #     docker_image,
-    #     sample_url,
-    #     logging_url,
-    #     boot_volume_in_gb,
-    #     service_account_email,
-    # ):
-    #     self.nodes.test_pipeline_submit_api(
-    #         setup_image=SETUP_IMAGE,
-    #         job_image=docker_image,
-    #         command=["sh", "-c", "echo okay"],
-    #         machine_type="n1-standard-2",
-    #         boot_volume_in_gb=boot_volume_in_gb,
-    #         service_account_email=service_account_email,
-    #     )
+    def test_image(
+        self,
+        project : str,
+        zones: List[str],
+        docker_image : str,
+        debug_log_url : str,
+        machine_specs : MachineSpec,
+        monitor_port: int
+    ):
+        from sparklespray.gcp_utils import create_pipeline_spec, create_validation_pipeline_spec, get_region
+
+        assert len(zones) == 1, f"Only one zone supported at this time, but got: {zones}"
+        zone = zones[0]
+
+        regions = set([get_region(zone) for zone in zones])
+        assert len(regions) == 1, "Only single region supported but got zones in {regions}"
+        region = list(regions)[0]
+
+        cluster_name = "validationtest-"+_unique_id()
+
+        self.nodes.test_pipeline_api(self.project, region)
+        pipeline_def = create_validation_pipeline_spec(
+            project=project,
+            zones=zones,
+            jobid="test-image",
+            cluster_name=cluster_name,
+            docker_image=docker_image,
+            machine_specs=machine_specs,
+            monitor_port=monitor_port
+        )
+        operation_id = self.nodes.add_node(pipeline_def, preemptible=False, debug_log_url=debug_log_url)
+        print(f"Submitted request for a new worker ( operation_id: {operation_id} )")
+
+        prev_event_description = None
+        while True:
+            status = self.nodes.get_add_node_status(operation_id)
+            event_description = status.last_event_description
+            if event_description != prev_event_description:
+                print(f"Latest event: {event_description}")
+                prev_event_description = event_description
+
+            if status.status == NODE_REQ_FAILED:
+                successful_completion = False
+                break
+            elif status.status == NODE_REQ_COMPLETE:
+                successful_completion = True
+                break
+
+            time.sleep(2)
+
+        print(f"Test complete: successful_completion={successful_completion}")
+        self.stop_cluster(cluster_name)
+        assert successful_completion, f"Test failed. For more information run:\n  sparkles dump-operation {operation_id}\n\n"
 
     def is_owner_running(self, owner: str) -> bool:
          if owner == "localhost":

@@ -116,6 +116,39 @@ def create_pipeline_json(
 
     return pipeline_def
 
+def get_region(zone):
+    # drop the zone suffix to get the name of the region
+    # that contains the zone
+    # us-east1-b -> us-east1
+    m = re.match("^([a-z0-9]+-[a-z0-9]+)-[a-z0-9]+$", zone)
+    assert m, f"Zone doesn't look like a valid zone name: {zone}"
+    return m.group(1)
+
+def create_validation_pipeline_spec(
+    project: str,
+    zones: List[str],
+    jobid: str,
+    cluster_name: str,
+    docker_image: str,
+    machine_specs: MachineSpec,
+    monitor_port: int
+) -> dict:
+    return create_pipeline_json(
+        project=project,
+        zones=zones,
+        jobid=jobid,
+        cluster_name=cluster_name,
+        setup_image=SETUP_IMAGE,
+        setup_commands=[["echo", "setup"]],
+        docker_image=docker_image,
+        docker_command=[
+            "echo",
+            "main command"
+        ],
+        machine_specs=machine_specs,
+        monitor_port=monitor_port,
+    )
+
 
 def create_pipeline_spec(
     project: str,
