@@ -90,7 +90,7 @@ class Config:
 
     def create_machine_specs(self):
         return MachineSpec(
-        service_account_email=self.credentials.service_account_email,
+        service_account_email=self.credentials.service_account_email, # type: ignore
         boot_volume_in_gb=self.boot_volume_in_gb,
         mounts=self.mounts,
         work_root_dir=self.work_root_dir,
