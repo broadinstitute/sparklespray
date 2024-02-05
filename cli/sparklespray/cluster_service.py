@@ -226,6 +226,7 @@ class Cluster:
         # before updating node requests, make sure the state has been updated to
         # reflect which ones are actually still running and which are done.
         # node_req_store.cleanup_cluster() assumes the states are up to date.
+        
         state = self.get_state(job_id)
         state.update()
 
@@ -306,6 +307,7 @@ class Cluster:
         prev_event_description = None
         while True:
             status = self.nodes.get_add_node_status(operation_id)
+            assert status is not None
             event_description = status.last_event_description
             if event_description != prev_event_description:
                 print(f"Latest event: {event_description}")
