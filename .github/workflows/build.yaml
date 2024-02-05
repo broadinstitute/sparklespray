@@ -4,6 +4,7 @@ on:
   push:
       paths:
          - "*.py"
+         - "**/pyproject.toml"
          - "**/*.py"
          - .github/workflows/build.yaml
          - "**/*.go"
