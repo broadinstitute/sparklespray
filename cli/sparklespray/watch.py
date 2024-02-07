@@ -395,10 +395,10 @@ def watch(
     job_id: str,
     cluster: Cluster,
     target_nodes=None,
+    max_preemptable_attempts_scale=None,
     initial_poll_delay=1.0,
     max_poll_delay=30.0,
     loglive=None,
-    max_preemptable_attempts_scale=2,
 ):
     job = jq.get_job(job_id)
     assert job is not None
@@ -410,12 +410,14 @@ def watch(
 
     if target_nodes is None:
         target_nodes = job.target_node_count
+
+    if max_preemptable_attempts_scale is None:
         max_preemptable_attempts = job.max_preemptable_attempts
     else:
         max_preemptable_attempts = target_nodes * max_preemptable_attempts_scale
 
     log.info(
-        "targeting %s nodes. First %s nodes will be preemptive (from job: %s, %s)",
+        "targeting %s nodes. First %s nodes will be preemptive (from job: target_node_count=%s, max_preemptable_attempts=%s)",
         target_nodes,
         max_preemptable_attempts,
         job.target_node_count,
