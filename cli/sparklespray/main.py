@@ -31,21 +31,39 @@ from . import txtui
 from .gcp_setup import setup_project, grant
 from .task_store import Task
 
-def logs_cmd(jq: JobQueue, io: IO, args):
-    jobid = _resolve_jobid(jq, args.jobid)
+def print_failures(jq: JobQueue, io: IO, jobid, show_all:bool):
     tasks = jq.task_storage.get_tasks(jobid)
-    if not args.all:
+    if not show_all:
+        all_task_count = len(tasks)
         tasks = [
             t
             for t in tasks
             if t.status == STATUS_FAILED
             or (t.exit_code is not None and str(t.exit_code) != "0")
         ]
-    print("You can view any of these logs by using: gsutil cat <log_path>")
-    print("task_id\texit_code\tlog_path\t")
-    for t in tasks:
-        print("{}\t{}\t{}".format(t.task_id, t.exit_code, t.log_url))
+        print(f"{len(tasks)} out of {all_task_count} tasks failed. Printing information about those failed tasks:\n")
 
+    from datetime import datetime
+    def format_history(history):
+        return "\n".join([f"      {(datetime.utcfromtimestamp(entry.timestamp).strftime('%Y-%m-%d %H:%M:%S'))} {entry.status}" for entry in history])
+
+    for t in tasks:
+        task_spec = json.loads(io.get_as_str_must(t.args))
+
+        print(f"""  task_index: {t.task_index}
+    task_id: {t.task_id}
+    command: {task_spec['command']}
+    parameters: {task_spec['parameters']}
+    exit_code: {t.exit_code}
+    log_url: {t.log_url}
+    history: 
+{format_history(t.history)}
+""")
+    print("You can view the logs from any of these by executing: gsutil cat <log_path>")
+
+def logs_cmd(jq: JobQueue, io: IO, args):
+    jobid = _resolve_jobid(jq, args.jobid)
+    print_failures(jq, io, jobid, args.all)
 
 def show_cmd(jq: JobQueue, io: IO, args):
     jobid = _resolve_jobid(jq, args.jobid)
@@ -303,6 +321,8 @@ def status_cmd(jq: JobQueue, io: IO, cluster: Cluster, args):
                     sum(max_memory_size) / n,
                 )
             )
+    if args.failed:
+        print_failures(jq, io, jobid, False)
 
 
 #            import pdb
@@ -674,6 +694,7 @@ def main(argv=None):
         "status", help="Print the status for the tasks which make up the specified job"
     )
     parser.add_argument("--stats", action="store_true")
+    parser.add_argument("--failed", action="store_true")
     parser.set_defaults(func=status_cmd)
     parser.add_argument("jobid_pattern", nargs="?")
 
