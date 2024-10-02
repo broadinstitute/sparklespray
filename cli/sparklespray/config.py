@@ -165,6 +165,12 @@ def load_config(
 
     config_dict.update(overrides)
 
+    # check for deprecated options
+    if "bootdisksizegb" in config_dict:
+        print("Warning: The option \"bootdisksizegb\" was seen in the config file but this name is deprecated. This parameter has been replaced with boot_volume_in_gb.")
+        config_dict["boot_volume_in_gb"] = config_dict["bootdisksizegb"]
+        del config_dict["bootdisksizegb"]
+
     config_used = set()
     def consume(name: str, default : Union[NoDefault, T]=NO_DEFAULT, parser : Callable[[str], T]=str) -> T:
         assert name not in config_used, f"Consumed {name} twice"
