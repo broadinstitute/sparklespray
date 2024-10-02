@@ -1,7 +1,7 @@
 from pydantic import BaseModel, validator
 from typing import List, Optional, Union
 
-ALLOWED_DISK_TYPES = {"local-ssd", "pd-standard", "pd-balanced", "pd-ssd"}
+ALLOWED_DISK_TYPES = {"local-ssd", "pd-standard", "pd-balanced", "pd-ssd", "hyperdisk-balanced"}
 
 DEFAULT_SSD_SIZE = (
     300  # slightly smaller than the 375 GB limit to avoid it allocating two volumes
