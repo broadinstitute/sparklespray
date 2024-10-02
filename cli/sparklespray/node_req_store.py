@@ -50,7 +50,7 @@ def entity_to_node_req(entity: datastore.Entity) -> NodeReq:
     #     val = entity.get(prop)
     #     assert val is None or isinstance(val, str)
     #     return val
-
+    assert entity.key is not None
     return NodeReq(
         operation_id=entity.key.name,
         cluster_id=entity["cluster_id"],

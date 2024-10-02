@@ -321,12 +321,8 @@ def status_cmd(jq: JobQueue, io: IO, cluster: Cluster, args):
                     sum(max_memory_size) / n,
                 )
             )
-    if args.failed:
-        print_failures(jq, io, jobid, False)
-
-
-#            import pdb
-#            pdb.set_trace()
+        if args.failed:
+            print_failures(jq, io, jobid, False)
 
 
 def fetch_cmd(jq: JobQueue, io: IO, args):
