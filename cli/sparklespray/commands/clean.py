@@ -4,7 +4,6 @@ from ..task_store import (
 )
 from ..job_queue import JobQueue, Job
 from ..cluster_service import Cluster
-from ..resize_cluster import GetPreempted
 from ..log import log
 from .shared import _get_jobids_from_pattern
 
@@ -78,18 +77,20 @@ def clean_cmd(cluster: Cluster, jq, args):
 
 
 def _update_claimed_are_still_running(jq, cluster, job_id):
-    get_preempted = GetPreempted(min_bad_time=0)
-    state = cluster.get_state(job_id)
-    state.update()
-    task_ids = get_preempted(state)
-    if len(task_ids) > 0:
-        log.info(
-            "Resetting tasks which appear to have been preempted: %s",
-            ", ".join(task_ids),
-        )
-        for task_id in task_ids:
-            jq.reset_task(task_id)
-    return task_ids
+    # FIXME
+    raise NotImplemented
+    # get_preempted = GetPreempted(min_bad_time=0)
+    # state = cluster.get_state(job_id)
+    # state.update()
+    # task_ids = get_preempted(state)
+    # if len(task_ids) > 0:
+    #     log.info(
+    #         "Resetting tasks which appear to have been preempted: %s",
+    #         ", ".join(task_ids),
+    #     )
+    #     for task_id in task_ids:
+    #         jq.reset_task(task_id)
+    # return task_ids
 
 
 def add_clean_cmd(subparser):

@@ -1,4 +1,4 @@
-from .runner import PeriodicTask, NextPoll, StopPolling
+from .runner_types import PeriodicTask, NextPoll, StopPolling
 from .shared import _count_incomplete_tasks
 
 

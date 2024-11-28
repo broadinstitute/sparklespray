@@ -1,5 +1,5 @@
 import contextlib
-from ..task_store import Task
+from ..task_store import Task, STATUS_CLAIMED, STATUS_FAILED, STATUS_COMPLETE
 from ..cluster_service import NodeReq
 from ..node_req_store import NODE_REQ_CLASS_PREEMPTIVE
 
@@ -35,6 +35,14 @@ def _exception_guard(deferred_msg, reset=None):
         if reset is not None:
             reset()
 
+def _only_running_tasks(tasks: List[Task]):
+    return [task for task in tasks if task.status == STATUS_CLAIMED]
+
+def _only_failed_tasks(tasks: List[Task]):
+    return [task for task in tasks if task.status == STATUS_FAILED]
+
+def _only_completed_tasks(tasks: List[Task]):
+    return [task for task in tasks if task.status == STATUS_COMPLETE]
 
 def _count_incomplete_tasks(tasks: List[Task]):
     return sum([1 for task in tasks if not _is_terminal_status(task.status)])

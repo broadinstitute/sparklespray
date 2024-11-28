@@ -6,18 +6,21 @@ import datetime
 import json
 
 from ..log import log
-from .runner import NextPoll
-from .shared import _exception_guard
-
+from .runner_types import NextPoll, ClusterStateQuery
+from .shared import _exception_guard, _only_running_tasks
+from ..cluster_service import Cluster
+from .. import txtui 
 
 class StreamLogs:
     # Stream output from one of the running processes.
-    def __init__(self, cluster):
+    def __init__(self, stream_logs : bool, cluster : Cluster):
         self.log_monitor = None
         self.cluster = cluster
+        self.stream_logs = stream_logs
+        self.complete_tasks_printed = 0
 
-    def start_logging(self, state):
-        running = list(state.get_running_tasks())
+    def start_logging(self, state : ClusterStateQuery):
+        running = _only_running_tasks(state.get_tasks())
         if len(running) > 0:
             task = running[0]
             if task.monitor_address is not None:
@@ -82,17 +85,66 @@ class StreamLogs:
                 return
 
         print_log_content(datetime.datetime.now(), rest_of_stdout)
+        self.complete_tasks_printed += 1
 
-    def poll(self, state):
-        if self.log_monitor is None:
-            self.start_logging()
-        else:
-            if state.is_task_running(self.log_monitor.task_id):
-                self.do_next_read()
+    def poll(self, state : ClusterStateQuery):
+        if self.stream_logs:
+            if self.log_monitor is None:
+                self.start_logging(state)
             else:
-                self.do_last_read()
-        return NextPoll(1)
+                if state.is_task_running(self.log_monitor.task_id):
+                    self.do_next_read()
+                else:
+                    self.do_last_read()
+            return NextPoll(1)
+        else:
+            return None
 
-    def finish(self):
+    def finish(self, state):
         if self.log_monitor is not None:
             self.do_last_read()
+        
+        self._print_final_summary(state)
+
+    def _print_final_summary(self, state:ClusterStateQuery):
+        tasks = state.get_tasks()
+        failures = _only_failed_tasks(tasks)
+        successes = _only_completed_tasks(tasks)
+
+        assert len(tasks) == len(failures) + len(successes), "Everything should be either failed or completed by this point"
+
+        txtui.user_print(
+            f"Job finished. {len(successes)} tasks completed successfully, {len(failures)} tasks failed"
+        )
+
+        if failures > 0:
+            log.warning(
+                "At least one task failed. Dumping stdout from one of the failures."
+            )
+            failed_tasks = state.get_failed_tasks()
+            self.flush_stdout_from_complete_task(failed_tasks[0].task_id, 0)
+        
+        # if we want the logs and yet we've never written out a single log, pick one at random and write it out
+        elif (
+            self.complete_tasks_printed == 0 and self.stream_logs
+        ):  
+            log.info("Dumping arbitrary successful task stdout")
+            successful_tasks = state.get_successful_tasks()
+            self.flush_stdout_from_complete_task(successful_tasks[0].task_id, 0)
+
+        return failures == 0
+
+
+class FlushStdout:
+    def __init__(self, jq, io):
+        self.flush_stdout_calls = 0
+        self.jq = jq
+        self.io = io
+
+    def __call__(self, task_id, offset):
+        flush_stdout_from_complete_task(self.jq, self.io, task_id, offset)
+        self.flush_stdout_calls += 1
+
+from .runner import ClusterStateQuery
+from .shared import _only_failed_tasks, _only_running_tasks, _only_completed_tasks
+

@@ -1,15 +1,12 @@
 import time
-from typing import Callable, Optional
-from ..cluster_service import ClusterState
 from ..task_store import STATUS_COMPLETE
 from ..config import Config
-from ..resize_cluster import ResizeCluster
 from ..io_helper import IO
 from ..job_queue import JobQueue
 from ..cluster_service import Cluster
-from .. import txtui
 
 from ..log import log
+from ..watch import run_tasks, PrintStatus, CompletionMonitor, StreamLogs, ResizeCluster
 
 
 def add_watch_cmd(subparser):
@@ -57,41 +54,8 @@ def watch_cmd(jq: JobQueue, io: IO, cluster: Cluster, config: Config, args):
     )
 
 
-def _watch(
-    job_id: str,
-    state: ClusterState,
-    initial_poll_delay: float,
-    max_poll_delay: float,
-    loglive: bool,
-    cluster: Cluster,
-    other_tasks: List[PeriodicTask],
-    flush_stdout_from_complete_task: Optional[Callable[[str, int], None]] = None,
-):
-    """
-    Periodically update the following independent threads:
-    6. What is the estimated completion rate?
-    7. Stream output from one of the running processes.
-    """
-
-    tasks = [
-        PrintStatus(initial_poll_delay, max_poll_delay),
-        CompletionMonitor(),
-    ] + other_tasks
-    # if loglive:
-    #     tasks.append(StreamLogs())
-
-    run_tasks(job_id, state.cluster_id, tasks, cluster)
 
 
-class FlushStdout:
-    def __init__(self, jq, io):
-        self.flush_stdout_calls = 0
-        self.jq = jq
-        self.io = io
-
-    def __call__(self, task_id, offset):
-        flush_stdout_from_complete_task(self.jq, self.io, task_id, offset)
-        self.flush_stdout_calls += 1
 
 
 def watch(
@@ -108,8 +72,6 @@ def watch(
     job = jq.get_job(job_id)
     assert job is not None
 
-    flush_stdout = FlushStdout(jq, io)
-
     if target_nodes is None:
         target_nodes = job.target_node_count
 
@@ -125,37 +87,31 @@ def watch(
         job.target_node_count,
         job.max_preemptable_attempts,
     )
-    state = cluster.get_state(job_id)
-    state.update()
 
-    _wait_until_tasks_exist(state, job_id)
+    _wait_until_tasks_exist(cluster, job_id)
 
     if loglive is None:
         loglive = True
-
-    resize_cluster = ResizeCluster(
-        target_nodes, max_preemptable_attempts, cluster.get_cluster_mod(job_id)
-    )
+    
+    tasks = [
+        CompletionMonitor(),
+        ResizeCluster(target_nodes, max_preemptable_attempts, cluster.get_cluster_mod(job_id)),
+        StreamLogs(loglive, cluster),
+        PrintStatus(initial_poll_delay, max_poll_delay),
+    ] 
 
     try:
-        _watch(
-            job_id,
-            state,
-            initial_poll_delay,
-            max_poll_delay,
-            loglive,
-            cluster,
-            [resize_cluster],
-            flush_stdout_from_complete_task=flush_stdout,
-        )
+        run_tasks(job_id, job.cluster, tasks, cluster)
     except KeyboardInterrupt:
         print("Interrupted -- Exiting, but your job will continue to run unaffected.")
         return 20
 
-    _print_final_summary(state, flush_stdout, loglive)
 
 
-def _wait_until_tasks_exist(state, job_id):
+def _wait_until_tasks_exist(cluster : Cluster, job_id : str):
+    state = cluster.get_state(job_id)
+    state.update()
+
     check_attempts = 0
     while len(state.get_tasks()) == 0:
         log.warning(
@@ -168,31 +124,6 @@ def _wait_until_tasks_exist(state, job_id):
             raise Exception(
                 "Even after checking many times, no tasks ever appeared. Aborting"
             )
-
-
-def _print_final_summary(state, flush_stdout: FlushStdout, loglive: bool):
-    failures = state.get_failed_task_count()
-    successes = state.get_successful_task_count()
-    txtui.user_print(
-        f"Job finished. {successes} tasks completed successfully, {failures} tasks failed"
-    )
-
-    if failures > 0:
-        log.warning(
-            "At least one task failed. Dumping stdout from one of the failures."
-        )
-        failed_tasks = state.get_failed_tasks()
-        flush_stdout(failed_tasks[0].task_id, 0)
-
-    elif (
-        flush_stdout.flush_stdout_calls == 0 and loglive
-    ):  # if we want the logs and yet we've never written out a single log, pick one at random and write it out
-        log.info("Dumping arbitrary successful task stdout")
-        successful_tasks = state.get_successful_tasks()
-        flush_stdout(successful_tasks[0].task_id, 0)
-
-    return failures == 0
-
 
 def check_completion(jq: JobQueue, io: IO, job_id: str):
     successful_count = 0

@@ -1,7 +1,7 @@
 import collections
 
 from ..log import log
-from .runner import PeriodicTask
+from .runner_types import PeriodicTask
 
 
 class NodesCompleted:
