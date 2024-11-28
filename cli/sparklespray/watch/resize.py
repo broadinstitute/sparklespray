@@ -1,4 +1,3 @@
-
 from .runner_types import PeriodicTask, NextPoll, ClusterStateQuery
 from .shared import (
     _count_incomplete_tasks,
@@ -70,8 +69,10 @@ class ResizeCluster(PeriodicTask):
 
         return NextPoll(self.seconds_between_modifications)
 
+
 class ClusterMod:
     pass
+
 
 class _ResizeCluster:
     # adjust cluster size
@@ -81,7 +82,7 @@ class _ResizeCluster:
         self,
         target_node_count: int,
         max_preemptable_attempts: int,
-        seconds_between_modifications:int,
+        seconds_between_modifications: int,
         get_time,
     ) -> None:
         self.target_node_count = target_node_count

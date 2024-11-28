@@ -29,8 +29,6 @@ def kill_cmd(jq: JobQueue, cluster, args):
             jq.reset_task(task.task_id, status=STATUS_KILLED)
 
 
-
-
 def _reconcile_claimed_tasks(jq: JobQueue, cluster: Cluster):
     "For all 'claimed' tasks associated with cluster, confirm that the owner is still running"
     raise NotImplemented

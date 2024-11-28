@@ -2,6 +2,8 @@ from dataclasses import dataclass
 import functools
 from typing import List
 import time
+from typing import Union
+
 
 class ClusterStateQuery:
     def __init__(self, now: float, _get_tasks, _get_nodes):
@@ -32,14 +34,12 @@ class StopPolling:
 class PeriodicTask:
     "This is an abstract class for tasks which should do some work (via calling poll()), pause for some duration and then poll() will be called again."
 
-    def poll(self, state: ClusterStateQuery):
+    def poll(self, state: ClusterStateQuery) -> Union[None, NextPoll, StopPolling]:
         "Function to be implemented with behavior for this task. Task should return None, if this task should stop, or NextPoll(delay) if it should be called again after `delay` seconds."
         return None
 
     def finish(self, state: ClusterStateQuery):
         "Function called after job is done and no more calls to poll() will be made"
-
-
 
 
 @functools.total_ordering
@@ -53,8 +53,6 @@ class ScheduledTask:
 
     def __eq__(self, other):
         return self.timestamp == other.timestamp
-
-
 
 
 class RateLimitedCall:

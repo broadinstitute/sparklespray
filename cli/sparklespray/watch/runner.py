@@ -4,8 +4,14 @@ from ..cluster_service import Cluster
 from typing import List
 from .runner_types import PeriodicTask, NextPoll, StopPolling
 
-from .runner_types import PeriodicTask, ScheduledTask, RateLimitedCall, ClusterStateQuery
+from .runner_types import (
+    PeriodicTask,
+    ScheduledTask,
+    RateLimitedCall,
+    ClusterStateQuery,
+)
 import heapq
+
 
 def run_tasks(
     job_id: str, cluster_id: str, tasks: List[PeriodicTask], cluster: Cluster

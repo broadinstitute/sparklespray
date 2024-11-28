@@ -54,10 +54,6 @@ def watch_cmd(jq: JobQueue, io: IO, cluster: Cluster, config: Config, args):
     )
 
 
-
-
-
-
 def watch(
     io: IO,
     jq: JobQueue,
@@ -92,13 +88,15 @@ def watch(
 
     if loglive is None:
         loglive = True
-    
+
     tasks = [
         CompletionMonitor(),
-        ResizeCluster(target_nodes, max_preemptable_attempts, cluster.get_cluster_mod(job_id)),
+        ResizeCluster(
+            target_nodes, max_preemptable_attempts, cluster.get_cluster_mod(job_id)
+        ),
         StreamLogs(loglive, cluster, io),
         PrintStatus(initial_poll_delay, max_poll_delay),
-    ] 
+    ]
 
     try:
         run_tasks(job_id, job.cluster, tasks, cluster)
@@ -107,8 +105,7 @@ def watch(
         return 20
 
 
-
-def _wait_until_tasks_exist(cluster : Cluster, job_id : str):
+def _wait_until_tasks_exist(cluster: Cluster, job_id: str):
     state = cluster.get_state(job_id)
     state.update()
 
@@ -124,6 +121,7 @@ def _wait_until_tasks_exist(cluster : Cluster, job_id : str):
             raise Exception(
                 "Even after checking many times, no tasks ever appeared. Aborting"
             )
+
 
 def check_completion(jq: JobQueue, io: IO, job_id: str):
     successful_count = 0

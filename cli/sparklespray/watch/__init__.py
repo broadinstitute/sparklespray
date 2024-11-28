@@ -6,4 +6,12 @@ from .resize import ResizeCluster
 from .runner import run_tasks
 from .status import PrintStatus
 
-__all__ = ["EstimateRateOfCompletion", "CompletionMonitor", "StartupFailureMonitor", "StreamLogs", "ResizeCluster", "PrintStatus", run_tasks]
+__all__ = [
+    "EstimateRateOfCompletion",
+    "CompletionMonitor",
+    "StartupFailureMonitor",
+    "StreamLogs",
+    "ResizeCluster",
+    "PrintStatus",
+    run_tasks,
+]

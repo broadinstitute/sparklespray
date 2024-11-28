@@ -9,19 +9,25 @@ from ..log import log
 from .runner_types import NextPoll, ClusterStateQuery
 from .shared import _exception_guard, _only_running_tasks
 from ..cluster_service import Cluster
-from .. import txtui 
-from .shared import _only_failed_tasks, _only_running_tasks, _only_successful_tasks
+from .. import txtui
+from .shared import (
+    _only_failed_tasks,
+    _only_running_tasks,
+    _only_successful_tasks,
+    _is_task_running,
+)
+
 
 class StreamLogs:
     # Stream output from one of the running processes.
-    def __init__(self, stream_logs : bool, cluster : Cluster, io):
+    def __init__(self, stream_logs: bool, cluster: Cluster, io):
         self.log_monitor = None
         self.cluster = cluster
         self.stream_logs = stream_logs
         self.complete_tasks_printed = 0
         self.io = io
 
-    def start_logging(self, state : ClusterStateQuery):
+    def start_logging(self, state: ClusterStateQuery):
         running = _only_running_tasks(state.get_tasks())
         if len(running) > 0:
             task = running[0]
@@ -41,6 +47,8 @@ class StreamLogs:
                 )
 
     def do_next_read(self):
+        assert self.log_monitor is not None
+
         with _exception_guard(lambda: "polling log file threw exception"):
             try:
                 self.log_monitor.poll()
@@ -52,6 +60,8 @@ class StreamLogs:
                 self.log_monitor = None
 
     def do_last_read(self):
+        assert self.log_monitor is not None
+
         print_log_content(
             None,
             "[{} is no longer running, tail of log stopping]".format(
@@ -89,12 +99,12 @@ class StreamLogs:
         print_log_content(datetime.datetime.now(), rest_of_stdout)
         self.complete_tasks_printed += 1
 
-    def poll(self, state : ClusterStateQuery):
+    def poll(self, state: ClusterStateQuery):
         if self.stream_logs:
             if self.log_monitor is None:
                 self.start_logging(state)
             else:
-                if state.is_task_running(self.log_monitor.task_id):
+                if _is_task_running(self.log_monitor.task_id, state.get_tasks()):
                     self.do_next_read()
                 else:
                     self.do_last_read()
@@ -105,15 +115,17 @@ class StreamLogs:
     def finish(self, state):
         if self.log_monitor is not None:
             self.do_last_read()
-        
+
         self._print_final_summary(state)
 
-    def _print_final_summary(self, state:ClusterStateQuery):
+    def _print_final_summary(self, state: ClusterStateQuery):
         tasks = state.get_tasks()
         failed_tasks = _only_failed_tasks(tasks)
         successful_tasks = _only_successful_tasks(tasks)
 
-        assert len(tasks) == len(failed_tasks) + len(successful_tasks), "Everything should be either failed or completed by this point"
+        assert len(tasks) == len(failed_tasks) + len(
+            successful_tasks
+        ), "Everything should be either failed or completed by this point"
 
         txtui.user_print(
             f"Job finished. {len(successful_tasks)} tasks completed successfully, {len(failed_tasks)} tasks failed"
@@ -124,14 +136,11 @@ class StreamLogs:
                 "At least one task failed. Dumping stdout from one of the failures."
             )
             self.flush_stdout_from_complete_task(failed_tasks[0].task_id, 0)
-        
+
         # if we want the logs and yet we've never written out a single log, pick one at random and write it out
-        elif (
-            self.complete_tasks_printed == 0 and self.stream_logs
-        ):  
+        elif self.complete_tasks_printed == 0 and self.stream_logs:
             log.info("Dumping arbitrary successful task stdout")
             self.flush_stdout_from_complete_task(successful_tasks[0].task_id, 0)
-
 
 
 # class FlushStdout:
@@ -143,5 +152,3 @@ class StreamLogs:
 #     def __call__(self, task_id, offset):
 #         flush_stdout_from_complete_task(self.jq, self.io, task_id, offset)
 #         self.flush_stdout_calls += 1
-
-

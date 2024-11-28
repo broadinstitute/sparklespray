@@ -35,17 +35,39 @@ def _exception_guard(deferred_msg, reset=None):
         if reset is not None:
             reset()
 
+
+def _is_task_running(task_id: str, tasks: List[Task]):
+    matching_tasks = [task for task in tasks if task.id == task_id]
+    if len(matching_tasks) == 0:
+        return False
+    assert len(matching_tasks) == 1
+    matching_task = matching_tasks[0]
+    return matching_task.status == STATUS_CLAIMED
+
+
 def _only_running_tasks(tasks: List[Task]):
     return [task for task in tasks if task.status == STATUS_CLAIMED]
 
+
 def _only_failed_tasks(tasks: List[Task]):
-    return [task for task in tasks if (task.status == STATUS_COMPLETE and task.exit_code != 0)]
+    return [
+        task
+        for task in tasks
+        if (task.status == STATUS_COMPLETE and task.exit_code != 0)
+    ]
+
 
 def _only_successful_tasks(tasks: List[Task]):
-    return [task for task in tasks if (task.status == STATUS_COMPLETE and task.exit_code == 0)]
+    return [
+        task
+        for task in tasks
+        if (task.status == STATUS_COMPLETE and task.exit_code == 0)
+    ]
+
 
 def _only_completed_tasks(tasks: List[Task]):
     return [task for task in tasks if task.status == STATUS_COMPLETE]
+
 
 def _count_incomplete_tasks(tasks: List[Task]):
     return sum([1 for task in tasks if not _is_terminal_status(task.status)])
