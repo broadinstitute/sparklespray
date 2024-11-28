@@ -96,7 +96,7 @@ def watch(
     tasks = [
         CompletionMonitor(),
         ResizeCluster(target_nodes, max_preemptable_attempts, cluster.get_cluster_mod(job_id)),
-        StreamLogs(loglive, cluster),
+        StreamLogs(loglive, cluster, io),
         PrintStatus(initial_poll_delay, max_poll_delay),
     ] 
 

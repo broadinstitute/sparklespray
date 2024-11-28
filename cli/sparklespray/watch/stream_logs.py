@@ -10,14 +10,16 @@ from .runner_types import NextPoll, ClusterStateQuery
 from .shared import _exception_guard, _only_running_tasks
 from ..cluster_service import Cluster
 from .. import txtui 
+from .shared import _only_failed_tasks, _only_running_tasks, _only_completed_tasks
 
 class StreamLogs:
     # Stream output from one of the running processes.
-    def __init__(self, stream_logs : bool, cluster : Cluster):
+    def __init__(self, stream_logs : bool, cluster : Cluster, io):
         self.log_monitor = None
         self.cluster = cluster
         self.stream_logs = stream_logs
         self.complete_tasks_printed = 0
+        self.io = io
 
     def start_logging(self, state : ClusterStateQuery):
         running = _only_running_tasks(state.get_tasks())
@@ -64,7 +66,7 @@ class StreamLogs:
         self.log_monitor = None
 
     def flush_stdout_from_complete_task(self, task_id, offset):
-        task = self.jq.task_storage.get_task(task_id)
+        task = self.cluster.task_store.get_task(task_id)
         spec = json.loads(self.io.get_as_str(task.args))
 
         attempts = 0
@@ -108,16 +110,16 @@ class StreamLogs:
 
     def _print_final_summary(self, state:ClusterStateQuery):
         tasks = state.get_tasks()
-        failures = _only_failed_tasks(tasks)
-        successes = _only_completed_tasks(tasks)
+        failed_tasks = _only_failed_tasks(tasks)
+        successful_tasks = _only_completed_tasks(tasks)
 
-        assert len(tasks) == len(failures) + len(successes), "Everything should be either failed or completed by this point"
+        assert len(tasks) == len(failed_tasks) + len(successful_tasks), "Everything should be either failed or completed by this point"
 
         txtui.user_print(
-            f"Job finished. {len(successes)} tasks completed successfully, {len(failures)} tasks failed"
+            f"Job finished. {len(successful_tasks)} tasks completed successfully, {len(failed_tasks)} tasks failed"
         )
 
-        if failures > 0:
+        if len(failed_tasks) > 0:
             log.warning(
                 "At least one task failed. Dumping stdout from one of the failures."
             )
@@ -129,22 +131,18 @@ class StreamLogs:
             self.complete_tasks_printed == 0 and self.stream_logs
         ):  
             log.info("Dumping arbitrary successful task stdout")
-            successful_tasks = state.get_successful_tasks()
             self.flush_stdout_from_complete_task(successful_tasks[0].task_id, 0)
 
-        return failures == 0
 
 
-class FlushStdout:
-    def __init__(self, jq, io):
-        self.flush_stdout_calls = 0
-        self.jq = jq
-        self.io = io
+# class FlushStdout:
+#     def __init__(self, jq, io):
+#         self.flush_stdout_calls = 0
+#         self.jq = jq
+#         self.io = io
 
-    def __call__(self, task_id, offset):
-        flush_stdout_from_complete_task(self.jq, self.io, task_id, offset)
-        self.flush_stdout_calls += 1
+#     def __call__(self, task_id, offset):
+#         flush_stdout_from_complete_task(self.jq, self.io, task_id, offset)
+#         self.flush_stdout_calls += 1
 
-from .runner import ClusterStateQuery
-from .shared import _only_failed_tasks, _only_running_tasks, _only_completed_tasks
 
