@@ -4,9 +4,11 @@ from ..job_queue import JobQueue, Job
 from ..cluster_service import Cluster
 from ..io_helper import IO
 
+
 def logs_cmd(jq: JobQueue, io: IO, args):
     jobid = _resolve_jobid(jq, args.jobid)
     print_failures(jq, io, jobid, args.all)
+
 
 def add_logs_cmd(subparser):
     parser = subparser.add_parser("logs", help="Print out logs from failed tasks")

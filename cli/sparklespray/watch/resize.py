@@ -1,41 +1,12 @@
-import time
-import sys
-import logging
-import contextlib
-import json
-from ..logclient import LogMonitor, CommunicationError
-from typing import Callable, Optional
-from ..cluster_service import ClusterState
-from ..txtui import print_log_content
-import datetime
-import subprocess
-import os
-from ..task_store import STATUS_COMPLETE
-import collections
-from ..config import Config
-import tempfile
-import json
-from ..task_store import Task, STATUS_FAILED
-from ..cluster_service import NodeReq
-from .shared import _summarize_task_statuses
-from typing import Dict
-from collections import defaultdict
-from ..node_req_store import NODE_REQ_CLASS_NORMAL, NODE_REQ_CLASS_PREEMPTIVE
-from ..resize_cluster import ResizeCluster, GetPreempted
-from ..io_helper import IO
-from ..job_queue import JobQueue
-from ..cluster_service import Cluster
-from .. import txtui
-from ..job_store import Job
+from ..resize_cluster import ResizeCluster
 
-from ..log import log
-from ..txtui import user_print
-from ..startup_failure_tracker import StartupFailureTracker
-from ..task_store import _is_terminal_status, Task
-from ..node_req_store import REQUESTED_NODE_STATES, NodeReq
-from typing import List
-from .runner import PeriodicTask, NextPoll, StopPolling, ClusterStateQuery
-from .shared import _count_incomplete_tasks, _exception_guard, _count_preempt_attempt, _count_requested_nodes
+from .runner import PeriodicTask, NextPoll, ClusterStateQuery
+from .shared import (
+    _count_incomplete_tasks,
+    _count_preempt_attempt,
+    _count_requested_nodes,
+)
+
 
 class ResizeCluster(PeriodicTask):
     # adjust cluster size
@@ -61,12 +32,15 @@ class ResizeCluster(PeriodicTask):
             self.target_node_count, _count_incomplete_tasks(state.get_tasks())
         )
 
-        requested_nodes = _count_requested_nodes(state.get_nodes()) # state.get_requested_node_count()
-        print("target_node_count > requested_nodes", target_node_count , requested_nodes)
+        requested_nodes = _count_requested_nodes(
+            state.get_nodes()
+        )  # state.get_requested_node_count()
+        print("target_node_count > requested_nodes", target_node_count, requested_nodes)
         if target_node_count > requested_nodes:
             # Is our target higher than what we have now? Then add that many nodes
             remaining_preempt_attempts = (
-                self.max_preemptable_attempts - _count_preempt_attempt(state.get_nodes())
+                self.max_preemptable_attempts
+                - _count_preempt_attempt(state.get_nodes())
             )
             nodes_to_add = target_node_count - requested_nodes
             if nodes_to_add > 0:

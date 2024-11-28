@@ -22,6 +22,7 @@ STATUS_KILLED = "killed"
 
 INCOMPLETE_TASK_STATES = set([STATUS_CLAIMED, STATUS_PENDING])
 
+
 def _is_terminal_status(status):
     return status in [STATUS_FAILED, STATUS_COMPLETE]
 
@@ -32,7 +33,6 @@ def _is_complete(status_counts):
         if not _is_terminal_status(status):
             all_terminal = True
     return all_terminal
-
 
 
 @dataclass
@@ -159,7 +159,7 @@ class TaskStore:
         batch.delete(key)
 
     def get_tasks(self, job_id=None, status=None, max_fetch=None) -> List[Task]:
-        filters=[]
+        filters = []
         if job_id is not None:
             filters.append(["job_id", "=", job_id])
         if status is not None:

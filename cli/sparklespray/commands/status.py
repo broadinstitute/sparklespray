@@ -22,6 +22,7 @@ from ..print_failures import print_failures
 
 from .shared import _summarize_task_statuses
 
+
 def status_cmd(jq: JobQueue, io: IO, cluster: Cluster, args):
     jobids = _get_jobids_from_pattern(jq, args.jobid_pattern)
 
@@ -118,6 +119,7 @@ def status_cmd(jq: JobQueue, io: IO, cluster: Cluster, args):
             )
         if args.failed:
             print_failures(jq, io, jobid, False)
+
 
 def add_status_cmd(subparser):
     parser = subparser.add_parser(

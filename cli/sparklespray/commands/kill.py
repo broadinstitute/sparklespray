@@ -11,6 +11,7 @@ from .. import txtui
 from .shared import _get_jobids_from_pattern
 from ..cluster_service import Cluster
 
+
 def kill_cmd(jq: JobQueue, cluster, args):
     jobids = _get_jobids_from_pattern(jq, args.jobid_pattern)
     if len(jobids) == 0:
@@ -30,10 +31,15 @@ def kill_cmd(jq: JobQueue, cluster, args):
         for task in tasks:
             jq.reset_task(task.task_id, status=STATUS_KILLED)
 
+
 from typing import List
+
+
 def _reconcile_claimed_tasks(jq: JobQueue, cluster: Cluster):
     "For all 'claimed' tasks associated with cluster, confirm that the owner is still running"
     raise NotImplemented
+
+
 #     tasks = jq.get_tasks_for_cluster(job.cluster, STATUS_CLAIMED)
 #     for task in tasks:
 #         _update_if_owner_missing(cluster, jq, task)

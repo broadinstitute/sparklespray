@@ -45,9 +45,12 @@ import json
 # which step in the actions does kubeconsume run in
 CONSUMER_ACTION_ID = 2
 
+
 def _unique_id():
     import uuid
+
     return str(uuid.uuid4())
+
 
 class ClusterStatus:
     def __init__(self, instances: List[dict]) -> None:
@@ -158,7 +161,9 @@ class Cluster:
         for pd_mount in pd_mounts:
             if isinstance(pd_mount, ExistingDiskMount):
                 volume = self.compute.get_volume_details(zone, pd_mount.name)
-                assert volume, f"Requested mounting of an existing volume ({pd_mount.name}) but it does not exist in zone {zone}"
+                assert (
+                    volume
+                ), f"Requested mounting of an existing volume ({pd_mount.name}) but it does not exist in zone {zone}"
 
     def stop_cluster(self, cluster_name: str):
         node_reqs = self.node_req_store.get_node_reqs(cluster_name)
@@ -175,7 +180,9 @@ class Cluster:
                 # just warn the use of the situation and move on. Typically the operation terminated log ago
                 # and the person didn't upgrade sparkles in the middle of running a job.
                 if re.match("projects/[^/]+/operations/[^/]+", node_req.operation_id):
-                    log.warn(f"Cannot cancel past request to add a node because the operation_id ({ node_req.operation_id}) looks like it was created with the old deprecated google API. Assuming this node terminated long ago and moving on.")
+                    log.warn(
+                        f"Cannot cancel past request to add a node because the operation_id ({ node_req.operation_id}) looks like it was created with the old deprecated google API. Assuming this node terminated long ago and moving on."
+                    )
                 else:
                     try:
                         self.cancel_add_node(node_req.operation_id)
@@ -226,7 +233,7 @@ class Cluster:
         # before updating node requests, make sure the state has been updated to
         # reflect which ones are actually still running and which are done.
         # node_req_store.cleanup_cluster() assumes the states are up to date.
-        
+
         state = self.get_state(job_id)
         state.update()
 
@@ -268,28 +275,38 @@ class Cluster:
 
     def test_pipeline_api(self):
         """Simple api call used to verify the service is enabled"""
-        assert len(self.zones) == 1, "With the switch to the google's life science API, we can now only use one zone"
+        assert (
+            len(self.zones) == 1
+        ), "With the switch to the google's life science API, we can now only use one zone"
         region = self.zones[0][:-2]
 
     def test_image(
         self,
-        project : str,
+        project: str,
         zones: List[str],
-        docker_image : str,
-        debug_log_url : str,
-        machine_specs : MachineSpec,
-        monitor_port: int
+        docker_image: str,
+        debug_log_url: str,
+        machine_specs: MachineSpec,
+        monitor_port: int,
     ):
-        from sparklespray.gcp_utils import create_pipeline_spec, create_validation_pipeline_spec, get_region
+        from sparklespray.gcp_utils import (
+            create_pipeline_spec,
+            create_validation_pipeline_spec,
+            get_region,
+        )
 
-        assert len(zones) == 1, f"Only one zone supported at this time, but got: {zones}"
+        assert (
+            len(zones) == 1
+        ), f"Only one zone supported at this time, but got: {zones}"
         zone = zones[0]
 
         regions = set([get_region(zone) for zone in zones])
-        assert len(regions) == 1, "Only single region supported but got zones in {regions}"
+        assert (
+            len(regions) == 1
+        ), "Only single region supported but got zones in {regions}"
         region = list(regions)[0]
 
-        cluster_name = "validationtest-"+_unique_id()
+        cluster_name = "validationtest-" + _unique_id()
 
         self.nodes.test_pipeline_api(self.project, region)
         pipeline_def = create_validation_pipeline_spec(
@@ -299,9 +316,11 @@ class Cluster:
             cluster_name=cluster_name,
             docker_image=docker_image,
             machine_specs=machine_specs,
-            monitor_port=monitor_port
+            monitor_port=monitor_port,
         )
-        operation_id = self.nodes.add_node(pipeline_def, preemptible=False, debug_log_url=debug_log_url)
+        operation_id = self.nodes.add_node(
+            pipeline_def, preemptible=False, debug_log_url=debug_log_url
+        )
         print(f"Submitted request for a new worker ( operation_id: {operation_id} )")
 
         prev_event_description = None
@@ -324,19 +343,21 @@ class Cluster:
 
         print(f"Test complete: successful_completion={successful_completion}")
         self.stop_cluster(cluster_name)
-        assert successful_completion, f"Test failed. For more information run:\n  sparkles dump-operation {operation_id}\n\n"
+        assert (
+            successful_completion
+        ), f"Test failed. For more information run:\n  sparkles dump-operation {operation_id}\n\n"
 
     def is_owner_running(self, owner: str) -> bool:
-         if owner == "localhost":
-             return False
+        if owner == "localhost":
+            return False
 
-         m = re.match("projects/([^/]+)/zones/([^/]+)/([^/]+)", owner)
-         assert (
-             m is not None
-         ), "Expected a instance name with zone but got owner={}".format(owner)
-         project_id, zone, instance_name = m.groups()
-         # assert project_id == self.project, "project_id ({}) != self.project ({})".format(project_id, self.project)
-         return self.compute.get_instance_status(zone, instance_name) == "RUNNING"
+        m = re.match("projects/([^/]+)/zones/([^/]+)/([^/]+)", owner)
+        assert (
+            m is not None
+        ), "Expected a instance name with zone but got owner={}".format(owner)
+        project_id, zone, instance_name = m.groups()
+        # assert project_id == self.project, "project_id ({}) != self.project ({})".format(project_id, self.project)
+        return self.compute.get_instance_status(zone, instance_name) == "RUNNING"
 
     def get_cluster_mod(self, job_id):
         return ClusterMod(job_id, self, self.debug_log_prefix)
@@ -447,7 +468,9 @@ class ClusterState:
         msg = f"tasks: {task_status}, worker nodes: {node_status}"
         if completion_rate:
             incomplete_task_count = self.get_incomplete_task_count()
-            remaining_estimate_in_seconds = float(incomplete_task_count)/completion_rate
+            remaining_estimate_in_seconds = (
+                float(incomplete_task_count) / completion_rate
+            )
             msg += f", eta: {(remaining_estimate_in_seconds/60):.1f} minutes to complete remaining {incomplete_task_count} tasks"
         return msg
 

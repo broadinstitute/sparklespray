@@ -1,41 +1,16 @@
-import time
-import sys
-import logging
-import contextlib
-import json
-from ..logclient import LogMonitor, CommunicationError
-from typing import Callable, Optional
-from ..cluster_service import ClusterState
-from ..txtui import print_log_content
-import datetime
-import subprocess
-import os
 from ..task_store import STATUS_COMPLETE
-import collections
-from ..config import Config
-import tempfile
-import json
 from ..task_store import Task, STATUS_FAILED
 from ..cluster_service import NodeReq
-from .shared import _summarize_task_statuses
 from typing import Dict
 from collections import defaultdict
 from ..node_req_store import NODE_REQ_CLASS_NORMAL, NODE_REQ_CLASS_PREEMPTIVE
-from ..resize_cluster import ResizeCluster, GetPreempted
-from ..io_helper import IO
-from ..job_queue import JobQueue
-from ..cluster_service import Cluster
-from .. import txtui
-from ..job_store import Job
 
-from ..log import log
 from ..txtui import user_print
-from ..startup_failure_tracker import StartupFailureTracker
-from ..task_store import _is_terminal_status, Task
-from ..node_req_store import REQUESTED_NODE_STATES, NodeReq
+from ..task_store import Task
+from ..node_req_store import NodeReq
 from typing import List
-from .runner import PeriodicTask, NextPoll, StopPolling, ClusterStateQuery
-from .shared import _count_incomplete_tasks, _exception_guard
+from .runner import PeriodicTask, NextPoll, ClusterStateQuery
+
 
 class PrintStatus(PeriodicTask):
     def __init__(self, initial_poll_delay, max_poll_delay):
@@ -43,7 +18,7 @@ class PrintStatus(PeriodicTask):
         self.max_poll_delay = max_poll_delay
         self.prev_summary = None
 
-    def poll(self, state : ClusterStateQuery):
+    def poll(self, state: ClusterStateQuery):
         summary = format_summary(state.get_tasks(), state.get_nodes())
         if self.prev_summary != summary:
             user_print(summary)
@@ -82,9 +57,7 @@ def format_summary(tasks: List[Task], node_reqs: List[NodeReq]):
         label = "{}(type={})".format(r.status, to_desc[r.node_class])
         by_status[label] += 1
     statuses = sorted(by_status.keys())
-    node_status = ", ".join(
-        [f"{status} ({by_status[status]})" for status in statuses]
-    )
+    node_status = ", ".join([f"{status} ({by_status[status]})" for status in statuses])
 
     msg = f"tasks: {task_status}, worker nodes: {node_status}"
     # if completion_rate:

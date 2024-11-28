@@ -72,10 +72,11 @@ def validate_cmd(jq: JobQueue, io: IO, cluster: Cluster, config: Config):
         docker_image=config.default_image,
         debug_log_url=logging_url,
         machine_specs=config.create_machine_specs(),
-        monitor_port=config.monitor_port
+        monitor_port=config.monitor_port,
     )
 
     print("Verification successful!")
+
 
 def add_validate_cmd(subparser):
     parser = subparser.add_parser(

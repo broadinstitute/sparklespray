@@ -59,7 +59,10 @@ def add_list_cmd(subparser):
         action="store_true",
     )
 
+
 from typing import Any
+
+
 def list_tasks(
     jq: JobQueue,
     io: IO,
@@ -111,7 +114,7 @@ def list_tasks(
     filtered = process_records(records, fields, filter_expressions)
 
     if params_only:
-        filtered = [record["args"]["parameters"] for record in filtered] # type: ignore
+        filtered = [record["args"]["parameters"] for record in filtered]  # type: ignore
 
     write(filtered, output_mode, output_filename)
 

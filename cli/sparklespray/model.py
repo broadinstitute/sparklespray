@@ -1,15 +1,21 @@
 from pydantic import BaseModel, validator
 from typing import List, Optional, Union
 
-ALLOWED_DISK_TYPES = {"local-ssd", "pd-standard", "pd-balanced", "pd-ssd", "hyperdisk-balanced"}
+ALLOWED_DISK_TYPES = {
+    "local-ssd",
+    "pd-standard",
+    "pd-balanced",
+    "pd-ssd",
+    "hyperdisk-balanced",
+}
 
 DEFAULT_SSD_SIZE = (
     300  # slightly smaller than the 375 GB limit to avoid it allocating two volumes
 )
 
+
 class DiskMount(BaseModel):
     path: str
-
 
 
 class ExistingDiskMount(DiskMount):
@@ -26,8 +32,12 @@ class PersistentDiskMount(DiskMount):
             raise ValueError(f"{v} was not one of {ALLOWED_DISK_TYPES}")
         return v
 
+
 from typing import TypeVar
-DiskMountT = Union[ExistingDiskMount, PersistentDiskMount] # TypeVar("DiskMountT", bound=DiskMount)
+
+DiskMountT = Union[
+    ExistingDiskMount, PersistentDiskMount
+]  # TypeVar("DiskMountT", bound=DiskMount)
 
 
 class SubmitConfig(BaseModel):
@@ -56,5 +66,6 @@ class MachineSpec(BaseModel):
 
     def as_dict(self):
         return self.dict()
+
 
 LOCAL_SSD = "local-ssd"

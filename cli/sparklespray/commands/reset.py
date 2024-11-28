@@ -27,6 +27,7 @@ def add_reset_cmd(subparser):
         help="If set, will mark all tasks as 'pending', not just 'claimed', 'killed' or 'failed' tasks. The first parameter can be either a job ID or an individual task ID",
     )
 
+
 def reset_cmd(jq: JobQueue, io: IO, cluster: Cluster, args):
     jobid_pattern = args.jobid_pattern
     if "." in jobid_pattern:

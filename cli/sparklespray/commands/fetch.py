@@ -6,6 +6,7 @@ from ..io_helper import IO
 from ..log import log
 from .shared import _resolve_jobid
 
+
 def fetch_cmd(jq: JobQueue, io: IO, args):
     jobid = _resolve_jobid(jq, args.jobid)
     if args.dest is None:

@@ -96,11 +96,20 @@ class AddNodeReqStore:
             assert isinstance(batch, Batcher)
             _batch = batch
 
-        query = self.client.query(kind="NodeReq", filters=[("cluster_id", "=", cluster_id), ("status", "=", NODE_REQ_COMPLETE)])
+        query = self.client.query(
+            kind="NodeReq",
+            filters=[
+                ("cluster_id", "=", cluster_id),
+                ("status", "=", NODE_REQ_COMPLETE),
+            ],
+        )
         for entity in query.fetch():
             _batch.delete(entity.key)
 
-        query = self.client.query(kind="NodeReq", filters=[("cluster_id", "=", cluster_id), ("status", "=", NODE_REQ_FAILED)])
+        query = self.client.query(
+            kind="NodeReq",
+            filters=[("cluster_id", "=", cluster_id), ("status", "=", NODE_REQ_FAILED)],
+        )
         for entity in query.fetch():
             _batch.delete(entity.key)
 

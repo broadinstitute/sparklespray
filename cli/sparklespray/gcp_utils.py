@@ -31,12 +31,12 @@ def create_pipeline_json(
     normalized_jobid = normalize_label(jobid)
 
     mounts = []
-#    volumes = []
+    #    volumes = []
     disks = []
     for i, pd in enumerate(machine_specs.mounts):
         if isinstance(pd, ExistingDiskMount):
             # only allowed with life science API
-            #volumes.append({"volume": f"disk{i}", "disk": {"disk": pd.name}})
+            # volumes.append({"volume": f"disk{i}", "disk": {"disk": pd.name}})
             raise Exception("Mounting existing volumes is not allowed at this time")
         elif isinstance(pd, PersistentDiskMount):
             # only allowed with life science API
@@ -116,6 +116,7 @@ def create_pipeline_json(
 
     return pipeline_def
 
+
 def get_region(zone):
     # drop the zone suffix to get the name of the region
     # that contains the zone
@@ -124,6 +125,7 @@ def get_region(zone):
     assert m, f"Zone doesn't look like a valid zone name: {zone}"
     return m.group(1)
 
+
 def create_validation_pipeline_spec(
     project: str,
     zones: List[str],
@@ -131,7 +133,7 @@ def create_validation_pipeline_spec(
     cluster_name: str,
     docker_image: str,
     machine_specs: MachineSpec,
-    monitor_port: int
+    monitor_port: int,
 ) -> dict:
     return create_pipeline_json(
         project=project,
@@ -141,10 +143,7 @@ def create_validation_pipeline_spec(
         setup_image=SETUP_IMAGE,
         setup_commands=[["echo", "setup"]],
         docker_image=docker_image,
-        docker_command=[
-            "echo",
-            "main command"
-        ],
+        docker_command=["echo", "main command"],
         machine_specs=machine_specs,
         monitor_port=monitor_port,
     )

@@ -2,7 +2,13 @@ import logging
 import os
 import sys
 
-from .model import PersistentDiskMount, LOCAL_SSD, ExistingDiskMount, DiskMountT, MachineSpec
+from .model import (
+    PersistentDiskMount,
+    LOCAL_SSD,
+    ExistingDiskMount,
+    DiskMountT,
+    MachineSpec,
+)
 from .io_helper import IO
 from configparser import RawConfigParser, NoSectionError, NoOptionError
 from .cluster_service import Cluster
@@ -90,17 +96,20 @@ class Config:
 
     def create_machine_specs(self):
         return MachineSpec(
-        service_account_email=self.credentials.service_account_email, # type: ignore
-        boot_volume_in_gb=self.boot_volume_in_gb,
-        mounts=self.mounts,
-        work_root_dir=self.work_root_dir,
-        machine_type=self.machine_type,
-    )
+            service_account_email=self.credentials.service_account_email,  # type: ignore
+            boot_volume_in_gb=self.boot_volume_in_gb,
+            mounts=self.mounts,
+            work_root_dir=self.work_root_dir,
+            machine_type=self.machine_type,
+        )
 
 
 class NoDefault:
     pass
+
+
 NO_DEFAULT = NoDefault()
+
 
 @dataclass
 class GCloudConfig:
@@ -137,7 +146,9 @@ def _parse_gcloud_config(gcloud_config_file: str, verbose: bool) -> GCloudConfig
 
 
 from typing import TypeVar, Generic, Union
-T = TypeVar('T')
+
+T = TypeVar("T")
+
 
 def load_config(
     config_file: str,
@@ -167,12 +178,19 @@ def load_config(
 
     # check for deprecated options
     if "bootdisksizegb" in config_dict:
-        print("Warning: The option \"bootdisksizegb\" was seen in the config file but this name is deprecated. This parameter has been replaced with boot_volume_in_gb.")
+        print(
+            'Warning: The option "bootdisksizegb" was seen in the config file but this name is deprecated. This parameter has been replaced with boot_volume_in_gb.'
+        )
         config_dict["boot_volume_in_gb"] = config_dict["bootdisksizegb"]
         del config_dict["bootdisksizegb"]
 
     config_used = set()
-    def consume(name: str, default : Union[NoDefault, T]=NO_DEFAULT, parser : Callable[[str], T]=str) -> T:
+
+    def consume(
+        name: str,
+        default: Union[NoDefault, T] = NO_DEFAULT,
+        parser: Callable[[str], T] = str,
+    ) -> T:
         assert name not in config_used, f"Consumed {name} twice"
         config_used.add(name)
 
@@ -250,9 +268,14 @@ def load_config(
     )
 
     preemptible_yn = consume("preemptible", "y")
-    assert preemptible_yn.lower() in ['y', 'n'], f"expected preemptible should be either y or n but value was: {preemptible_yn}"
+    assert preemptible_yn.lower() in [
+        "y",
+        "n",
+    ], f"expected preemptible should be either y or n but value was: {preemptible_yn}"
     if preemptible_yn.lower() == "n":
-        assert "max_preemptable_attempts_scale" not in config_dict, f"Cannot specify both preemptible=n and max_preemptable_attempts_scale"
+        assert (
+            "max_preemptable_attempts_scale" not in config_dict
+        ), f"Cannot specify both preemptible=n and max_preemptable_attempts_scale"
 
         config.max_preemptable_attempts_scale = 0
     else:
@@ -298,13 +321,11 @@ def load_config(
         size_in_gb = consume(f"mount_{i+1}_size_in_gb", 100, int)
         name = consume(f"mount_{i+1}_name", None)
         if name is not None:
-            mounts.append(
-            ExistingDiskMount(name=name, path=path)
-        )
+            mounts.append(ExistingDiskMount(name=name, path=path))
         else:
             mounts.append(
-            PersistentDiskMount(path=path, type=type, size_in_gb=size_in_gb)
-        )
+                PersistentDiskMount(path=path, type=type, size_in_gb=size_in_gb)
+            )
 
     # TODO: Add validation that no two mounts have the same path and that workdir lines up with at least one mount
 
@@ -328,7 +349,9 @@ def load_config(
     return Config(**dataclasses.asdict(config))
 
 
-def create_services(config_file: str, overrides: Dict[str, str] ) -> Tuple[Config, JobQueue, IO, Cluster]:
+def create_services(
+    config_file: str, overrides: Dict[str, str]
+) -> Tuple[Config, JobQueue, IO, Cluster]:
     config = load_config(config_file, overrides)
     service_account_key = config.service_account_key
     if not os.path.exists(service_account_key):

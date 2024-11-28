@@ -64,7 +64,10 @@ def main(argv=None):
     )
     # silence this annoying warning that is coming from google's library, and we don't have control over (google/cloud/datastore/query.py:234)
 
-    warnings.filterwarnings("ignore", "Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.")
+    warnings.filterwarnings(
+        "ignore",
+        "Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.",
+    )
 
     from .submit import add_submit_cmd
     from .commands.watch import add_watch_cmd
@@ -83,13 +86,19 @@ def main(argv=None):
     from .commands.list import add_list_cmd, add_list_nodes_cmd
 
     parse = argparse.ArgumentParser()
-    
+
     # add global options
-    parse.add_argument("-c","--config", default=None)
+    parse.add_argument("-c", "--config", default=None)
     parse.add_argument(
         "--debug", action="store_true", help="If set, debug messages will be output"
     )
-    parse.add_argument("-o","--override", action="append", dest="overrides", help="override a parameter in the config file. Value should be -o 'param=value'")
+    parse.add_argument(
+        "-o",
+        "--override",
+        action="append",
+        dest="overrides",
+        help="override a parameter in the config file. Value should be -o 'param=value'",
+    )
 
     # add subcommands
     subparser = parse.add_subparsers()
@@ -154,4 +163,3 @@ def main(argv=None):
 
 if __name__ == "__main__":
     main(sys.argv[1:])
-

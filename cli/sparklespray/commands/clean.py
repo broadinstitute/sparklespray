@@ -13,6 +13,7 @@ from ..config import get_config_path, load_config, create_services, Config, BadC
 from ..log import log
 from .shared import _get_jobids_from_pattern
 
+
 def clean(
     cluster: Cluster,
     jq: JobQueue,
@@ -80,6 +81,7 @@ def clean_cmd(cluster: Cluster, jq, args):
             only_nodes=args.only_nodes,
         )
 
+
 def _update_claimed_are_still_running(jq, cluster, job_id):
     get_preempted = GetPreempted(min_bad_time=0)
     state = cluster.get_state(job_id)
@@ -93,6 +95,7 @@ def _update_claimed_are_still_running(jq, cluster, job_id):
         for task_id in task_ids:
             jq.reset_task(task_id)
     return task_ids
+
 
 def add_clean_cmd(subparser):
     parser = subparser.add_parser(
@@ -122,4 +125,3 @@ def add_clean_cmd(subparser):
         action="store_true",
         help="If set, will not delete the job, only completed node requests.",
     )
-

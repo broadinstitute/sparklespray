@@ -13,6 +13,7 @@ from ..config import get_config_path, load_config, create_services, Config, BadC
 from ..log import log
 from ..gcp_setup import setup_project, grant
 
+
 def add_grant_cmd(subparser):
     parser = subparser.add_parser(
         "grant",
@@ -21,6 +22,7 @@ def add_grant_cmd(subparser):
     parser.add_argument("project")
     parser.add_argument("role")
     parser.set_defaults(func=grant_cmd)
+
 
 def grant_cmd(args, config: Config):
     role = args.role

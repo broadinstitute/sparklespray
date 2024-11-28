@@ -15,6 +15,7 @@ from ..log import log
 from .shared import _get_jobids_from_pattern
 from ..gcp_setup import setup_project
 
+
 def setup_cmd(args, config: Config):
     default_url_prefix = config.default_url_prefix
     m = re.match("^gs://([^/]+)(?:/.*)?$", default_url_prefix)
@@ -22,6 +23,7 @@ def setup_cmd(args, config: Config):
     bucket_name = m.group(1)
 
     setup_project(config.project, config.service_account_key, bucket_name)
+
 
 def add_setup_cmd(subparser):
     parser = subparser.add_parser(

@@ -18,6 +18,7 @@ from ..task_store import Task
 import dataclasses
 import csv
 
+
 def show_cmd(jq: JobQueue, io: IO, args):
     jobid = _resolve_jobid(jq, args.jobid)
     retcode = args.exitcode
@@ -50,7 +51,7 @@ def show_cmd(jq: JobQueue, io: IO, args):
 
         rows = []
 
-        def make_simple_row(task : Task):
+        def make_simple_row(task: Task):
             row = {}
             row["sparklespray_task_id"] = task.task_id
             row["sparklespray_exit_code"] = task.exit_code
@@ -64,7 +65,7 @@ def show_cmd(jq: JobQueue, io: IO, args):
 
             return row
 
-        def make_full_row(task : Task):
+        def make_full_row(task: Task):
             row = dataclasses.asdict(task)
             task_spec = json.loads(io.get_as_str_must(task.args))
             row["args_url"] = task.args
@@ -106,6 +107,7 @@ def show_cmd(jq: JobQueue, io: IO, args):
                 write(rows, fd)
         else:
             write(rows, sys.stdout)
+
 
 def add_show_cmd(subparser):
     parser = subparser.add_parser(

@@ -121,7 +121,7 @@ class IO:
         else:
             assert not must, "Could not find {}".format(path)
 
-    def get_as_str_must(self, src_url): # Created to make type checker happy
+    def get_as_str_must(self, src_url):  # Created to make type checker happy
         value = self.get_as_str(src_url, must=True)
         assert value is not None
         return value

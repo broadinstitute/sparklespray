@@ -35,7 +35,6 @@ from ..task_store import _is_terminal_status, Task
 from ..node_req_store import REQUESTED_NODE_STATES, NodeReq
 
 
-
 def add_watch_cmd(subparser):
     parser = subparser.add_parser("watch", help="Monitor the job")
     parser.set_defaults(func=watch_cmd)
@@ -97,7 +96,10 @@ def _watch(
     7. Stream output from one of the running processes.
     """
 
-    tasks = [PrintStatus(initial_poll_delay, max_poll_delay), CompletionMonitor()] + other_tasks
+    tasks = [
+        PrintStatus(initial_poll_delay, max_poll_delay),
+        CompletionMonitor(),
+    ] + other_tasks
     # if loglive:
     #     tasks.append(StreamLogs())
 
@@ -108,11 +110,12 @@ class FlushStdout:
     def __init__(self, jq, io):
         self.flush_stdout_calls = 0
         self.jq = jq
-        self.io = io 
-        
+        self.io = io
+
     def __call__(self, task_id, offset):
         flush_stdout_from_complete_task(self.jq, self.io, task_id, offset)
         self.flush_stdout_calls += 1
+
 
 def watch(
     io: IO,
@@ -154,10 +157,8 @@ def watch(
         loglive = True
 
     resize_cluster = ResizeCluster(
-        target_nodes,
-        max_preemptable_attempts,
-        cluster.get_cluster_mod(job_id))
-    
+        target_nodes, max_preemptable_attempts, cluster.get_cluster_mod(job_id)
+    )
 
     try:
         _watch(
@@ -187,9 +188,12 @@ def _wait_until_tasks_exist(state, job_id):
         state.update()
         check_attempts += 1
         if check_attempts > 20:
-            raise Exception("Even after checking many times, no tasks ever appeared. Aborting")
+            raise Exception(
+                "Even after checking many times, no tasks ever appeared. Aborting"
+            )
 
-def _print_final_summary(state, flush_stdout : FlushStdout, loglive : bool):
+
+def _print_final_summary(state, flush_stdout: FlushStdout, loglive: bool):
     failures = state.get_failed_task_count()
     successes = state.get_successful_task_count()
     txtui.user_print(

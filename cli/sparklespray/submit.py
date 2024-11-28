@@ -143,7 +143,10 @@ def expand_tasks(spec, io, default_url_prefix, default_job_url_prefix):
         tasks.append(task)
     return tasks
 
-def _make_cluster_name(job_name : str, image : str, machine_spec : MachineSpec, unique_name: bool):
+
+def _make_cluster_name(
+    job_name: str, image: str, machine_spec: MachineSpec, unique_name: bool
+):
     import hashlib
 
     if unique_name:
@@ -152,14 +155,9 @@ def _make_cluster_name(job_name : str, image : str, machine_spec : MachineSpec, 
         machine_json = json.dumps(machine_spec.as_dict(), sort_keys=True)
         # print(f"machine_json: {machine_json}")
         hash = hashlib.md5()
-        hash.update(f"{job_name}-{image}-{sparklespray.__version__}".encode(
-                "utf8"
-            ))
+        hash.update(f"{job_name}-{image}-{sparklespray.__version__}".encode("utf8"))
         hash.update(machine_json.encode("utf8"))
-        return (
-
-            f"c-{hash.hexdigest()[:20]}"
-        )
+        return f"c-{hash.hexdigest()[:20]}"
 
 
 def submit(
@@ -523,9 +521,7 @@ def submit_cmd(jq: JobQueue, io: IO, cluster: Cluster, args: Any, config: Config
     dest_url = url_join(default_url_prefix, job_id)
     files_to_push = list(args.push)
     if args.rerun:
-        assert (
-            args.name is not None
-        ), "Cannot re-run a job if the name isn't specified"
+        assert args.name is not None, "Cannot re-run a job if the name isn't specified"
         assert len(parameters) == 1, "Cannot re-run a job with more than one task"
         # Add the existing job directory to the list of files to download to the worker
 
@@ -554,8 +550,10 @@ def submit_cmd(jq: JobQueue, io: IO, cluster: Cluster, args: Any, config: Config
         exclude_patterns=args.exclude_wildcards,
     )
 
-    assert os.path.exists(config.kubequeconsume_exe_path), (f"Could not find {config.kubequeconsume_exe_path}. This most commonly happens when one doesn't "
-                    "install from the packaged releases at https://github.com/broadinstitute/sparklespray/releases")
+    assert os.path.exists(config.kubequeconsume_exe_path), (
+        f"Could not find {config.kubequeconsume_exe_path}. This most commonly happens when one doesn't "
+        "install from the packaged releases at https://github.com/broadinstitute/sparklespray/releases"
+    )
     kubequeconsume_exe_path = config.kubequeconsume_exe_path
     kubequeconsume_exe_obj_path = upload_map.add(
         hash_db.get_sha256,

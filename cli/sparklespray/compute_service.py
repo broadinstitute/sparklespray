@@ -1,5 +1,6 @@
 from googleapiclient.discovery import build
-#from apiclient.discovery import build
+
+# from apiclient.discovery import build
 import googleapiclient.errors
 from googleapiclient.errors import HttpError
 
@@ -9,6 +10,7 @@ import hashlib
 import tempfile
 from dataclasses import dataclass
 import time
+
 
 @dataclass
 class VolumeDetails:
@@ -70,8 +72,9 @@ class ComputeService:
                 return None
             raise
         disk = response
-        return VolumeDetails(disk["type"].split("/")[-1], float(disk["sizeGb"]), disk["status"])
-
+        return VolumeDetails(
+            disk["type"].split("/")[-1], float(disk["sizeGb"]), disk["status"]
+        )
 
     def get_cluster_instances(self, zones, cluster_name):
         instances = []

@@ -87,10 +87,10 @@ class AddNodeStatus:
     def events(self):
         events = self.response.get("metadata", {}).get("events", [])
         return events
-    
+
     @property
     def last_event_description(self):
-        events = sorted(self.events, key=lambda x: x['timestamp'])
+        events = sorted(self.events, key=lambda x: x["timestamp"])
         if len(events) == 0:
             return None
 
@@ -99,9 +99,9 @@ class AddNodeStatus:
     @property
     def status(self):
         from .cluster_service import CONSUMER_ACTION_ID
-        
-        #print(self.response)
-        
+
+        # print(self.response)
+
         if self.response.get("done", False):
             if "error" in self.response:
                 return NODE_REQ_FAILED
@@ -114,7 +114,10 @@ class AddNodeStatus:
             else:
                 events = self.response.get("metadata", {}).get("events", [])
                 for event in events:
-                    if event.get("containerStarted", {}).get("actionId") == CONSUMER_ACTION_ID:
+                    if (
+                        event.get("containerStarted", {}).get("actionId")
+                        == CONSUMER_ACTION_ID
+                    ):
                         return NODE_REQ_RUNNING
                 return NODE_REQ_STAGING
             #
@@ -133,6 +136,7 @@ class AddNodeStatus:
 
     def is_done(self) -> bool:
         return self.status.get("done", False)
+
 
 class NodeService:
     def __init__(self, project: str, zones: List[str], credentials=None) -> None:
@@ -160,13 +164,15 @@ class NodeService:
         )
         response = request.execute()
         assert response == {}
-        #breakpoint()
-        #assert "operations" in response
+        # breakpoint()
+        # assert "operations" in response
         # print(response)
 
     def get_operation_details(self, operation_name: str) -> dict:
         _sanity_check_operation_name(operation_name)
-        request = self.service.projects().locations().operations().get(name=operation_name)
+        request = (
+            self.service.projects().locations().operations().get(name=operation_name)
+        )
         response = request.execute()
         return response
 
@@ -184,10 +190,14 @@ class NodeService:
         return AddNodeStatus(response)
 
     def cancel_add_node(self, operation_name: str):
-        request = self.service.projects().locations().operations().cancel(name=operation_name)
+        request = (
+            self.service.projects().locations().operations().cancel(name=operation_name)
+        )
         request.execute()
 
-    def add_node(self, pipeline_def: dict, preemptible: bool, debug_log_url: Optional[str]):
+    def add_node(
+        self, pipeline_def: dict, preemptible: bool, debug_log_url: Optional[str]
+    ):
         "Returns operation name"
         # make a deep copy
         pipeline_def = json.loads(json.dumps(pipeline_def))
@@ -208,7 +218,16 @@ class NodeService:
 
         # Run the pipeline
         log.info("%s", f"submitting pipeline run: {json.dumps(pipeline_def, indent=3)}")
-        operation = self.service.projects().locations().pipelines().run(parent=f"projects/{self.project}/locations/{self.region}",body=pipeline_def).execute()
+        operation = (
+            self.service.projects()
+            .locations()
+            .pipelines()
+            .run(
+                parent=f"projects/{self.project}/locations/{self.region}",
+                body=pipeline_def,
+            )
+            .execute()
+        )
 
         return operation["name"]
 
@@ -368,7 +387,10 @@ class NodeService:
 
         return pipeline_def
 
+
 def _sanity_check_operation_name(operation_name):
     m = re.match("projects/([^/]+)/operations/\\d+", operation_name)
     if m is not None:
-        raise Exception(f"Operation ID {operation_name} appears to be from an older version of sparkles (which used an older google API). This job cannot be manipulated with this version of sparkles")
+        raise Exception(
+            f"Operation ID {operation_name} appears to be from an older version of sparkles (which used an older google API). This job cannot be manipulated with this version of sparkles"
+        )
