@@ -1,16 +1,8 @@
 from ..task_store import (
     STATUS_COMPLETE,
     STATUS_FAILED,
-    STATUS_KILLED,
-    STATUS_PENDING,
-    STATUS_CLAIMED,
     _is_terminal_status,
-    Task,
 )
-from ..job_store import JOB_STATUS_KILLED
-from ..log import log
-from ..job_queue import JobQueue
-from ..cluster_service import Cluster
 
 
 def _get_jobids_from_pattern(jq, jobid_pattern):

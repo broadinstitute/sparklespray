@@ -1,15 +1,10 @@
 from ..task_store import (
-    STATUS_FAILED,
     STATUS_CLAIMED,
     STATUS_PENDING,
-    STATUS_KILLED,
-    STATUS_COMPLETE,
 )
 from ..job_queue import JobQueue, Job
 from ..cluster_service import Cluster
-from ..io_helper import IO
 from ..resize_cluster import GetPreempted
-from ..config import get_config_path, load_config, create_services, Config, BadConfig
 from ..log import log
 from .shared import _get_jobids_from_pattern
 

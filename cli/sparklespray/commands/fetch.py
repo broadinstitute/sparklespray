@@ -1,7 +1,7 @@
 import os
 import json
 from ..log import log
-from ..job_queue import JobQueue, Job
+from ..job_queue import JobQueue
 from ..io_helper import IO
 from ..log import log
 from .shared import _resolve_jobid

@@ -1,7 +1,5 @@
-import logging
 import sparklespray
 
-from ..log import log
 import pprint
 from ..util import random_string
 from ..job_queue import JobQueue

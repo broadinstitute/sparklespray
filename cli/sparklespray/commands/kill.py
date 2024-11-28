@@ -1,11 +1,8 @@
-from ..job_queue import JobQueue, Job
+from ..job_queue import JobQueue
 from ..log import log
 from ..task_store import (
-    STATUS_FAILED,
-    STATUS_CLAIMED,
     STATUS_PENDING,
     STATUS_KILLED,
-    STATUS_COMPLETE,
 )
 from .. import txtui
 from .shared import _get_jobids_from_pattern
@@ -32,7 +29,6 @@ def kill_cmd(jq: JobQueue, cluster, args):
             jq.reset_task(task.task_id, status=STATUS_KILLED)
 
 
-from typing import List
 
 
 def _reconcile_claimed_tasks(jq: JobQueue, cluster: Cluster):

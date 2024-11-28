@@ -1,7 +1,6 @@
 from ..print_failures import print_failures
 from .shared import _resolve_jobid
-from ..job_queue import JobQueue, Job
-from ..cluster_service import Cluster
+from ..job_queue import JobQueue
 from ..io_helper import IO
 
 
