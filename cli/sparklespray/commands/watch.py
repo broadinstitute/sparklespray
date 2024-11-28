@@ -3,19 +3,18 @@ import sys
 import logging
 import contextlib
 import json
-from .logclient import LogMonitor, CommunicationError
+from ..logclient import LogMonitor, CommunicationError
 from typing import Callable, Optional
-from .cluster_service import ClusterState
-from .txtui import print_log_content
+from ..cluster_service import ClusterState
+from ..txtui import print_log_content
 import datetime
 import subprocess
 import os
-from .task_store import STATUS_COMPLETE
+from ..task_store import STATUS_COMPLETE
 import collections
-from .config import Config
-
-# from google.gax.errors import RetryError
-
+from ..config import Config
+import tempfile
+import json
 
 class RetryError(Exception):
     pass
@@ -25,15 +24,16 @@ class TooManyNodeFailures(Exception):
     pass
 
 
-from .resize_cluster import ResizeCluster, GetPreempted
-from .io_helper import IO
-from .job_queue import JobQueue
-from .cluster_service import Cluster
-from . import txtui
-from .job_store import Job
+from ..resize_cluster import ResizeCluster, GetPreempted
+from ..io_helper import IO
+from ..job_queue import JobQueue
+from ..cluster_service import Cluster
+from .. import txtui
+from ..job_store import Job
 
-from .log import log
-from .txtui import user_print
+from ..log import log
+from ..txtui import user_print
+from ..startup_failure_tracker import StartupFailureTracker
 
 
 def add_watch_cmd(subparser):
@@ -62,7 +62,7 @@ def add_watch_cmd(subparser):
 
 
 def watch_cmd(jq: JobQueue, io: IO, cluster: Cluster, config: Config, args):
-    from .main import _resolve_jobid
+    from ..main import _resolve_jobid
 
     jobid = _resolve_jobid(jq, args.jobid)
     if args.verify:
@@ -128,7 +128,6 @@ def flush_stdout_from_complete_task(jq, io, task_id, offset):
     print_log_content(datetime.datetime.now(), rest_of_stdout)
 
 
-from .startup_failure_tracker import StartupFailureTracker
 
 
 def _watch(
@@ -254,140 +253,15 @@ def _watch(
         time.sleep(poll_delay)
 
 
-# TODO: Finish implementing. Use to start docker instance and watch progress
-import tempfile
-import json
-
-
-def start_docker_process(job_spec_str: str, consume_exe: str, work_dir: str):
-    job_spec = json.loads(job_spec_str)
-
-    print(json.dumps(job_spec, indent=2))
-    # the goal of this is to emulate how the google pipelines API will interpret this
-    # job.
-
-    # start by setting up the volumes
-    volume_by_name = {}
-    volumes = job_spec["pipeline"]["resources"]["virtualMachine"]["volumes"]
-    tmpdirs = []
-    for volume in volumes:
-        if "persistentDisk" in volume:
-            tmpdir = tempfile.TemporaryDirectory(dir=".", prefix="pdtmp-")
-            tmpdirs.append(tmpdir)
-            path = os.path.abspath(tmpdir.name)
-            print(f"Created temp folder {path} for volume")
-        elif "existingDisk" in volume:
-            path = volume["existingDisk"]["disk"]
-            path = os.path.abspath(path)
-            assert os.path.exists(path)
-        else:
-            raise Exception("Unknown type of volume")
-        print(f"Using {path} for the volume {volume['volume']}")
-        volume_by_name[volume["volume"]] = path
-
-    proc = None
-    actions = job_spec["pipeline"]["actions"]
-    for index, action in enumerate(actions):
-        docker_command = [
-            "docker",
-            "run",
-            "--platform",
-            "linux/amd64",
-            "-v",
-            os.path.expanduser("~/.config/gcloud") + ":/google-creds",
-            "-e",
-            "GOOGLE_APPLICATION_CREDENTIALS=/google-creds/application_default_credentials.json",
-        ]
-
-        for mount in action["mounts"]:
-            docker_command.extend(
-                ["-v", f"{volume_by_name[mount['disk']]}:{mount['path']}"]
-            )
-
-        portMappings = action.get("portMappings")
-        if portMappings:
-            for src_port, dst_port in portMappings.items():
-                docker_command.extend(["-p", f"{src_port}:{dst_port}"])
-
-        docker_command.append(action["imageUri"])
-        docker_command.extend(action["commands"])
-
-        with open("sparkles-docker.log", "a") as docker_log:
-            # docker_log = sys.stdout
-            docker_log.write(f"Executing: {docker_command}\n")
-            proc = subprocess.Popen(
-                docker_command, stderr=subprocess.STDOUT, stdout=docker_log
-            )
-
-            if index < len(actions):
-                # if this isn't the last job (the consume action) run now and wait for completion
-                retcode = proc.wait()
-                if retcode != 0:
-                    raise Exception(
-                        f"docker command {docker_command} failed: retcode = {retcode}"
-                    )
-                continue
-
-    assert proc is not None
-    return proc
-
-
-class DockerFailedException(Exception):
-    pass
-
-
-def local_watch(
-    job_id: str,
-    consume_exe: str,
-    work_dir: str,
-    cluster: Cluster,
-    initial_poll_delay=1.0,
-    max_poll_delay=30.0,
-):
-    loglive = True
-
-    job = cluster.job_store.get_job(job_id)
-    assert isinstance(job, Job)
-
-    state = cluster.get_state(job_id)
-    state.update()
-
-    assert isinstance(job.kube_job_spec, str)
-    proc = start_docker_process(job.kube_job_spec, consume_exe, work_dir)
-
-    def poll_cluster():
-        if proc.poll() is not None:
-            raise DockerFailedException("Docker process prematurely died")
-
-    try:
-        _watch(
-            job_id,
-            state,
-            initial_poll_delay,
-            max_poll_delay,
-            loglive,
-            cluster,
-            poll_cluster,
-        )
-
-        failures = state.get_failed_task_count()
-        successes = state.get_successful_task_count()
-        txtui.user_print(
-            f"Job finished. {successes} tasks completed successfully, {failures} tasks failed"
-        )
-
-        successful_execution = failures == 0
-
-    except KeyboardInterrupt:
-        print("Interrupted -- Aborting...")
-        successful_execution = False
-
-    if proc.poll() is not None:
-        log.warning(f"Sending terminate signal to {proc}")
-        proc.terminate()
-
-    return successful_execution
-
+class FlushStdout:
+    def __init__(self, jq, io):
+        self.flush_stdout_calls = 0
+        self.jq = jq
+        self.io = io 
+        
+    def __call__(self, task_id, offset):
+        flush_stdout_from_complete_task(self.jq, self.io, task_id, offset)
+        self.flush_stdout_calls += 1
 
 def watch(
     io: IO,
@@ -402,11 +276,8 @@ def watch(
 ):
     job = jq.get_job(job_id)
     assert job is not None
-    flush_stdout_calls = [0]
 
-    def flush_stdout(task_id, offset):
-        flush_stdout_from_complete_task(jq, io, task_id, offset)
-        flush_stdout_calls[0] += 1
+    flush_stdout = FlushStdout(jq, io)
 
     if target_nodes is None:
         target_nodes = job.target_node_count
@@ -431,36 +302,26 @@ def watch(
     state = cluster.get_state(job_id)
     state.update()
 
-    check_attempts = 0
-    while len(state.get_tasks()) == 0:
-        log.warning(
-            "Did not see any tasks for %s, sleeping and will check again...", job_id
-        )
-        time.sleep(5)
-        state.update()
-        check_attempts += 1
-        if check_attempts > 20:
-            raise Exception("Even after waiting a while no tasks ever appeared")
+    _wait_until_tasks_exist(state, job_id)
 
     if loglive is None:
         loglive = True
 
+    def poll_cluster():
+        with _exception_guard(lambda: "restarting preempted nodes threw exception"):
+            task_ids = get_preempted(state)
+            if len(task_ids) > 0:
+                log.warning(
+                    "Resetting tasks which appear to have been preempted: %s",
+                    ", ".join(task_ids),
+                )
+                for task_id in task_ids:
+                    jq.reset_task(task_id)
+
+        with _exception_guard(lambda: "rescaling cluster threw exception"):
+            resize_cluster(state, cluster.get_cluster_mod(job_id))
+
     try:
-
-        def poll_cluster():
-            with _exception_guard(lambda: "restarting preempted nodes threw exception"):
-                task_ids = get_preempted(state)
-                if len(task_ids) > 0:
-                    log.warning(
-                        "Resetting tasks which appear to have been preempted: %s",
-                        ", ".join(task_ids),
-                    )
-                    for task_id in task_ids:
-                        jq.reset_task(task_id)
-
-            with _exception_guard(lambda: "rescaling cluster threw exception"):
-                resize_cluster(state, cluster.get_cluster_mod(job_id))
-
         _watch(
             job_id,
             state,
@@ -471,31 +332,47 @@ def watch(
             poll_cluster,
             flush_stdout_from_complete_task=flush_stdout,
         )
-
-        failures = state.get_failed_task_count()
-        successes = state.get_successful_task_count()
-        txtui.user_print(
-            f"Job finished. {successes} tasks completed successfully, {failures} tasks failed"
-        )
-
-        if failures > 0:
-            log.warning(
-                "At least one task failed. Dumping stdout from one of the failures."
-            )
-            failed_tasks = state.get_failed_tasks()
-            flush_stdout(failed_tasks[0].task_id, 0)
-
-        elif (
-            flush_stdout_calls[0] == 0 and loglive
-        ):  # if we want the logs and yet we've never written out a single log, pick one at random and write it out
-            log.info("Dumping arbitrary successful task stdout")
-            successful_tasks = state.get_successful_tasks()
-            flush_stdout(successful_tasks[0].task_id, 0)
-
-        return failures == 0
     except KeyboardInterrupt:
         print("Interrupted -- Exiting, but your job will continue to run unaffected.")
         return 20
+
+    _print_final_summary(state, flush_stdout, loglive)
+
+
+def _wait_until_tasks_exist(state, job_id):
+    check_attempts = 0
+    while len(state.get_tasks()) == 0:
+        log.warning(
+            "Did not see any tasks for %s, sleeping and will check again...", job_id
+        )
+        time.sleep(5)
+        state.update()
+        check_attempts += 1
+        if check_attempts > 20:
+            raise Exception("Even after checking many times, no tasks ever appeared. Aborting")
+
+def _print_final_summary(state, flush_stdout : FlushStdout, loglive : bool):
+    failures = state.get_failed_task_count()
+    successes = state.get_successful_task_count()
+    txtui.user_print(
+        f"Job finished. {successes} tasks completed successfully, {failures} tasks failed"
+    )
+
+    if failures > 0:
+        log.warning(
+            "At least one task failed. Dumping stdout from one of the failures."
+        )
+        failed_tasks = state.get_failed_tasks()
+        flush_stdout(failed_tasks[0].task_id, 0)
+
+    elif (
+        flush_stdout.flush_stdout_calls == 0 and loglive
+    ):  # if we want the logs and yet we've never written out a single log, pick one at random and write it out
+        log.info("Dumping arbitrary successful task stdout")
+        successful_tasks = state.get_successful_tasks()
+        flush_stdout(successful_tasks[0].task_id, 0)
+
+    return failures == 0
 
 
 def check_completion(jq: JobQueue, io: IO, job_id: str):
@@ -513,7 +390,6 @@ def check_completion(jq: JobQueue, io: IO, job_id: str):
                 )
             completed_count += 1
             if io.exists(task.command_result_url):
-                # print("task {} completed successfully".format(task.task_id))
                 successful_count += 1
             else:
                 print(
@@ -521,5 +397,4 @@ def check_completion(jq: JobQueue, io: IO, job_id: str):
                         task.task_id, task.command_result_url
                     )
                 )
-                # look up owner -> operation id -> dump log
                 jq.reset_task(task.task_id)

@@ -1,15 +1,15 @@
 import logging
 import sparklespray
 
-from .log import log
+from ..log import log
 import pprint
-from .util import random_string
-from .job_queue import JobQueue
-from .io_helper import IO
-from .cluster_service import Cluster
-from .job_store import JobStore, Job, JOB_STATUS_KILLED
+from ..util import random_string
+from ..job_queue import JobQueue
+from ..io_helper import IO
+from ..cluster_service import Cluster
+from ..job_store import JobStore, Job, JOB_STATUS_KILLED
 import time
-from .config import Config
+from ..config import Config
 
 
 def _test_datastore_api(job_store: JobStore, job_id: str):
@@ -76,3 +76,9 @@ def validate_cmd(jq: JobQueue, io: IO, cluster: Cluster, config: Config):
     )
 
     print("Verification successful!")
+
+def add_validate_cmd(subparser):
+    parser = subparser.add_parser(
+        "validate", help="Run a series of tests to confirm the configuration is valid"
+    )
+    parser.set_defaults(func=validate_cmd)

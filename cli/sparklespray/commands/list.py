@@ -3,13 +3,13 @@ from typing import List, Optional, Dict
 import re
 import json
 import csv
-from .job_queue import JobQueue
+from ..job_queue import JobQueue
 import sys
-from .main import _resolve_jobid
-from .io_helper import IO
-from .cluster_service import Cluster
-from .node_req_store import AddNodeReqStore
+from ..io_helper import IO
+from ..cluster_service import Cluster
+from ..node_req_store import AddNodeReqStore
 import dataclasses
+from .shared import _resolve_jobid
 
 # def logs_cmd(jq: JobQueue, io: IO, args):
 #     jobid = _resolve_jobid(jq, args.jobid)

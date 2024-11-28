@@ -1,0 +1,29 @@
+from ..task_store import (
+    STATUS_FAILED,
+    STATUS_CLAIMED,
+    STATUS_PENDING,
+    STATUS_KILLED,
+    STATUS_COMPLETE,
+)
+from ..job_queue import JobQueue, Job
+from ..cluster_service import Cluster
+from ..io_helper import IO
+from ..resize_cluster import GetPreempted
+from ..config import get_config_path, load_config, create_services, Config, BadConfig
+from ..log import log
+from ..gcp_setup import setup_project, grant
+
+def add_grant_cmd(subparser):
+    parser = subparser.add_parser(
+        "grant",
+        help="Grants additional rights to service account that sparkles is using",
+    )
+    parser.add_argument("project")
+    parser.add_argument("role")
+    parser.set_defaults(func=grant_cmd)
+
+def grant_cmd(args, config: Config):
+    role = args.role
+    project_id = args.project
+    service_acct = config.credentials.service_account_email
+    grant(service_acct, project_id, role)

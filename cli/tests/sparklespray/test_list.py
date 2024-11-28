@@ -1,4 +1,4 @@
-from .list import process_records, write_csv
+from ...sparklespray.commands.list import process_records, write_csv
 import io
 
 

@@ -1,31 +1,28 @@
-import os
-import json
-import copy
 import argparse
+import copy
+import json
+import os
 import re
+from typing import Any, Dict, List, Optional, Tuple
 
-from typing import List, Optional, Tuple, Any, Dict
 from pydantic import BaseModel
 
 import sparklespray
-from .model import LOCAL_SSD
-from .csv_utils import read_csv_as_dicts
-from .util import random_string, url_join
-from .model import MachineSpec, PersistentDiskMount, SubmitConfig
-from .hasher import CachingHashFunction
-from .spec import make_spec_from_command, SrcDstPair
-from .main import clean
-from .util import get_timestamp
-from .job_queue import JobQueue
-from .cluster_service import Cluster
-from .io_helper import IO
-from .watch import watch, local_watch
-from . import txtui
-from .watch import DockerFailedException
-from .config import Config
-from .gcp_utils import create_pipeline_spec
 
+from . import txtui
+from .cluster_service import Cluster
+from .commands.clean import clean
+from .commands.watch import watch
+from .config import Config
+from .csv_utils import read_csv_as_dicts
+from .gcp_utils import create_pipeline_spec
+from .hasher import CachingHashFunction
+from .io_helper import IO
+from .job_queue import JobQueue
 from .log import log
+from .model import LOCAL_SSD, MachineSpec, PersistentDiskMount, SubmitConfig
+from .spec import SrcDstPair, make_spec_from_command
+from .util import get_timestamp, random_string, url_join
 
 MEMORY_REQUEST = "memory"
 CPU_REQUEST = "cpu"
@@ -641,26 +638,12 @@ def submit_cmd(jq: JobQueue, io: IO, cluster: Cluster, args: Any, config: Config
     finished = False
     successful_execution = True
 
-    if args.local:
-        try:
-            successful_execution = local_watch(
-                job_id, kubequeconsume_exe_path, work_dir, cluster
-            )
-            finished = True
-        except DockerFailedException:
-            log.error(
-                "Docker process prematurely died -- reseting job %s to release any claimed tasks",
-                job_id,
-            )
-            jq.reset(job_id, None)
-            finished = False
-    else:
-        if not (args.dryrun or args.skip_kube_submit) and args.wait_for_completion:
-            log.info("Waiting for job to terminate")
-            successful_execution = watch(
-                io, jq, job_id, cluster, target_nodes=target_node_count, loglive=True
-            )
-            finished = True
+    if not (args.dryrun or args.skip_kube_submit) and args.wait_for_completion:
+        log.info("Waiting for job to terminate")
+        successful_execution = watch(
+            io, jq, job_id, cluster, target_nodes=target_node_count, loglive=True
+        )
+        finished = True
 
     if finished:
         txtui.user_print(

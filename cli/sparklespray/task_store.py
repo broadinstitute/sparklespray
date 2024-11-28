@@ -22,6 +22,18 @@ STATUS_KILLED = "killed"
 
 INCOMPLETE_TASK_STATES = set([STATUS_CLAIMED, STATUS_PENDING])
 
+def _is_terminal_status(status):
+    return status in [STATUS_FAILED, STATUS_COMPLETE]
+
+
+def _is_complete(status_counts):
+    all_terminal = True
+    for status in status_counts.keys():
+        if not _is_terminal_status(status):
+            all_terminal = True
+    return all_terminal
+
+
 
 @dataclass
 class TaskHistory:
