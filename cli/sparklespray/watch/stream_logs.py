@@ -10,7 +10,7 @@ from .runner_types import NextPoll, ClusterStateQuery
 from .shared import _exception_guard, _only_running_tasks
 from ..cluster_service import Cluster
 from .. import txtui 
-from .shared import _only_failed_tasks, _only_running_tasks, _only_completed_tasks
+from .shared import _only_failed_tasks, _only_running_tasks, _only_successful_tasks
 
 class StreamLogs:
     # Stream output from one of the running processes.
@@ -111,7 +111,7 @@ class StreamLogs:
     def _print_final_summary(self, state:ClusterStateQuery):
         tasks = state.get_tasks()
         failed_tasks = _only_failed_tasks(tasks)
-        successful_tasks = _only_completed_tasks(tasks)
+        successful_tasks = _only_successful_tasks(tasks)
 
         assert len(tasks) == len(failed_tasks) + len(successful_tasks), "Everything should be either failed or completed by this point"
 
@@ -123,7 +123,6 @@ class StreamLogs:
             log.warning(
                 "At least one task failed. Dumping stdout from one of the failures."
             )
-            failed_tasks = state.get_failed_tasks()
             self.flush_stdout_from_complete_task(failed_tasks[0].task_id, 0)
         
         # if we want the logs and yet we've never written out a single log, pick one at random and write it out

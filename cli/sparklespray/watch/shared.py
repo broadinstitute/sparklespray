@@ -39,7 +39,10 @@ def _only_running_tasks(tasks: List[Task]):
     return [task for task in tasks if task.status == STATUS_CLAIMED]
 
 def _only_failed_tasks(tasks: List[Task]):
-    return [task for task in tasks if task.status == STATUS_FAILED]
+    return [task for task in tasks if (task.status == STATUS_COMPLETE and task.exit_code != 0)]
+
+def _only_successful_tasks(tasks: List[Task]):
+    return [task for task in tasks if (task.status == STATUS_COMPLETE and task.exit_code == 0)]
 
 def _only_completed_tasks(tasks: List[Task]):
     return [task for task in tasks if task.status == STATUS_COMPLETE]
