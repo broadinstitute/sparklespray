@@ -8,6 +8,11 @@ import datetime
 def user_print(msg):
     print(msg)
 
+def print_error_lines(lines):
+    from termcolor import colored, cprint
+
+    for line in lines:
+        print(colored(line, "red"))
 
 def print_log_content(timestamp, payload, from_sparkles=False):
     if timestamp is None:
