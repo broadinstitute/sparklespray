@@ -50,7 +50,6 @@ def main(argv=None):
     from .commands.validate import add_validate_cmd
     from .commands.setup import add_setup_cmd, setup_cmd
     from .commands.reset import add_reset_cmd
-    from .commands.grant import add_grant_cmd
     from .commands.logs import add_logs_cmd
     from .commands.show import add_show_cmd
     from .commands.status import add_status_cmd
@@ -84,7 +83,6 @@ def main(argv=None):
     add_validate_cmd(subparser)
     add_reset_cmd(subparser)
     add_setup_cmd(subparser)
-    add_grant_cmd(subparser)
     add_logs_cmd(subparser)
     add_show_cmd(subparser)
     add_status_cmd(subparser)
