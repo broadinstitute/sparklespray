@@ -1,10 +1,7 @@
 import re
 from .task_store import (
-    INCOMPLETE_TASK_STATES,
-    Task,
     STATUS_FAILED,
     STATUS_COMPLETE,
-    STATUS_CLAIMED,
 )
 from .node_req_store import (
     AddNodeReqStore,
@@ -16,26 +13,19 @@ from .node_req_store import (
     REQUESTED_NODE_STATES,
     NODE_REQ_FAILED,
     REQUESTED_NODE_STATES,
-    NODE_REQ_STAGING,
-    NODE_REQ_RUNNING,
     FINAL_NODE_STATES,
 )
 from .compute_service import ComputeService
 from .node_service import NodeService, MachineSpec
 from .job_store import JobStore
 from .task_store import TaskStore
-from .job_queue import JobQueue
-from typing import List, Dict, DefaultDict, Optional, Set
-from collections import defaultdict
+from typing import List, Set
 from google.cloud import datastore
 import time
 import sys
-import logging
-import os
 from .util import get_timestamp
 from .datastore_batch import Batch
-from abc import abstractmethod
-from .model import PersistentDiskMount, DiskMount, ExistingDiskMount, DiskMountT
+from .model import ExistingDiskMount, DiskMountT
 
 from .log import log
 from googleapiclient.errors import HttpError
@@ -51,39 +41,6 @@ def _unique_id():
 
     return str(uuid.uuid4())
 
-
-class ClusterStatus:
-    def __init__(self, instances: List[dict]) -> None:
-        instances_per_key: DefaultDict[str, int] = defaultdict(lambda: 0)
-
-        running_count = 0
-        for instance in instances:
-            status = instance["status"]
-            key = status
-            instances_per_key[key] += 1
-            if status != "STOPPING":
-                running_count += 1
-
-        table = []
-        for key, count in instances_per_key.items():
-            table.append([key] + [count])
-        table.sort()
-
-        self.table = table
-        self.running_count = running_count
-
-    def __eq__(self, other):
-        return self.table == other.table
-
-    def as_string(self):
-        if len(self.table) == 0:
-            return "(no nodes)"
-        return ", ".join(
-            ["{}: {}".format(status, count) for status, count in self.table]
-        )
-
-    def is_running(self):
-        return self.running_count > 0
 
 
 class Cluster:
@@ -109,21 +66,6 @@ class Cluster:
         self.task_store = task_store
         self.debug_log_prefix = debug_log_prefix
 
-    def get_raw_operation_details(self, operation_id):
-        return self.nodes.get_operation_details(operation_id)
-
-    def get_state(self, job_id):
-        job = self.job_store.get_job(job_id)
-        assert job is not None
-        return ClusterState(
-            job_id, job.cluster, self.task_store, self.node_req_store, self
-        )
-
-    def add_nodes(
-        self, job_id: str, preemptible: bool, debug_log_url_prefix: str, count: int
-    ):
-        for i in range(count):
-            self.add_node(job_id, preemptible, "{}/{}".format(debug_log_url_prefix, i))
 
     def add_node(self, job_id: str, preemptible: bool, debug_log_url: str):
         job = self._get_job(job_id)
@@ -145,10 +87,6 @@ class Cluster:
             f"Requested node (preemptible: {preemptible} operation_id: {operation_id} debug_log_url: {debug_log_url})"
         )
         return operation_id
-
-    def get_cluster_status(self, cluster_name: str) -> ClusterStatus:
-        instances = self.compute.get_cluster_instances(self.zones, cluster_name)
-        return ClusterStatus(instances)
 
     def has_active_node_requests(self, cluster_id):
         node_reqs = self.node_req_store.get_node_reqs(cluster_id)
@@ -229,13 +167,60 @@ class Cluster:
             p(".")
         p("\n")
 
+    def update_node_reqs(self, cluster_id):
+        from . import node_req_store
+        node_reqs = self.node_req_store.get_node_reqs(cluster_id=cluster_id)
+        
+        for node_req in node_reqs:
+            if not node_req_store.is_terminal_state(node_req.status):
+                add_node_status = self.nodes.get_add_node_status(node_req.operation_id)
+                real_status = add_node_status.status
+                instance_name = add_node_status.instance_name
+                if real_status != node_req.status or instance_name != node_req.instance_name:
+                    self.node_req_store.update_node_req_status(node_req.operation_id, real_status, instance_name)
+
+    # def update(self):
+    #     # update tasks
+    #     self.tasks = self.task_store.get_tasks(self.job_id)
+
+    #     self.node_reqs = self.node_req_store.get_node_reqs(self.cluster_id)
+
+    #     # poll all the operations which are not marked as dead
+    #     log.debug("fetched %d node_reqs", len(self.node_reqs))
+
+    #     # get all the status of each operation
+    #     for node_req in self.node_reqs:
+    #         if node_req.status not in [NODE_REQ_COMPLETE, NODE_REQ_FAILED]:
+    #             op = self.cluster.nodes.get_add_node_status(node_req.operation_id)
+    #             if op is None:
+    #                 # if the operation is missing, google probably deleted it because it was old
+    #                 new_status = NODE_REQ_COMPLETE
+    #                 new_instance_name = None
+    #             else:
+    #                 new_status = op.status
+    #                 new_instance_name = op.instance_name
+    #                 if new_status == NODE_REQ_FAILED:
+    #                     log.warning(
+    #                         "Node request (%s) failed: %s",
+    #                         node_req.operation_id,
+    #                         op.error_message,
+    #                     )
+    #                 # print("fetched {} and status was {}".format(node_req.operation_id, new_status))
+
+    #             if new_status != node_req.status:
+    #                 self.node_req_store.update_node_req_status(
+    #                     node_req.operation_id, new_status, new_instance_name
+    #                 )
+    #                 # reflect the change in memory as well
+    #                 node_req.status = new_status
+
+
     def cleanup_node_reqs(self, job_id):
         # before updating node requests, make sure the state has been updated to
         # reflect which ones are actually still running and which are done.
         # node_req_store.cleanup_cluster() assumes the states are up to date.
-
-        state = self.get_state(job_id)
-        state.update()
+        job = self._get_job(job_id)
+        self.update_node_reqs(job.cluster)
 
         batch = Batch(self.client)
 
@@ -291,7 +276,6 @@ class Cluster:
         monitor_port: int,
     ):
         from sparklespray.gcp_utils import (
-            create_pipeline_spec,
             create_validation_pipeline_spec,
             get_region,
         )
@@ -348,212 +332,9 @@ class Cluster:
             successful_completion
         ), f"Test failed. For more information run:\n  sparkles dump-operation {operation_id}\n\n"
 
-    def is_owner_running(self, owner: str) -> bool:
-        if owner == "localhost":
-            return False
-
-        m = re.match("projects/([^/]+)/zones/([^/]+)/([^/]+)", owner)
-        assert (
-            m is not None
-        ), "Expected a instance name with zone but got owner={}".format(owner)
-        project_id, zone, instance_name = m.groups()
-        # assert project_id == self.project, "project_id ({}) != self.project ({})".format(project_id, self.project)
-        return self.compute.get_instance_status(zone, instance_name) == "RUNNING"
-
     def get_cluster_mod(self, job_id):
-        return ClusterMod(job_id, self, self.debug_log_prefix)
-
-
-class ClusterState:
-    def __init__(
-        self,
-        job_id: str,
-        cluster_id: str,
-        task_store: TaskStore,
-        node_req_store: AddNodeReqStore,
-        cluster: Cluster,
-    ) -> None:
-        self.job_id = job_id
-        self.cluster_id = cluster_id
-        self.cluster = cluster
-        self.datastore = datastore
-        self.tasks = []  # type: List[Task]
-        self.node_reqs = []  # type: List[NodeReq]
-        self.node_req_store = node_req_store
-        self.task_store = task_store
-        self.failed_node_req_count = 0
-        self.unknown_instance_names: Set[str] = set()
-        # self.add_node_statuses = [] # type: List[AddNodeStatus]
-
-    def update(self):
-        # update tasks
-        self.tasks = self.task_store.get_tasks(self.job_id)
-
-        self.node_reqs = self.node_req_store.get_node_reqs(self.cluster_id)
-
-        # poll all the operations which are not marked as dead
-        log.debug("fetched %d node_reqs", len(self.node_reqs))
-
-        # get all the status of each operation
-        for node_req in self.node_reqs:
-            if node_req.status not in [NODE_REQ_COMPLETE, NODE_REQ_FAILED]:
-                op = self.cluster.nodes.get_add_node_status(node_req.operation_id)
-                if op is None:
-                    # if the operation is missing, google probably deleted it because it was old
-                    new_status = NODE_REQ_COMPLETE
-                    new_instance_name = None
-                else:
-                    new_status = op.status
-                    new_instance_name = op.instance_name
-                    if new_status == NODE_REQ_FAILED:
-                        log.warning(
-                            "Node request (%s) failed: %s",
-                            node_req.operation_id,
-                            op.error_message,
-                        )
-                        self.failed_node_req_count += 1
-                    # print("fetched {} and status was {}".format(node_req.operation_id, new_status))
-
-                if new_status != node_req.status:
-                    self.node_req_store.update_node_req_status(
-                        node_req.operation_id, new_status, new_instance_name
-                    )
-                    # reflect the change in memory as well
-                    node_req.status = new_status
-
-    def get_completed_node_names(self):
-        return [
-            x.instance_name for x in self.node_reqs if x.status in FINAL_NODE_STATES
-        ]
-
-    def get_tasks(self):
-        return self.tasks
-
-    def get_running_tasks(self):
-        return [x for x in self.tasks if x.status == STATUS_CLAIMED]
-
-    def is_task_running(self, task_id):
-        by_id = {x.task_id: x for x in self.tasks}
-        return by_id[task_id].status == STATUS_CLAIMED
-
-    def get_summary(self, completion_rate: Optional[float] = None) -> str:
-        # compute status of tasks
-        by_status: Dict[str, int] = defaultdict(lambda: 0)
-        for t in self.tasks:
-            if t.status == STATUS_COMPLETE:
-                label = "{}(code={})".format(t.status, t.exit_code)
-            elif t.status == STATUS_FAILED:
-                label = "{}({})".format(t.status, t.failure_reason)
-            else:
-                label = t.status
-            by_status[label] += 1
-        statuses = sorted(by_status.keys())
-        task_status = ", ".join(
-            ["{} ({})".format(status, by_status[status]) for status in statuses]
-        )
-
-        # compute status of workers
-        by_status = defaultdict(lambda: 0)
-        to_desc = {
-            NODE_REQ_CLASS_NORMAL: "non-preempt",
-            NODE_REQ_CLASS_PREEMPTIVE: "preemptible",
-        }
-        for r in self.node_reqs:
-            label = "{}(type={})".format(r.status, to_desc[r.node_class])
-            by_status[label] += 1
-        statuses = sorted(by_status.keys())
-        node_status = ", ".join(
-            [f"{status} ({by_status[status]})" for status in statuses]
-        )
-
-        msg = f"tasks: {task_status}, worker nodes: {node_status}"
-        if completion_rate:
-            incomplete_task_count = self.get_incomplete_task_count()
-            remaining_estimate_in_seconds = (
-                float(incomplete_task_count) / completion_rate
-            )
-            msg += f", eta: {(remaining_estimate_in_seconds/60):.1f} minutes to complete remaining {incomplete_task_count} tasks"
-        return msg
-
-    def get_incomplete_task_count(self) -> int:
-        return len([t for t in self.tasks if t.status in INCOMPLETE_TASK_STATES])
-
-    def get_requested_node_count(self) -> int:
-        return len([o for o in self.node_reqs if o.status in REQUESTED_NODE_STATES])
-
-    def get_preempt_attempt_count(self) -> int:
-        return len(
-            [o for o in self.node_reqs if o.node_class == NODE_REQ_CLASS_PREEMPTIVE]
-        )
-
-    def get_running_tasks_with_invalid_owner(self) -> List[str]:
-        node_req_by_instance_name: Dict[str, NodeReq] = {}
-        for node_req in self.node_reqs:
-            if node_req.instance_name is not None:
-                assert node_req.instance_name not in node_req_by_instance_name
-                node_req_by_instance_name[node_req.instance_name] = node_req
-
-        task_ids_needing_reset = []
-        claimed_tasks = [task for task in self.tasks if task.status == STATUS_CLAIMED]
-
-        for task in claimed_tasks:
-            instance_name = task.get_instance_name()
-            assert instance_name is not None
-
-            if instance_name not in node_req_by_instance_name:
-                if instance_name not in self.unknown_instance_names:
-                    log.warning(
-                        "instance {} was not listed among {} nodes".format(
-                            instance_name, len(node_req_by_instance_name)
-                        )
-                    )
-                    # remember we don't know what this instance is and we should ignore it
-                    self.unknown_instance_names.add(instance_name)
-
-            else:
-                node_req = node_req_by_instance_name[instance_name]
-                if node_req.status in [NODE_REQ_COMPLETE, NODE_REQ_FAILED]:
-                    log.warning(
-                        "task {} status = {}, but node_req was {}".format(
-                            task.task_id, task.status, node_req.status
-                        )
-                    )
-                    if node_req.node_class != NODE_REQ_CLASS_PREEMPTIVE:
-                        log.error(
-                            "instance %s terminated but task %s was reported to still be using instance and the instance was not preemptiable",
-                            instance_name,
-                            task.task_id,
-                        )
-                    task_ids_needing_reset.append(task.task_id)
-                else:
-                    assert node_req.status in [
-                        NODE_REQ_SUBMITTED,
-                        NODE_REQ_STAGING,
-                        NODE_REQ_RUNNING,
-                    ]
-
-        return task_ids_needing_reset
-
-    def get_successful_task_count(self):
-        return len(self.get_successful_tasks())
-
-    def get_failed_task_count(self):
-        return len(self.get_failed_tasks())
-
-    def get_failed_tasks(self):
-        return [
-            t
-            for t in self.tasks
-            if t.status == STATUS_FAILED
-            or (t.status == STATUS_COMPLETE and t.exit_code != "0")
-        ]
-
-    def get_successful_tasks(self):
-        return [
-            t
-            for t in self.tasks
-            if (t.status == STATUS_COMPLETE and t.exit_code == "0")
-        ]
+        job = self._get_job(job_id)
+        return ClusterMod(job_id, job.cluster, self, self.debug_log_prefix)
 
 
 
@@ -579,8 +360,9 @@ class CachingCaller:
 
 
 class ClusterMod:
-    def __init__(self, job_id: str, cluster: Cluster, debug_log_prefix: str) -> None:
+    def __init__(self, job_id: str, cluster_id: str, cluster: Cluster, debug_log_prefix: str) -> None:
         self.job_id = job_id
+        self.cluster_id = cluster_id
         self.cluster = cluster
         self.debug_log_prefix = debug_log_prefix
         self.node_counter = 0  # just used to make sure logs are unique
@@ -592,10 +374,8 @@ class ClusterMod:
         )
         self.cluster.add_node(self.job_id, preemptable, debug_log_path)
 
-    def cancel_nodes(self, state: ClusterState, count: int) -> None:
-        pending_node_reqs = [
-            x for x in state.node_reqs if x.status == NODE_REQ_SUBMITTED
-        ]
+    def cancel_nodes(self, count: int) -> None:
+        pending_node_reqs = self.cluster.node_req_store.get_node_reqs(self.cluster_id, NODE_REQ_SUBMITTED)
         pending_node_reqs.sort(key=lambda x: x.sequence)
         pending_node_reqs = list(reversed(pending_node_reqs))
         if count < len(pending_node_reqs):

@@ -57,8 +57,7 @@ def main(argv=None):
     from .commands.kill import add_kill_cmd
     from .commands.fetch import add_fetch_cmd
     from .commands.version import add_version_cmd
-
-    from .commands.list import add_list_cmd, add_list_nodes_cmd
+    from .commands.list import add_list_cmd
 
     parse = argparse.ArgumentParser()
 
@@ -79,7 +78,6 @@ def main(argv=None):
     subparser = parse.add_subparsers()
     add_submit_cmd(subparser)
     add_list_cmd(subparser)
-    add_list_nodes_cmd(subparser)
     add_validate_cmd(subparser)
     add_reset_cmd(subparser)
     add_setup_cmd(subparser)

@@ -1,7 +1,7 @@
 from ..task_store import (
     STATUS_COMPLETE,
     STATUS_FAILED,
-    _is_terminal_status,
+    is_terminal_status,
 )
 
 
@@ -38,7 +38,7 @@ def _summarize_task_statuses(tasks):
             label = task.status
         counts[label] += 1
 
-        if not _is_terminal_status(task.status):
+        if not is_terminal_status(task.status):
             complete = False
 
     labels = list(counts.keys())

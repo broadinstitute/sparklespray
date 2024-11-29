@@ -1,6 +1,6 @@
 import logging
 import logging.handlers
-from termcolor import colored, cprint
+from termcolor import colored
 from .log import log
 import datetime
 
@@ -9,11 +9,11 @@ def user_print(msg):
     print(msg)
 
 
-def print_error_lines(lines):
-    from termcolor import colored, cprint
+# def print_error_lines(lines):
+#     from termcolor import colored
 
-    for line in lines:
-        print(colored(line, "red"))
+#     for line in lines:
+#         print(colored(line, "red"))
 
 
 def print_log_content(timestamp, payload, from_sparkles=False):

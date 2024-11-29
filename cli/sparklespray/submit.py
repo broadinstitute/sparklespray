@@ -24,10 +24,6 @@ from .model import LOCAL_SSD, MachineSpec, PersistentDiskMount, SubmitConfig
 from .spec import SrcDstPair, make_spec_from_command
 from .util import get_timestamp, random_string, url_join
 
-MEMORY_REQUEST = "memory"
-CPU_REQUEST = "cpu"
-
-
 class ExistingJobException(Exception):
     pass
 
@@ -348,27 +344,6 @@ def expand_files_to_upload(io, filenames):
     return pairs
 
 
-def _parse_resources(resources_str):
-    # not robust parsing at all
-    spec = {}
-    if resources_str is None:
-        return spec
-    pairs = resources_str.split(",")
-    for pair in pairs:
-        m = re.match("([^=]+)=(.*)", pair)
-        if m is None:
-            raise Exception("resource constraint malformed: {}".format(pair))
-        name, value = m.groups()
-        assert name in [
-            MEMORY_REQUEST,
-            CPU_REQUEST,
-        ], "Unknown resource requested: {}. Must be one of {} {}".format(
-            name, MEMORY_REQUEST, CPU_REQUEST
-        )
-        spec[name] = value
-    return spec
-
-
 def add_submit_cmd(subparser):
     parser = subparser.add_parser(
         "sub", help="Submit a command (or batch of commands) for execution"
@@ -488,7 +463,6 @@ def submit_cmd(jq: JobQueue, io: IO, cluster: Cluster, args: Any, config: Config
 
     boot_volume_in_gb = config.boot_volume_in_gb
     default_url_prefix = config.default_url_prefix
-    work_dir = config.local_work_dir
 
     job_id = args.name
     if job_id is None:

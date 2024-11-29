@@ -1,6 +1,4 @@
-from OpenSSL import crypto, SSL
-from socket import gethostname
-from time import gmtime, mktime
+from OpenSSL import crypto
 from typing import Tuple
 
 

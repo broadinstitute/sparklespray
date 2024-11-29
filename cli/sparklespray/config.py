@@ -1,6 +1,4 @@
-import logging
 import os
-import sys
 
 from .model import (
     PersistentDiskMount,
@@ -23,7 +21,7 @@ from .txtui import log
 from typing import List, Optional, Tuple, Dict
 import dataclasses
 from google.auth.credentials import Credentials
-from typing import Callable, Any
+from typing import Callable
 
 
 class BadConfig(Exception):
@@ -145,7 +143,7 @@ def _parse_gcloud_config(gcloud_config_file: str, verbose: bool) -> GCloudConfig
     return config
 
 
-from typing import TypeVar, Generic, Union
+from typing import TypeVar, Union
 
 T = TypeVar("T")
 

@@ -1,16 +1,8 @@
 from google.cloud import datastore
-import google.cloud.exceptions
-import logging
 
-from google.cloud.storage.client import Client as GSClient
-import os
-import re
-import hashlib
 import time
-import json
 from typing import List, Optional
-import logging
-from .datastore_batch import ImmediateBatch, Batch
+from .datastore_batch import ImmediateBatch
 from dataclasses import dataclass
 from .log import log
 
@@ -20,20 +12,14 @@ STATUS_FAILED = "failed"
 STATUS_COMPLETE = "complete"
 STATUS_KILLED = "killed"
 
+
 INCOMPLETE_TASK_STATES = set([STATUS_CLAIMED, STATUS_PENDING])
 
 
-def _is_terminal_status(status):
-    return status in [STATUS_FAILED, STATUS_COMPLETE]
+def is_terminal_status(status):
+    return status not in INCOMPLETE_TASK_STATES
 
-
-def _is_complete(status_counts):
-    all_terminal = True
-    for status in status_counts.keys():
-        if not _is_terminal_status(status):
-            all_terminal = True
-    return all_terminal
-
+# INCOMPLETE_TASK_STATES = set([STATUS_CLAIMED, STATUS_PENDING])
 
 @dataclass
 class TaskHistory:
@@ -67,14 +53,6 @@ class Task(object):
         if owner is None:
             return None
         return owner.split("/")[-1]
-
-
-@dataclass
-class TaskStatus(object):
-    node_status: str
-    node: str
-    task: str
-    operation_id: str
 
 
 def task_to_entity(client, o):

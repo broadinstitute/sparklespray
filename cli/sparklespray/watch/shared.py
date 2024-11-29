@@ -4,7 +4,7 @@ from ..cluster_service import NodeReq
 from ..node_req_store import NODE_REQ_CLASS_PREEMPTIVE
 
 from ..log import log
-from ..task_store import _is_terminal_status, Task
+from ..task_store import is_terminal_status, Task
 from ..node_req_store import REQUESTED_NODE_STATES, NodeReq
 from typing import List
 
@@ -70,7 +70,7 @@ def _only_completed_tasks(tasks: List[Task]):
 
 
 def _count_incomplete_tasks(tasks: List[Task]):
-    return sum([1 for task in tasks if not _is_terminal_status(task.status)])
+    return sum([1 for task in tasks if not is_terminal_status(task.status)])
 
 
 def _count_requested_nodes(node_reqs: List[NodeReq]):

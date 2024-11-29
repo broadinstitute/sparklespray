@@ -227,82 +227,74 @@ def write(records, mode, filename):
         write_json(records, fd)
 
 
-# def filter(records: List[dict] )
-
-# select source (easy fields, all fields or params only) -> list of dicts
-# apply filters
-# project columns
-# write to format
-
-
-def add_list_nodes_cmd(subparser):
-    parser = subparser.add_parser("list-nodes", help="List tasks within a job")
-    parser.set_defaults(func=list_nodes_cmd)
-    parser.add_argument("jobid")
-    parser.add_argument(
-        "--filter",
-        help="only include records matching this filter",
-        action="append",
-        dest="filters",
-    )
-    parser.add_argument("--fields", help="Only include these fields")
-    parser.add_argument(
-        "--format", default="csv", help="Output format, either 'json' or 'csv'"
-    )
-    parser.add_argument(
-        "--output",
-        "-o",
-        help="Name of file to write to. If not specified, writes to stdout",
-    )
+# def add_list_nodes_cmd(subparser):
+#     parser = subparser.add_parser("list-nodes", help="List tasks within a job")
+#     parser.set_defaults(func=list_nodes_cmd)
+#     parser.add_argument("jobid")
+#     parser.add_argument(
+#         "--filter",
+#         help="only include records matching this filter",
+#         action="append",
+#         dest="filters",
+#     )
+#     parser.add_argument("--fields", help="Only include these fields")
+#     parser.add_argument(
+#         "--format", default="csv", help="Output format, either 'json' or 'csv'"
+#     )
+#     parser.add_argument(
+#         "--output",
+#         "-o",
+#         help="Name of file to write to. If not specified, writes to stdout",
+#     )
 
 
-def list_nodes_cmd(jq: JobQueue, cluster: Cluster, io, args):
-    job_id = _resolve_jobid(jq, args.jobid)
-    fields = None
-    if args.fields is not None:
-        fields = args.fields.split(",")
+# def list_nodes_cmd(jq: JobQueue, cluster: Cluster, io, args):
+#     job_id = _resolve_jobid(jq, args.jobid)
+#     fields = None
+#     if args.fields is not None:
+#         fields = args.fields.split(",")
 
-    filters: List[str] = []
-    if args.filters is not None:
-        filters = args.filters
-        assert isinstance(filters, list)
+#     filters: List[str] = []
+#     if args.filters is not None:
+#         filters = args.filters
+#         assert isinstance(filters, list)
 
-    job = jq.get_job(job_id)
-    assert job is not None
-    cluster_id = job.cluster
+#     job = jq.get_job(job_id)
+#     assert job is not None
+#     cluster_id = job.cluster
 
-    list_nodes(
-        cluster_id,
-        cluster.node_req_store,
-        io,
-        job_id,
-        fields,
-        filters,
-        args.format,
-        args.output,
-    )
+#     list_nodes(
+#         cluster_id,
+#         cluster.node_req_store,
+#         io,
+#         job_id,
+#         fields,
+#         filters,
+#         args.format,
+#         args.output,
+#     )
 
 
-def list_nodes(
-    cluster_id: str,
-    node_req_store,
-    io: IO,
-    job_id: str,
-    fields: Optional[List[str]],
-    filter_expressions: List[str],
-    output_mode: str,
-    output_filename: str,
-):
-    def to_record(note_req: AddNodeReqStore):
-        row = dataclasses.asdict(node_req)
-        return row
+# def list_nodes(
+#     cluster_id: str,
+#     node_req_store,
+#     io: IO,
+#     job_id: str,
+#     fields: Optional[List[str]],
+#     filter_expressions: List[str],
+#     output_mode: str,
+#     output_filename: str,
+# ):
+#     def to_record(node_req: AddNodeReqStore):
+#         row = dataclasses.asdict(node_req)
+#         return row
 
-    node_reqs = node_req_store.get_node_reqs(cluster_id)
+#     node_reqs = node_req_store.get_node_reqs(cluster_id)
 
-    records = []
-    for i, node_req in enumerate(node_reqs):
-        records.append(to_record(node_reqs))
+#     records = []
+#     for _, node_req in enumerate(node_reqs):
+#         records.append(to_record(node_req))
 
-    filtered = process_records(records, fields, filter_expressions)
+#     filtered = process_records(records, fields, filter_expressions)
 
-    write(filtered, output_mode, output_filename)
+#     write(filtered, output_mode, output_filename)

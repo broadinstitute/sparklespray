@@ -9,9 +9,9 @@ ALLOWED_DISK_TYPES = {
     "hyperdisk-balanced",
 }
 
-DEFAULT_SSD_SIZE = (
-    300  # slightly smaller than the 375 GB limit to avoid it allocating two volumes
-)
+# DEFAULT_SSD_SIZE = (
+#     300  # slightly smaller than the 375 GB limit to avoid it allocating two volumes
+# )
 
 
 class DiskMount(BaseModel):

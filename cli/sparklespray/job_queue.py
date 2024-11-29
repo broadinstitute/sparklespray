@@ -1,38 +1,23 @@
 # Authorize server-to-server interactions from Google Compute Engine.
 from google.cloud import datastore
-import google.cloud.exceptions
-import logging
 
-from google.cloud.storage.client import Client as GSClient
-import os
-import re
-import hashlib
 import json
 from .task_store import (
     STATUS_CLAIMED,
     STATUS_FAILED,
     STATUS_COMPLETE,
-    STATUS_KILLED,
     STATUS_PENDING,
-    INCOMPLETE_TASK_STATES,
 )
 from .job_store import JobStore, Job, JOB_STATUS_SUBMITTED, JOB_STATUS_KILLED
 from .task_store import TaskStore, TaskHistory, Task
 
 from fnmatch import fnmatch
-from .datastore_batch import ImmediateBatch, Batch
+from .datastore_batch import Batch
 
-from contextlib import contextmanager
 import collections
 
 import time
-from collections import namedtuple
-import sys
 from typing import Dict, List
-
-CLAIM_TIMEOUT = 5
-
-from .log import log
 
 
 def get_credentials(account, cred_file="~/.config/gcloud/credentials"):
@@ -248,5 +233,3 @@ class JobQueue:
 #             self._update_task_status(task.task_id, "lost")
 
 
-def _gcloud_cmd(args):
-    return ["gcloud"] + list(args)

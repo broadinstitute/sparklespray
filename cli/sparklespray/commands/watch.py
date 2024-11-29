@@ -105,16 +105,14 @@ def watch(
 
 
 def _wait_until_tasks_exist(cluster: Cluster, job_id: str):
-    state = cluster.get_state(job_id)
-    state.update()
+    tasks = cluster.task_store.get_tasks(job_id=job_id)
 
     check_attempts = 0
-    while len(state.get_tasks()) == 0:
+    while len(tasks) == 0:
         log.warning(
             "Did not see any tasks for %s, sleeping and will check again...", job_id
         )
         time.sleep(5)
-        state.update()
         check_attempts += 1
         if check_attempts > 20:
             raise Exception(

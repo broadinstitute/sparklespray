@@ -1,14 +1,11 @@
 import subprocess
 import os
 from sparklespray.util import random_string
-import re
-import sys
 from google.cloud import datastore
 from google.api_core import exceptions
 from google.cloud.storage.client import Client as GSClient
 from sparklespray.config import SCOPES
 from google.oauth2 import service_account
-import google.api_core.exceptions
 import time
 from collections import namedtuple
 from google.api_core.exceptions import PermissionDenied, Forbidden

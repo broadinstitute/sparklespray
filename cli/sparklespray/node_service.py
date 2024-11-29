@@ -32,9 +32,6 @@ from .log import log
 from .model import PersistentDiskMount, SubmitConfig, MachineSpec
 
 
-def get_random_string(length):
-    return "".join([random.choice(string.ascii_lowercase) for x in range(length)])
-
 
 def _normalize_label(label):
     label = label.lower()
@@ -172,6 +169,8 @@ class NodeService:
         )
         response = request.execute()
         return response
+
+    
 
     def get_add_node_status(self, operation_name: str) -> Optional[AddNodeStatus]:
         try:
