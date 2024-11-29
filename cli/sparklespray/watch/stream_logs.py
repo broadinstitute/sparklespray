@@ -120,7 +120,6 @@ class StreamLogs:
 
     def _print_final_summary(self, state: ClusterStateQuery):
         tasks = state.get_tasks()
-        breakpoint()
         failed_tasks = _only_failed_tasks(tasks)
         successful_tasks = _only_successful_tasks(tasks)
 

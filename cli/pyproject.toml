@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "sparklespray"
-version = "4.3.0"
+version = "4.2.1000"
 description = "CLI for submitting batch jobs to GCP for execution"
 authors = ["Philip Montgomery <pmontgom@broadinstitute.org>"]
 include = ["sparklespray/bin/kubequeconsume"]
@@ -15,6 +15,7 @@ pydantic="^1.9.2"
 google-api-python-client="^2.58.0"
 pyOpenSSL="^22.0.0"
 types-protobuf = "^4.21.0.2"
+google-cloud-batch = "^0.17.31"
 
 [tool.poetry.dev-dependencies]
 pytest = "^7.1.2"
