@@ -3,11 +3,11 @@ from ..log import log
 from ..task_store import (
     STATUS_PENDING,
     STATUS_KILLED,
+    STATUS_CLAIMED
 )
 from .. import txtui
 from .shared import _get_jobids_from_pattern
 from ..cluster_service import Cluster
-
 
 def kill_cmd(jq: JobQueue, cluster, args):
     jobids = _get_jobids_from_pattern(jq, args.jobid_pattern)
@@ -20,7 +20,7 @@ def kill_cmd(jq: JobQueue, cluster, args):
         assert ok
         if not args.keepcluster:
             cluster.stop_cluster(job.cluster)
-            _reconcile_claimed_tasks(jq, tasks)
+            jq.reset(jobid, None, statuses_to_clear=[STATUS_CLAIMED])
 
         # if there are any sit sitting at pending, mark them as killed
         tasks = jq.task_storage.get_tasks(jobid, status=STATUS_PENDING)
@@ -28,10 +28,6 @@ def kill_cmd(jq: JobQueue, cluster, args):
         for task in tasks:
             jq.reset_task(task.task_id, status=STATUS_KILLED)
 
-
-def _reconcile_claimed_tasks(jq: JobQueue, cluster: Cluster):
-    "For all 'claimed' tasks associated with cluster, confirm that the owner is still running"
-    raise NotImplemented
 
 
 #     tasks = jq.get_tasks_for_cluster(job.cluster, STATUS_CLAIMED)

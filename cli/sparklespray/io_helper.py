@@ -30,6 +30,7 @@ class IO:
     def generate_signed_url(self, path, expiry=datetime.timedelta(days=30)):
         bucket, key = self._get_bucket_and_path(path)
         blob = bucket.get_blob(key)
+        assert blob is not None
         return blob.generate_signed_url(expiry)
 
     def bulk_get_as_str(self, paths):
@@ -80,7 +81,7 @@ class IO:
         result = dict(pool.map(check, paths))
         return result
 
-    def _get_bucket_and_path(self, path):
+    def _get_bucket_and_path(self, path : str):
         m = re.match("^gs://([^/]+)/(.*)$", path)
         assert m != None, "invalid remote path: {}".format(path)
         bucket_name = m.group(1)
@@ -108,6 +109,7 @@ class IO:
 
         # I'm unclear if _I_ am responsible for requesting the next page or whether iterator does it for me.
         for blob in bucket.list_blobs(prefix=path + "/"):
+            assert bucket.name is not None
             keys.append("gs://" + bucket.name + "/" + blob.name)
 
         return keys
@@ -176,6 +178,7 @@ class IO:
         bucket, path = self._get_bucket_and_path(dst_url)
         blob = bucket.blob(path)
         blob.upload_from_filename(filename)
+        assert bucket.name is not None
         return self._get_url_prefix() + bucket.name + "/" + path
 
     def write_str_to_cas(self, text):
@@ -185,6 +188,7 @@ class IO:
         bucket, path = self._get_bucket_and_path(dst_url)
         blob = bucket.blob(path)
         blob.upload_from_string(text)
+        assert bucket.name is not None
         return self._get_url_prefix() + bucket.name + "/" + path
 
     def write_json_to_cas(self, obj):

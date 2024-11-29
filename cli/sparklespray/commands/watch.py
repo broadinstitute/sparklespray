@@ -7,6 +7,7 @@ from ..cluster_service import Cluster
 
 from ..log import log
 from ..watch import run_tasks, PrintStatus, CompletionMonitor, StreamLogs, ResizeCluster
+from .shared import _resolve_jobid
 
 
 def add_watch_cmd(subparser):
@@ -35,8 +36,6 @@ def add_watch_cmd(subparser):
 
 
 def watch_cmd(jq: JobQueue, io: IO, cluster: Cluster, config: Config, args):
-    from ..main import _resolve_jobid
-
     jobid = _resolve_jobid(jq, args.jobid)
     if args.verify:
         check_completion(jq, io, jobid)
