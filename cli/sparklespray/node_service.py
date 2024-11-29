@@ -134,9 +134,6 @@ class AddNodeStatus:
 
         return self.response["error"]["message"]
 
-    def is_done(self) -> bool:
-        return self.status.get("done", False)
-
 
 class NodeService:
     def __init__(self, project: str, zones: List[str], credentials=None) -> None:
@@ -299,93 +296,6 @@ class NodeService:
                 )
             time.sleep(2)
         out.write("\n")
-
-    def create_pipeline_json(
-        self,
-        jobid: str,
-        cluster_name: str,
-        setup_image: str,
-        setup_parameters: List[str],
-        docker_image: str,
-        docker_command: List[str],
-        machine_specs: MachineSpec,
-        monitor_port: int,
-    ) -> dict:
-        # labels have a few restrictions
-        normalized_jobid = _normalize_label(jobid)
-
-        mounts = [
-            {
-                "disk": f"ephemeralssd{i}",
-                "path": x,
-                "readOnly": False,
-            }
-            for i, x in enumerate(machine_specs.ssd_mount_points)
-        ] + [
-            {
-                "disk": f"pddisk{i}",
-                "path": x.path,
-                "readOnly": False,
-            }
-            for i, x in enumerate(machine_specs.pd_mount_points)
-        ]
-
-        disks = [
-            {"name": f"ephemeralssd{i}", "type": "local-ssd"}
-            for i, _ in enumerate(machine_specs.ssd_mount_points)
-        ] + [
-            {"name": f"pddisk{i}", "sizeGb": x.size_in_gb, "type": "pd-standard"}
-            for i, x in enumerate(machine_specs.pd_mount_points)
-        ]
-
-        pipeline_def = {
-            "pipeline": {
-                "actions": [
-                    {
-                        "imageUri": setup_image,
-                        "commands": setup_parameters,
-                        "mounts": mounts,
-                    },
-                    {
-                        "imageUri": docker_image,
-                        "commands": docker_command,
-                        "mounts": mounts,
-                        "portMappings": {str(monitor_port): monitor_port},
-                    },
-                ],
-                "resources": {
-                    "zones": self.zones,
-                    "virtualMachine": {
-                        "machineType": machine_specs.machine_type,
-                        "preemptible": False,
-                        "disks": disks,
-                        "serviceAccount": {
-                            "email": "default",
-                            "scopes": [
-                                "https://www.googleapis.com/auth/cloud-platform"
-                            ],
-                        },
-                        "bootDiskSizeGb": machine_specs.boot_volume_in_gb,
-                        "serviceAccount": {
-                            "email": machine_specs.service_account_email,
-                            "scopes": [
-                                "https://www.googleapis.com/auth/cloud-platform"
-                            ],
-                        },
-                        "labels": {
-                            "kubeque-cluster": cluster_name,
-                            "sparkles-job": normalized_jobid,
-                        },
-                    },
-                },
-            },
-            "labels": {
-                "kubeque-cluster": cluster_name,
-                "sparkles-job": normalized_jobid,
-            },
-        }
-
-        return pipeline_def
 
 
 def _sanity_check_operation_name(operation_name):

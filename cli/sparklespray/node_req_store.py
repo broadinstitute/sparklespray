@@ -70,7 +70,7 @@ class AddNodeReqStore:
     def add_node_req(self, req: NodeReq):
         self.client.put(node_req_to_entity(self.client, req))
 
-    def get_node_reqs(self, cluster_id: str, status: str = None) -> List[NodeReq]:
+    def get_node_reqs(self, cluster_id: str, status: Optional[str] = None) -> List[NodeReq]:
         filters = [("cluster_id", "=", cluster_id)]
         if status is not None:
             filters.append(("status", "=", status))
@@ -83,6 +83,7 @@ class AddNodeReqStore:
 
     def update_node_req_status(self, operation_id, status, instance_name):
         entity = self.client.get(self.client.key("NodeReq", operation_id))
+        assert entity is not None
         entity["status"] = status
         if instance_name is not None:
             entity["instance_name"] = instance_name

@@ -555,8 +555,6 @@ class ClusterState:
             if (t.status == STATUS_COMPLETE and t.exit_code == "0")
         ]
 
-    def is_done(self):
-        return self.get_incomplete_task_count() == 0
 
 
 class CachingCaller:

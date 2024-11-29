@@ -596,7 +596,7 @@ def submit_cmd(jq: JobQueue, io: IO, cluster: Cluster, args: Any, config: Config
 
     mount_ = config.mounts
     submit_config = SubmitConfig(
-        service_account_email=config.credentials.service_account_email,
+        service_account_email=config.credentials.service_account_email, # pyright: ignore
         boot_volume_in_gb=boot_volume_in_gb,
         default_url_prefix=default_url_prefix,
         machine_type=machine_type,
