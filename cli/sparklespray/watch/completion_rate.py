@@ -13,16 +13,16 @@ class EstimateRateOfCompletion:
         completion_count = (
             state.get_failed_task_count() + state.get_successful_task_count()
         )
-        if prev_completion_count is None:
-            prev_completion_count = completion_count
+        if self.prev_completion_count is None:
+            self.prev_completion_count = completion_count
         else:
             now = state.get_time()
-            for _ in range(completion_count - prev_completion_count):
+            for _ in range(completion_count - self.prev_completion_count):
                 self.completion_timestamps.append(now)
             # if we have too many samples, drop the oldest
             while len(self.completion_timestamps) > self.max_completion_timestamps:
                 del self.completion_timestamps[0]
-            prev_completion_count = completion_count
+            self.prev_completion_count = completion_count
 
         self.completion_rate = None
         if len(self.completion_timestamps) > self.min_completion_timestamps:

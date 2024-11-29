@@ -13,5 +13,5 @@ __all__ = [
     "StreamLogs",
     "ResizeCluster",
     "PrintStatus",
-    run_tasks,
+    "run_tasks",
 ]

@@ -37,7 +37,7 @@ def _exception_guard(deferred_msg, reset=None):
 
 
 def _is_task_running(task_id: str, tasks: List[Task]):
-    matching_tasks = [task for task in tasks if task.id == task_id]
+    matching_tasks = [task for task in tasks if task.task_id == task_id]
     if len(matching_tasks) == 0:
         return False
     assert len(matching_tasks) == 1

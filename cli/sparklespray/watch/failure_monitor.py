@@ -2,11 +2,15 @@ import collections
 
 from ..log import log
 from .runner_types import PeriodicTask
+from dataclasses import dataclass
 
 
+@dataclass
 class NodesCompleted:
-    def __init__(self):
-        raise NotImplemented
+    timestamp: float
+    processed_count: int  # number of nodes which completed _and_ had processed some tasks
+    zero_processed_count: int  # number of nodes which completed _and_ had not processed any tasks
+
 
 
 class StartupFailureMonitor(PeriodicTask):
