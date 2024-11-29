@@ -37,12 +37,12 @@ class StreamLogs:
                     task.task_id,
                     task.monitor_address,
                 )
-                log_monitor = LogMonitor(
+                self.log_monitor = LogMonitor(
                     self.cluster.client, task.monitor_address, task.task_id
                 )
                 print_log_content(
                     None,
-                    "[starting tail of log {}]".format(log_monitor.task_id),
+                    "[starting tail of log {}]".format(self.log_monitor.task_id),
                     from_sparkles=True,
                 )
 
@@ -120,6 +120,7 @@ class StreamLogs:
 
     def _print_final_summary(self, state: ClusterStateQuery):
         tasks = state.get_tasks()
+        breakpoint()
         failed_tasks = _only_failed_tasks(tasks)
         successful_tasks = _only_successful_tasks(tasks)
 
