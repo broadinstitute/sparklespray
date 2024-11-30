@@ -1,7 +1,8 @@
 from sparklespray.batch_api import *
+from google.cloud.batch_v1alpha.services.batch_service import BatchServiceClient
 
 if __name__ == "__main__":
-    w = ClusterAPI()
+    w = ClusterAPI(BatchServiceClient())
 
     project="broad-achilles"
     location="us-central1"
@@ -19,7 +20,9 @@ if __name__ == "__main__":
     
     job = JobSpec(
         task_count="1",
-        runnables=[Runnable(image="alpine", command=["sleep", "60"])],
+        runnables=[Runnable(image="alpine", command=["ls", "-l", "/"]),
+                   Runnable(image="alpine", command=["df"]),
+                   ],
         machine_type="n4-standard-2",
         preemptible=True,
         locations=["regions/us-central1"],
@@ -32,7 +35,8 @@ if __name__ == "__main__":
 
     print("creating job")
     op_id = w.create_job(project, location, job)
-    
+    print(f"created job {op_id}")
+
     print("Polling cluster")
     for i in range(20):
         node_reqs = w.get_node_reqs(project, location, cluster_id)

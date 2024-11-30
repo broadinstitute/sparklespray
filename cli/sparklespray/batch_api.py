@@ -1,4 +1,3 @@
-from google.cloud.batch_v1alpha.services.batch_service import BatchServiceClient
 import google.cloud.batch_v1alpha.types as batch
 from pydantic import BaseModel
 from typing import List, Dict
@@ -56,13 +55,12 @@ def _create_runnables(runnables: List[Runnable], disks: List[Disk]):
             container=batch.Runnable.Container(
                 image_uri=runnable.image,
                 commands=runnable.command,
-                # volumes=_create_volumes(disks)
+                volumes=[disk.mount_path for disk in disks],
                 # "enableImageStreaming": True
             )
         )
         for runnable in runnables
     ]
-
 
 def _create_disks(disks: List[Disk]):
     return [
