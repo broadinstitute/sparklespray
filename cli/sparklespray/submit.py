@@ -156,21 +156,23 @@ def _make_cluster_name(
         return f"c-{hash.hexdigest()[:20]}"
 
 
+from .cluster_service import create_cluster
+
 def submit(
     jq: JobQueue,
     io: IO,
-    cluster: Cluster,
     job_id: str,
     spec: dict,
     config: SubmitConfig,
+    datastore_client,
+    cluster,
     metadata: Dict[str, str] = {},
     clean_if_exists: bool = False,
     dry_run: bool = False,
-    cluster_name=None,
 ):
     from .key_store import KeyStore
 
-    key_store = KeyStore(cluster.client)
+    key_store = KeyStore(datastore_client)
     cert, key = key_store.get_cert_and_key()
     if cert is None:
         log.info("No cert and key for cluster found -- generating now")
@@ -215,8 +217,7 @@ def submit(
 
     if not dry_run:
         image = config.image
-        if cluster_name is None:
-            cluster_name = _make_cluster_name(job_id, image, machine_specs, False)
+        cluster_name = _make_cluster_name(job_id, image, machine_specs, False)
 
         existing_job = jq.get_job(job_id, must=False)
         if existing_job is not None:
@@ -249,20 +250,38 @@ def submit(
             assert (
                 len(config.zones) == 1
             ), "Cannot create jobs in multiple zones if you are mounting PD volumes"
-        cluster.ensure_named_volumes_exist(config.zones[0], config.mounts)
+#        cluster.ensure_named_volumes_exist(config.zones[0], config.mounts)
 
-        pipeline_spec = create_pipeline_spec(
-            project=cluster.project,
-            zones=cluster.zones,
-            jobid=job_id,
-            cluster_name=cluster_name,
-            consume_exe_url=config.kubequeconsume_url,
-            consume_exe_md5=config.kubequeconsume_md5,
-            docker_image=image,
-            consume_exe_args=consume_exe_args,
-            machine_specs=machine_specs,
-            monitor_port=monitor_port,
+        print("warning: hardcoded job spec"
         )
+        from .batch_api import JobSpec, Runnable, Disk
+
+        job = JobSpec(
+        task_count="1",
+        runnables=[Runnable(image="alpine", command=["sleep", "60"])],
+        machine_type="n4-standard-2",
+        preemptible=True,
+        locations=["regions/us-central1"],
+        network_tags=[],
+        boot_disk=Disk(name="bootdisk", size_gb=40, type="hyperdisk-balanced", mount_path="/"),
+        disks=[Disk(name="data", size_gb=50, type="hyperdisk-balanced", mount_path="/data")],
+        sparkles_job="job-test",
+        sparkles_cluster=cluster_name
+        )
+        pipeline_spec = job.model_dump_json()
+
+        # pipeline_spec = create_pipeline_spec(
+        #     project=cluster.project,
+        #     zones=cluster.zones,
+        #     jobid=job_id,
+        #     cluster_name=cluster_name,
+        #     consume_exe_url=config.kubequeconsume_url,
+        #     consume_exe_md5=config.kubequeconsume_md5,
+        #     docker_image=image,
+        #     consume_exe_args=consume_exe_args,
+        #     machine_specs=machine_specs,
+        #     monitor_port=monitor_port,
+        # )
 
         # print(config)
         # print(json.dumps(pipeline_spec, indent=2))
@@ -453,7 +472,9 @@ def add_submit_cmd(subparser):
     parser.add_argument("command", nargs=argparse.REMAINDER)
 
 
-def submit_cmd(jq: JobQueue, io: IO, cluster: Cluster, args: Any, config: Config):
+
+def submit_cmd(jq: JobQueue, io: IO,  datastore_client,
+    cluster_api, args: Any, config: Config):
     metadata: Dict[str, str] = {}
 
     if args.image:
@@ -587,24 +608,31 @@ def submit_cmd(jq: JobQueue, io: IO, cluster: Cluster, args: Any, config: Config
     )
     assert mount_ == submit_config.mounts
 
-    cluster_name = None
-    if args.local:
-        # if doing a local submission, generate a unique cluster name each time
-        # to ensure the local process is the one which picks up the job.
-        cluster_name = "local-" + random_string(8)
+    from .cluster_service import MinConfig
+    print("Warning: hardcoded location")
+    cluster = Cluster(config.project,
+        config.location,
+        None,
+        job_id,
+        config.zones,
+        jq.job_storage,
+        jq.task_storage,
+        datastore_client,
+        cluster_api,
+        config.debug_log_prefix)
 
     txtui.user_print("Submitting job: {}".format(job_id))
     submit(
         jq,
         io,
-        cluster,
         job_id,
         spec,
         submit_config,
+    datastore_client,
+    cluster,
         metadata=metadata,
         clean_if_exists=True,
         dry_run=args.dryrun,
-        cluster_name=cluster_name,
     )
 
     finished = False
@@ -613,7 +641,7 @@ def submit_cmd(jq: JobQueue, io: IO, cluster: Cluster, args: Any, config: Config
     if not (args.dryrun or args.skip_kube_submit) and args.wait_for_completion:
         log.info("Waiting for job to terminate")
         successful_execution = watch(
-            io, jq, job_id, cluster, target_nodes=target_node_count, loglive=True
+            io, jq, cluster, target_nodes=target_node_count, loglive=True
         )
         finished = True
 

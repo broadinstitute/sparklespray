@@ -3,7 +3,7 @@ import sys
 from . import txtui
 import argparse
 
-from .config import load_config, create_services, BadConfig
+from .config import load_config, create_func_params, BadConfig
 
 from . import txtui
 
@@ -113,22 +113,10 @@ def main(argv=None):
     else:
         func_param_names = get_func_parameters(args.func)
         try:
-            config, jq, io, cluster = create_services(args.config, overrides=overrides)
+            func_params = create_func_params(args.config, overrides=overrides, extras={"args": args}, requested=func_param_names)
         except BadConfig as ex:
             print(f"Failure loading config: {ex}")
             return 1
-
-        func_params = {}
-        if "args" in func_param_names:
-            func_params["args"] = args
-        if "config" in func_param_names:
-            func_params["config"] = config
-        if "io" in func_param_names:
-            func_params["io"] = io
-        if "jq" in func_param_names:
-            func_params["jq"] = jq
-        if "cluster" in func_param_names:
-            func_params["cluster"] = cluster
 
         return args.func(**func_params)
 

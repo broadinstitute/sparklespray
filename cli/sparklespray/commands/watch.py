@@ -34,18 +34,21 @@ def add_watch_cmd(subparser):
         dest="loglive",
     )
 
+from ..batch_api import ClusterAPI
+from ..cluster_service import create_cluster
 
-def watch_cmd(jq: JobQueue, io: IO, cluster: Cluster, config: Config, args):
-    jobid = _resolve_jobid(jq, args.jobid)
+def watch_cmd(jq: JobQueue, io: IO, config: Config, args, cluster_api: ClusterAPI, datastore_client):
+    job_id = _resolve_jobid(jq, args.jobid)
     if args.verify:
-        check_completion(jq, io, jobid)
+        check_completion(jq, io, job_id)
 
     max_preemptable_attempts_scale = config.max_preemptable_attempts_scale
+
+    cluster = create_cluster(config, jq, datastore_client, cluster_api, job_id)
 
     watch(
         io,
         jq,
-        jobid,
         cluster,
         target_nodes=args.nodes,
         loglive=args.loglive,
@@ -56,7 +59,6 @@ def watch_cmd(jq: JobQueue, io: IO, cluster: Cluster, config: Config, args):
 def watch(
     io: IO,
     jq: JobQueue,
-    job_id: str,
     cluster: Cluster,
     target_nodes=None,
     max_preemptable_attempts_scale=None,
@@ -64,6 +66,7 @@ def watch(
     max_poll_delay=30.0,
     loglive=None,
 ):
+    job_id = cluster.job_id
     job = jq.get_job(job_id)
     assert job is not None
 
@@ -90,8 +93,8 @@ def watch(
 
     tasks = [
         CompletionMonitor(),
-        ResizeCluster(
-            target_nodes, max_preemptable_attempts, cluster.get_cluster_mod(job_id)
+        ResizeCluster(cluster, 
+             target_nodes, max_preemptable_attempts, 
         ),
         StreamLogs(loglive, cluster, io),
         PrintStatus(initial_poll_delay, max_poll_delay),

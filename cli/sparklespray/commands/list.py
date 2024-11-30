@@ -6,7 +6,6 @@ from ..job_queue import JobQueue
 import sys
 from ..io_helper import IO
 from ..cluster_service import Cluster
-from ..node_req_store import AddNodeReqStore
 import dataclasses
 from .shared import _resolve_jobid
 

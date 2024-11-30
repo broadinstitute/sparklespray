@@ -107,8 +107,6 @@ class JobQueue:
         clear_nonzero_exit=True,
     ):
         tasks = self.task_storage.get_tasks(jobid)
-        # for status_to_clear in statuses_to_clear:
-        #     tasks.extend(self.task_storage.get_tasks(jobid, status=status_to_clear))
 
         def needs_clear(task):
             if task.status in statuses_to_clear:
@@ -124,8 +122,6 @@ class JobQueue:
             return False
 
         tasks = [t for t in tasks if needs_clear(t)]
-        # print("clear", tasks)
-        # raise Exception()
 
         updated = 0
         batch = Batch(self.client)
@@ -159,13 +155,13 @@ class JobQueue:
         self,
         job_id,
         args,
-        kube_job_spec,
+        sparkles_job_spec : str,
         metadata: Dict[str, str],
         cluster,
         target_node_count,
         max_preemptable_attempts,
     ):
-        kube_job_spec = json.dumps(kube_job_spec)
+        assert isinstance(sparkles_job_spec, str)
         tasks: List[Task] = []
         now = time.time()
 
@@ -191,8 +187,8 @@ class JobQueue:
 
         job = Job(
             job_id=job_id,
-            tasks=[t.task_id for t in tasks],
-            kube_job_spec=kube_job_spec,
+            tasks=[t.task_id for t in tasks], # we could just store the information needed to construct these task IDs
+            kube_job_spec=sparkles_job_spec,
             metadata=metadata,
             cluster=cluster,
             status=JOB_STATUS_SUBMITTED,
@@ -202,34 +198,3 @@ class JobQueue:
         )
         self.job_storage.insert(job, batch=batch)
         batch.flush()
-        # log.info("Saved task definition batch containing %d tasks", len(batch))
-
-
-#     def test_datastore_api(self, job_id):
-#         """Test we the datastore api is enabled by writing a value and deleting a value."""
-#         job = Job(job_id=job_id, tasks=[], kube_job_spec=None, metadata={}, cluster=job_id, status=JOB_STATUS_KILLED,
-#                   submit_time=time.time())
-#         self.storage.store_job(job)
-#         fetched_job = self.storage.get_job(job_id)
-#         assert fetched_job.job_id == job_id
-#         self.storage.delete_job(job_id)
-
-#     def _update_task_status(self, task_id, new_status, failure_reason, retcode):
-#         task = self.storage.get_task(task_id)
-#         now = time.time()
-#         task.history.append( TaskHistory(timestamp=now, status=new_status, failure_reason=failure_reason) )
-#         task.status = new_status
-#         task.failure_reason = failure_reason
-#         task.exit_code = retcode
-# #        task.owner = None
-#         updated = self.storage.update_task(task)
-#         if not updated:
-#             # I suppose this is not technically correct. Could be a simultaneous update of "success" or "failed" and "lost"
-#             raise Exception("Detected concurrent update, which should not be possible")
-
-#     def owner_lost(self, owner):
-#         tasks = self.Task.scan(owner == owner)
-#         for task in tasks:
-#             self._update_task_status(task.task_id, "lost")
-
-

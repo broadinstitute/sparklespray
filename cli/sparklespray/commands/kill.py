@@ -7,23 +7,24 @@ from ..task_store import (
 )
 from .. import txtui
 from .shared import _get_jobids_from_pattern
-from ..cluster_service import Cluster
+from ..cluster_service import Cluster, create_cluster
 
-def kill_cmd(jq: JobQueue, cluster, args):
-    jobids = _get_jobids_from_pattern(jq, args.jobid_pattern)
-    if len(jobids) == 0:
+def kill_cmd(jq: JobQueue,  args, config, datastore_client, cluster_api):
+    job_ids = _get_jobids_from_pattern(jq, args.jobid_pattern)
+    if len(job_ids) == 0:
         log.warning("No jobs found matching pattern")
-    for jobid in jobids:
+    for job_id in job_ids:
         # TODO: stop just marks the job as it shouldn't run any more.  tasks will still be claimed.
-        log.info("Marking %s as killed", jobid)
-        ok, job = jq.kill_job(jobid)
+        cluster = create_cluster(config, jq, datastore_client, cluster_api, job_id)
+        log.info("Marking %s as killed", job_id)
+        ok, job = jq.kill_job(job_id)
         assert ok
         if not args.keepcluster:
-            cluster.stop_cluster(job.cluster)
-            jq.reset(jobid, None, statuses_to_clear=[STATUS_CLAIMED])
+            cluster.stop_cluster()
+            jq.reset(job_id, None, statuses_to_clear=[STATUS_CLAIMED])
 
         # if there are any sit sitting at pending, mark them as killed
-        tasks = jq.task_storage.get_tasks(jobid, status=STATUS_PENDING)
+        tasks = jq.task_storage.get_tasks(job_id, status=STATUS_PENDING)
         txtui.user_print("Marking {} pending tasks as killed".format(len(tasks)))
         for task in tasks:
             jq.reset_task(task.task_id, status=STATUS_KILLED)

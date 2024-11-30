@@ -25,7 +25,7 @@ def run_tasks(
 
     get_tasks = RateLimitedCall(lambda: cluster.task_store.get_tasks(job_id), 1)
     get_nodes = RateLimitedCall(
-        lambda: cluster.node_req_store.get_node_reqs(cluster_id), 1
+        lambda: cluster.get_node_reqs(), 1
     )
 
     while True:

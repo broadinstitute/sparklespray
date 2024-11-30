@@ -3,23 +3,18 @@ from ..task_store import (
     STATUS_PENDING,
 )
 from ..job_queue import JobQueue, Job
-from ..cluster_service import Cluster
+from ..cluster_service import Cluster, create_cluster
 from ..log import log
 from .shared import _get_jobids_from_pattern
 
 
 def clean(
-    cluster: Cluster,
+            cluster : Cluster,
     jq: JobQueue,
     job_id: str,
     force: bool = False,
     force_pending: bool = False,
-    only_nodes: bool = False,
 ):
-    cluster.cleanup_node_reqs(job_id)
-    if only_nodes:
-        return
-
     if not force:
         # Check to not remove tasks that are claimed and still running
         tasks = cluster.task_store.get_tasks(job_id, status=STATUS_CLAIMED)
@@ -49,7 +44,7 @@ def clean(
             assert isinstance(job, Job)
             tasks = cluster.task_store.get_tasks(job_id, status=STATUS_PENDING)
             nb_tasks_pending = len(tasks)
-            if nb_tasks_pending > 0 and cluster.has_active_node_requests(job.cluster):
+            if nb_tasks_pending > 0 and cluster.has_active_node_requests():
                 log.warning(
                     "Job {} has {} tasks that are still pending and active requests for VMs. If you want to force cleaning them,"
                     " please use 'sparkles kill {}'".format(
@@ -58,21 +53,23 @@ def clean(
                 )
                 return False
 
-    cluster.delete_job(job_id)
+    cluster.stop_cluster()
     return True
 
 
-def clean_cmd(cluster: Cluster, jq, args):
-    jobids = _get_jobids_from_pattern(jq, args.jobid_pattern)
-    for jobid in jobids:
-        log.info("Deleting %s", jobid)
+def clean_cmd(config, datastore_client, cluster_api, jq, args):
+    job_ids = _get_jobids_from_pattern(jq, args.jobid_pattern)
+    for job_id in job_ids:
+        log.info("Deleting %s", job_id)
+
+        cluster = create_cluster(config, jq, datastore_client, cluster_api, job_id)
+
         clean(
             cluster,
             jq,
-            jobid,
+            job_id,
             args.force,
             args.force_pending,
-            only_nodes=args.only_nodes,
         )
 
 
@@ -115,9 +112,4 @@ def add_clean_cmd(subparser):
         "-p",
         help="If set, will delete pending jobs",
         action="store_true",
-    )
-    parser.add_argument(
-        "--only-nodes",
-        action="store_true",
-        help="If set, will not delete the job, only completed node requests.",
     )
