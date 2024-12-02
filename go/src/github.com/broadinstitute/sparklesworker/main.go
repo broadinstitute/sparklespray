@@ -1,22 +1,24 @@
 package sparklesworker
 
 import (
-	"crypto/tls"
-	"crypto/x509"
+	"encoding/hex"
+	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
 	"cloud.google.com/go/datastore"
+	"cloud.google.com/go/storage"
 	"golang.org/x/net/context"
 	"golang.org/x/oauth2/google"
 
 	"github.com/urfave/cli"
 	"google.golang.org/api/option"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
 )
 
 func Main() {
@@ -43,58 +45,120 @@ func Main() {
 				cli.IntFlag{Name: "timeout", Value: 5}, // watchdog timeout: 5 minutes means the process will be killed after 10 minutes if the main loop doesn't check in
 				cli.IntFlag{Name: "shutdownAfter", Value: 30},
 			},
-			Action: consume}}
+			Action: consume},
+		cli.Command{
+			Name: "fetch",
+			Flags: []cli.Flag{
+				cli.StringFlag{Name: "expectMD5"},
+				cli.StringFlag{Name: "src"},
+				cli.StringFlag{Name: "dst"},
+			},
+			Action: fetch}}
 
 	app.Run(os.Args)
 }
 
-func initCerts() *x509.CertPool {
-	pool := x509.NewCertPool()
-	pool.AppendCertsFromPEM([]byte(pemCerts))
-	return pool
+func clientWithCerts(ctx context.Context, scope ...string) (*http.Client, error) {
+	return google.DefaultClient(ctx, scope...)
 }
 
-func clientWithCerts(ctx context.Context, certs *x509.CertPool, scope ...string) (*http.Client, error) {
-	// func NewClient(ctx context.Context, src TokenSource) *http.Client {
-	// 	if src == nil {
-	// 		c, err := internal.ContextClient(ctx)
-	// 		if err != nil {
-	// 			return &http.Client{Transport: internal.ErrorTransport{Err: err}}
-	// 		}
-	// 		return c
-	// 	}
-	// 	return &http.Client{
-	// 		Transport: &Transport{
-	// 			Base:   internal.ContextTransport(ctx),
-	// 			Source: ReuseTokenSource(nil, src),
-	// 		},
-	// 	}
-	// }
+func fetch(c *cli.Context) error {
+	log.Printf("Starting fetch")
 
-	// func DefaultClient(ctx context.Context, scope ...string) (*http.Client, error) {
-	// 	ts, err := DefaultTokenSource(ctx, scope...)
-	// 	if err != nil {
-	// 		return nil, err
-	// 	}
-	// 	return NewClient(ctx, ts), nil
-	// }
+	expectMD5 := c.String("expectMD5")
+	src := c.String("src")
+	dst := c.String("dst")
 
-	// return DefaultClient(ctx, scope)
+	ctx := context.Background()
 
-	return google.DefaultClient(ctx, scope...)
+	var err error
+
+	httpClient, err := clientWithCerts(ctx, "https://www.googleapis.com/auth/compute.readonly")
+	if err != nil {
+		log.Printf("Could not create default client: %v", err)
+		return err
+	}
+
+	client, err := storage.NewClient(ctx, option.WithHTTPClient(httpClient))
+	if err != nil {
+		return fmt.Errorf("could not get storage client: %s", err)
+	}
+
+	bucketName, objectName := splitGCSPath(src)
+	if bucketName == "" {
+		return fmt.Errorf("expected source to be gs://<bucket>/<object> but source was \"%s\"", src)
+	}
+
+	object := client.Bucket(bucketName).Object(objectName)
+	reader, err := object.NewReader(ctx)
+	if err != nil {
+		return fmt.Errorf("could not open %s for reading: %s", src, err)
+	}
+
+	err = CopyToFile(reader, dst, expectMD5)
+	if err != nil {
+		return fmt.Errorf("copy of %s failed: %s", src, err)
+	}
+
+	return nil
+}
+
+func splitGCSPath(path string) (bucket, key string) {
+	re := regexp.MustCompile(`^gs://([^/]+)/(.+)$`)
+	matches := re.FindStringSubmatch(path)
+	if len(matches) == 3 {
+		return matches[1], matches[2]
+	}
+	return "", ""
+}
+
+func CopyToFile(src io.Reader, dstPath string, expectedMD5 string) error {
+	// Create temp file in same directory as destination
+	dir := filepath.Dir(dstPath)
+	tmpFile, err := os.CreateTemp(dir, "*.tmp")
+	if err != nil {
+		return fmt.Errorf("creating temp file: %w", err)
+	}
+	tmpPath := tmpFile.Name()
+
+	// Clean up temp file on failure
+	success := false
+	defer func() {
+		tmpFile.Close()
+		if !success {
+			os.Remove(tmpPath)
+		}
+	}()
+
+	wrapper := NewMD5Writer(tmpFile)
+
+	// Copy data to temp file
+	if _, err := io.Copy(wrapper, src); err != nil {
+		return fmt.Errorf("copying data: %w", err)
+	}
+
+	// Close before rename
+	if err := tmpFile.Close(); err != nil {
+		return fmt.Errorf("closing temp file: %w", err)
+	}
+
+	// check md5 of written file matches expectation
+	md5 := hex.EncodeToString(wrapper.MD5())
+	if md5 != expectedMD5 {
+		return fmt.Errorf("MD5 hash did not match expected")
+	}
+
+	// Atomic rename
+	if err := os.Rename(tmpPath, dstPath); err != nil {
+		return fmt.Errorf("renaming temp file: %w", err)
+	}
+
+	success = true
+	return nil
 }
 
 func consume(c *cli.Context) error {
 	log.Printf("Starting consume")
-	certs := initCerts()
-	http.DefaultTransport = &http.Transport{
-		TLSClientConfig: &tls.Config{RootCAs: certs},
-	}
-	// http.DefaultClient = &http.Client{
-	// 	Transport: &http.Transport{
-	// 		TLSClientConfig: &tls.Config{RootCAs: certs},
-	// 	},
-	// }
 
 	projectID := c.String("projectId")
 	cacheDir := c.String("cacheDir")
@@ -110,13 +174,13 @@ func consume(c *cli.Context) error {
 	ctx := context.Background()
 
 	var err error
-	httpclient, err := clientWithCerts(ctx, certs, "https://www.googleapis.com/auth/compute.readonly")
+	httpclient, err := clientWithCerts(ctx, "https://www.googleapis.com/auth/compute.readonly")
 	if err != nil {
 		log.Printf("Could not create default client: %v", err)
 		return err
 	}
 
-	ioc, err := NewIOClient(ctx, certs, httpclient)
+	ioc, err := NewIOClient(ctx, httpclient)
 	if err != nil {
 		log.Printf("Creating io client failed: %v", err)
 		return err
@@ -161,10 +225,10 @@ func consume(c *cli.Context) error {
 	monitor := NewMonitor()
 
 	options := &Options{
-		ClaimTimeout:       30 * time.Second,            // how long do we keep trying if we get an error claiming a task
-		InitialClaimRetry:  1 * time.Second,             // if we get an error claiming, how long until we try again?
-		SleepOnEmpty:       1 * time.Second,             // how often to poll the queue if is empty
-		MaxWaitForNewTasks: shutdownAfter * time.Second, // how long to wait for a new task to arrive if the queue is empty
+		ClaimTimeout:       30 * time.Second,                           // how long do we keep trying if we get an error claiming a task
+		InitialClaimRetry:  1 * time.Second,                            // if we get an error claiming, how long until we try again?
+		SleepOnEmpty:       1 * time.Second,                            // how often to poll the queue if is empty
+		MaxWaitForNewTasks: time.Duration(shutdownAfter) * time.Second, // how long to wait for a new task to arrive if the queue is empty
 		Owner:              owner}
 
 	executor := func(taskId string, taskParam string) (string, error) {
@@ -176,8 +240,12 @@ func consume(c *cli.Context) error {
 		time.Sleep(sleepTime)
 	}
 
-	transportCreds := grpc.WithTransportCredentials(credentials.NewClientTLSFromCert(certs, ""))
-	client, err := datastore.NewClient(ctx, projectID, option.WithGRPCDialOption(transportCreds))
+	httpClient, err := clientWithCerts(ctx, "https://www.googleapis.com/auth/compute.readonly")
+	if err != nil {
+		log.Printf("Could not create default client: %v", err)
+		return err
+	}
+	client, err := datastore.NewClient(ctx, projectID, option.WithHTTPClient(httpClient))
 	if err != nil {
 		log.Printf("Creating datastore client failed: %v", err)
 		return err
