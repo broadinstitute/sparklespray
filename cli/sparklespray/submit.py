@@ -233,59 +233,21 @@ def submit(
                     'Existing job with id "{}", aborting!'.format(job_id)
                 )
 
-        project = config.project
-        monitor_port = config.monitor_port
-        consume_exe_args = [
-            "--cluster",
-            cluster_name,
-            "--projectId",
-            project,
-            "--zones",
-            ",".join(config.zones),
-            "--port",
-            str(monitor_port),
-        ]
-
         if len(config.mounts) > 1:
             assert (
                 len(config.zones) == 1
             ), "Cannot create jobs in multiple zones if you are mounting PD volumes"
 #        cluster.ensure_named_volumes_exist(config.zones[0], config.mounts)
 
-        print("warning: hardcoded job spec"
-        )
-        from .batch_api import JobSpec, Runnable, Disk
+        job = create_job_spec(config.work_root_dir, 
+                              config.kubequeconsume_url, 
+                              config.kubequeconsume_md5, 
+                              config.image, 
+                              cluster_name, 
+                              config.project, 
+                              config.monitor_port)
 
-        job = JobSpec(
-        task_count="1",
-        runnables=[Runnable(image="alpine", command=["sleep", "60"])],
-        machine_type="n4-standard-2",
-        preemptible=True,
-        locations=["regions/us-central1"],
-        network_tags=[],
-        boot_disk=Disk(name="bootdisk", size_gb=40, type="hyperdisk-balanced", mount_path="/"),
-        disks=[Disk(name="data", size_gb=50, type="hyperdisk-balanced", mount_path="/data")],
-        sparkles_job="job-test",
-        sparkles_cluster=cluster_name
-        )
         pipeline_spec = job.model_dump_json()
-
-        # pipeline_spec = create_pipeline_spec(
-        #     project=cluster.project,
-        #     zones=cluster.zones,
-        #     jobid=job_id,
-        #     cluster_name=cluster_name,
-        #     consume_exe_url=config.kubequeconsume_url,
-        #     consume_exe_md5=config.kubequeconsume_md5,
-        #     docker_image=image,
-        #     consume_exe_args=consume_exe_args,
-        #     machine_specs=machine_specs,
-        #     monitor_port=monitor_port,
-        # )
-
-        # print(config)
-        # print(json.dumps(pipeline_spec, indent=2))
-        # raise Exception()
 
         max_preemptable_attempts = (
             config.target_node_count * config.max_preemptable_attempts_scale
@@ -300,6 +262,69 @@ def submit(
             config.target_node_count,
             max_preemptable_attempts,
         )
+
+SETUP_IMAGE = "sequenceiq/alpine-curl"
+
+def create_job_spec(work_root_dir, consume_exe_url, consume_exe_md5, docker_image, cluster_name, project, monitor_port):
+        
+    consume_exe_path = os.path.join(work_root_dir, "consume")
+    consume_data = os.path.join(work_root_dir, "data")
+
+    exe_dir = os.path.dirname(consume_exe_path)
+    checksum_path = os.path.join(exe_dir, "expected-checksums")
+
+    setup_commands = [
+        # download executable
+        ["mkdir", "-p", exe_dir],
+        ["chmod", "a+rwx", exe_dir],
+        ["curl", "-o", consume_exe_path, consume_exe_url],
+        # verify checksum of downloaded file
+        ["sh", "-c", f'echo "{consume_exe_md5}  {consume_exe_path}" > {checksum_path}'],
+        ["md5sum", "-c", checksum_path],
+        # mark file as executable
+        ["chmod", "a+x", consume_exe_path],
+        # set up directory that'll be used by consume exe
+        ["mkdir", "-p", consume_data],
+        ["chmod", "a+rwx", consume_data],
+    ]
+
+
+    from .batch_api import JobSpec, Runnable, Disk
+
+    runnables = []
+    for setup_command in setup_commands:
+        runnables.append(Runnable(image=SETUP_IMAGE, command=setup_command))
+
+    runnables.append(Runnable(image=docker_image, command=[
+        consume_exe_path,
+            "consume",
+            "--cacheDir",
+            os.path.join(consume_data, "cache"),
+            "--tasksDir",
+            os.path.join(consume_data, "tasks"),
+            "--cluster",
+            cluster_name,
+            "--projectId",
+            project,
+            "--port",
+            str(monitor_port),
+        
+    ]))
+
+    job = JobSpec(
+    task_count="1",
+    runnables=runnables,
+    machine_type="n4-standard-2",
+    preemptible=True,
+    locations=["regions/us-central1"],
+    network_tags=[],
+    boot_disk=Disk(name="bootdisk", size_gb=40, type="hyperdisk-balanced", mount_path="/"),
+    disks=[Disk(name="data", size_gb=50, type="hyperdisk-balanced", mount_path="/data")],
+    sparkles_job="job-test",
+    sparkles_cluster=cluster_name
+    )
+
+    return job
 
 
 def new_job_id():

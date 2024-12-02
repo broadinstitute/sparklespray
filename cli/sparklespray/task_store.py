@@ -15,6 +15,7 @@ STATUS_KILLED = "killed"
 
 INCOMPLETE_TASK_STATES = set([STATUS_CLAIMED, STATUS_PENDING])
 
+TASK_COLLECTION = "SparklesV5Task"
 
 def is_terminal_status(status):
     return status not in INCOMPLETE_TASK_STATES
@@ -56,7 +57,7 @@ class Task(object):
 
 
 def task_to_entity(client, o):
-    entity_key = client.key("Task", o.task_id)
+    entity_key = client.key(TASK_COLLECTION, o.task_id)
     entity = datastore.Entity(key=entity_key)
     entity["task_index"] = o.task_index
     entity["job_id"] = o.job_id
@@ -119,7 +120,7 @@ class TaskStore:
         self.immediate_batch = ImmediateBatch(client)
 
     def get_task(self, task_id):
-        task_key = self.client.key("Task", task_id)
+        task_key = self.client.key(TASK_COLLECTION, task_id)
         return entity_to_task(self.client.get(task_key))
 
     def insert(self, task, batch=None):
@@ -133,7 +134,7 @@ class TaskStore:
         if batch is None:
             batch = self.immediate_batch
 
-        key = self.client.key("Task", task_id)
+        key = self.client.key(TASK_COLLECTION, task_id)
         batch.delete(key)
 
     def get_tasks(self, job_id=None, status=None, max_fetch=None) -> List[Task]:
@@ -142,7 +143,7 @@ class TaskStore:
             filters.append(["job_id", "=", job_id])
         if status is not None:
             filters.append(["status", "=", status])
-        query = self.client.query(kind="Task", filters=filters)
+        query = self.client.query(kind=TASK_COLLECTION, filters=filters)
         start_time = time.time()
         tasks_it = query.fetch(limit=max_fetch)
         # do I need to use next_page?
@@ -164,7 +165,7 @@ class TaskStore:
         return tasks
 
     def get_tasks_for_cluster(self, cluster_name, status, max_fetch=None):
-        query = self.client.query(kind="Task")
+        query = self.client.query(kind=TASK_COLLECTION)
         query.add_filter("cluster", "=", cluster_name)
         query.add_filter("status", "=", status)
         start_time = time.time()
