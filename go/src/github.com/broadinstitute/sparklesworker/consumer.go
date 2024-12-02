@@ -1,4 +1,4 @@
-package kubequeconsume
+package sparklesworker
 
 import (
 	"log"
@@ -69,11 +69,12 @@ type ClusterKeys struct {
 const INITIAL_CLAIM_RETRY_DELAY = 1000
 
 type Options struct {
-	Owner             string
-	InitialClaimRetry time.Duration
-	SleepOnEmpty      time.Duration
-	ClaimTimeout      time.Duration
-	LoggingClient     *logging.Client
+	Owner              string
+	InitialClaimRetry  time.Duration
+	SleepOnEmpty       time.Duration
+	ClaimTimeout       time.Duration
+	MaxWaitForNewTasks time.Duration
+	LoggingClient      *logging.Client
 }
 
 type Queue interface {
@@ -88,8 +89,9 @@ func getTimestampMillis() int64 {
 	return int64(time.Now().UnixNano()) / int64(time.Millisecond)
 }
 
-func ConsumerRunLoop(ctx context.Context, queue Queue, sleepUntilNotify func(sleepTime time.Duration), executor Executor, timeout Timeout, SleepOnEmpty time.Duration) error {
+func ConsumerRunLoop(ctx context.Context, queue Queue, sleepUntilNotify func(sleepTime time.Duration), executor Executor, SleepOnEmpty time.Duration, MaxWaitForNewTasks time.Duration) error {
 	firstClaim := true
+	lastClaim := time.Now()
 	log.Printf("Starting ConsumerRunLoop, sleeping %v once queue drains", SleepOnEmpty)
 	for {
 		claimed, err := queue.claimTask(ctx)
@@ -97,22 +99,26 @@ func ConsumerRunLoop(ctx context.Context, queue Queue, sleepUntilNotify func(sle
 			return err
 		}
 
-		now := time.Now()
 		if claimed == nil {
 			if firstClaim {
 				firstClaim = false
 				log.Printf("Special case: first poll returned no results. May be due to newly created tasks are not yet visible. Waiting a few seconds and trying again")
-				sleepUntilNotify(time.Second * 5)
+				sleepUntilNotify(time.Second * 10)
 				continue
 			}
 
-			if timeout.HasTimeoutExpired(now) {
-				return nil
-			}
 			sleepUntilNotify(SleepOnEmpty)
+
+			if time.Since(lastClaim) > MaxWaitForNewTasks {
+				// if we've had more than SleepOnEmpty time elapse since the last time we got something from the queue, it's time to
+				// gracefully shut down.
+				break
+			}
+
 			continue
 		}
-		timeout.Reset(now)
+
+		lastClaim = time.Now()
 
 		log.Printf("Claimed task %s", claimed.TaskID)
 		firstClaim = false

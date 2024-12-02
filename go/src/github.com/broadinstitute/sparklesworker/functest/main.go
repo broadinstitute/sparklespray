@@ -4,18 +4,18 @@ import (
 	"log"
 	"time"
 
-	"github.com/broadinstitute/kubequeconsume"
+	"github.com/broadinstitute/sparklesworker"
 )
 
 func main() {
-	kubequeconsume.EnableWatchdog(5 * time.Second)
+	sparklesworker.EnableWatchdog(5 * time.Second)
 	i := 0
 	for {
 		log.Printf("Sleeping for a sec...")
 		time.Sleep(time.Second)
 		if i < 10 {
 			log.Printf("Calling notify")
-			kubequeconsume.NotifyWatchdog()
+			sparklesworker.NotifyWatchdog()
 		}
 		i++
 	}

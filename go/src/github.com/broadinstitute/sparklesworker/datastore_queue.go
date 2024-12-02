@@ -1,4 +1,4 @@
-package kubequeconsume
+package sparklesworker
 
 import (
 	"errors"
@@ -23,8 +23,10 @@ func CreateDataStoreQueue(client *datastore.Client, cluster string, owner string
 	return &DataStoreQueue{client: client, cluster: cluster, owner: owner, monitorAddress: monitorAddress, InitialClaimRetry: InitialClaimRetry, ClaimTimeout: ClaimTimeout}, nil
 }
 
+const TaskCollection = "SparklesV5Task"
+
 func getTasks(ctx context.Context, client *datastore.Client, cluster string, status string, maxFetch int) ([]*Task, error) {
-	q := datastore.NewQuery("Task").Filter("cluster =", cluster).Filter("status =", status).Limit(maxFetch)
+	q := datastore.NewQuery(TaskCollection).FilterField("cluster", "=", cluster).FilterField("status", "=", status).Limit(maxFetch)
 	var tasks []*Task
 	keys, err := client.GetAll(ctx, q, &tasks)
 
@@ -99,7 +101,7 @@ func (q *DataStoreQueue) atomicUpdateTask(ctx context.Context, task_id string, m
 	_, err := client.RunInTransaction(ctx, func(tx *datastore.Transaction) error {
 		log.Printf("attempting update of task %s start", task_id)
 
-		taskKey := datastore.NameKey("Task", task_id, nil)
+		taskKey := datastore.NameKey(TaskCollection, task_id, nil)
 		err := tx.Get(taskKey, &task)
 		if err != nil {
 			return err
@@ -128,12 +130,5 @@ func (q *DataStoreQueue) atomicUpdateTask(ctx context.Context, task_id string, m
 		return nil, err
 	}
 
-	// task_as_json = json.dumps(attr.asdict(task)).encode("utf8")
-
-	// topic_name = self._job_id_to_topic(task.job_id)
-	// topic = self.pubsub.topic(topic_name)
-	// topic.publish(task_as_json)
-
-	//	log.Printf("atomic update of task %s success", task_id)
 	return &task, nil
 }

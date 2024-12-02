@@ -1,4 +1,4 @@
-package kubequeconsume
+package sparklesworker
 
 import (
 	"fmt"
@@ -43,7 +43,7 @@ func spawnExecuteTasks(t *testing.T, projectID string, jobID string, index int, 
 			return "0", nil
 		}
 		cluster := "c"
-		err := ConsumerRunLoop(ctx, client, cluster, executor, &MockTimeout{}, options)
+		err := ConsumerRunLoop(ctx, client, cluster, executor, options)
 		if err != nil {
 			log.Printf("consumerRunLoop returned error: %v\n", err)
 		}

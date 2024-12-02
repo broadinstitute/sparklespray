@@ -1,4 +1,4 @@
-package kubequeconsume
+package sparklesworker
 
 import (
 	"crypto/tls"
@@ -21,7 +21,7 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/reflection"
 
-	"github.com/broadinstitute/kubequeconsume/pb"
+	"github.com/broadinstitute/sparklesworker/pb"
 )
 
 type Monitor struct {

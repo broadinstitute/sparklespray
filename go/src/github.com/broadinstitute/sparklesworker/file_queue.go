@@ -1,4 +1,4 @@
-package kubequeconsume
+package sparklesworker
 
 import (
 	"encoding/json"

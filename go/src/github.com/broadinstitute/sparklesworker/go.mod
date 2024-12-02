@@ -1,4 +1,4 @@
-module github.com/broadinstitute/kubequeconsume
+module github.com/broadinstitute/sparklesworker
 
 go 1.19
 

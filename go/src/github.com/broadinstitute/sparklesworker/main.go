@@ -1,4 +1,4 @@
-package kubequeconsume
+package sparklesworker
 
 import (
 	"crypto/tls"
@@ -14,7 +14,6 @@ import (
 	"golang.org/x/oauth2/google"
 
 	"github.com/urfave/cli"
-	compute "google.golang.org/api/compute/v1"
 	"google.golang.org/api/option"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -22,8 +21,8 @@ import (
 
 func Main() {
 	app := cli.NewApp()
-	app.Name = "kubequeconsume"
-	app.Version = "4.0.2"
+	app.Name = "sparklesworker"
+	app.Version = "5.0.0"
 	app.Compiled = time.Now()
 	app.Authors = []cli.Author{
 		cli.Author{
@@ -40,11 +39,10 @@ func Main() {
 				cli.StringFlag{Name: "cluster"},
 				cli.StringFlag{Name: "tasksDir"},
 				cli.StringFlag{Name: "tasksFile"},
-				cli.StringFlag{Name: "zones"},
 				cli.StringFlag{Name: "port"},
-				cli.IntFlag{Name: "timeout", Value: 5}, // 5 minutes means the process will be killed after 10 minutes
-				cli.IntFlag{Name: "restimeout",
-					Value: 10}},
+				cli.IntFlag{Name: "timeout", Value: 5}, // watchdog timeout: 5 minutes means the process will be killed after 10 minutes if the main loop doesn't check in
+				cli.IntFlag{Name: "shutdownAfter", Value: 30},
+			},
 			Action: consume}}
 
 	app.Run(os.Args)
@@ -104,8 +102,7 @@ func consume(c *cli.Context) error {
 	tasksDir := c.String("tasksDir")
 	tasksFile := c.String("tasksFile")
 	port := c.String("port")
-	zones := strings.Split(c.String("zones"), ",")
-	ReservationTimeout := time.Duration(c.Int("restimeout")) * time.Minute
+	shutdownAfter := c.Int("shutdownAfter")
 	watchdogTimeout := time.Duration(c.Int("timeout")) * time.Minute
 
 	EnableWatchdog(watchdogTimeout)
@@ -164,29 +161,17 @@ func consume(c *cli.Context) error {
 	monitor := NewMonitor()
 
 	options := &Options{
-		ClaimTimeout:      30 * time.Second, // how long do we keep trying if we get an error claiming a task
-		InitialClaimRetry: 1 * time.Second,  // if we get an error claiming, how long until we try again?
-		SleepOnEmpty:      1 * time.Second,  // how often to poll the queue if is empty
-		Owner:             owner}
+		ClaimTimeout:       30 * time.Second,            // how long do we keep trying if we get an error claiming a task
+		InitialClaimRetry:  1 * time.Second,             // if we get an error claiming, how long until we try again?
+		SleepOnEmpty:       1 * time.Second,             // how often to poll the queue if is empty
+		MaxWaitForNewTasks: shutdownAfter * time.Second, // how long to wait for a new task to arrive if the queue is empty
+		Owner:              owner}
 
 	executor := func(taskId string, taskParam string) (string, error) {
 		return ExecuteTaskFromUrl(ioc, taskId, taskParam, cacheDir, tasksDir, monitor)
 	}
 
-	Timeout := 1 * time.Second
-	ReservationSize := 1
-
-	service, err := compute.New(httpclient)
-	if err != nil {
-		log.Printf("Could not create compute service: %v", err)
-		return err
-	}
-
-	timeout := NewClusterTimeout(service, cluster, zones, projectID, owner, Timeout,
-		ReservationSize, ReservationTimeout)
-
-	var sleepUntilNotify func(sleepTime time.Duration)
-	sleepUntilNotify = func(sleepTime time.Duration) {
+	sleepUntilNotify := func(sleepTime time.Duration) {
 		log.Printf("Going to sleep (max: %d milliseconds)", sleepTime/time.Millisecond)
 		time.Sleep(sleepTime)
 	}
@@ -227,7 +212,7 @@ func consume(c *cli.Context) error {
 		return err
 	}
 
-	err = ConsumerRunLoop(ctx, queue, sleepUntilNotify, executor, timeout, options.SleepOnEmpty)
+	err = ConsumerRunLoop(ctx, queue, sleepUntilNotify, executor, options.SleepOnEmpty, options.MaxWaitForNewTasks)
 	if err != nil {
 		log.Printf("consumerRunLoop exited with: %v\n", err)
 		return err
