@@ -25,22 +25,22 @@ jobs:
         go-version: 1.19
 
     - name: Build everything
-      run: cd go/src/github.com/broadinstitute/kubequeconsume && go build -v ./...
+      run: cd go/src/github.com/broadinstitute/sparklesworker && go build -v ./...
 
     - name: build executable
       run: bash scripts/build-static-exe.sh
 
     - name: print md5sum 
-      run: md5sum cli/sparklespray/bin/kubequeconsume && ls -s cli/sparklespray/bin/kubequeconsume
+      run: md5sum cli/sparklespray/bin/sparklesworker && ls -s cli/sparklespray/bin/sparklesworker
       
     - name: Upload executable
       uses: actions/upload-artifact@v3
       with:
-        name: kubequeconsume-exe-${{ github.run_number }}
-        path: cli/sparklespray/bin/kubequeconsume
+        name: sparklesworker-exe-${{ github.run_number }}
+        path: cli/sparklespray/bin/sparklesworker
         retention-days: 5
 #    - name: Test
-#      run: cd go/src/github.com/broadinstitute/kubequeconsume && go test -v ./...
+#      run: cd go/src/github.com/broadinstitute/sparklesworker && go test -v ./...
 
           
   test-python:
@@ -109,10 +109,10 @@ jobs:
       - name: Download executable
         uses: actions/download-artifact@v3
         with:
-          name: kubequeconsume-exe-${{ github.run_number }}
+          name: sparklesworker-exe-${{ github.run_number }}
           path: cli/sparklespray/bin
       - name: print md5sum 
-        run: md5sum cli/sparklespray/bin/kubequeconsume && ls -s cli/sparklespray/bin/kubequeconsume
+        run: md5sum cli/sparklespray/bin/sparklesworker && ls -s cli/sparklespray/bin/sparklesworker
       - name: get package version
         run: (echo -n 'package_version=' && poetry version -s) >> "$GITHUB_ENV"
         working-directory: cli
