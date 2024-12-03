@@ -46,6 +46,11 @@ func Main() {
 				cli.IntFlag{Name: "shutdownAfter", Value: 30},
 			},
 			Action: consume},
+		cli.Command{Name: "copyexe",
+			Flags: []cli.Flag{
+				cli.StringFlag{Name: "dst"},
+			},
+			Action: copyexe},
 		cli.Command{
 			Name: "fetch",
 			Flags: []cli.Flag{
@@ -60,6 +65,39 @@ func Main() {
 
 func clientWithCerts(ctx context.Context, scope ...string) (*http.Client, error) {
 	return google.DefaultClient(ctx, scope...)
+}
+
+func copyexe(c *cli.Context) error {
+	dst := c.String("dst")
+	executablePath, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("couldn't get path to executable: %s", err)
+	}
+
+	log.Printf("Installing (copying %s to %s)", executablePath, dst)
+
+	reader, err := os.Open(executablePath)
+	if err != nil {
+		return fmt.Errorf("could open %s for reading: %s", executablePath, err)
+	}
+	defer reader.Close()
+
+	// create executable file
+	writer, err := os.OpenFile(dst, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0777)
+
+	if err != nil {
+		return fmt.Errorf("could open %s for writing: %s", dst, err)
+	}
+	defer writer.Close()
+
+	_, err = io.Copy(writer, reader)
+	if err != nil {
+		return fmt.Errorf("failed copying %s to %s writing: %s", executablePath, dst, err)
+	}
+
+	log.Printf("Installing (copying %s to %s)", executablePath, dst)
+
+	return nil
 }
 
 func fetch(c *cli.Context) error {

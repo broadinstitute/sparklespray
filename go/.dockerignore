@@ -1,0 +1,5 @@
+.caches/
+src/github.com/broadinstitute/sparklesworker/.caches/
+*~
+.*
+Dockerfile
