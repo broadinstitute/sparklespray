@@ -14,6 +14,7 @@ machine_type=n1-standard-2
 zones=us-central1-b
 region=us-central1
 account=apple
+sparklesworker_image=invalid-sparklesworker-name
 """
     )
 
@@ -43,6 +44,8 @@ zones=us-central1-b
 region=us-central1
 account=apple
 extra_arg=yes
+sparklesworker_image=invalid-sparklesworker-name
+
 """
     )
 

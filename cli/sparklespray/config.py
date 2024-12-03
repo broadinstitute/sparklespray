@@ -51,7 +51,8 @@ class PrepConfig:
     machine_type: Optional[str] = None
     cas_url_prefix: Optional[str] = None
     default_url_prefix: Optional[str] = None
-    kubequeconsume_exe_path: Optional[str] = None
+    sparklesworker_exe_path: Optional[str] = None
+    sparklesworker_image: Optional[str] = None
     project: Optional[str] = None
     zones: Optional[List[str]] = None
     region: Optional[str] = None
@@ -75,7 +76,8 @@ class Config:
     machine_type: str
     cas_url_prefix: str
     default_url_prefix: str
-    kubequeconsume_exe_path: str
+    sparklesworker_exe_path: str
+    sparklesworker_image: str
     project: str
     zones: List[str]
     region: str
@@ -249,9 +251,10 @@ def load_config(
             f"Missing the following required parameters in {config_file}: {', '.join(missing_values)}"
         )
 
-    config.kubequeconsume_exe_path = consume(
-        "kubequeconsume_exe_path",
-        os.path.join(os.path.dirname(__file__), "bin/kubequeconsume"),
+    config.sparklesworker_image = consume("sparklesworker_image")
+    config.sparklesworker_exe_path = consume(
+        "sparklesworker_exe_path",
+        os.path.join(os.path.dirname(__file__), "bin/sparklesworker"),
     )
     assert config.default_url_prefix is not None
     config.cas_url_prefix = consume(
@@ -292,7 +295,7 @@ def load_config(
     #            "machine_type",
     #            "cas_url_prefix",
     #            "default_url_prefix",
-    #            "kubequeconsume_exe_path",
+    #            "sparklesworker_exe_path",
     #            "project",
     #            "zones",
     #            "region",

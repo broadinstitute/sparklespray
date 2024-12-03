@@ -240,8 +240,8 @@ def submit(
 #        cluster.ensure_named_volumes_exist(config.zones[0], config.mounts)
 
         job = create_job_spec(config.work_root_dir, 
-                              config.kubequeconsume_url, 
-                              config.kubequeconsume_md5, 
+                              config.sparklesworker_url, 
+                              config.sparklesworker_md5, 
                               config.image, 
                               cluster_name, 
                               config.project, 
@@ -570,18 +570,18 @@ def submit_cmd(jq: JobQueue, io: IO,  datastore_client,
         exclude_patterns=args.exclude_wildcards,
     )
 
-    assert os.path.exists(config.kubequeconsume_exe_path), (
-        f"Could not find {config.kubequeconsume_exe_path}. This most commonly happens when one doesn't "
+    assert os.path.exists(config.sparklesworker_exe_path), (
+        f"Could not find {config.sparklesworker_exe_path}. This most commonly happens when one doesn't "
         "install from the packaged releases at https://github.com/broadinstitute/sparklespray/releases"
     )
-    kubequeconsume_exe_path = config.kubequeconsume_exe_path
-    kubequeconsume_exe_obj_path = upload_map.add(
+    sparklesworker_exe_path = config.sparklesworker_exe_path
+    sparklesworker_exe_obj_path = upload_map.add(
         hash_db.get_sha256,
         cas_url_prefix,
-        kubequeconsume_exe_path,
+        sparklesworker_exe_path,
         is_public=True,
     )
-    kubequeconsume_exe_md5 = hash_db.get_md5(kubequeconsume_exe_path)
+    sparklesworker_exe_md5 = hash_db.get_md5(sparklesworker_exe_path)
     hash_db.persist()
 
     log.debug("upload_map = %s", upload_map)
@@ -609,8 +609,8 @@ def submit_cmd(jq: JobQueue, io: IO,  datastore_client,
     log.debug("spec: %s", json.dumps(spec, indent=2))
 
     # now that the executable is uploaded, we should be able to get a signed url for it
-    kubequeconsume_exe_url = io.generate_signed_url(kubequeconsume_exe_obj_path)
-    log.info("kubeconsume at %s", kubequeconsume_exe_url)
+    sparklesworker_exe_url = io.generate_signed_url(sparklesworker_exe_obj_path)
+    log.info("kubeconsume at %s", sparklesworker_exe_url)
 
     max_preemptable_attempts_scale = config.max_preemptable_attempts_scale
 
@@ -626,8 +626,8 @@ def submit_cmd(jq: JobQueue, io: IO,  datastore_client,
         zones=config.zones,
         work_root_dir=config.work_root_dir,
         mounts=mount_,
-        kubequeconsume_url=kubequeconsume_exe_url,
-        kubequeconsume_md5=kubequeconsume_exe_md5,
+        sparklesworker_url=sparklesworker_exe_url,
+        sparklesworker_md5=sparklesworker_exe_md5,
         target_node_count=target_node_count,
         max_preemptable_attempts_scale=max_preemptable_attempts_scale,
     )

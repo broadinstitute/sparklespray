@@ -51,8 +51,8 @@ class SubmitConfig(BaseModel):
     zones: List[str]
     mounts: List[DiskMountT]
     work_root_dir: str
-    kubequeconsume_url: str
-    kubequeconsume_md5: str
+    sparklesworker_url: str
+    sparklesworker_md5: str
     target_node_count: int
     max_preemptable_attempts_scale: int
 
