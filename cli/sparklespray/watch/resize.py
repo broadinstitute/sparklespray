@@ -5,6 +5,7 @@ from .shared import (
     _count_requested_nodes,
 )
 from ..cluster_service import Cluster
+from .runner import StopPolling
 
 class ResizeCluster(PeriodicTask):
     # adjust cluster size
@@ -38,6 +39,9 @@ class ResizeCluster(PeriodicTask):
             # we haven't requested anything, so request something now
             self.cluster.add_nodes(1)
             modified = True
+
+            print("warning: hardcoded single node request")
+            return StopPolling() 
         # print("target_node_count > requested_nodes", target_node_count, requested_nodes)
         # if target_node_count > requested_nodes:
         #     # Is our target higher than what we have now? Then add that many nodes
