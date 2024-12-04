@@ -4,10 +4,10 @@ from google.cloud.batch_v1alpha.services.batch_service import BatchServiceClient
 if __name__ == "__main__":
     w = ClusterAPI(BatchServiceClient())
 
-    project="broad-achilles"
-    location="us-central1"
+    project = "broad-achilles"
+    location = "us-central1"
     cluster_id = "cluster-test"
-    
+
     w.stop_cluster(project, location, cluster_id)
     while True:
         node_reqs = w.get_node_reqs(project, location, cluster_id)
@@ -17,20 +17,25 @@ if __name__ == "__main__":
             print(f"waiting for nodes to disappear: {node_reqs}")
         print("Sleeping...")
         time.sleep(5)
-    
+
     job = JobSpec(
         task_count="1",
-        runnables=[Runnable(image="alpine", command=["ls", "-l", "/"]),
-                   Runnable(image="alpine", command=["df"]),
-                   ],
+        runnables=[
+            Runnable(image="alpine", command=["ls", "-l", "/"]),
+            Runnable(image="alpine", command=["df"]),
+        ],
         machine_type="n4-standard-2",
         preemptible=True,
         locations=["regions/us-central1"],
         network_tags=[],
-        boot_disk=Disk(name="bootdisk", size_gb=40, type="hyperdisk-balanced", mount_path="/"),
-        disks=[Disk(name="data", size_gb=50, type="hyperdisk-balanced", mount_path="/data")],
+        boot_disk=Disk(
+            name="bootdisk", size_gb=40, type="hyperdisk-balanced", mount_path="/"
+        ),
+        disks=[
+            Disk(name="data", size_gb=50, type="hyperdisk-balanced", mount_path="/data")
+        ],
         sparkles_job="job-test",
-        sparkles_cluster=cluster_id
+        sparkles_cluster=cluster_id,
     )
 
     print("creating job")
@@ -45,7 +50,7 @@ if __name__ == "__main__":
     # status = w.create_job(project, location, job)
     # name = status.name
     # printer = EventPrinter()
-    # count = 0 
+    # count = 0
     # while not status.is_done():
     #     count += 1
     #     printer.print_new(status.events)
@@ -55,4 +60,4 @@ if __name__ == "__main__":
     #     #     print("cancelling")
     #     #     w.cancel(name)
     #     status = w.get_job_status(name)
-    # print(status)    
+    # print(status)

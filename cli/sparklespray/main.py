@@ -58,6 +58,7 @@ def main(argv=None):
     from .commands.fetch import add_fetch_cmd
     from .commands.version import add_version_cmd
     from .commands.list import add_list_cmd
+    from .commands.prep_image import add_prep_image_cmd
 
     parse = argparse.ArgumentParser()
 
@@ -89,6 +90,7 @@ def main(argv=None):
     add_kill_cmd(subparser)
     add_fetch_cmd(subparser)
     add_version_cmd(subparser)
+    add_prep_image_cmd(subparser)
 
     args = parse.parse_args(argv)
 
@@ -113,7 +115,12 @@ def main(argv=None):
     else:
         func_param_names = get_func_parameters(args.func)
         try:
-            func_params = create_func_params(args.config, overrides=overrides, extras={"args": args}, requested=func_param_names)
+            func_params = create_func_params(
+                args.config,
+                overrides=overrides,
+                extras={"args": args},
+                requested=func_param_names,
+            )
         except BadConfig as ex:
             print(f"Failure loading config: {ex}")
             return 1

@@ -12,11 +12,15 @@ from ..print_failures import print_failures
 
 from .shared import _summarize_task_statuses
 
+from ..cluster_service import create_cluster
 
-def status_cmd(jq: JobQueue, io: IO, cluster: Cluster, args):
+
+def status_cmd(jq: JobQueue, io: IO, args, config, datastore_client, cluster_api):
     jobids = _get_jobids_from_pattern(jq, args.jobid_pattern)
 
     for jobid in jobids:
+        cluster = create_cluster(config, jq, datastore_client, cluster_api, jobid)
+
         # if args.detailed or args.failures:
         #     for task in jq.get_tasks(jobid):
         #         if args.failures and task.status != STATUS_FAILED:

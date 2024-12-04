@@ -33,7 +33,7 @@ def _test_datastore_api(job_store: JobStore, job_id: str):
 def validate_cmd(jq: JobQueue, io: IO, cluster: Cluster, config: Config):
     print(f"Validating config, using sparklespray {sparklespray.__version__}")
 
-    service_acct = config.credentials.service_account_email # pyright: ignore
+    service_acct = config.credentials.service_account_email  # pyright: ignore
     print("Printing config:")
     pprint.pprint(config)
     project_id = config.project

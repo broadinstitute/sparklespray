@@ -7,13 +7,14 @@ from .shared import (
 from ..cluster_service import Cluster
 from .runner import StopPolling
 
+
 class ResizeCluster(PeriodicTask):
     # adjust cluster size
     # Given a (target size, a restart-preempt budget, current number of outstanding operations, current number of pending tasks)
     # decide whether to add more add_node operations or remove add_node operations.
     def __init__(
         self,
-        cluster : Cluster, 
+        cluster: Cluster,
         target_node_count: int,
         max_preemptable_attempts: int,
         seconds_between_modifications: int = 60,
@@ -31,9 +32,7 @@ class ResizeCluster(PeriodicTask):
             self.target_node_count, _count_incomplete_tasks(state.get_tasks())
         )
 
-        requested_nodes = _count_requested_nodes(
-            state.get_nodes()
-        )  
+        requested_nodes = _count_requested_nodes(state.get_nodes())
 
         if requested_nodes == 0:
             # we haven't requested anything, so request something now
@@ -41,7 +40,7 @@ class ResizeCluster(PeriodicTask):
             modified = True
 
             print("warning: hardcoded single node request")
-            return StopPolling() 
+            return None
         # print("target_node_count > requested_nodes", target_node_count, requested_nodes)
         # if target_node_count > requested_nodes:
         #     # Is our target higher than what we have now? Then add that many nodes
@@ -70,7 +69,7 @@ class ResizeCluster(PeriodicTask):
         #     # We have requested too many. Start cancelling
         #     needs_cancel = requested_nodes - target_node_count
         #     if needs_cancel > 0:
-        #         # FIXME: I'm pretty sure the next line doesn't work... 
+        #         # FIXME: I'm pretty sure the next line doesn't work...
         #         self.cluster_mod.cancel_nodes(state, needs_cancel)
         #         modified = True
 
@@ -78,4 +77,3 @@ class ResizeCluster(PeriodicTask):
             self.last_modification = state.get_time()
 
         return NextPoll(self.seconds_between_modifications)
-

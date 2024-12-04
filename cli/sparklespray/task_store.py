@@ -17,10 +17,13 @@ INCOMPLETE_TASK_STATES = set([STATUS_CLAIMED, STATUS_PENDING])
 
 TASK_COLLECTION = "SparklesV5Task"
 
+
 def is_terminal_status(status):
     return status not in INCOMPLETE_TASK_STATES
 
+
 # INCOMPLETE_TASK_STATES = set([STATUS_CLAIMED, STATUS_PENDING])
+
 
 @dataclass
 class TaskHistory:

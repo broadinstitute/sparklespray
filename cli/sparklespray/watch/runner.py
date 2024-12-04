@@ -24,9 +24,7 @@ def run_tasks(
         heapq.heappush(timeline, ScheduledTask(now, task))
 
     get_tasks = RateLimitedCall(lambda: cluster.task_store.get_tasks(job_id), 1)
-    get_nodes = RateLimitedCall(
-        lambda: cluster.get_node_reqs(), 1
-    )
+    get_nodes = RateLimitedCall(lambda: cluster.get_node_reqs(), 1)
 
     while True:
         now = time.time()

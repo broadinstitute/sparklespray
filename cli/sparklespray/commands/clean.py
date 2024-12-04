@@ -9,7 +9,7 @@ from .shared import _get_jobids_from_pattern
 
 
 def clean(
-            cluster : Cluster,
+    cluster: Cluster,
     jq: JobQueue,
     job_id: str,
     force: bool = False,

@@ -17,8 +17,10 @@ FINAL_NODE_STATES = set([NODE_REQ_FAILED, NODE_REQ_COMPLETE])
 NODE_REQ_CLASS_PREEMPTIVE = "preemptable"
 NODE_REQ_CLASS_NORMAL = "normal"
 
+
 def is_terminal_state(status: str):
     return status in FINAL_NODE_STATES
+
 
 @dataclass
 class NodeReq:
@@ -62,4 +64,3 @@ def entity_to_node_req(entity: datastore.Entity) -> NodeReq:
         job_id=entity["job_id"],
         instance_name=entity["instance_name"],
     )
-

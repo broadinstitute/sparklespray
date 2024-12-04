@@ -12,7 +12,6 @@ class NodesCompleted:
     zero_processed_count: int  # number of nodes which completed _and_ had not processed any tasks
 
 
-
 class StartupFailureMonitor(PeriodicTask):
     "Are nodes failing to start?"
 

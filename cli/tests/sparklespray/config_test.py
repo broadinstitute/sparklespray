@@ -19,7 +19,9 @@ sparklesworker_image=invalid-sparklesworker-name
     )
 
     config = load_config(
-        config_file=str(config_file), overrides={}, gcloud_config_file=str(tmpdir.join("invalid"))
+        config_file=str(config_file),
+        overrides={},
+        gcloud_config_file=str(tmpdir.join("invalid")),
     )
 
     assert config.default_url_prefix == "gs://bananas/1000"
@@ -51,7 +53,9 @@ sparklesworker_image=invalid-sparklesworker-name
 
     with pytest.raises(UnknownParameters):
         load_config(
-            config_file=str(config_file), overrides={}, gcloud_config_file=str(tmpdir.join("invalid"))
+            config_file=str(config_file),
+            overrides={},
+            gcloud_config_file=str(tmpdir.join("invalid")),
         )
 
 
@@ -69,5 +73,7 @@ region=us-central1
 
     with pytest.raises(MissingRequired):
         load_config(
-            config_file=str(config_file), overrides={}, gcloud_config_file=str(tmpdir.join("invalid"))
+            config_file=str(config_file),
+            overrides={},
+            gcloud_config_file=str(tmpdir.join("invalid")),
         )

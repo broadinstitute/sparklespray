@@ -34,10 +34,19 @@ def add_watch_cmd(subparser):
         dest="loglive",
     )
 
+
 from ..batch_api import ClusterAPI
 from ..cluster_service import create_cluster
 
-def watch_cmd(jq: JobQueue, io: IO, config: Config, args, cluster_api: ClusterAPI, datastore_client):
+
+def watch_cmd(
+    jq: JobQueue,
+    io: IO,
+    config: Config,
+    args,
+    cluster_api: ClusterAPI,
+    datastore_client,
+):
     job_id = _resolve_jobid(jq, args.jobid)
     if args.verify:
         check_completion(jq, io, job_id)
@@ -93,8 +102,10 @@ def watch(
 
     tasks = [
         CompletionMonitor(),
-        ResizeCluster(cluster, 
-             target_nodes, max_preemptable_attempts, 
+        ResizeCluster(
+            cluster,
+            target_nodes,
+            max_preemptable_attempts,
         ),
         StreamLogs(loglive, cluster, io),
         PrintStatus(initial_poll_delay, max_poll_delay),

@@ -101,7 +101,7 @@ class Config:
             work_root_dir=self.work_root_dir,
             machine_type=self.machine_type,
         )
-    
+
     @property
     def location(self):
         print("Warning: hardcoded location")
@@ -370,40 +370,55 @@ def create_func_params(
         service_account_key, scopes=SCOPES
     )
 
-    params = dict(create_services_from_config(config, set(requested).difference(extras.keys())))
+    params = dict(
+        create_services_from_config(config, set(requested).difference(extras.keys()))
+    )
     for name, value in extras.items():
         if name in requested:
             params[name] = value
     return params
 
+
 class LazyInit:
     def __init__(self, **constructors):
         self.constructors = constructors
         self.initialized = {}
-    
+
     def get(self, name):
         if name not in self.initialized:
             value = self.constructors[name](self)
-            self.initialized[name] =value
+            self.initialized[name] = value
         return self.initialized[name]
+
 
 from .batch_api import ClusterAPI
 from google.cloud.batch_v1alpha.services.batch_service import BatchServiceClient
 
-def create_services_from_config(config: Config, requested : List[str]):
+
+def create_services_from_config(config: Config, requested: List[str]):
     credentials = config.credentials
     project_id = config.project
 
-    services = LazyInit(jq=lambda services: JobQueue(services.get("datastore_client"), services.get("job_store"), services.get("task_store")),
-                        job_store=lambda services: JobStore(services.get("datastore_client")),
-                        task_store=lambda services: TaskStore(services.get("datastore_client")),
-                        datastore_client=lambda services: datastore.Client(project_id, credentials=credentials),
-                        io=lambda services: IO(project_id, config.cas_url_prefix, credentials),
-                        batch_service_client=lambda services: BatchServiceClient(credentials=credentials),
-                        cluster_api= lambda services:  ClusterAPI(services.get("batch_service_client"))
-                        )
+    services = LazyInit(
+        jq=lambda services: JobQueue(
+            services.get("datastore_client"),
+            services.get("job_store"),
+            services.get("task_store"),
+        ),
+        job_store=lambda services: JobStore(services.get("datastore_client")),
+        task_store=lambda services: TaskStore(services.get("datastore_client")),
+        datastore_client=lambda services: datastore.Client(
+            project_id, credentials=credentials
+        ),
+        io=lambda services: IO(project_id, config.cas_url_prefix, credentials),
+        batch_service_client=lambda services: BatchServiceClient(
+            credentials=credentials
+        ),
+        cluster_api=lambda services: ClusterAPI(services.get("batch_service_client")),
+    )
 
     return dict([(name, services.get(name)) for name in requested])
+
 
 def get_config_path(config_path):
     if config_path is not None:

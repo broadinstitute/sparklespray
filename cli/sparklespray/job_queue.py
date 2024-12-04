@@ -155,7 +155,7 @@ class JobQueue:
         self,
         job_id,
         args,
-        sparkles_job_spec : str,
+        sparkles_job_spec: str,
         metadata: Dict[str, str],
         cluster,
         target_node_count,
@@ -187,7 +187,9 @@ class JobQueue:
 
         job = Job(
             job_id=job_id,
-            tasks=[t.task_id for t in tasks], # we could just store the information needed to construct these task IDs
+            tasks=[
+                t.task_id for t in tasks
+            ],  # we could just store the information needed to construct these task IDs
             kube_job_spec=sparkles_job_spec,
             metadata=metadata,
             cluster=cluster,

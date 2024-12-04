@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -21,7 +22,7 @@ import (
 	"google.golang.org/api/option"
 )
 
-func Main() {
+func Main() error {
 	app := cli.NewApp()
 	app.Name = "sparklesworker"
 	app.Version = "5.0.0"
@@ -60,7 +61,7 @@ func Main() {
 			},
 			Action: fetch}}
 
-	app.Run(os.Args)
+	return app.Run(os.Args)
 }
 
 func clientWithCerts(ctx context.Context, scope ...string) (*http.Client, error) {
@@ -75,6 +76,10 @@ func copyexe(c *cli.Context) error {
 	}
 
 	log.Printf("Installing (copying %s to %s)", executablePath, dst)
+
+	parentDir := path.Dir(dst)
+	// create parent dir if it doesn't already exist
+	os.MkdirAll(parentDir, 0777)
 
 	reader, err := os.Open(executablePath)
 	if err != nil {
@@ -95,7 +100,7 @@ func copyexe(c *cli.Context) error {
 		return fmt.Errorf("failed copying %s to %s writing: %s", executablePath, dst, err)
 	}
 
-	log.Printf("Installing (copying %s to %s)", executablePath, dst)
+	log.Printf("Installed", executablePath, dst)
 
 	return nil
 }
@@ -278,12 +283,13 @@ func consume(c *cli.Context) error {
 		time.Sleep(sleepTime)
 	}
 
-	httpClient, err := clientWithCerts(ctx, "https://www.googleapis.com/auth/compute.readonly")
-	if err != nil {
-		log.Printf("Could not create default client: %v", err)
-		return err
-	}
-	client, err := datastore.NewClient(ctx, projectID, option.WithHTTPClient(httpClient))
+	log.Printf("Creating data store client")
+	// httpClient, err := clientWithCerts(ctx, "https://www.googleapis.com/auth/compute.readonly")
+	// if err != nil {
+	// 	log.Printf("Could not create default client: %v", err)
+	// 	return err
+	// }
+	client, err := datastore.NewClient(ctx, projectID)
 	if err != nil {
 		log.Printf("Creating datastore client failed: %v", err)
 		return err

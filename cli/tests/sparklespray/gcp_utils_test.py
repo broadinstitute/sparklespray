@@ -16,20 +16,19 @@ def _create_pipeline_spec(machine_specs):
         monitor_port=6000,
     )
 
+
 import pytest
+
 
 def test_pd_standard():
     pytest.skip("Lots of refactoring -- need to fix this")
-    
+
     machine_specs = MachineSpec(
         service_account_email="test@sample.com",
         boot_volume_in_gb=100,
-        mounts=[
-            PersistentDiskMount(path="/d1", size_in_gb=200, type="pd-standard")
-        ],
+        mounts=[PersistentDiskMount(path="/d1", size_in_gb=200, type="pd-standard")],
         work_root_dir="/mnt",
         machine_type="machinetype",
-
     )
 
     pipeline_spec = _create_pipeline_spec(machine_specs)
@@ -39,13 +38,16 @@ def test_pd_standard():
     for action in pipeline_spec["pipeline"]["actions"]:
         assert action["mounts"] == expected_mounts
 
-    assert pipeline_spec["pipeline"]["resources"]["virtualMachine"]['disks'] == [{'type': 'pd-standard', 'sizeGb': 200, 'name': 'disk0'}]
+    assert pipeline_spec["pipeline"]["resources"]["virtualMachine"]["disks"] == [
+        {"type": "pd-standard", "sizeGb": 200, "name": "disk0"}
+    ]
     # assert "disks" not in pipeline_spec["pipeline"]["resources"]["virtualMachine"]
     # assert (
     #     pipeline_spec["pipeline"]["resources"]["virtualMachine"]["volumes"]
     #     == excepted_volumes
     # )
     assert "volumes" not in pipeline_spec
+
 
 # def test_existing_mount():
 #     machine_specs = MachineSpec(

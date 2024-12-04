@@ -1,15 +1,12 @@
 from ..job_queue import JobQueue
 from ..log import log
-from ..task_store import (
-    STATUS_PENDING,
-    STATUS_KILLED,
-    STATUS_CLAIMED
-)
+from ..task_store import STATUS_PENDING, STATUS_KILLED, STATUS_CLAIMED
 from .. import txtui
 from .shared import _get_jobids_from_pattern
 from ..cluster_service import Cluster, create_cluster
 
-def kill_cmd(jq: JobQueue,  args, config, datastore_client, cluster_api):
+
+def kill_cmd(jq: JobQueue, args, config, datastore_client, cluster_api):
     job_ids = _get_jobids_from_pattern(jq, args.jobid_pattern)
     if len(job_ids) == 0:
         log.warning("No jobs found matching pattern")
@@ -28,7 +25,6 @@ def kill_cmd(jq: JobQueue,  args, config, datastore_client, cluster_api):
         txtui.user_print("Marking {} pending tasks as killed".format(len(tasks)))
         for task in tasks:
             jq.reset_task(task.task_id, status=STATUS_KILLED)
-
 
 
 #     tasks = jq.get_tasks_for_cluster(job.cluster, STATUS_CLAIMED)

@@ -25,6 +25,45 @@ class Timeout(CommunicationError):
     pass
 
 
+# import time
+# import select
+# def read_with_timeout(fd, n, timeout):
+#     result = bytearray()
+#     end_time = time.monotonic() + timeout
+
+#     while len(result) < n:
+#         remaining = end_time - time.monotonic()
+#         if remaining <= 0:
+#             raise TimeoutError(f"Timeout while reading {n} bytes, got {len(result)}")
+
+#         ready, _, _ = select.select([fd], [], [], remaining)
+#         if not ready:
+#             raise TimeoutError(f"Timeout while reading {n} bytes, got {len(result)}")
+
+#         chunk = fd.read(n - len(result))
+#         if not chunk:
+#             raise EOFError(f"Pipe closed after reading {len(result)} bytes")
+
+#         result.extend(chunk)
+
+#     return bytes(result)
+
+# import struct
+
+# def write_framed_message(fd, message_bytes : bytes):
+#     fd.write(struct.pack("I", len(message_bytes))
+# def read_framed_message():
+
+
+# def read_with_timeout
+# import select
+# r, w, e = select.select([ f ], [], [], 0)
+# if f in r:
+#   print os.read(f.fileno(), 50)
+# else:
+#   print "nothing available!"  # or just ignore that case
+# os.read(f.fileno(), 50)
+
 # this is ridiculously complicated but it seems like the timeout option on grpc isn't reliable. So instead, make the call on a different thread
 # so as worst, we can leak the hanging thread and signal the main thread with an exception.
 class WrappedStub:

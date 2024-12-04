@@ -81,7 +81,7 @@ class IO:
         result = dict(pool.map(check, paths))
         return result
 
-    def _get_bucket_and_path(self, path : str):
+    def _get_bucket_and_path(self, path: str):
         m = re.match("^gs://([^/]+)/(.*)$", path)
         assert m != None, "invalid remote path: {}".format(path)
         bucket_name = m.group(1)

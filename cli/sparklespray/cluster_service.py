@@ -14,6 +14,7 @@ from .node_req_store import (
     REQUESTED_NODE_STATES,
     FINAL_NODE_STATES,
 )
+
 # from .node_service import NodeService, MachineSpec
 from .job_store import JobStore
 from .task_store import TaskStore
@@ -36,8 +37,10 @@ def _unique_id():
 
     return str(uuid.uuid4())
 
+
 from .batch_api import ClusterAPI, JobSpec
 from dataclasses import dataclass
+
 
 @dataclass
 class MinConfig:
@@ -46,10 +49,12 @@ class MinConfig:
     zones: List[str]
     debug_log_prefix: str
 
-def create_cluster(config : MinConfig, jq, datastore_client, cluster_api, job_id):
+
+def create_cluster(config: MinConfig, jq, datastore_client, cluster_api, job_id):
     job = jq.get_job(job_id)
 
-    return Cluster(config.project,
+    return Cluster(
+        config.project,
         config.location,
         job.cluster,
         job_id,
@@ -58,7 +63,9 @@ def create_cluster(config : MinConfig, jq, datastore_client, cluster_api, job_id
         jq.task_storage,
         datastore_client,
         cluster_api,
-        config.debug_log_prefix)
+        config.debug_log_prefix,
+    )
+
 
 class Cluster:
     def __init__(
@@ -71,7 +78,7 @@ class Cluster:
         job_store: JobStore,
         task_store: TaskStore,
         client: datastore.Client,
-        cluster_api : ClusterAPI,
+        cluster_api: ClusterAPI,
         debug_log_prefix: str,
     ) -> None:
         self.project = project
@@ -93,9 +100,13 @@ class Cluster:
         return self._cluster_id
 
     def get_node_reqs(self):
-        return self.cluster_api.get_node_reqs(self.project, self.location, self.cluster_id)
+        return self.cluster_api.get_node_reqs(
+            self.project, self.location, self.cluster_id
+        )
 
-    def add_nodes(self, count : int ): #job_id: str, preemptible: bool, debug_log_url: str):
+    def add_nodes(
+        self, count: int
+    ):  # job_id: str, preemptible: bool, debug_log_url: str):
         job = self.job_store.get_job(self.job_id)
 
         job_spec = JobSpec.model_validate_json(job.kube_job_spec)
@@ -104,7 +115,9 @@ class Cluster:
         return self.cluster_api.create_job(self.project, self.location, job_spec)
 
     def has_active_node_requests(self):
-        node_reqs = self.cluster_api.get_node_reqs(self.project, self.location, self.cluster_id)
+        node_reqs = self.cluster_api.get_node_reqs(
+            self.project, self.location, self.cluster_id
+        )
         for node_req in node_reqs:
             if node_req.status in REQUESTED_NODE_STATES:
                 return True
@@ -163,7 +176,6 @@ class Cluster:
         #     for instance in instances:
         #         zone = instance["zone"].split("/")[-1]
         #         self.wait_for_instance_status(zone, instance["name"], "TERMINATED")
-
 
 
 class CachingCaller:

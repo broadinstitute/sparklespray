@@ -45,4 +45,3 @@ class DirCache(Cache):
         tmp_fd.write(content)
         tmp_fd.close()
         os.rename(tmp_fd.name, fn)
-

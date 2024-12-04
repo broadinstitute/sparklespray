@@ -1,7 +1,14 @@
 package main
 
-import "github.com/broadinstitute/sparklesworker"
+import (
+	"log"
+
+	"github.com/broadinstitute/sparklesworker"
+)
 
 func main() {
-	sparklesworker.Main()
+	err := sparklesworker.Main()
+	if err != nil {
+		log.Fatalf("Error: %s", err)
+	}
 }

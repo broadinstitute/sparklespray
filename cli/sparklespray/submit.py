@@ -15,7 +15,6 @@ from .commands.clean import clean
 from .commands.watch import watch
 from .config import Config
 from .csv_utils import read_csv_as_dicts
-from .gcp_utils import create_pipeline_spec
 from .hasher import CachingHashFunction
 from .io_helper import IO
 from .job_queue import JobQueue
@@ -23,6 +22,7 @@ from .log import log
 from .model import LOCAL_SSD, MachineSpec, PersistentDiskMount, SubmitConfig
 from .spec import SrcDstPair, make_spec_from_command
 from .util import get_timestamp, random_string, url_join
+
 
 class ExistingJobException(Exception):
     pass
@@ -158,6 +158,7 @@ def _make_cluster_name(
 
 from .cluster_service import create_cluster
 
+
 def submit(
     jq: JobQueue,
     io: IO,
@@ -237,15 +238,18 @@ def submit(
             assert (
                 len(config.zones) == 1
             ), "Cannot create jobs in multiple zones if you are mounting PD volumes"
-#        cluster.ensure_named_volumes_exist(config.zones[0], config.mounts)
+        #        cluster.ensure_named_volumes_exist(config.zones[0], config.mounts)
 
-        job = create_job_spec(config.work_root_dir, 
-                              config.sparklesworker_url, 
-                              config.sparklesworker_md5, 
-                              config.image, 
-                              cluster_name, 
-                              config.project, 
-                              config.monitor_port)
+        job = create_job_spec(
+            job_id,
+            config.sparklesworker_image,
+            config.work_root_dir,
+            config.image,
+            cluster_name,
+            config.project,
+            config.monitor_port,
+            config.service_account_email,
+        )
 
         pipeline_spec = job.model_dump_json()
 
@@ -263,65 +267,76 @@ def submit(
             max_preemptable_attempts,
         )
 
-SETUP_IMAGE = "sequenceiq/alpine-curl"
 
-def create_job_spec(work_root_dir, consume_exe_url, consume_exe_md5, docker_image, cluster_name, project, monitor_port):
-        
+from datetime import datetime
+from .batch_api import JobSpec, Runnable, Disk
+from .gcp_utils import normalize_label, make_unique_label, validate_label
+
+
+def create_job_spec(
+    job_id,
+    sparklesworker_image,
+    work_root_dir,
+    docker_image,
+    cluster_name,
+    project,
+    monitor_port,
+    service_account_email,
+):
+
     consume_exe_path = os.path.join(work_root_dir, "consume")
     consume_data = os.path.join(work_root_dir, "data")
 
-    exe_dir = os.path.dirname(consume_exe_path)
-    checksum_path = os.path.join(exe_dir, "expected-checksums")
-
-    setup_commands = [
-        # download executable
-        ["mkdir", "-p", exe_dir],
-        ["chmod", "a+rwx", exe_dir],
-        ["curl", "-o", consume_exe_path, consume_exe_url],
-        # verify checksum of downloaded file
-        ["sh", "-c", f'echo "{consume_exe_md5}  {consume_exe_path}" > {checksum_path}'],
-        ["md5sum", "-c", checksum_path],
-        # mark file as executable
-        ["chmod", "a+x", consume_exe_path],
-        # set up directory that'll be used by consume exe
-        ["mkdir", "-p", consume_data],
-        ["chmod", "a+rwx", consume_data],
-    ]
-
-
-    from .batch_api import JobSpec, Runnable, Disk
+    validate_label(job_id)
+    timestamp = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
 
     runnables = []
-    for setup_command in setup_commands:
-        runnables.append(Runnable(image=SETUP_IMAGE, command=setup_command))
-
-    runnables.append(Runnable(image=docker_image, command=[
-        consume_exe_path,
-            "consume",
-            "--cacheDir",
-            os.path.join(consume_data, "cache"),
-            "--tasksDir",
-            os.path.join(consume_data, "tasks"),
-            "--cluster",
-            cluster_name,
-            "--projectId",
-            project,
-            "--port",
-            str(monitor_port),
-        
-    ]))
+    runnables.append(
+        Runnable(
+            image=sparklesworker_image, command=["copyexe", "--dst", consume_exe_path]
+        )
+    )
+    runnables.append(
+        Runnable(
+            image=docker_image,
+            command=[
+                consume_exe_path,
+                "consume",
+                "--cacheDir",
+                os.path.join(consume_data, "cache"),
+                "--tasksDir",
+                os.path.join(consume_data, "tasks"),
+                "--cluster",
+                cluster_name,
+                "--projectId",
+                project,
+                "--port",
+                str(monitor_port),
+                "--shutdownAfter",
+                str(60*10) # keep worker around for 10 minutes?
+            ],
+        )
+    )
 
     job = JobSpec(
-    task_count="1",
-    runnables=runnables,
-    machine_type="n4-standard-2",
-    preemptible=True,
-    locations=["regions/us-central1"],
-    network_tags=[],
-    boot_disk=Disk(name="bootdisk", size_gb=40, type="hyperdisk-balanced", mount_path="/"),
-    disks=[Disk(name="data", size_gb=50, type="hyperdisk-balanced", mount_path="/data")],
-    sparkles_job="job-test",
-    sparkles_cluster=cluster_name
+        task_count="1",
+        runnables=runnables,
+        machine_type="n4-standard-2",
+        preemptible=True,
+        locations=["regions/us-central1"],
+        network_tags=["sparklesworker"],
+        monitor_port=monitor_port,
+        boot_disk=Disk(
+            name="bootdisk", size_gb=40, type="hyperdisk-balanced", mount_path="/"
+        ),
+        disks=[
+            Disk(name="data", size_gb=50, type="hyperdisk-balanced", mount_path="/mnt")
+        ],
+        sparkles_job=job_id,
+        sparkles_cluster=cluster_name,
+        sparkles_timestamp=timestamp,
+        service_account_email=service_account_email,
+        scopes=["https://www.googleapis.com/auth/cloud-platform"],
     )
 
     return job
@@ -497,9 +512,9 @@ def add_submit_cmd(subparser):
     parser.add_argument("command", nargs=argparse.REMAINDER)
 
 
-
-def submit_cmd(jq: JobQueue, io: IO,  datastore_client,
-    cluster_api, args: Any, config: Config):
+def submit_cmd(
+    jq: JobQueue, io: IO, datastore_client, cluster_api, args: Any, config: Config
+):
     metadata: Dict[str, str] = {}
 
     if args.image:
@@ -574,15 +589,6 @@ def submit_cmd(jq: JobQueue, io: IO,  datastore_client,
         f"Could not find {config.sparklesworker_exe_path}. This most commonly happens when one doesn't "
         "install from the packaged releases at https://github.com/broadinstitute/sparklespray/releases"
     )
-    sparklesworker_exe_path = config.sparklesworker_exe_path
-    sparklesworker_exe_obj_path = upload_map.add(
-        hash_db.get_sha256,
-        cas_url_prefix,
-        sparklesworker_exe_path,
-        is_public=True,
-    )
-    sparklesworker_exe_md5 = hash_db.get_md5(sparklesworker_exe_path)
-    hash_db.persist()
 
     log.debug("upload_map = %s", upload_map)
 
@@ -608,15 +614,11 @@ def submit_cmd(jq: JobQueue, io: IO,  datastore_client,
 
     log.debug("spec: %s", json.dumps(spec, indent=2))
 
-    # now that the executable is uploaded, we should be able to get a signed url for it
-    sparklesworker_exe_url = io.generate_signed_url(sparklesworker_exe_obj_path)
-    log.info("kubeconsume at %s", sparklesworker_exe_url)
-
     max_preemptable_attempts_scale = config.max_preemptable_attempts_scale
 
     mount_ = config.mounts
     submit_config = SubmitConfig(
-        service_account_email=config.credentials.service_account_email, # pyright: ignore
+        service_account_email=config.credentials.service_account_email,  # pyright: ignore
         boot_volume_in_gb=boot_volume_in_gb,
         default_url_prefix=default_url_prefix,
         machine_type=machine_type,
@@ -626,16 +628,17 @@ def submit_cmd(jq: JobQueue, io: IO,  datastore_client,
         zones=config.zones,
         work_root_dir=config.work_root_dir,
         mounts=mount_,
-        sparklesworker_url=sparklesworker_exe_url,
-        sparklesworker_md5=sparklesworker_exe_md5,
+        sparklesworker_image=config.sparklesworker_image,
         target_node_count=target_node_count,
         max_preemptable_attempts_scale=max_preemptable_attempts_scale,
     )
     assert mount_ == submit_config.mounts
 
     from .cluster_service import MinConfig
+
     print("Warning: hardcoded location")
-    cluster = Cluster(config.project,
+    cluster = Cluster(
+        config.project,
         config.location,
         None,
         job_id,
@@ -644,7 +647,8 @@ def submit_cmd(jq: JobQueue, io: IO,  datastore_client,
         jq.task_storage,
         datastore_client,
         cluster_api,
-        config.debug_log_prefix)
+        config.debug_log_prefix,
+    )
 
     txtui.user_print("Submitting job: {}".format(job_id))
     submit(
@@ -653,8 +657,8 @@ def submit_cmd(jq: JobQueue, io: IO,  datastore_client,
         job_id,
         spec,
         submit_config,
-    datastore_client,
-    cluster,
+        datastore_client,
+        cluster,
         metadata=metadata,
         clean_if_exists=True,
         dry_run=args.dryrun,

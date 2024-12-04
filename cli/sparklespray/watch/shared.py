@@ -53,7 +53,7 @@ def _only_failed_tasks(tasks: List[Task]):
     return [
         task
         for task in tasks
-        if (task.status == STATUS_COMPLETE and str(task.exit_code) != '0')
+        if (task.status == STATUS_COMPLETE and str(task.exit_code) != "0")
     ]
 
 
@@ -61,7 +61,7 @@ def _only_successful_tasks(tasks: List[Task]):
     return [
         task
         for task in tasks
-        if (task.status == STATUS_COMPLETE and str(task.exit_code) == '0')
+        if (task.status == STATUS_COMPLETE and str(task.exit_code) == "0")
     ]
 
 
