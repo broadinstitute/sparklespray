@@ -30,7 +30,7 @@ gcloud auth login
 
 ## Setting up
 
-### Set up a python 3.9 virtual environment
+### Set up a python 3.11 virtual environment
 
 sparkles uses google's services python client libraries, which in turn have a
 fair number of their own dependencies, so it's really best to create virtual
@@ -42,7 +42,7 @@ tested with.
 Create the conda environment and activate it:
 
 ```
-conda create -n sparkles python=3.9
+conda create -n sparkles python=3.11
 conda activate sparkles
 ```
 
