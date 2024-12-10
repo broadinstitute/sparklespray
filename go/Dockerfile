@@ -2,7 +2,7 @@
 FROM golang:1.19 AS builder
 
 WORKDIR /app
-COPY . .
+COPY src src
 WORKDIR /app/src/github.com/broadinstitute/sparklesworker/cli
 # build staticly linked executable
 RUN GCO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "-linkmode 'external' -extldflags '-static'" -o /app/sparklesworker .
