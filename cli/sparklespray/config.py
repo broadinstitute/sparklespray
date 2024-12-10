@@ -104,8 +104,7 @@ class Config:
 
     @property
     def location(self):
-        print("Warning: hardcoded location")
-        return "us-central1"
+        return self.region
 
 
 class NoDefault:
