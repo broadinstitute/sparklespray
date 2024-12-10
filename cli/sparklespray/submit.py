@@ -22,6 +22,10 @@ from .log import log
 from .model import LOCAL_SSD, MachineSpec, PersistentDiskMount, SubmitConfig
 from .spec import SrcDstPair, make_spec_from_command
 from .util import get_timestamp, random_string, url_join
+from datetime import datetime
+from .batch_api import JobSpec, Runnable, Disk
+from .gcp_utils import normalize_label, make_unique_label, validate_label
+from .cluster_service import create_cluster
 
 
 class ExistingJobException(Exception):
@@ -156,7 +160,6 @@ def _make_cluster_name(
         return f"c-{hash.hexdigest()[:20]}"
 
 
-from .cluster_service import create_cluster
 
 
 def submit(
@@ -268,9 +271,6 @@ def submit(
         )
 
 
-from datetime import datetime
-from .batch_api import JobSpec, Runnable, Disk
-from .gcp_utils import normalize_label, make_unique_label, validate_label
 
 
 def create_job_spec(
@@ -290,16 +290,7 @@ def create_job_spec(
     validate_label(job_id)
     timestamp = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
 
-    runnables = []
-    runnables.append(
-        Runnable(
-            image=sparklesworker_image, command=["copyexe", "--dst", consume_exe_path]
-        )
-    )
-    runnables.append(
-        Runnable(
-            image=docker_image,
-            command=[
+    consume_command = [
                 consume_exe_path,
                 "consume",
                 "--cacheDir",
@@ -312,11 +303,23 @@ def create_job_spec(
                 project,
                 "--port",
                 str(monitor_port),
+                "--timeout",
+                "10",
                 "--shutdownAfter",
                 str(60*10) # keep worker around for 10 minutes?
-            ],
+            ]
+
+    print(f"exec: {' '.join(consume_command)}")
+
+    runnables = [
+        Runnable(
+            image=sparklesworker_image, command=["copyexe", "--dst", consume_exe_path]
+        ),
+        Runnable(
+            image=docker_image,
+            command=consume_command,
         )
-    )
+    ]
 
     job = JobSpec(
         task_count="1",
@@ -636,7 +639,6 @@ def submit_cmd(
 
     from .cluster_service import MinConfig
 
-    print("Warning: hardcoded location")
     cluster = Cluster(
         config.project,
         config.location,
