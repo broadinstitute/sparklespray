@@ -312,13 +312,23 @@ def load_config(
     #            "max_preemptable_attempts_scale"
     #        ]
     #    )
+    machine_type = config.machine_type
+    if machine_type.startswith("n4-"):
+        # N4 instances only work with "hyperdrive" so use that as the default
+        default_drive_type = "hyperdisk-balanced"
+    elif machine_type.startswith("n1-") or machine_type.startswith("n2-"):
+        # the original sparkles behavior was always use local-ssd
+        default_drive_type = LOCAL_SSD
+    else:
+        # not all machine types have local ssd, so default everything else to the standard pd-balanced
+        default_drive_type = "pd-balanced"
 
     mount_count = consume("mount_count", 1, int)
     mounts = []
     for i in range(mount_count):
         if i == 0:
             path = consume(f"mount_{i+1}_path", "/mnt")
-            type = consume(f"mount_{i+1}_type", LOCAL_SSD)
+            type = consume(f"mount_{i+1}_type", default_drive_type)
         else:
             path = consume(f"mount_{i+1}_path")
             type = consume(f"mount_{i+1}_type")
