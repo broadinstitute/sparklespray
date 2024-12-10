@@ -106,6 +106,123 @@ sparkles sub echo Done
 Once you've seen your first sparkles job complete successfully, you can
 change "zones", and "default_image" based on your needs.
 
+# Configuration reference
+
+Sparklespray uses a configuration file (`.sparkles`) to define how jobs are executed and managed. The file can be placed in your home directory or any parent directory of where you run the `sparkles` command.
+
+## Basic Configuration Format
+
+The configuration file uses INI format with a `[config]` section:
+
+```ini
+[config]
+default_url_prefix=gs://your-bucket
+project=your-project
+default_image=alpine
+machine_type=n1-standard-1
+zones=us-east1-b
+region=us-east1
+```
+
+## Required Parameters
+
+| Parameter | Description |
+|-----------|-------------|
+| `default_url_prefix` | Base GCS path for job outputs and temp storage |
+| `project` | Google Cloud project ID |
+| `default_image` | Default Docker image for jobs |
+| `machine_type` | GCE machine type (e.g., n1-standard-1) |
+| `region` | GCP region for resources |
+| `account` | GCP service account email |
+| `zones` | Which zones to create VMs in |
+
+Some configuration values can be inherited from your gcloud configuration (`~/.config/gcloud/configurations/config_default`):
+- `project`
+- `region`
+- `zones` (from compute/zone)
+
+## Optional Parameters
+
+### General Settings
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `monitor_port` | 6032 | Port for job monitoring interface |
+| `work_root_dir` | "/mnt/" | Base directory for job execution |
+| `cas_url_prefix` | `{default_url_prefix}/CAS/` | Storage location for CAS files (temporary files) |
+| `sparklesworker_exe_path` | Auto-detected | Path to sparklesworker executable |
+| `cache_db_path` | ".kubeque-cached-file-hashes" | Path to file hash cache |
+| `debug_log_prefix` | `{default_url_prefix}/node-logs` | Location for debug logs |
+
+### Storage Configuration
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `boot_volume_in_gb` | 20 | Size of boot disk in GB |
+| `mount_count` | 1 | Number of additional disk mounts |
+| `mount_N_path` | "/mnt" (for N=1) | Mount path for disk N |
+| `mount_N_type` | Varies* | Disk type for mount N |
+| `mount_N_size_in_gb` | 100 | Size in GB for mount N |
+| `mount_N_name` | None | Name of existing disk to mount (optional) |
+
+*Default disk type depends on machine type:
+- n4-*: "hyperdisk-balanced"
+- n1-* or n2-*: "local-ssd"
+- Others: "pd-balanced"
+
+### Preemption Settings
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `preemptible` | "y" | Use preemptible instances ("y" or "n") |
+| `max_preemptable_attempts_scale` | 2 | Max retry attempts for preempted jobs |
+
+### Authentication Settings
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `service_account_key` | `~/.sparkles-cache/service-keys/{project}.json` | Path to service account key file |
+
+## Example Configurations
+
+Basic configuration with minimal settings:
+```ini
+[config]
+default_url_prefix=gs://my-bucket/sparkles
+project=my-project-id
+default_image=ubuntu:20.04
+machine_type=n1-standard-2
+zones=us-east1-b
+region=us-east1
+account=my-service-account@project.iam.gserviceaccount.com
+```
+
+Configuration with a local SSD attached for temp storage:
+```ini
+[config]
+default_url_prefix=gs://my-bucket/sparkles
+project=my-project-id
+default_image=ubuntu:20.04
+machine_type=n1-standard-2
+zones=us-east1-b
+region=us-east1
+account=my-service-account@project.iam.gserviceaccount.com
+boot_volume_in_gb=50
+mount_count=2
+mount_1_path=/mnt/data
+mount_1_type=pd-ssd
+mount_1_size_in_gb=200
+mount_2_path=/mnt/temp
+mount_2_type=local-ssd
+mount_2_size_in_gb=375
+```
+
+### Configuration File Location
+
+Sparklespray searches for the configuration file in the following order:
+1. Path specified by `--config` parameter
+2. `.sparkles` in the current directory
+3. `.sparkles` in any parent directory
+4. `.kubeque` in the current directory (legacy)
+5. `.kubeque` in any parent directory (legacy)
+
+
 # Command reference
 
 ## Running jobs
@@ -291,16 +408,6 @@ tasks: claimed (1), worker nodes: running(type=preemptible) (1)
 
 Didn't report that it didn't need to submit a request for a new worker, it immediately saw there already was one in the `running` state, and it immediately updated the task's state to `claimed` when it started running the task.
 
-
-### GPU usage
-
-Sparkles supports GPUs via `--gpu_count {number_of_gpus}`. By default, it will spawn a Nvidia Tesla p100.
-You would need to be in the zone us-east1-b (or one supporting this GPU) to have access to this feature.
-
-If you would want to use them, you would need to have a [compatible Docker image](https://www.tensorflow.org/install/gpu).
-If you are using Tensorflow, it is highly recommended to derive your Docker image from [tensorflow/tensorflow:latest-gpu-py3](https://hub.docker.com/r/tensorflow/tensorflow/).
-
-Benchmarking will be coming is available [here](benchmark.html) to decide on your machine specifications.
 
 ## Submitting along with multiple files that are needed by job
 
