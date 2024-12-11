@@ -436,42 +436,174 @@ When files are downloaded onto the remote node, they are always placed within th
 
 For example "-u /users/pgm/foo" will be stored on the execution host in "./foo". However, if you specify the file as '-u /users/pgm/foo:pgm/foo' then it will be stored in ./pgm/foo
 
-## Simulating a submission by running it locally
+### Parameterized Jobs
 
-The following will do all the upload data and bookkeeping normally done for jobs, but will not actually create a kubernetes job to run it. Instead, after
-all data is uploaded, it will run the equivilent docker command locally to simulate execution. This can be helpful for debugging issues.
+Sparklespray supports two main methods of parameterization: sequence-based and CSV-based. These allow you to run multiple variations of a job with different parameters.
 
+#### Sequence-Based Parameterization
+
+Use `--seq N` to run N variations of your command, with an `{index}` parameter varying from 1 to N.
+
+```bash
+# Run 5 variations
+sparkles sub --seq 5 python script.py --index {index}
+
+# This will execute:
+# python script.py --index 1
+# python script.py --index 2
+# python script.py --index 3
+# python script.py --index 4
+# python script.py --index 5
 ```
 
-sparkles sub --local python3 '^mandelbrot.py' 0 0 0.5
+Common use cases:
+```bash
+# Process different data shards
+sparkles sub --seq 10 python process.py --shard {index} --total-shards 10
 
+# Train models with different random seeds
+sparkles sub --seq 5 python train.py --seed {index} --model-dir model_{index}
+
+# Process different date ranges
+sparkles sub --seq 12 python analyze.py --month {index} --year 2024
 ```
 
-Submit a sample job reserving 1G of memory (or you can update the memory
-settings in .sparkles)
+#### CSV-Based Parameterization
 
+Use `--params filename.csv` to run variations based on CSV file contents. Each row in the CSV generates a separate task.
+
+Basic CSV parameterization:
+```csv
+# params.csv
+input_file,output_file,threshold
+data1.txt,result1.txt,0.5
+data2.txt,result2.txt,0.7
+data3.txt,result3.txt,0.6
 ```
 
-sparkles sub -r memory=1G -n sample-job python3 '^mandelbrot.py' 0 0 0.5
-
+```bash
+sparkles sub --params params.csv python script.py --input {input_file} --output {output_file} --threshold {threshold}
 ```
 
-Download the results
+Advanced CSV examples:
 
+1. Machine Learning Hyperparameter Sweep:
+```csv
+# hyperparams.csv
+learning_rate,batch_size,hidden_layers,dropout
+0.001,32,2,0.1
+0.001,64,2,0.1
+0.0001,32,3,0.2
+0.0001,64,3,0.2
 ```
 
-sparkles fetch sample-job
-
+```bash
+sparkles sub --params hyperparams.csv \
+    -u train.py -u data/ \
+    python train.py \
+    --lr {learning_rate} \
+    --batch-size {batch_size} \
+    --layers {hidden_layers} \
+    --dropout {dropout} \
+    --output-dir model_{learning_rate}_{batch_size}_{hidden_layers}_{dropout}
 ```
 
-Submit multiple parameterized by csv file
-
+2. Data Processing Pipeline:
+```csv
+# pipeline.csv
+input_path,output_path,start_date,end_date,region
+gs://data/raw/us,gs://data/processed/us,2024-01-01,2024-03-31,US
+gs://data/raw/eu,gs://data/processed/eu,2024-01-01,2024-03-31,EU
+gs://data/raw/asia,gs://data/processed/asia,2024-01-01,2024-03-31,ASIA
 ```
 
-sparkles sub --params params.csv python3 '^mandelbrot.py' '{x_scale}' '{y_scale}' '{zoom}'
-sparkles sub --fetch results --params params.csv python3 '^mandelbrot.py' '{x_scale}' '{y_scale}' '{zoom}'
-
+```bash
+sparkles sub --params pipeline.csv \
+    python process.py \
+    --input {input_path} \
+    --output {output_path} \
+    --start {start_date} \
+    --end {end_date} \
+    --region {region}
 ```
+
+3. Feature Engineering:
+```csv
+# features.csv
+feature_name,window_size,aggregation,min_samples
+daily_revenue,7,sum,100
+weekly_users,30,average,500
+monthly_growth,90,percentage,1000
+```
+
+```bash
+sparkles sub --params features.csv \
+    python engineer_features.py \
+    --feature {feature_name} \
+    --window {window_size} \
+    --agg {aggregation} \
+    --min-samples {min_samples} \
+    --output features_{feature_name}.parquet
+```
+
+#### Parameter Substitution Rules
+
+1. Basic Substitution
+   - Use `{param_name}` to substitute CSV column values
+   - Parameters are case-sensitive
+   - Missing parameters result in error
+
+2. File Path Handling
+   ```bash
+   # Automatic path joining
+   sparkles sub --params params.csv python script.py \
+       --data-dir data/{region}/{date} \
+       --output results/{region}/{date}/output.csv
+   ```
+
+3. Nested Parameters
+   ```bash
+   # Parameters can be used multiple times
+   sparkles sub --params params.csv python script.py \
+       --input data_{region}/input_{date}.csv \
+       --output data_{region}/output_{date}.csv \
+       --log logs/{region}_{date}.log
+   ```
+
+#### Best Practices for Parameterization
+
+1. CSV Organization
+   - Use clear, descriptive column names
+   - Include all required parameters
+   - Keep CSV files version controlled
+   - Document parameter meanings and valid ranges
+
+2. Parameter Validation
+   ```python
+   # In your script
+   def validate_params(args):
+       assert float(args.learning_rate) > 0, "Learning rate must be positive"
+       assert int(args.batch_size) > 0, "Batch size must be positive"
+       assert args.region in ["US", "EU", "ASIA"], "Invalid region"
+   ```
+
+3. Output Management
+   - Include parameters in output paths
+   - Use consistent naming patterns
+   - Avoid parameter values that create invalid paths
+
+4. Resource Considerations
+   ```bash
+   # Scale nodes based on parameter count
+   sparkles sub --params large_sweep.csv --nodes 10 python train.py ...
+   ```
+
+5. Debugging Parameterized Jobs
+   ```bash
+   # Test with subset of parameters
+   head -n 2 params.csv > test_params.csv
+   sparkles sub --params test_params.csv --local python script.py ...
+   ```
 
 Add additional machines to be used for a job:
 
