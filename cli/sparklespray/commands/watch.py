@@ -4,7 +4,7 @@ from ..config import Config
 from ..io_helper import IO
 from ..job_queue import JobQueue
 from ..cluster_service import Cluster
-
+from ..batch_api import JobSpec
 from ..log import log
 from ..watch import run_tasks, PrintStatus, CompletionMonitor, StreamLogs, ResizeCluster
 from .shared import _resolve_jobid
@@ -102,14 +102,20 @@ def watch(
 
     tasks = [
         CompletionMonitor(),
-        ResizeCluster(
-            cluster,
-            target_nodes,
-            max_preemptable_attempts,
-        ),
         StreamLogs(loglive, cluster, io),
         PrintStatus(initial_poll_delay, max_poll_delay),
     ]
+    if target_nodes == 0:
+        log.warning("target_nodes = 0, so no VMs will be powered on. Worker will need to be started manually for anything to run")
+        job_spec = JobSpec.model_validate_json(job.kube_job_spec)
+        from ..worker_job import get_consume_command
+        log.warning(f'execute: {" ".join(get_consume_command(job_spec))}')
+    else:
+        tasks.append(ResizeCluster(
+            cluster,
+            target_nodes,
+            max_preemptable_attempts,
+        ))
 
     try:
         run_tasks(job_id, job.cluster, tasks, cluster)

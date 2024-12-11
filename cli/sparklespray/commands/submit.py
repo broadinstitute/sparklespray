@@ -4,34 +4,35 @@ import json
 import os
 import re
 from typing import Any, Dict, List, Optional, Tuple
+from ..errors import UserError
 
 from pydantic import BaseModel
 
 import sparklespray
-from .cluster_service import MinConfig
+from ..cluster_service import MinConfig, Cluster, create_cluster
+from ..key_store import KeyStore
+import hashlib
+import uuid
 
-from . import txtui
-from .cluster_service import Cluster
-from .commands.clean import clean
-from .commands.watch import watch
-from .config import Config
-from .csv_utils import read_csv_as_dicts
-from .hasher import CachingHashFunction
-from .io_helper import IO
-from .job_queue import JobQueue
-from .log import log
-from .model import LOCAL_SSD, MachineSpec, PersistentDiskMount, SubmitConfig
-from .spec import SrcDstPair, make_spec_from_command
-from .util import get_timestamp, random_string, url_join
+from .. import txtui
+from .clean import clean
+from .watch import watch
+from ..config import Config
+from ..csv_utils import read_csv_as_dicts
+from ..hasher import CachingHashFunction
+from ..io_helper import IO
+from ..job_queue import JobQueue
+from ..log import log
+from ..model import LOCAL_SSD, MachineSpec, PersistentDiskMount, SubmitConfig
+from ..spec import SrcDstPair, make_spec_from_command
+from ..util import get_timestamp, random_string, url_join
 from datetime import datetime
-from .batch_api import JobSpec, Runnable, Disk
-from .gcp_utils import normalize_label, make_unique_label, validate_label
-from .cluster_service import create_cluster
+from ..certgen import create_self_signed_cert
 
+from ..worker_job import create_job_spec
 
 class ExistingJobException(Exception):
     pass
-
 
 # spec should have three rough components:
 #   common: keys shared by everything
@@ -148,7 +149,6 @@ def expand_tasks(spec, io, default_url_prefix, default_job_url_prefix):
 def _make_cluster_name(
     job_name: str, image: str, machine_spec: MachineSpec, unique_name: bool
 ):
-    import hashlib
 
     if unique_name:
         return "l-" + random_string(20)
@@ -173,24 +173,17 @@ def submit(
     cluster,
     metadata: Dict[str, str] = {},
     clean_if_exists: bool = False,
-    dry_run: bool = False,
 ):
-    from .key_store import KeyStore
 
     key_store = KeyStore(datastore_client)
     cert, key = key_store.get_cert_and_key()
     if cert is None:
         log.info("No cert and key for cluster found -- generating now")
-        from .certgen import create_self_signed_cert
 
         cert, key = create_self_signed_cert()
         key_store.set_cert_and_key(cert, key)
 
     log.info("Submitting job with id: %s", job_id)
-
-    # where to take this from? arg with a default of 1?
-    if dry_run:
-        skip_kube_submit = True
 
     boot_volume_in_gb = config.boot_volume_in_gb
     default_url_prefix = config.default_url_prefix
@@ -204,13 +197,10 @@ def submit(
     # TODO: When len(tasks) is a fair size (>100) this starts taking a noticable amount of time.
     # Perhaps store tasks in a single blob?  Or do write with multiple requests in parallel?
     for task in tasks:
-        if not dry_run:
-            url = io.write_json_to_cas(task)
-            task_spec_urls.append(url)
-            command_result_urls.append(task["command_result_url"])
-            log_urls.append(task["stdout_url"])
-        else:
-            log.debug("task post expand: %s", json.dumps(task, indent=2))
+        url = io.write_json_to_cas(task)
+        task_spec_urls.append(url)
+        command_result_urls.append(task["command_result_url"])
+        log_urls.append(task["stdout_url"])
 
     machine_specs = MachineSpec(
         service_account_email=config.service_account_email,
@@ -220,135 +210,58 @@ def submit(
         machine_type=config.machine_type,
     )
 
-    if not dry_run:
-        image = config.image
-        cluster_name = _make_cluster_name(job_id, image, machine_specs, False)
+    image = config.image
+    cluster_name = _make_cluster_name(job_id, image, machine_specs, False)
 
-        existing_job = jq.get_job(job_id, must=False)
-        if existing_job is not None:
-            if clean_if_exists:
-                log.info('Cleaning existing job with id "{}"'.format(job_id))
-                success = clean(cluster, jq, job_id)
-                if not success:
-                    raise ExistingJobException(
-                        'Could not remove running job "{}", aborting!'.format(job_id)
-                    )
-            else:
+    existing_job = jq.get_job(job_id, must=False)
+    if existing_job is not None:
+        if clean_if_exists:
+            log.info('Cleaning existing job with id "{}"'.format(job_id))
+            success = clean(cluster, jq, job_id)
+            if not success:
                 raise ExistingJobException(
-                    'Existing job with id "{}", aborting!'.format(job_id)
+                    'Could not remove running job "{}", aborting!'.format(job_id)
                 )
+        else:
+            raise ExistingJobException(
+                'Existing job with id "{}", aborting!'.format(job_id)
+            )
 
-        if len(config.mounts) > 1:
-            assert (
-                len(config.zones) == 1
-            ), "Cannot create jobs in multiple zones if you are mounting PD volumes"
-        #        cluster.ensure_named_volumes_exist(config.zones[0], config.mounts)
+    if len(config.mounts) > 1:
+        assert (
+            len(config.zones) == 1
+        ), "Cannot create jobs in multiple zones if you are mounting PD volumes"
+    #        cluster.ensure_named_volumes_exist(config.zones[0], config.mounts)
 
-        job = create_job_spec(
-            job_id,
-            config.sparklesworker_image,
-            config.work_root_dir,
-            config.image,
-            cluster_name,
-            config.project,
-            config.monitor_port,
-            config.service_account_email,
-        )
-
-        pipeline_spec = job.model_dump_json()
-
-        max_preemptable_attempts = (
-            config.target_node_count * config.max_preemptable_attempts_scale
-        )
-
-        jq.submit(
-            job_id,
-            list(zip(task_spec_urls, command_result_urls, log_urls)),
-            pipeline_spec,
-            metadata,
-            cluster_name,
-            config.target_node_count,
-            max_preemptable_attempts,
-        )
-
-
-
-
-def create_job_spec(
-    job_id,
-    sparklesworker_image,
-    work_root_dir,
-    docker_image,
-    cluster_name,
-    project,
-    monitor_port,
-    service_account_email,
-):
-
-    consume_exe_path = os.path.join(work_root_dir, "consume")
-    consume_data = os.path.join(work_root_dir, "data")
-
-    validate_label(job_id)
-    timestamp = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
-
-    consume_command = [
-                consume_exe_path,
-                "consume",
-                "--cacheDir",
-                os.path.join(consume_data, "cache"),
-                "--tasksDir",
-                os.path.join(consume_data, "tasks"),
-                "--cluster",
-                cluster_name,
-                "--projectId",
-                project,
-                "--port",
-                str(monitor_port),
-                "--timeout",
-                "10",
-                "--shutdownAfter",
-                str(60*10) # keep worker around for 10 minutes?
-            ]
-
-    print(f"exec: {' '.join(consume_command)}")
-
-    runnables = [
-        Runnable(
-            image=sparklesworker_image, command=["copyexe", "--dst", consume_exe_path]
-        ),
-        Runnable(
-            image=docker_image,
-            command=consume_command,
-        )
-    ]
-
-    job = JobSpec(
-        task_count="1",
-        runnables=runnables,
-        machine_type="n4-standard-2",
-        preemptible=True,
-        locations=["regions/us-central1"],
-        network_tags=["sparklesworker"],
-        monitor_port=monitor_port,
-        boot_disk=Disk(
-            name="bootdisk", size_gb=40, type="hyperdisk-balanced", mount_path="/"
-        ),
-        disks=[
-            Disk(name="data", size_gb=50, type="hyperdisk-balanced", mount_path="/mnt")
-        ],
-        sparkles_job=job_id,
-        sparkles_cluster=cluster_name,
-        sparkles_timestamp=timestamp,
-        service_account_email=service_account_email,
-        scopes=["https://www.googleapis.com/auth/cloud-platform"],
+    job = create_job_spec(
+        job_id,
+        config.sparklesworker_image,
+        config.work_root_dir,
+        config.image,
+        cluster_name,
+        config.project,
+        config.monitor_port,
+        config.service_account_email,
     )
 
-    return job
+    pipeline_spec = job.model_dump_json()
+
+    max_preemptable_attempts = (
+        config.target_node_count * config.max_preemptable_attempts_scale
+    )
+
+    jq.submit(
+        job_id,
+        list(zip(task_spec_urls, command_result_urls, log_urls)),
+        pipeline_spec,
+        metadata,
+        cluster_name,
+        config.target_node_count,
+        max_preemptable_attempts,
+    )
 
 
 def new_job_id():
-    import uuid
-
     return get_timestamp() + "-" + uuid.uuid4().hex[:4]
 
 
@@ -448,11 +361,6 @@ def add_submit_cmd(subparser):
         help="Parameterize the command by the rows in the specified CSV file.  If the CSV file has 5 rows, then 5 commands will be submitted.",
     )
     # parser.add_argument("--fetch", help="After run is complete, automatically download the results")
-    parser.add_argument(
-        "--dryrun",
-        action="store_true",
-        help="Don't actually submit the job but just print what would have been done",
-    )
     parser.add_argument(
         "--skipkube",
         action="store_true",
@@ -588,7 +496,8 @@ def submit_cmd(
         exclude_patterns=args.exclude_wildcards,
     )
 
-    assert os.path.exists(config.sparklesworker_exe_path), (
+    if not os.path.exists(config.sparklesworker_exe_path):
+        raise UserError(
         f"Could not find {config.sparklesworker_exe_path}. This most commonly happens when one doesn't "
         "install from the packaged releases at https://github.com/broadinstitute/sparklespray/releases"
     )
@@ -637,7 +546,6 @@ def submit_cmd(
     )
     assert mount_ == submit_config.mounts
 
-
     cluster = Cluster(
         config.project,
         config.location,
@@ -662,13 +570,12 @@ def submit_cmd(
         cluster,
         metadata=metadata,
         clean_if_exists=True,
-        dry_run=args.dryrun,
     )
 
     finished = False
     successful_execution = True
 
-    if not (args.dryrun or args.skip_kube_submit) and args.wait_for_completion:
+    if args.wait_for_completion:
         log.info("Waiting for job to terminate")
         successful_execution = watch(
             io, jq, cluster, target_nodes=target_node_count, loglive=True
