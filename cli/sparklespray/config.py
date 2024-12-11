@@ -21,9 +21,9 @@ from typing import List, Optional, Tuple, Dict
 import dataclasses
 from google.auth.credentials import Credentials
 from typing import Callable
+from .errors import UserError
 
-
-class BadConfig(Exception):
+class BadConfig(UserError):
     pass
 
 

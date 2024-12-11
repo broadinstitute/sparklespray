@@ -14,6 +14,7 @@ from .node_req_store import (
     NODE_REQ_CLASS_PREEMPTIVE,
 )
 
+import json
 
 class Runnable(BaseModel):
     image: str
@@ -92,7 +93,7 @@ def _create_parent_id(project, location):
     return f"projects/{project}/locations/{location}"
 
 
-def to_request(project: str, location: str, self: JobSpec):
+def create_batch_job_from_job_spec(project: str, location: str, self: JobSpec):
     job = batch.Job(
         task_groups=[
             batch.TaskGroup(
@@ -243,15 +244,12 @@ class EventPrinter:
                 print(event.description)
 
 
-import json
-
-
 class ClusterAPI:
     def __init__(self, batch_service_client):
         self.batch_service = batch_service_client
 
     def create_job(self, project: str, location: str, job: JobSpec):
-        request = to_request(project, location, job)
+        request = create_batch_job_from_job_spec(project, location, job)
         job_result = self.batch_service.create_job(request)
         print("created", job_result.name)
         return job_result.name

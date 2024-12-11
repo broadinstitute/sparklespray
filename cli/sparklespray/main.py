@@ -31,6 +31,7 @@ def sparkles_main():
     if retcode is not None:
         sys.exit(retcode)
 
+from .errors import UserError
 
 def main(argv=None):
     import warnings
@@ -121,8 +122,8 @@ def main(argv=None):
                 extras={"args": args},
                 requested=func_param_names,
             )
-        except BadConfig as ex:
-            print(f"Failure loading config: {ex}")
+        except UserError as ex:
+            print(ex.message)
             return 1
 
         return args.func(**func_params)
