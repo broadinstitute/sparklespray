@@ -1,8 +1,3 @@
-from queue import Queue, Empty
-import threading
-from .pb_pb2_grpc import MonitorStub
-from .pb_pb2 import ReadOutputRequest, GetProcessStatusRequest
-import grpc
 import datetime
 import logging
 from .txtui import print_log_content
@@ -24,85 +19,62 @@ class GRPCError(CommunicationError):
 class Timeout(CommunicationError):
     pass
 
-# this is ridiculously complicated but it seems like the timeout option on grpc isn't reliable. So instead, make the call on a different thread
-# so as worst, we can leak the hanging thread and signal the main thread with an exception.
+from .isolated_log_client import write_obj, read_obj
+from termcolor import colored
+import fcntl, os
+import select
+import threading
+import subprocess
+import sys
 
-class MonitorDictAPI:
-    "Basically the same contract as MonitorStub, but consumes typed dicts and returns typed dicts"
-    def __init__(self, channel, shared_secret):
-        self.shared_secret = shared_secret
-        self.stub = MonitorStub(channel)
-
-    def read_output(self, task_id: str, offset:int, size:int):
-        try:
-            response = self.stub.ReadOutput(
-                ReadOutputRequest(
-                    taskId=task_id, offset=offset, size=size
-                ),
-                metadata=[("shared-secret", self.shared_secret)],
-                timeout=GRPC_TIMEOUT,
-            )
-            return {"success": True, "data":response.data, "end_of_file": response.endOfFile}
-        except grpc.RpcError as rpc_error:
-            return {"success": False, "error": str(rpc_error)}
-    
-    def get_process_status(self):
-        try:
-            response = self.stub.GetProcessStatus(
-                GetProcessStatusRequest(),
-                metadata=[("shared-secret", self.shared_secret)],
-                timeout=GRPC_TIMEOUT,
-            )
-        except grpc.RpcError as rpc_error:
-            return {"success": False, "error": str(rpc_error)}
-
-        return {"success": True, "process_count": response.processCount, "total_memory": response.totalMemory, "total_data": response.totalData, "total_shared":response.totalShared,"total_resident": response.totalResident}
-
-def _worker_loop(in_queue, cert, node_address, shared_secret):
-    creds = grpc.ssl_channel_credentials(cert)
-
-    log.info("connecting to %s", node_address)
-    channel = grpc.secure_channel(
-        node_address,
-        creds,
-        options=(("grpc.ssl_target_name_override", "sparkles.server"),),
-    )
-
-    monitor = MonitorDictAPI(channel, shared_secret)
+def spit_out_stderr(fd):
+    flags = fcntl.fcntl(fd, fcntl.F_GETFL)
+    fcntl.fcntl(fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
 
     while True:
-        cmd = in_queue.get()
-        if cmd == "dispose":
+        select.select([fd], [], [])
+        data = fd.read()
+        if len(data) == 0:
             break
-        else:
-            name, args, kwargs, out_queue = cmd
-            result = getattr(monitor, name)(*args, **kwargs)
-            out_queue.put(result)
+        print(colored(data.decode("utf8"), "red"))
 
-    channel.close()
+
+def _start_isolated_log_client(init_params):
+    python_executable = sys.executable
+    command = [python_executable, "-m", "sparklespray.isolated_log_client"]
+    print(f"Executing: {' '.join(command)}")
+    proc = subprocess.Popen(command, executable=python_executable, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    # make stdout_pipe a non-blocking, non-buffered file-like object for reading
+    flags = fcntl.fcntl(proc.stdout, fcntl.F_GETFL)
+    fcntl.fcntl(proc.stdout, fcntl.F_SETFL, flags | os.O_NONBLOCK)
+    stdout_pipe = os.fdopen(proc.stdout.fileno(), mode="rb", buffering=0)
+
+    threading.Thread(target=lambda: spit_out_stderr(proc.stderr), daemon=True).start()
+
+    print("writing init params")
+    write_obj(proc.stdin, init_params )
+    return proc, stdout_pipe
 
 class WrappedStub:
     def __init__(self, timeout):
-        in_queue = Queue()
-
-        self.in_queue = in_queue
         self.timeout = timeout
+        self.proc = None
 
     def start(self, cert, node_address, shared_secret):
-        t = threading.Thread(target=_worker_loop, args=[self.in_queue, cert, node_address, shared_secret])
-        t.daemon = True
-        t.start()
+        self.proc, self.stdout_pipe=_start_isolated_log_client((cert, node_address, shared_secret))
+
+    def start_mock(self):
+        self.proc, self.stdout_pipe=_start_isolated_log_client("mock")
 
     def _blocking_call(self, method, args, kwargs):
-        if self.in_queue is None:
+        if self.proc is None:
             raise CommunicationError("disconnected WrappedStub")
-        out_queue = Queue()
-        self.in_queue.put((method, args, kwargs, out_queue))
+        write_obj(self.proc.stdin, (method, args, kwargs) )
         try:
-            value = out_queue.get(timeout=self.timeout)
-        except Empty:
+            value = read_obj(self.stdout_pipe, timeout=self.timeout)
+        except Timeout:
             self.dispose()
-            self.in_queue = None
             raise Timeout("Timeout trying in call to {}".format(method))
         if not value['success']:
             raise CommunicationError(value["error"])
@@ -115,8 +87,18 @@ class WrappedStub:
         return self._blocking_call("get_process_status", args, kwargs)
 
     def dispose(self):
-        if self.in_queue is not None:
-            self.in_queue.put("dispose")
+        assert self.proc is not None
+        # if the child process is still running, kill it
+        if self.proc.poll() is None:
+            self.proc.kill()
+            self.proc.wait()
+            self.proc=None
+
+if __name__ == "__main__":
+    stub = WrappedStub(3)
+    stub.start_mock()
+    result = stub._blocking_call("echo", ["example"], {})
+    print(result)
 
 
 class LogMonitor:

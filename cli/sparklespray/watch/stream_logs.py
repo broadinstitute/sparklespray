@@ -91,7 +91,19 @@ class StreamLogs:
 
         with _exception_guard(lambda: "polling log file threw exception"):
             try:
+                print_log_content(
+                    None,
+                    "calling poll",
+                    from_sparkles=True,
+                )
+
                 self.log_monitor.poll()
+                print_log_content(
+                    None,
+                    "calling poll complete",
+                    from_sparkles=True,
+                )
+
             except CommunicationError as ex:
                 log.info(f"Got error polling log. shutting down log watch due to exception: {ex}")
                 self._abort_logging()
