@@ -16,7 +16,7 @@ def user_print(msg):
 #         print(colored(line, "red"))
 
 
-def print_log_content(timestamp, payload, from_sparkles=False):
+def print_log_content(timestamp, payload, from_sparkles=False, is_important=True):
     if timestamp is None:
         timestamp = datetime.datetime.now()
 
@@ -30,13 +30,16 @@ def print_log_content(timestamp, payload, from_sparkles=False):
     message_color = "yellow"
     if from_sparkles:
         message_color = "green"
+    attrs = []
+    if not is_important:
+        attrs = ["dark"]
 
     for line in payload_lines:
         if prefix is None:
             prefix = "[{}]".format(timestamp.strftime("%H:%M:%S"))
-            print(colored(prefix, "green"), colored(line, message_color))
+            print(colored(prefix, "green"), colored(line, message_color, attrs=attrs))
         else:
-            print(colored(" " * len(prefix), "white"), colored(line, message_color))
+            print(colored(" " * len(prefix), "white"), colored(line, message_color, attrs=attrs))
 
 
 def config_logging(verbosity):

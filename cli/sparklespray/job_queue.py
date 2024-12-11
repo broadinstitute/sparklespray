@@ -200,3 +200,26 @@ class JobQueue:
         )
         self.job_storage.insert(job, batch=batch)
         batch.flush()
+
+    def delete_job(self, job_id: str):
+        batch = Batch(self.client)
+
+        self.task_storage.delete(job_id, batch=batch)
+
+        job_key = self.client.key("Job", job_id)
+        entity_job = self.client.get(job_key)
+
+        task_ids = set(entity_job.get("tasks", []))
+        # If we've got a mismatch between the data store and the data in the Job object, take the union
+        # to get things back into sync
+        for task in self.task_storage.get_tasks(job_id):
+            task_ids.add(task.task_id)
+
+        # delete tasks
+        for task_id in task_ids:
+            self.task_storage.delete(task_id, batch=batch)
+
+        self.task_storage.delete(job_id, batch=batch)
+#        log.info(f"in delete_job flushing batch: {batch}")
+
+        batch.flush()

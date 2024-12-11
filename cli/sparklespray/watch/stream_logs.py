@@ -17,6 +17,26 @@ from .shared import (
     _is_task_running,
 )
 
+from time import monotonic
+
+class CooldownCounter:
+    def __init__(self, initial_delay):
+        self.initial_delay = initial_delay
+        self.current_delay = initial_delay
+        self.next_expiration = monotonic()
+    
+    def reset(self):
+        self.current_delay = self.initial_delay
+
+    def failure(self):
+        self.next_expiration = monotonic() + self.current_delay
+        self.current_delay = self.current_delay * 2
+ 
+    def time_till_cool(self):
+        return max(0.0, self.next_expiration - monotonic())
+    
+    
+from collections import defaultdict
 
 class StreamLogs:
     # Stream output from one of the running processes.
@@ -26,11 +46,16 @@ class StreamLogs:
         self.stream_logs = stream_logs
         self.complete_tasks_printed = 0
         self.io = io
+        self.task_cooldown_counters = defaultdict(lambda: CooldownCounter(5))
 
     def start_logging(self, state: ClusterStateQuery):
         running = _only_running_tasks(state.get_tasks())
         if len(running) > 0:
             task = running[0]
+            
+            if self.task_cooldown_counters[task.task_id].time_till_cool() > 0:
+                return
+
             if task.monitor_address is not None:
                 log.info(
                     "Obtained monitor address for task %s: %s",
@@ -46,6 +71,21 @@ class StreamLogs:
                     from_sparkles=True,
                 )
 
+    def _abort_logging(self):
+        # log.warning(f"Request for status from task {self.log_monitor.task_id} failed. This could be because the node was preempted. If so, the task will be restarted elsewhere.")
+        task_id = self.log_monitor.task_id
+        self.log_monitor.close()
+        self.log_monitor = None
+        # keep track of the fact that this task is behaving badly and backoff
+        counter = self.task_cooldown_counters[task_id]
+        print_log_content(
+            None,
+            f"Retreiving live log and status from {task_id} failed, but this could be a transient issue. Will continue monitoring, and won't try communicating with this task for at least {counter.current_delay} seconds.",
+            is_important=False,
+        )
+
+        counter.failure()
+
     def do_next_read(self):
         assert self.log_monitor is not None
 
@@ -53,11 +93,8 @@ class StreamLogs:
             try:
                 self.log_monitor.poll()
             except CommunicationError as ex:
-                log.warning(
-                    "Got error polling log. shutting down log watch: {}".format(ex)
-                )
-                self.log_monitor.close()
-                self.log_monitor = None
+                log.info(f"Got error polling log. shutting down log watch due to exception: {ex}")
+                self._abort_logging()
 
     def do_last_read(self):
         assert self.log_monitor is not None

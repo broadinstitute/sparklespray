@@ -24,95 +24,99 @@ class GRPCError(CommunicationError):
 class Timeout(CommunicationError):
     pass
 
-
-# import time
-# import select
-# def read_with_timeout(fd, n, timeout):
-#     result = bytearray()
-#     end_time = time.monotonic() + timeout
-
-#     while len(result) < n:
-#         remaining = end_time - time.monotonic()
-#         if remaining <= 0:
-#             raise TimeoutError(f"Timeout while reading {n} bytes, got {len(result)}")
-
-#         ready, _, _ = select.select([fd], [], [], remaining)
-#         if not ready:
-#             raise TimeoutError(f"Timeout while reading {n} bytes, got {len(result)}")
-
-#         chunk = fd.read(n - len(result))
-#         if not chunk:
-#             raise EOFError(f"Pipe closed after reading {len(result)} bytes")
-
-#         result.extend(chunk)
-
-#     return bytes(result)
-
-# import struct
-
-# def write_framed_message(fd, message_bytes : bytes):
-#     fd.write(struct.pack("I", len(message_bytes))
-# def read_framed_message():
-
-
-# def read_with_timeout
-# import select
-# r, w, e = select.select([ f ], [], [], 0)
-# if f in r:
-#   print os.read(f.fileno(), 50)
-# else:
-#   print "nothing available!"  # or just ignore that case
-# os.read(f.fileno(), 50)
-
 # this is ridiculously complicated but it seems like the timeout option on grpc isn't reliable. So instead, make the call on a different thread
 # so as worst, we can leak the hanging thread and signal the main thread with an exception.
+
+class MonitorDictAPI:
+    "Basically the same contract as MonitorStub, but consumes typed dicts and returns typed dicts"
+    def __init__(self, channel, shared_secret):
+        self.shared_secret = shared_secret
+        self.stub = MonitorStub(channel)
+
+    def read_output(self, task_id: str, offset:int, size:int):
+        try:
+            response = self.stub.ReadOutput(
+                ReadOutputRequest(
+                    taskId=task_id, offset=offset, size=size
+                ),
+                metadata=[("shared-secret", self.shared_secret)],
+                timeout=GRPC_TIMEOUT,
+            )
+            return {"success": True, "data":response.data, "end_of_file": response.endOfFile}
+        except grpc.RpcError as rpc_error:
+            return {"success": False, "error": str(rpc_error)}
+    
+    def get_process_status(self):
+        try:
+            response = self.stub.GetProcessStatus(
+                GetProcessStatusRequest(),
+                metadata=[("shared-secret", self.shared_secret)],
+                timeout=GRPC_TIMEOUT,
+            )
+        except grpc.RpcError as rpc_error:
+            return {"success": False, "error": str(rpc_error)}
+
+        return {"success": True, "process_count": response.processCount, "total_memory": response.totalMemory, "total_data": response.totalData, "total_shared":response.totalShared,"total_resident": response.totalResident}
+
+def _worker_loop(in_queue, cert, node_address, shared_secret):
+    creds = grpc.ssl_channel_credentials(cert)
+
+    log.info("connecting to %s", node_address)
+    channel = grpc.secure_channel(
+        node_address,
+        creds,
+        options=(("grpc.ssl_target_name_override", "sparkles.server"),),
+    )
+
+    monitor = MonitorDictAPI(channel, shared_secret)
+
+    while True:
+        cmd = in_queue.get()
+        if cmd == "dispose":
+            break
+        else:
+            name, args, kwargs, out_queue = cmd
+            result = getattr(monitor, name)(*args, **kwargs)
+            out_queue.put(result)
+
+    channel.close()
+
 class WrappedStub:
     def __init__(self, timeout):
         in_queue = Queue()
-        out_queue = Queue()
 
         self.in_queue = in_queue
-        self.out_queue = out_queue
         self.timeout = timeout
 
-    def _worker_loop(self, channel):
-        stub = MonitorStub(channel)
-        while True:
-            cmd = self.in_queue.get()
-            if cmd == "dispose":
-                break
-            else:
-                name, args, kwargs = cmd
-                try:
-                    result = getattr(stub, name)(*args, **kwargs)
-                except Exception as ex:
-                    self.out_queue.put(("exception", ex))
-                else:
-                    self.out_queue.put(("result", result))
-
-    def start(self, channel):
-        t = threading.Thread(target=self._worker_loop, args=[channel])
+    def start(self, cert, node_address, shared_secret):
+        t = threading.Thread(target=_worker_loop, args=[self.in_queue, cert, node_address, shared_secret])
         t.daemon = True
         t.start()
 
     def _blocking_call(self, method, args, kwargs):
-        self.in_queue.put((method, args, kwargs))
+        if self.in_queue is None:
+            raise CommunicationError("disconnected WrappedStub")
+        out_queue = Queue()
+        self.in_queue.put((method, args, kwargs, out_queue))
         try:
-            type, value = self.out_queue.get(timeout=self.timeout)
+            value = out_queue.get(timeout=self.timeout)
         except Empty:
+            self.dispose()
+            self.in_queue = None
             raise Timeout("Timeout trying in call to {}".format(method))
-        if type == "exception":
-            raise value
+        if not value['success']:
+            raise CommunicationError(value["error"])
         return value
 
-    def ReadOutput(self, *args, **kwargs):
-        return self._blocking_call("ReadOutput", args, kwargs)
+    def read_output(self, *args, **kwargs):
+        return self._blocking_call("read_output", args, kwargs)
 
-    def GetProcessStatus(self, *args, **kwargs):
-        return self._blocking_call("GetProcessStatus", args, kwargs)
+    def get_process_status(self, *args, **kwargs):
+        return self._blocking_call("get_process_status", args, kwargs)
 
     def dispose(self):
-        self.in_queue.put("dispose")
+        if self.in_queue is not None:
+            self.in_queue.put("dispose")
 
 
 class LogMonitor:
@@ -121,18 +125,9 @@ class LogMonitor:
         entity = datastore_client.get(entity_key)
 
         cert = entity["cert"]
-        self.shared_secret = entity["shared_secret"]
-        creds = grpc.ssl_channel_credentials(cert)
-
-        log.info("connecting to %s", node_address)
-        channel = grpc.secure_channel(
-            node_address,
-            creds,
-            options=(("grpc.ssl_target_name_override", "sparkles.server"),),
-        )
 
         self.stub = WrappedStub(GRPC_TIMEOUT * 2)
-        self.stub.start(channel)
+        self.stub.start(cert, node_address, entity["shared_secret"])
         self.task_id = task_id
         self.offset = 0
 
@@ -143,50 +138,25 @@ class LogMonitor:
 
     def poll(self):
         while True:
-            try:
-                response = self.stub.ReadOutput(
-                    ReadOutputRequest(
-                        taskId=self.task_id, offset=self.offset, size=100000
-                    ),
-                    metadata=[("shared-secret", self.shared_secret)],
-                    timeout=GRPC_TIMEOUT,
-                )
-            except grpc.RpcError as rpc_error:
-                # TODO: Might be caught in an infinite loop. Could be good to add an exponential delay before retrying. And stop after a number of retries
-                log.debug(
-                    "Received a RpcError {}. Retrying to contact the VM".format(
-                        rpc_error
-                    )
-                )
-                raise GRPCError(rpc_error)
+            response = self.stub.read_output(
+                task_id=self.task_id, offset=self.offset, size=100000)
 
-            payload = response.data.decode("utf8")
+            payload = response["data"].decode("utf8")
             if payload != "":
                 print_log_content(datetime.datetime.now(), payload)
 
-            self.offset += len(response.data)
+            self.offset += len(response["data"])
 
-            if response.endOfFile:
+            if response["end_of_file"]:
                 break
 
-        try:
-            response = self.stub.GetProcessStatus(
-                GetProcessStatusRequest(),
-                metadata=[("shared-secret", self.shared_secret)],
-                timeout=GRPC_TIMEOUT,
-            )
-        except grpc.RpcError as rpc_error:
-            # TODO: Might be caught in an infinite loop. Could be good to add an exponential delay before retrying. And stop after a number of retries
-            log.debug(
-                "Received a RpcError {}. Retrying to contact the VM".format(rpc_error)
-            )
-            raise GRPCError(rpc_error)
+        response = self.stub.get_process_status(        )
 
         mem_total = (
-            response.totalMemory
-            + response.totalData
-            + response.totalShared
-            + response.totalResident
+            response["total_memory"]
+            + response["total_data"]
+            + response["total_shared"]
+            + response["total_resident"]
         )
         per_gb = 1024 * 1024 * 1024.0
         if abs(self.prev_mem_total - mem_total) > 0.01 * per_gb:
@@ -196,11 +166,11 @@ class LogMonitor:
                 datetime.datetime.now(),
                 "Processes running in container: %s, total memory used: %.3f GB, data memory used: %.3f GB, shared used %.3f GB, resident %.3f GB"
                 % (
-                    response.processCount,
-                    response.totalMemory / per_gb,
-                    response.totalData / per_gb,
-                    response.totalShared / per_gb,
-                    response.totalResident / per_gb,
+                    response["process_count"],
+                    response["total_data"] / per_gb,
+                    response["total_data"] / per_gb,
+                    response["total_shared"] / per_gb,
+                    response["total_resident"] / per_gb,
                 ),
                 from_sparkles=True,
             )
