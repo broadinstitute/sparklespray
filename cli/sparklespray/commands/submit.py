@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from pydantic import BaseModel
 
 import sparklespray
+from .cluster_service import MinConfig
 
 from . import txtui
 from .cluster_service import Cluster
@@ -502,11 +503,10 @@ def add_submit_cmd(subparser):
         help="When localizing files, use symlinks instead of copying files into location. This should only be used when the uploaded files will not be modified by the job.",
         action="store_true",
     )
-    parser.add_argument(
-        "--local",
-        help="Run the tasks inside of docker on the local machine",
-        action="store_true",
-    )
+    # parser.add_argument(
+    #     "--use-vm",
+    #     help="Instead of powering on a new VM, use an existing GCP VM by providing it's ssh connect string (mostly for testing)",
+    # )
     parser.add_argument(
         "--rerun",
         help="If set, will download all of the files from previous execution of this job to worker before running",
@@ -637,7 +637,6 @@ def submit_cmd(
     )
     assert mount_ == submit_config.mounts
 
-    from .cluster_service import MinConfig
 
     cluster = Cluster(
         config.project,

@@ -45,7 +45,7 @@ def main(argv=None):
         "Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.",
     )
 
-    from .submit import add_submit_cmd
+    from .commands.submit import add_submit_cmd
     from .commands.watch import add_watch_cmd
     from .commands.validate import add_validate_cmd
     from .commands.setup import add_setup_cmd, setup_cmd
