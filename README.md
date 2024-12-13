@@ -85,12 +85,56 @@ Storage, Container Registry service and the Genomics Pipeline API and creates a 
 access to those services. It will also enable docker to use google credentials when
 authentication to Google's Container Registry service.)
 
-```
+## The `setup` Command
+
+The `setup` command configures your Google Cloud Project for use with Sparklespray by enabling required services and setting up necessary permissions.
+
+```bash
 sparkles setup
 ```
 
-After this completes successfully, you can run a series of checks to confirm
-that everything is set up correctly:
+### Prerequisites
+
+Before running setup:
+
+1. **Google Cloud SDK**
+   - Must be installed and in PATH
+   - Authenticated via `gcloud auth login`
+   - Default project configured
+
+2. **Configuration File**
+   - Valid `.sparkles` config file
+   - Must contain:
+     - `project`: Google Cloud project ID
+     - `default_url_prefix`: GCS bucket URL (gs://bucket-name/...)
+     - `service_account_key`: Path to service account key file
+
+3. **Permissions**
+   - Must have sufficient permissions to:
+     - Enable Google Cloud APIs
+     - Create service accounts
+     - Create storage buckets
+     - Manage IAM permissions
+
+### What Setup Does
+
+The setup command:
+
+1. **Enables Required APIs**
+   - Google Cloud Storage
+   - Cloud Datastore
+   - Cloud Batch
+   - Cloud Container Registry
+
+2. **Creates Resources**
+   - Storage bucket (if doesn't exist)
+   - Service account with required permissions
+   - Service account key file
+
+3. **Configures Permissions**
+   - Grants necessary IAM roles
+   - Sets up storage access
+   - Configures service account
 
 ```
 sparkles validate
@@ -691,23 +735,71 @@ information is contained within results.json in the output directory for each ta
 TODO: Write docs about setting up firewall rule to allow traffic on port
 6032
 
-## View the status of a job
+## The `status` Command
 
+The `status` command provides detailed information about jobs and their tasks, including execution statistics and failure information.
+
+## Basic Usage
+
+```bash
+sparkles status [options] [jobid_pattern]
 ```
 
-sparkles status JOB_ID
+### Command Options
 
+| Option | Description |
+|--------|-------------|
+| `--stats` | Show detailed execution statistics |
+| `--failed` | Show information about failed tasks |
+
+### Basic Status Information
+
+Without any options, the command shows a summary of task statuses:
+```bash
+# Check single job
+sparkles status job-20240313-abc123
+job-20240313-abc123: running(5), pending(10), complete(85)
+
+# Check multiple jobs using pattern
+sparkles status "job-2024*"
+job-20240313-abc123: complete(100)
+job-20240314-def456: running(20), pending(80)
 ```
 
-You can also see summary stats (execution times and memory usage) by adding the --stats parameter.
+## Detailed Statistics
 
+Using the `--stats` flag provides comprehensive execution metrics:
+
+```bash
+sparkles status --stats job-20240313-abc123
 ```
 
-sparkles status JOB_ID --stats
+Statistics include:
 
-```
+1. **Task Claim Information**
+   ```
+   Number of times a task was claimed quantiles: 1, 1, 1, 2, 5, mean: 1.4
+   ```
+   - Shows how many times tasks were retried
+   - Provides min, 25%, median, 75%, max, and mean values
 
-## Mark jobs as needing re-execution
+2. **Execution Time Statistics**
+   ```
+   task count: 100, execution time quantiles (in minutes): 
+   2.1, 2.8, 3.2, 3.9, 8.5, mean: 3.4
+   ```
+   - Shows task runtime distribution in minutes
+   - Helps identify performance outliers
+
+3. **Memory Usage**
+   ```
+   max memory quantiles: 
+   512MB, 768MB, 1024MB, 1536MB, 2048MB, mean: 1126MB
+   ```
+   - Shows peak memory usage across tasks
+   - Helps with resource planning
+
+## Reset command
 
 ```
 
@@ -723,21 +815,268 @@ sparkles show JOB_ID
 
 ```
 
-There's also a more powerful query tool "list" which can export all attributes of all tasks and supports filtering.
+## The `list` Command
 
+The `list` command provides detailed information about tasks within a job, with filtering and output formatting capabilities.
+
+#### Basic Usage
+
+```bash
+sparkles list [options] job-id
 ```
 
-sparkles list JOB_ID
+#### Command Options
 
+| Option | Description |
+|--------|-------------|
+| `--filter` | Filter tasks using expressions (can be used multiple times) |
+| `--fields` | Specify which fields to include (comma-separated) |
+| `--format` | Output format: 'csv' (default) or 'json' |
+| `--output`, `-o` | Output file (defaults to stdout) |
+| `--params` | Only show parameters from original submission |
+
+#### Filtering Tasks
+
+Use `--filter` to select specific tasks. Filter expressions follow the format:
+```
+field_name[.nested_field]=value
+field_name[.nested_field]!=value
 ```
 
-## Poll the status of a job, adding nodes if necessary
+Example filters:
+```bash
+# Show only failed tasks
+sparkles list job-id --filter "status=failed"
 
+# Show tasks with specific exit code
+sparkles list job-id --filter "exit_code!=0"
+
+# Filter by parameter value
+sparkles list job-id --filter "args.parameters.batch_size=64"
 ```
 
-sparkles watch JOB_ID
+#### Field Selection
 
+Use `--fields` to specify which fields to include in output:
+
+```bash
+# Basic fields
+sparkles list job-id --fields "task_id,status,exit_code"
+
+# Include nested fields
+sparkles list job-id --fields "task_id,args.parameters.batch_size,status"
 ```
+
+Common fields:
+- `task_id`: Unique task identifier
+- `status`: Current task status
+- `exit_code`: Task exit code
+- `owner`: Node that ran the task
+- `args`: Task arguments and parameters
+- `history`: Task execution history
+
+#### Output Formats
+
+1. **CSV Format** (default)
+```bash
+# Output to file
+sparkles list job-id --format csv --output tasks.csv
+
+# View in terminal
+sparkles list job-id --format csv
+```
+
+2. **JSON Format**
+```bash
+# Detailed JSON output
+sparkles list job-id --format json --output tasks.json
+```
+
+#### Parameter Extraction
+
+Use `--params` to focus on task parameters:
+```bash
+# Extract original parameters
+sparkles list job-id --params --output params.csv
+```
+
+Useful for:
+- Identifying failed parameter combinations
+- Rerunning specific parameter sets
+
+#### Example Use Cases
+
+2. **Parameter Analysis**
+```bash
+# Extract parameters of successful tasks
+sparkles list job-id \
+    --filter "exit_code=0" \
+    --params \
+    --output successful_params.csv
+```
+
+1. **Multiple Conditions**
+```bash
+sparkles list job-id \
+    --filter "status=complete" \
+    --filter "exit_code!=0" \
+    --filter "args.parameters.batch_size=128"
+```
+
+2. **Parameter-Based Filtering**
+```bash
+sparkles list job-id \
+    --filter "args.parameters.learning_rate=0.001" \
+    --filter "args.parameters.model_type=resnet" \
+    --fields "task_id,status,args.parameters"
+```
+
+1. **Finding Failed Tasks for Resubmission**
+```bash
+# Export failed task parameters
+sparkles list job-id \
+    --filter "status=failed" \
+    --params \
+    --output failed_params.csv
+```
+
+3. **Resource Analysis**
+```bash
+# Export resource usage patterns
+sparkles list job-id \
+    --fields "task_id,memory_used,cpu_used,args.parameters" \
+    --format csv \
+    --output resources.csv
+```
+
+## The `watch` Command
+
+The `watch` command monitors job execution, streams logs, and manages worker nodes. It's automatically invoked after job submission (unless `--no-wait` is specified) but can also be used separately to monitor existing jobs.
+
+### Basic Usage
+
+```bash
+sparkles watch [options] job-id
+```
+
+### Command Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--nodes`, `-n` | From job config | Target number of worker nodes |
+| `--verify` | False | Verify completion status and reset failed tasks |
+| `--loglive` | True | Stream output logs in real-time |
+| `--no-loglive` | False | Disable log streaming |
+
+### Features
+
+1. **Task Monitoring**
+   - Tracks task status changes
+   - Reports job progress
+   - Shows completion statistics
+   - Real-time output from running tasks
+
+2. **Node Management**
+   - Automatic worker scaling
+   - Preemptible instance handling
+   - Node health monitoring
+
+3. **Interruption Handling**
+   - Safe to Ctrl+C watch command
+   - Job continues running
+   - Can resume watching later
+
+### Examples
+
+Basic job monitoring:
+```bash
+# Monitor job by ID
+sparkles watch job-20240313-abc123
+```
+
+Adjust worker count:
+```bash
+# Scale to 5 workers
+sparkles watch my-job --nodes 5
+```
+
+Verify completion and reset failed tasks (only needed for debugging an troubleshooting. Normal users should not need to ever use this option):
+```bash
+sparkles watch my-job --verify
+```
+
+Disable log streaming:
+```bash
+sparkles watch my-job --no-loglive
+```
+
+#### Status Updates
+
+The watch command provides periodic status updates showing:
+```
+tasks: running (5), pending (10), complete (85), failed (0)
+workers: running (3), staging (1), terminated (0)
+```
+
+Status fields:
+- **Tasks**
+  - `pending`: Waiting to be executed
+  - `running`: Currently executing
+  - `complete`: Successfully finished. (This does not mean that the command exited without any errors, but rather, the command was successfully executed and the results collected. One will need to also check the exit code to confirm that the command was successful.)
+  - `failed`: Failed execution (The command failed to start or there was an issue with the worker which resulted in the command being aborted before it was complete.)
+  
+- **Workers**
+  - `running`: Actively processing tasks
+  - `staging`: Starting up
+  - `submitted`: Requested but not yet staging
+  - `terminated`: Shut down
+
+#### Worker Management
+
+The watch command manages worker nodes based on:
+1. Target node count (`--nodes`)
+2. Preemptible instance settings
+3. Job requirements
+4. Current task queue
+
+Scaling behavior:
+```python
+# Example scaling scenarios
+workers = min(target_nodes, pending_tasks)
+preemptible = min(max_preemptable_attempts, workers)
+```
+
+#### Log Streaming
+
+When `--loglive` is enabled (default):
+1. Automatically selects a running task
+2. Streams stdout/stderr in real-time
+3. Switches to new task if current completes
+4. Shows timestamp for each log line
+
+Example output:
+```
+[22:15:30] Starting task processing...
+[22:15:31] Loading input data
+[22:15:35] Processing batch 1/10
+[22:15:40] Processing batch 2/10
+```
+
+#### Completion Verification
+
+When `--verify` is used:
+1. Checks all completed tasks
+2. Verifies output files exist
+3. Resets tasks with missing outputs
+4. Reports verification progress
+
+Example verification:
+```
+Verified 85 out of 100 completed tasks successfully wrote output
+task task_123 missing gs://bucket/results/output.txt, resetting
+```
+
+
 
 # Developing sparklespray
 
