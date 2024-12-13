@@ -85,190 +85,6 @@ Storage, Container Registry service and the Genomics Pipeline API and creates a 
 access to those services. It will also enable docker to use google credentials when
 authentication to Google's Container Registry service.)
 
-## The `setup` Command
-
-The `setup` command configures your Google Cloud Project for use with Sparklespray by enabling required services and setting up necessary permissions.
-
-```bash
-sparkles setup
-```
-
-### Prerequisites
-
-Before running setup:
-
-1. **Google Cloud SDK**
-   - Must be installed and in PATH
-   - Authenticated via `gcloud auth login`
-   - Default project configured
-
-2. **Configuration File**
-   - Valid `.sparkles` config file
-   - Must contain:
-     - `project`: Google Cloud project ID
-     - `default_url_prefix`: GCS bucket URL (gs://bucket-name/...)
-     - `service_account_key`: Path to service account key file
-
-3. **Permissions**
-   - Must have sufficient permissions to:
-     - Enable Google Cloud APIs
-     - Create service accounts
-     - Create storage buckets
-     - Manage IAM permissions
-
-### What Setup Does
-
-The setup command:
-
-1. **Enables Required APIs**
-   - Google Cloud Storage
-   - Cloud Datastore
-   - Cloud Batch
-   - Cloud Container Registry
-
-2. **Creates Resources**
-   - Storage bucket (if doesn't exist)
-   - Service account with required permissions
-   - Service account key file
-
-3. **Configures Permissions**
-   - Grants necessary IAM roles
-   - Sets up storage access
-   - Configures service account
-
-```
-sparkles validate
-```
-
-If this completes without errors, you are good to go! Try the following
-submission:
-
-```
-sparkles sub echo Done
-```
-
-Once you've seen your first sparkles job complete successfully, you can
-change "zones", and "default_image" based on your needs.
-
-# Configuration reference
-
-Sparklespray uses a configuration file (`.sparkles`) to define how jobs are executed and managed. The file can be placed in your home directory or any parent directory of where you run the `sparkles` command.
-
-## Basic Configuration Format
-
-The configuration file uses INI format with a `[config]` section:
-
-```ini
-[config]
-default_url_prefix=gs://your-bucket
-project=your-project
-default_image=alpine
-machine_type=n1-standard-1
-zones=us-east1-b
-region=us-east1
-```
-
-## Required Parameters
-
-| Parameter | Description |
-|-----------|-------------|
-| `default_url_prefix` | Base GCS path for job outputs and temp storage |
-| `project` | Google Cloud project ID |
-| `default_image` | Default Docker image for jobs |
-| `machine_type` | GCE machine type (e.g., n1-standard-1) |
-| `region` | GCP region for resources |
-| `account` | GCP service account email |
-| `zones` | Which zones to create VMs in |
-
-Some configuration values can be inherited from your gcloud configuration (`~/.config/gcloud/configurations/config_default`):
-- `project`
-- `region`
-- `zones` (from compute/zone)
-
-## Optional Parameters
-
-### General Settings
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `monitor_port` | 6032 | Port for job monitoring interface |
-| `work_root_dir` | "/mnt/" | Base directory for job execution |
-| `cas_url_prefix` | `{default_url_prefix}/CAS/` | Storage location for CAS files (temporary files) |
-| `sparklesworker_exe_path` | Auto-detected | Path to sparklesworker executable |
-| `cache_db_path` | ".kubeque-cached-file-hashes" | Path to file hash cache |
-| `debug_log_prefix` | `{default_url_prefix}/node-logs` | Location for debug logs |
-
-### Storage Configuration
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `boot_volume_in_gb` | 20 | Size of boot disk in GB |
-| `mount_count` | 1 | Number of additional disk mounts |
-| `mount_N_path` | "/mnt" (for N=1) | Mount path for disk N |
-| `mount_N_type` | Varies* | Disk type for mount N |
-| `mount_N_size_in_gb` | 100 | Size in GB for mount N |
-| `mount_N_name` | None | Name of existing disk to mount (optional) |
-
-*Default disk type depends on machine type:
-- n4-*: "hyperdisk-balanced"
-- n1-* or n2-*: "local-ssd"
-- Others: "pd-balanced"
-
-### Preemption Settings
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `preemptible` | "y" | Use preemptible instances ("y" or "n") |
-| `max_preemptable_attempts_scale` | 2 | Max retry attempts for preempted jobs |
-
-### Authentication Settings
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `service_account_key` | `~/.sparkles-cache/service-keys/{project}.json` | Path to service account key file |
-
-## Example Configurations
-
-Basic configuration with minimal settings:
-```ini
-[config]
-default_url_prefix=gs://my-bucket/sparkles
-project=my-project-id
-default_image=ubuntu:20.04
-machine_type=n1-standard-2
-zones=us-east1-b
-region=us-east1
-account=my-service-account@project.iam.gserviceaccount.com
-```
-
-Configuration with a local SSD attached for temp storage:
-```ini
-[config]
-default_url_prefix=gs://my-bucket/sparkles
-project=my-project-id
-default_image=ubuntu:20.04
-machine_type=n1-standard-2
-zones=us-east1-b
-region=us-east1
-account=my-service-account@project.iam.gserviceaccount.com
-boot_volume_in_gb=50
-mount_count=2
-mount_1_path=/mnt/data
-mount_1_type=pd-ssd
-mount_1_size_in_gb=200
-mount_2_path=/mnt/temp
-mount_2_type=local-ssd
-mount_2_size_in_gb=375
-```
-
-### Configuration File Location
-
-Sparklespray searches for the configuration file in the following order:
-1. Path specified by `--config` parameter
-2. `.sparkles` in the current directory
-3. `.sparkles` in any parent directory
-4. `.kubeque` in the current directory (legacy)
-5. `.kubeque` in any parent directory (legacy)
-
-
-# Command reference
-
 ## Running jobs
 
 Let's take a trivial "echo hello" submission and look at the output.
@@ -649,21 +465,188 @@ sparkles sub --params features.csv \
    sparkles sub --params test_params.csv --local python script.py ...
    ```
 
-Add additional machines to be used for a job:
+# Configuration reference
 
+Sparklespray uses a configuration file (`.sparkles`) to define how jobs are executed and managed. The file can be placed in your home directory or any parent directory of where you run the `sparkles` command.
+
+## Basic Configuration Format
+
+The configuration file uses INI format with a `[config]` section:
+
+```ini
+[config]
+default_url_prefix=gs://your-bucket
+project=your-project
+default_image=alpine
+machine_type=n1-standard-1
+zones=us-east1-b
+region=us-east1
 ```
 
-## the following will add 2 more worker nodes which will be used by the last
+## Required Parameters
 
-## job submitted. Instead of the word "LAST" you can use a job id. Most
+| Parameter | Description |
+|-----------|-------------|
+| `default_url_prefix` | Base GCS path for job outputs and temp storage |
+| `project` | Google Cloud project ID |
+| `default_image` | Default Docker image for jobs |
+| `machine_type` | GCE machine type (e.g., n1-standard-1) |
+| `region` | GCP region for resources |
+| `account` | GCP service account email |
+| `zones` | Which zones to create VMs in |
 
-## commands which accept a jobid also understand "LAST" as a synonym for the
+Some configuration values can be inherited from your gcloud configuration (`~/.config/gcloud/configurations/config_default`):
+- `project`
+- `region`
+- `zones` (from compute/zone)
 
-## last submitted job.
+## Optional Parameters
 
-sparkles addnodes LAST 2
+### General Settings
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `monitor_port` | 6032 | Port for job monitoring interface |
+| `work_root_dir` | "/mnt/" | Base directory for job execution |
+| `cas_url_prefix` | `{default_url_prefix}/CAS/` | Storage location for CAS files (temporary files) |
+| `sparklesworker_exe_path` | Auto-detected | Path to sparklesworker executable |
+| `cache_db_path` | ".kubeque-cached-file-hashes" | Path to file hash cache |
+| `debug_log_prefix` | `{default_url_prefix}/node-logs` | Location for debug logs |
+
+### Storage Configuration
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `boot_volume_in_gb` | 20 | Size of boot disk in GB |
+| `mount_count` | 1 | Number of additional disk mounts |
+| `mount_N_path` | "/mnt" (for N=1) | Mount path for disk N |
+| `mount_N_type` | Varies* | Disk type for mount N |
+| `mount_N_size_in_gb` | 100 | Size in GB for mount N |
+| `mount_N_name` | None | Name of existing disk to mount (optional) |
+
+*Default disk type depends on machine type:
+- n4-*: "hyperdisk-balanced"
+- n1-* or n2-*: "local-ssd"
+- Others: "pd-balanced"
+
+### Preemption Settings
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `preemptible` | "y" | Use preemptible instances ("y" or "n") |
+| `max_preemptable_attempts_scale` | 2 | Max retry attempts for preempted jobs |
+
+### Authentication Settings
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `service_account_key` | `~/.sparkles-cache/service-keys/{project}.json` | Path to service account key file |
+
+## Example Configurations
+
+Basic configuration with minimal settings:
+```ini
+[config]
+default_url_prefix=gs://my-bucket/sparkles
+project=my-project-id
+default_image=ubuntu:20.04
+machine_type=n1-standard-2
+zones=us-east1-b
+region=us-east1
+account=my-service-account@project.iam.gserviceaccount.com
+```
+
+Configuration with a local SSD attached for temp storage:
+```ini
+[config]
+default_url_prefix=gs://my-bucket/sparkles
+project=my-project-id
+default_image=ubuntu:20.04
+machine_type=n1-standard-2
+zones=us-east1-b
+region=us-east1
+account=my-service-account@project.iam.gserviceaccount.com
+boot_volume_in_gb=50
+mount_count=2
+mount_1_path=/mnt/data
+mount_1_type=pd-ssd
+mount_1_size_in_gb=200
+mount_2_path=/mnt/temp
+mount_2_type=local-ssd
+mount_2_size_in_gb=375
+```
+
+### Configuration File Location
+
+Sparklespray searches for the configuration file in the following order:
+1. Path specified by `--config` parameter
+2. `.sparkles` in the current directory
+3. `.sparkles` in any parent directory
+4. `.kubeque` in the current directory (legacy)
+5. `.kubeque` in any parent directory (legacy)
+
+# Command reference
+
+## The `setup` Command
+
+The `setup` command configures your Google Cloud Project for use with Sparklespray by enabling required services and setting up necessary permissions.
+
+```bash
+sparkles setup
+```
+
+### Prerequisites
+
+Before running setup:
+
+1. **Google Cloud SDK**
+   - Must be installed and in PATH
+   - Authenticated via `gcloud auth login`
+   - Default project configured
+
+2. **Configuration File**
+   - Valid `.sparkles` config file
+   - Must contain:
+     - `project`: Google Cloud project ID
+     - `default_url_prefix`: GCS bucket URL (gs://bucket-name/...)
+     - `service_account_key`: Path to service account key file
+
+3. **Permissions**
+   - Must have sufficient permissions to:
+     - Enable Google Cloud APIs
+     - Create service accounts
+     - Create storage buckets
+     - Manage IAM permissions
+
+### What Setup Does
+
+The setup command:
+
+1. **Enables Required APIs**
+   - Google Cloud Storage
+   - Cloud Datastore
+   - Cloud Batch
+   - Cloud Container Registry
+
+2. **Creates Resources**
+   - Storage bucket (if doesn't exist)
+   - Service account with required permissions
+   - Service account key file
+
+3. **Configures Permissions**
+   - Grants necessary IAM roles
+   - Sets up storage access
+   - Configures service account
 
 ```
+sparkles validate
+```
+
+If this completes without errors, you are good to go! Try the following
+submission:
+
+```
+sparkles sub echo Done
+```
+
+Once you've seen your first sparkles job complete successfully, you can
+change "zones", and "default_image" based on your needs.
 
 ## Cleaning out old jobs
 
