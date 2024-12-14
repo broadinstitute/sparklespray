@@ -1,6 +1,6 @@
 import certifi
 
-with open("go/src/github.com/broadinstitute/kubequeconsume/certs.go", "wt") as o:
+with open("go/src/github.com/broadinstitute/sparklesworker/certs.go", "wt") as o:
     with open(certifi.where()) as fd:
         o.write(
             """
