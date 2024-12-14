@@ -190,6 +190,10 @@ class StreamLogs:
             log.info("Dumping arbitrary successful task stdout")
             self.flush_stdout_from_complete_task(successful_tasks[0].task_id, 0)
 
+    def cleanup(self):
+        if self.log_monitor is not None:
+            self.log_monitor.close()
+            self.log_monitor = None
 
 # class FlushStdout:
 #     def __init__(self, jq, io):

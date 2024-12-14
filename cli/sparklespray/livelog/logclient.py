@@ -37,7 +37,9 @@ def print_from_stream(fd, color):
                 break
             print(colored(data.decode("utf8"), color))
 
-    threading.Thread(target=print_loop, daemon=True).start()
+    t = threading.Thread(target=print_loop, daemon=True)
+    t.start()
+    return t
 
 def _start_isolated_log_client(entry_point, init_params):
     python_executable = sys.executable
@@ -45,14 +47,14 @@ def _start_isolated_log_client(entry_point, init_params):
     print(f"Executing: {' '.join(command)}")
     proc = subprocess.Popen(command, executable=python_executable, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
-    print_from_stream(proc.stderr, color="red")
+    t = print_from_stream(proc.stderr, color="red")
 
     writer = Writer(proc.stdin)
     reader = Reader(proc.stdout)
 
     print("writing init params")
     writer.write_obj( init_params )
-    return proc, reader, writer
+    return proc, reader, writer, t
 
 from . import isolated_log_client
 
@@ -65,7 +67,7 @@ class SafeRemoteCaller:
         self.entry_point = entry_point
 
     def start(self, init_params):
-        self.proc, self.reader, self.writer = _start_isolated_log_client(self.entry_point, init_params)
+        self.proc, self.reader, self.writer, self.stderr_read_thread = _start_isolated_log_client(self.entry_point, init_params)
 
     def _blocking_call(self, method, args, kwargs):
         if self.proc is None:
@@ -92,7 +94,11 @@ class SafeRemoteCaller:
         if self.proc.poll() is None:
             self.proc.kill()
             self.proc.wait()
-            self.proc=None
+        assert self.proc.poll() is not None
+        self.proc=None
+        if self.stderr_read_thread is not None:
+            self.stderr_read_thread.join()
+            self.stderr_read_thread = None
 
 
 class LogMonitor:

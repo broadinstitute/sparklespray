@@ -93,11 +93,11 @@ def _create_parent_id(project, location):
     return f"projects/{project}/locations/{location}"
 
 
-def create_batch_job_from_job_spec(project: str, location: str, self: JobSpec):
+def create_batch_job_from_job_spec(project: str, location: str, self: JobSpec, worker_count: int):
     job = batch.Job(
         task_groups=[
             batch.TaskGroup(
-                task_count=self.task_count,
+                task_count=worker_count,
                 task_count_per_node="1",
                 task_spec=batch.TaskSpec(
                     runnables=_create_runnables(
@@ -248,8 +248,8 @@ class ClusterAPI:
     def __init__(self, batch_service_client):
         self.batch_service = batch_service_client
 
-    def create_job(self, project: str, location: str, job: JobSpec):
-        request = create_batch_job_from_job_spec(project, location, job)
+    def create_job(self, project: str, location: str, job: JobSpec, worker_count: int):
+        request = create_batch_job_from_job_spec(project, location, job, worker_count)
         job_result = self.batch_service.create_job(request)
         print("created", job_result.name)
         return job_result.name

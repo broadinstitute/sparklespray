@@ -122,4 +122,8 @@ if __name__ == "__main__":
 
     monitor = constructor_function(init_params)
     
-    start_worker_loop(reader, writer, monitor)
+    try:
+        start_worker_loop(reader, writer, monitor)
+    except KeyboardInterrupt:
+        # if we get a ^C just silently shutdown
+        pass

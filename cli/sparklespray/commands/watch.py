@@ -120,7 +120,6 @@ def watch(
     try:
         run_tasks(job_id, job.cluster, tasks, cluster)
     except KeyboardInterrupt:
-        raise
         print("Interrupted -- Exiting, but your job will continue to run unaffected.")
         return 20
 

@@ -26,35 +26,40 @@ def run_tasks(
     get_tasks = RateLimitedCall(lambda: cluster.task_store.get_tasks(job_id), 1)
     get_nodes = RateLimitedCall(lambda: cluster.get_node_reqs(), 1)
 
-    while True:
-        now = time.time()
+    try:
+        while True:
+            now = time.time()
 
-        # get the next task whose time is soonest
-        scheduled_task = heapq.heappop(timeline)
+            # get the next task whose time is soonest
+            scheduled_task = heapq.heappop(timeline)
 
-        # if it's not yet time for this task, sleep until then
-        if scheduled_task.timestamp > now:
-            time.sleep(scheduled_task.timestamp - now)
+            # if it's not yet time for this task, sleep until then
+            if scheduled_task.timestamp > now:
+                time.sleep(scheduled_task.timestamp - now)
 
-        # now, run the task and find out if we need to run it again later
-        # print("calling", scheduled_task.task)
-        next_action = scheduled_task.task.poll(
-            ClusterStateQuery(now, get_tasks, get_nodes)
-        )
-        # print("next action", next_action)
+            # now, run the task and find out if we need to run it again later
+            # print("calling", scheduled_task.task)
+            next_action = scheduled_task.task.poll(
+                ClusterStateQuery(now, get_tasks, get_nodes)
+            )
+            # print("next action", next_action)
 
-        if next_action is not None:
-            if isinstance(next_action, StopPolling):
-                break
-            else:
-                assert isinstance(next_action, NextPoll)
-                # add it to the schedule at the appropriate time
-                heapq.heappush(
-                    timeline,
-                    ScheduledTask(now + next_action.delay, scheduled_task.task),
-                )
+            if next_action is not None:
+                if isinstance(next_action, StopPolling):
+                    break
+                else:
+                    assert isinstance(next_action, NextPoll)
+                    # add it to the schedule at the appropriate time
+                    heapq.heappush(
+                        timeline,
+                        ScheduledTask(now + next_action.delay, scheduled_task.task),
+                    )
 
-    # now that we're done polling, call finish() on all tasks
-    final_state = ClusterStateQuery(time.time(), get_tasks, get_nodes)
-    for task in tasks:
-        task.finish(final_state)
+        # now that we're done polling, call finish() on all tasks
+        final_state = ClusterStateQuery(time.time(), get_tasks, get_nodes)
+        for task in tasks:
+            task.finish(final_state)
+    finally:
+        for task in tasks:
+            if hasattr(task, "cleanup"):
+                task.cleanup()

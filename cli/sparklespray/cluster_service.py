@@ -112,7 +112,7 @@ class Cluster:
         job_spec = JobSpec.model_validate_json(job.kube_job_spec)
 
         assert count == 1
-        return self.cluster_api.create_job(self.project, self.location, job_spec)
+        return self.cluster_api.create_job(self.project, self.location, job_spec, count)
 
     def has_active_node_requests(self):
         node_reqs = self.cluster_api.get_node_reqs(

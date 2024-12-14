@@ -33,13 +33,12 @@ class ResizeCluster(PeriodicTask):
         )
 
         requested_nodes = _count_requested_nodes(state.get_nodes())
+        additional_nodes = max(0, target_node_count - requested_nodes )
 
-        if requested_nodes == 0:
+        if additional_nodes > 0:
             # we haven't requested anything, so request something now
-            self.cluster.add_nodes(1)
+            self.cluster.add_nodes(additional_nodes)
             modified = True
-
-            print("warning: hardcoded single node request")
             return None
         # print("target_node_count > requested_nodes", target_node_count, requested_nodes)
         # if target_node_count > requested_nodes:
