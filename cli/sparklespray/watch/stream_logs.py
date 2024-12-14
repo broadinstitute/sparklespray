@@ -1,6 +1,6 @@
 import time
 import json
-from ..logclient import LogMonitor, CommunicationError
+from ..livelog.logclient import LogMonitor, CommunicationError
 from ..txtui import print_log_content
 import datetime
 import json
@@ -91,20 +91,19 @@ class StreamLogs:
 
         with _exception_guard(lambda: "polling log file threw exception"):
             try:
-                print_log_content(
-                    None,
-                    "calling poll",
-                    from_sparkles=True,
-                )
+                # print_log_content(
+                #     None,
+                #     "calling poll",
+                #     from_sparkles=True,
+                # )
 
                 self.log_monitor.poll()
-                print_log_content(
-                    None,
-                    "calling poll complete",
-                    from_sparkles=True,
-                )
-
-            except CommunicationError as ex:
+                # print_log_content(
+                #     None,
+                #     "calling poll complete",
+                #     from_sparkles=True,
+                # )
+            except TimeoutError as ex:
                 log.info(f"Got error polling log. shutting down log watch due to exception: {ex}")
                 self._abort_logging()
 

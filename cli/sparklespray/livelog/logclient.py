@@ -1,8 +1,14 @@
 import datetime
 import logging
-from .txtui import print_log_content
-
-from .log import log
+from ..txtui import print_log_content
+from ..log import log
+from termcolor import colored
+import fcntl, os
+import select
+import threading
+import subprocess
+import sys
+from .pickle_pipe import create_nonblocking_file_obj, Reader, Writer
 
 # Give all grpc calls a timeout of 10 seconds to complete
 GRPC_TIMEOUT = 10.0
@@ -19,60 +25,54 @@ class GRPCError(CommunicationError):
 class Timeout(CommunicationError):
     pass
 
-from .isolated_log_client import write_obj, read_obj
-from termcolor import colored
-import fcntl, os
-import select
-import threading
-import subprocess
-import sys
 
-def spit_out_stderr(fd):
-    flags = fcntl.fcntl(fd, fcntl.F_GETFL)
-    fcntl.fcntl(fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
+def print_from_stream(fd, color):
+    def print_loop():
+        nb_fd = create_nonblocking_file_obj(fd)
 
-    while True:
-        select.select([fd], [], [])
-        data = fd.read()
-        if len(data) == 0:
-            break
-        print(colored(data.decode("utf8"), "red"))
+        while True:
+            select.select([nb_fd], [], [])
+            data = nb_fd.read()
+            if len(data) == 0:
+                break
+            print(colored(data.decode("utf8"), color))
 
+    threading.Thread(target=print_loop, daemon=True).start()
 
-def _start_isolated_log_client(init_params):
+def _start_isolated_log_client(entry_point, init_params):
     python_executable = sys.executable
-    command = [python_executable, "-m", "sparklespray.isolated_log_client"]
+    command = [python_executable, "-m", "sparklespray.livelog.isolated_log_client", entry_point]
     print(f"Executing: {' '.join(command)}")
     proc = subprocess.Popen(command, executable=python_executable, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
-    # make stdout_pipe a non-blocking, non-buffered file-like object for reading
-    flags = fcntl.fcntl(proc.stdout, fcntl.F_GETFL)
-    fcntl.fcntl(proc.stdout, fcntl.F_SETFL, flags | os.O_NONBLOCK)
-    stdout_pipe = os.fdopen(proc.stdout.fileno(), mode="rb", buffering=0)
+    print_from_stream(proc.stderr, color="red")
 
-    threading.Thread(target=lambda: spit_out_stderr(proc.stderr), daemon=True).start()
+    writer = Writer(proc.stdin)
+    reader = Reader(proc.stdout)
 
     print("writing init params")
-    write_obj(proc.stdin, init_params )
-    return proc, stdout_pipe
+    writer.write_obj( init_params )
+    return proc, reader, writer
 
-class WrappedStub:
-    def __init__(self, timeout):
+from . import isolated_log_client
+
+class SafeRemoteCaller:
+    def __init__(self, entry_point, timeout):
         self.timeout = timeout
         self.proc = None
+        self.reader = None
+        self.writer = None
+        self.entry_point = entry_point
 
-    def start(self, cert, node_address, shared_secret):
-        self.proc, self.stdout_pipe=_start_isolated_log_client((cert, node_address, shared_secret))
-
-    def start_mock(self):
-        self.proc, self.stdout_pipe=_start_isolated_log_client("mock")
+    def start(self, init_params):
+        self.proc, self.reader, self.writer = _start_isolated_log_client(self.entry_point, init_params)
 
     def _blocking_call(self, method, args, kwargs):
         if self.proc is None:
             raise CommunicationError("disconnected WrappedStub")
-        write_obj(self.proc.stdin, (method, args, kwargs) )
+        self.writer.write_obj( (method, args, kwargs) )
         try:
-            value = read_obj(self.stdout_pipe, timeout=self.timeout)
+            value = self.reader.read_obj(timeout=self.timeout)
         except Timeout:
             self.dispose()
             raise Timeout("Timeout trying in call to {}".format(method))
@@ -94,12 +94,6 @@ class WrappedStub:
             self.proc.wait()
             self.proc=None
 
-if __name__ == "__main__":
-    stub = WrappedStub(3)
-    stub.start_mock()
-    result = stub._blocking_call("echo", ["example"], {})
-    print(result)
-
 
 class LogMonitor:
     def __init__(self, datastore_client, node_address, task_id):
@@ -108,8 +102,8 @@ class LogMonitor:
 
         cert = entity["cert"]
 
-        self.stub = WrappedStub(GRPC_TIMEOUT * 2)
-        self.stub.start(cert, node_address, entity["shared_secret"])
+        self.stub = SafeRemoteCaller(f"{isolated_log_client.__name__}:create_monitor", GRPC_TIMEOUT * 2)
+        self.stub.start((cert, node_address, entity["shared_secret"]))
         self.task_id = task_id
         self.offset = 0
 
@@ -156,3 +150,4 @@ class LogMonitor:
                 ),
                 from_sparkles=True,
             )
+
