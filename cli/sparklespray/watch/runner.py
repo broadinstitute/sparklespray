@@ -61,5 +61,4 @@ def run_tasks(
             task.finish(final_state)
     finally:
         for task in tasks:
-            if hasattr(task, "cleanup"):
-                task.cleanup()
+            task.cleanup()

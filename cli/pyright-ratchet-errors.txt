@@ -1,19 +1,12 @@
 cluster_service.py: error: "cluster" is not a known attribute of "None" (reportOptionalMemberAccess)
 cluster_service.py: error: "kube_job_spec" is not a known attribute of "None" (reportOptionalMemberAccess)
-cluster_service.py: error: Argument of type "str | None" cannot be assigned to parameter "json_data" of type "str | bytes | bytearray" in function "model_validate_json"
 config.py: error: Argument of type "dict[str, Unknown]" cannot be assigned to parameter "iterable" of type "Iterable[list[bytes]]" in function "__init__"
 config.py: error: Argument of type "set[Unknown]" cannot be assigned to parameter "requested" of type "List[str]" in function "create_services_from_config"
-config.py: error: Cannot assign to attribute "sparklesworker_image" for class "PrepConfig"
 config.py: error: No overloads for "__init__" match the provided arguments (reportCallIssue)
 gcp_utils.py: error: "create_pipeline_json" is not defined (reportUndefinedVariable)
-gcp_utils_test.py: error: "DEFAULT_SSD_SIZE" is unknown import symbol (reportAttributeAccessIssue)
 key_store_test.py: error: Argument of type "MockClient" cannot be assigned to parameter "client" of type "Client" in function "__init__"
 pb_pb2_grpc.py: error: "experimental" is not a known attribute of module "grpc" (reportAttributeAccessIssue)
-prep_image.py: error: Cannot access attribute "name" for class "str"
-reset.py: error: Cannot access attribute "cleanup_node_reqs" for class "Cluster"
-resize_cluster_test.py: error: Import "sparklespray.resize_cluster" could not be resolved (reportMissingImports)
 submit.py: error: Argument of type "None" cannot be assigned to parameter "cluster_id" of type "str" in function "__init__"
-test_startup_failure_tracker.py: error: Import ".startup_failure_tracker" could not be resolved (reportMissingImports)
 validate.py: error: Cannot access attribute "test_image" for class "Cluster"
 validate.py: error: Cannot access attribute "test_pipeline_api" for class "Cluster"
 watch.py: error: Argument of type "Config" cannot be assigned to parameter "config" of type "MinConfig" in function "create_cluster"

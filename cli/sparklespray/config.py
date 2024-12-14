@@ -22,6 +22,11 @@ import dataclasses
 from google.auth.credentials import Credentials
 from typing import Callable
 from .errors import UserError
+from .batch_api import ClusterAPI
+from google.cloud.batch_v1alpha.services.batch_service import BatchServiceClient
+from typing import TypeVar, Union
+
+T = TypeVar("T")
 
 class BadConfig(UserError):
     pass
@@ -148,9 +153,6 @@ def _parse_gcloud_config(gcloud_config_file: str, verbose: bool) -> GCloudConfig
     return config
 
 
-from typing import TypeVar, Union
-
-T = TypeVar("T")
 
 
 def load_config(
@@ -313,6 +315,7 @@ def load_config(
     #        ]
     #    )
     machine_type = config.machine_type
+    assert machine_type is not None
     if machine_type.startswith("n4-"):
         # N4 instances only work with "hyperdrive" so use that as the default
         default_drive_type = "hyperdisk-balanced"
@@ -400,8 +403,6 @@ class LazyInit:
         return self.initialized[name]
 
 
-from .batch_api import ClusterAPI
-from google.cloud.batch_v1alpha.services.batch_service import BatchServiceClient
 
 
 def create_services_from_config(config: Config, requested: List[str]):

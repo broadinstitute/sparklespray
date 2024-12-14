@@ -70,6 +70,9 @@ class SafeRemoteCaller:
         self.proc, self.reader, self.writer, self.stderr_read_thread = _start_isolated_log_client(self.entry_point, init_params)
 
     def _blocking_call(self, method, args, kwargs):
+        assert self.reader is not None
+        assert self.writer is not None
+        
         if self.proc is None:
             raise CommunicationError("disconnected WrappedStub")
         self.writer.write_obj( (method, args, kwargs) )

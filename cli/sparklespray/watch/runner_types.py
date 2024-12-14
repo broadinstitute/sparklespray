@@ -41,6 +41,8 @@ class PeriodicTask:
     def finish(self, state: ClusterStateQuery):
         "Function called after job is done and no more calls to poll() will be made"
 
+    def cleanup(self):
+        "Release any resources after all tasks are done. (Different then finish in that it is called both on successful completions and when exceptions are raised)"
 
 @functools.total_ordering
 class ScheduledTask:

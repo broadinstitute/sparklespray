@@ -15,7 +15,7 @@ def _test_datastore_api(job_store: JobStore, job_id: str):
     job = Job(
         job_id=job_id,
         tasks=[],
-        kube_job_spec=None,
+        kube_job_spec="invalid",
         metadata={},
         cluster=job_id,
         status=JOB_STATUS_KILLED,

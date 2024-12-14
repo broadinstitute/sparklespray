@@ -1,0 +1,8 @@
+echo hello 1
+sleep 5
+echo hello 2
+sleep 5
+echo hello 3
+sleep 5
+echo hello 4
+#exit 1

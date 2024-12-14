@@ -3,6 +3,8 @@ import collections
 import os
 from .util import url_join
 
+DownloadsAndCommand = collections.namedtuple("DownloadsAndCommand", "downloads command")
+SrcDstPair = collections.namedtuple("SrcDstPair", "src dst")
 
 class UploadMap:
     def __init__(self):
@@ -28,22 +30,6 @@ class UploadMap:
         return url
 
 
-def rewrite_argv_with_parameters(argv, parameters):
-    l = []
-    for task_params in parameters:
-
-        def expand_parameters(x):
-            while True:
-                m = re.match("(.*){([^}]+)}(.*)", x)
-                if m == None:
-                    return x
-                else:
-                    x = m.group(1) + task_params[m.group(2)] + m.group(3)
-
-        l.append([expand_parameters(x) for x in argv])
-    return l
-
-
 class Download:
     def __init__(self, src_url, dst, executable, is_cas_key, symlink_safe):
         self.src_url = src_url
@@ -63,9 +49,24 @@ class Download:
             d["symlink_safe"] = self.symlink_safe
         return d
 
+def rewrite_argv_with_parameters(argv, parameters):
+    l = []
+    for task_params in parameters:
 
-DownloadsAndCommand = collections.namedtuple("DownloadsAndCommand", "downloads command")
-SrcDstPair = collections.namedtuple("SrcDstPair", "src dst")
+        def expand_parameters(x):
+            while True:
+                m = re.match("(.*){([^}]+)}(.*)", x)
+                if m == None:
+                    return x
+                else:
+                    x = m.group(1) + task_params[m.group(2)] + m.group(3)
+
+        l.append([expand_parameters(x) for x in argv])
+    return l
+
+
+
+
 
 
 def _add_files_in_dir_to_pull_to_wd(

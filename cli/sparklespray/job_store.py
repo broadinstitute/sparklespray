@@ -11,7 +11,7 @@ from dataclasses import dataclass
 class Job:
     job_id: str
     tasks: List
-    kube_job_spec: Optional[str]
+    kube_job_spec: str
     metadata: Dict[str, str]
     cluster: str
     status: str
@@ -86,24 +86,6 @@ class JobStore:
         for entity_job in jobs_it:
             jobids.append(entity_job.key.name)
         return jobids
-
-    # moved to cluster.store_job
-    # def store_job(self, job : Job) -> None:
-    #     existing_job = self.get_job(job.job_id, must=False)
-    #     if existing_job is not None:
-    #         raise Exception("Cannot create job \"{}\", ID is already used".format(job.job_id))
-    #
-    #     batch = self.client.batch()
-    #     batch.begin()
-    #
-    #     for task in job.tasks:
-    #         batch.push(task_to_entity(self.client, task))
-    #     batch.put(job_to_entity(self.client, job))
-    #     batch.commit()
-    #
-    #     with self.batch_write() as batch:
-    #        batch.save(job)
-    #        log.info("Saved job definition with %d tasks", len(job.tasks))
 
     def update_job(self, job_id: str, mutate_fn) -> Tuple[bool, Job]:
         job_key = self.client.key("Job", job_id)

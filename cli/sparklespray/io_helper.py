@@ -4,7 +4,6 @@ import re
 import hashlib
 import json
 from .util import compute_hash
-import logging
 
 from .log import log
 

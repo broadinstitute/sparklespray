@@ -208,6 +208,7 @@ class JobQueue:
 
         job_key = self.client.key("Job", job_id)
         entity_job = self.client.get(job_key)
+        assert entity_job is not None, f"Could not get from datastore: {job_key}"
 
         task_ids = set(entity_job.get("tasks", []))
         # If we've got a mismatch between the data store and the data in the Job object, take the union

@@ -4,6 +4,7 @@ from typing import List
 from dataclasses import dataclass
 import dataclasses
 from typing import Optional
+from typing import Optional
 
 NODE_REQ_SUBMITTED = "submitted"
 NODE_REQ_STAGING = "staging"
@@ -46,7 +47,6 @@ def node_req_to_entity(client: datastore.Client, o: NodeReq) -> datastore.Entity
     return entity
 
 
-from typing import Optional
 
 
 def entity_to_node_req(entity: datastore.Entity) -> NodeReq:

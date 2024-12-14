@@ -1,0 +1,12 @@
+[config]
+default_url_prefix=gs://broad-achilles-kubeque/depmap-pipeline
+project=broad-achilles
+default_image=debian
+region=us-central1
+zones=us-central1-b
+machine_type=n2-standard-2
+account=856306709302-compute@developer.gserviceaccount.com
+boot_volume_in_gb=10
+mount_1_type=pd-standard
+mount_1_size_in_gb=50
+#max_preemptable_attempts_scale=10

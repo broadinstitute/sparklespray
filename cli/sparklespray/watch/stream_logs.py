@@ -73,6 +73,7 @@ class StreamLogs:
 
     def _abort_logging(self):
         # log.warning(f"Request for status from task {self.log_monitor.task_id} failed. This could be because the node was preempted. If so, the task will be restarted elsewhere.")
+        assert self.log_monitor is not None
         task_id = self.log_monitor.task_id
         self.log_monitor.close()
         self.log_monitor = None

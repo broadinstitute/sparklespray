@@ -1,4 +1,3 @@
-import re
 from .task_store import (
     STATUS_FAILED,
     STATUS_COMPLETE,
@@ -21,22 +20,9 @@ from .task_store import TaskStore
 from typing import List, Set
 from google.cloud import datastore
 import time
-import sys
 from .util import get_timestamp
-from .datastore_batch import Batch
-from .model import ExistingDiskMount, DiskMountT
 
 from .log import log
-from googleapiclient.errors import HttpError
-
-import json
-
-
-def _unique_id():
-    import uuid
-
-    return str(uuid.uuid4())
-
 
 from .batch_api import ClusterAPI, JobSpec
 from dataclasses import dataclass
@@ -123,60 +109,8 @@ class Cluster:
                 return True
         return False
 
-    # def ensure_named_volumes_exist(self, zone, pd_mounts: List[DiskMountT]):
-    #     raise NotImplemented
-    #     for pd_mount in pd_mounts:
-    #         if isinstance(pd_mount, ExistingDiskMount):
-    #             volume = self.compute.get_volume_details(zone, pd_mount.name)
-    #             assert (
-    #                 volume
-    #             ), f"Requested mounting of an existing volume ({pd_mount.name}) but it does not exist in zone {zone}"
-
     def stop_cluster(self):
         self.cluster_api.stop_cluster(self.project, self.location, self.cluster_id)
-        # node_reqs = self.node_req_store.get_node_reqs(cluster_name)
-        # for i, node_req in enumerate(node_reqs):
-        #     if node_req.status in FINAL_NODE_STATES:
-        #         log.info(
-        #             "Canceling node request %s (%s/%s)",
-        #             node_req.operation_id,
-        #             i,
-        #             len(node_reqs),
-        #         )
-        #         # if we are trying to stop a cluster that was created with an old version of sparkles
-        #         # which used the old pipeline API, don't even try to cancel the operation. Instead
-        #         # just warn the use of the situation and move on. Typically the operation terminated log ago
-        #         # and the person didn't upgrade sparkles in the middle of running a job.
-        #         if re.match("projects/[^/]+/operations/[^/]+", node_req.operation_id):
-        #             log.warn(
-        #                 f"Cannot cancel past request to add a node because the operation_id ({ node_req.operation_id}) looks like it was created with the old deprecated google API. Assuming this node terminated long ago and moving on."
-        #             )
-        #         else:
-        #             try:
-        #                 self.cancel_add_node(node_req.operation_id)
-        #             except HttpError as ex:
-        #                 log.info("Got httpError canceling node request: %s", ex)
-
-        # instances = self.compute.get_cluster_instances(self.zones, cluster_name)
-        # if len(instances) == 0:
-        #     log.warning(
-        #         "Attempted to delete instances in cluster %s but no instances found!",
-        #         cluster_name,
-        #     )
-        # else:
-        #     for instance in instances:
-        #         zone = instance["zone"].split("/")[-1]
-        #         log.info(
-        #             "deleting instance %s associated with cluster %s",
-        #             instance["name"],
-        #             cluster_name,
-        #         )
-        #         self.compute.stop(instance["name"], zone)
-
-        #     for instance in instances:
-        #         zone = instance["zone"].split("/")[-1]
-        #         self.wait_for_instance_status(zone, instance["name"], "TERMINATED")
-
 
 class CachingCaller:
     def __init__(self, fn, expiry_time=5):

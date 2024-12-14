@@ -1,0 +1,6 @@
+./sparklesworker.local consume --localhost \
+                                                                                 --cacheDir /tmp/mnt/data/cache \
+                                                                                 --tasksDir /tmp/mnt/data/tasks \
+ --cluster c-5cb1fd7dfae41048ad04 \
+                                                                                 --projectId broad-achilles \
+                                                                                 --timeout 10 --shutdownAfter 600
