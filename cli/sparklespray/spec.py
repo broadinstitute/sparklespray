@@ -6,6 +6,7 @@ from .util import url_join
 DownloadsAndCommand = collections.namedtuple("DownloadsAndCommand", "downloads command")
 SrcDstPair = collections.namedtuple("SrcDstPair", "src dst")
 
+
 class UploadMap:
     def __init__(self):
         self.map = {}
@@ -49,6 +50,7 @@ class Download:
             d["symlink_safe"] = self.symlink_safe
         return d
 
+
 def rewrite_argv_with_parameters(argv, parameters):
     l = []
     for task_params in parameters:
@@ -63,10 +65,6 @@ def rewrite_argv_with_parameters(argv, parameters):
 
         l.append([expand_parameters(x) for x in argv])
     return l
-
-
-
-
 
 
 def _add_files_in_dir_to_pull_to_wd(

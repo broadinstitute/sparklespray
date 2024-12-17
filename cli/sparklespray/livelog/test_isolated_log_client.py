@@ -3,27 +3,34 @@ import os
 import time
 import pytest
 
+
 class MockMonitorDictAPI:
     def __init__(self, init_param):
         self.init_param = init_param
 
     def echo(self, obj):
         return {"success": True, "value": obj, "init_param": self.init_param}
-        
+
 
 def create_mock(init_params):
     return MockMonitorDictAPI(init_params)
 
+
 def test_with_mock():
-    # this doesn't really test grpc calls can be made. It just tests the plumbing. Creates a child process and makes sure it can 
+    # this doesn't really test grpc calls can be made. It just tests the plumbing. Creates a child process and makes sure it can
     # communicate
     stub = SafeRemoteCaller(f"{__name__}:create_mock", 3)
     stub.start("my name is steve")
     result = stub._blocking_call("echo", ["hello"], {})
-    assert result == {"success": True, "value": "hello", "init_param": "my name is steve"}
+    assert result == {
+        "success": True,
+        "value": "hello",
+        "init_param": "my name is steve",
+    }
     result = stub._blocking_call("echo", ["bye"], {})
     assert result == {"success": True, "value": "bye", "init_param": "my name is steve"}
     stub.dispose()
+
 
 class MockHangingMonitor:
     def __init__(self, blocking_filename):
@@ -42,7 +49,7 @@ def test_timeout(tmpdir):
 
     stub = SafeRemoteCaller(f"{__name__}:MockHangingMonitor", 0.5)
     stub.start(str(lock_file))
-    
+
     # make a normal call
     result = stub._blocking_call("echo", ["hello"], {})
     assert result == {"success": True, "value": "hello"}

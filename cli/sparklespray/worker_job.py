@@ -4,10 +4,14 @@ from datetime import datetime
 from .batch_api import JobSpec, Runnable, Disk
 from .gcp_utils import normalize_label, make_unique_label, validate_label
 
-def get_consume_command(job_spec : JobSpec):
-    consume_runnable = [x for x in job_spec.runnables if x.command[0].endswith("consume")]
+
+def get_consume_command(job_spec: JobSpec):
+    consume_runnable = [
+        x for x in job_spec.runnables if x.command[0].endswith("consume")
+    ]
     assert len(consume_runnable) == 1
     return consume_runnable[0].command
+
 
 def create_job_spec(
     job_id,
@@ -27,23 +31,23 @@ def create_job_spec(
     timestamp = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
 
     consume_command = [
-                consume_exe_path,
-                "consume",
-                "--cacheDir",
-                os.path.join(consume_data, "cache"),
-                "--tasksDir",
-                os.path.join(consume_data, "tasks"),
-                "--cluster",
-                cluster_name,
-                "--projectId",
-                project,
-                "--port",
-                str(monitor_port),
-                "--timeout",
-                "10",
-                "--shutdownAfter",
-                str(60*10) # keep worker around for 10 minutes?
-            ]
+        consume_exe_path,
+        "consume",
+        "--cacheDir",
+        os.path.join(consume_data, "cache"),
+        "--tasksDir",
+        os.path.join(consume_data, "tasks"),
+        "--cluster",
+        cluster_name,
+        "--projectId",
+        project,
+        "--port",
+        str(monitor_port),
+        "--timeout",
+        "10",
+        "--shutdownAfter",
+        str(60 * 10),  # keep worker around for 10 minutes?
+    ]
 
     print(f"exec: {' '.join(consume_command)}")
 
@@ -54,7 +58,7 @@ def create_job_spec(
         Runnable(
             image=docker_image,
             command=consume_command,
-        )
+        ),
     ]
 
     job = JobSpec(

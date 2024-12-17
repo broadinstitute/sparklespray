@@ -31,8 +31,10 @@ from ..certgen import create_self_signed_cert
 
 from ..worker_job import create_job_spec
 
+
 class ExistingJobException(Exception):
     pass
+
 
 # spec should have three rough components:
 #   common: keys shared by everything
@@ -159,8 +161,6 @@ def _make_cluster_name(
         hash.update(f"{job_name}-{image}-{sparklespray.__version__}".encode("utf8"))
         hash.update(machine_json.encode("utf8"))
         return f"c-{hash.hexdigest()[:20]}"
-
-
 
 
 def submit(
@@ -498,9 +498,9 @@ def submit_cmd(
 
     if not os.path.exists(config.sparklesworker_exe_path):
         raise UserError(
-        f"Could not find {config.sparklesworker_exe_path}. This most commonly happens when one doesn't "
-        "install from the packaged releases at https://github.com/broadinstitute/sparklespray/releases"
-    )
+            f"Could not find {config.sparklesworker_exe_path}. This most commonly happens when one doesn't "
+            "install from the packaged releases at https://github.com/broadinstitute/sparklespray/releases"
+        )
 
     log.debug("upload_map = %s", upload_map)
 
@@ -549,7 +549,7 @@ def submit_cmd(
     cluster = Cluster(
         config.project,
         config.location,
-        None,
+        "none",
         job_id,
         config.zones,
         jq.job_storage,

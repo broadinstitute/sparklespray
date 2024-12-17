@@ -31,7 +31,9 @@ def sparkles_main():
     if retcode is not None:
         sys.exit(retcode)
 
+
 from .errors import UserError
+
 
 def main(argv=None):
     import warnings

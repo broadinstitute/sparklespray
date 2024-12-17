@@ -33,7 +33,7 @@ class ResizeCluster(PeriodicTask):
         )
 
         requested_nodes = _count_requested_nodes(state.get_nodes())
-        additional_nodes = max(0, target_node_count - requested_nodes )
+        additional_nodes = max(0, target_node_count - requested_nodes)
 
         if additional_nodes > 0:
             # we haven't requested anything, so request something now

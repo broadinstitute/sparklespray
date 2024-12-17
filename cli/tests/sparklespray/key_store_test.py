@@ -25,8 +25,10 @@ class MockClient:
         self.objs_by_id[entity.key] = entity
 
 
+from typing import cast
+from google.cloud.datastore import Client
 def test_key_store():
-    mock_client = MockClient()
+    mock_client = cast(Client, MockClient())
     ks = KeyStore(mock_client)
 
     cert, key = ks.get_cert_and_key()

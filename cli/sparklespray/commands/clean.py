@@ -9,7 +9,7 @@ from .shared import _get_jobids_from_pattern
 
 
 def clean(
-        cluster: Cluster,
+    cluster: Cluster,
     jq: JobQueue,
     job_id: str,
     force: bool = False,
@@ -30,7 +30,6 @@ def clean(
     jq.delete_job(job_id)
 
     return True
-
 
 
 def clean_cmd(config, datastore_client, cluster_api, jq, args):

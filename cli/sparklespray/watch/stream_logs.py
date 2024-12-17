@@ -19,24 +19,26 @@ from .shared import (
 
 from time import monotonic
 
+
 class CooldownCounter:
     def __init__(self, initial_delay):
         self.initial_delay = initial_delay
         self.current_delay = initial_delay
         self.next_expiration = monotonic()
-    
+
     def reset(self):
         self.current_delay = self.initial_delay
 
     def failure(self):
         self.next_expiration = monotonic() + self.current_delay
         self.current_delay = self.current_delay * 2
- 
+
     def time_till_cool(self):
         return max(0.0, self.next_expiration - monotonic())
-    
-    
+
+
 from collections import defaultdict
+
 
 class StreamLogs:
     # Stream output from one of the running processes.
@@ -52,7 +54,7 @@ class StreamLogs:
         running = _only_running_tasks(state.get_tasks())
         if len(running) > 0:
             task = running[0]
-            
+
             if self.task_cooldown_counters[task.task_id].time_till_cool() > 0:
                 return
 
@@ -105,7 +107,9 @@ class StreamLogs:
                 #     from_sparkles=True,
                 # )
             except TimeoutError as ex:
-                log.info(f"Got error polling log. shutting down log watch due to exception: {ex}")
+                log.info(
+                    f"Got error polling log. shutting down log watch due to exception: {ex}"
+                )
                 self._abort_logging()
 
     def do_last_read(self):
@@ -195,6 +199,7 @@ class StreamLogs:
         if self.log_monitor is not None:
             self.log_monitor.close()
             self.log_monitor = None
+
 
 # class FlushStdout:
 #     def __init__(self, jq, io):

@@ -1117,3 +1117,19 @@ This will write generated code to the following files:
 brew install protobuf
 go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.28
 go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.2
+
+# Common failure modes
+
+* Cannot pull docker image
+* Cannot execute command 
+   * because command is not executable/missing
+   * because image built for wrong arch
+* Process exhausts memory and is killed
+* VM becomes non-responsive
+* VM is preempted
+
+TODO: 
+get tests passing
+get pyright checks passing
+reimplement "validate"
+

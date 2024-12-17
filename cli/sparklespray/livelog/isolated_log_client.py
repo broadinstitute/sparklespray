@@ -7,43 +7,56 @@ import grpc
 from .pickle_pipe import Reader, Writer
 import importlib
 
-# this is ridiculously complicated but it seems like the timeout option on grpc isn't reliable. So instead, 
+# this is ridiculously complicated but it seems like the timeout option on grpc isn't reliable. So instead,
 # spawn a child process which makes all grpc calls. If any call takes too long, we simply kill the process.
+
 
 class MonitorDictAPI:
     "Basically the same contract as MonitorStub, but consumes typed dicts and returns typed dicts"
+
     def __init__(self, channel, shared_secret):
         self.shared_secret = shared_secret
         self.stub = MonitorStub(channel)
 
-    def read_output(self, task_id: str, offset:int, size:int):
+    def read_output(self, task_id: str, offset: int, size: int):
         try:
             response = self.stub.ReadOutput(
-                ReadOutputRequest(
-                    taskId=task_id, offset=offset, size=size
-                ),
+                ReadOutputRequest(taskId=task_id, offset=offset, size=size),
                 metadata=[("shared-secret", self.shared_secret)],
-#                timeout=GRPC_TIMEOUT,
+                #                timeout=GRPC_TIMEOUT,
             )
-            return {"success": True, "data":response.data, "end_of_file": response.endOfFile}
+            return {
+                "success": True,
+                "data": response.data,
+                "end_of_file": response.endOfFile,
+            }
         except grpc.RpcError as rpc_error:
             return {"success": False, "error": str(rpc_error)}
-    
+
     def get_process_status(self):
         try:
             response = self.stub.GetProcessStatus(
                 GetProcessStatusRequest(),
                 metadata=[("shared-secret", self.shared_secret)],
-#                timeout=GRPC_TIMEOUT,
+                #                timeout=GRPC_TIMEOUT,
             )
         except grpc.RpcError as rpc_error:
             return {"success": False, "error": str(rpc_error)}
 
-        return {"success": True, "process_count": response.processCount, "total_memory": response.totalMemory, "total_data": response.totalData, "total_shared":response.totalShared,"total_resident": response.totalResident}
+        return {
+            "success": True,
+            "process_count": response.processCount,
+            "total_memory": response.totalMemory,
+            "total_data": response.totalData,
+            "total_shared": response.totalShared,
+            "total_resident": response.totalResident,
+        }
+
 
 from .pickle_pipe import log
 
-def _worker_loop(in_queue : Queue, out_queue: Queue, monitor):
+
+def _worker_loop(in_queue: Queue, out_queue: Queue, monitor):
     while True:
         # log("waiting for command")
         cmd = in_queue.get()
@@ -61,10 +74,12 @@ def _worker_loop(in_queue : Queue, out_queue: Queue, monitor):
     # log("shutting down")
     monitor.close()
 
+
 class Shutdown:
     pass
 
-def start_worker_loop(reader : Reader, writer : Writer, monitor):
+
+def start_worker_loop(reader: Reader, writer: Writer, monitor):
     out_queue = Queue()
     in_queue = Queue()
 
@@ -92,6 +107,7 @@ def start_worker_loop(reader : Reader, writer : Writer, monitor):
 
     _worker_loop(in_queue, out_queue, monitor)
 
+
 def create_monitor(init_params):
     cert, node_address, shared_secret = init_params
 
@@ -103,9 +119,8 @@ def create_monitor(init_params):
         options=(("grpc.ssl_target_name_override", "sparkles.server"),),
     )
 
-#    log("connected")
+    #    log("connected")
     return MonitorDictAPI(channel, shared_secret)
-
 
 
 if __name__ == "__main__":
@@ -121,7 +136,7 @@ if __name__ == "__main__":
     constructor_function = getattr(module, constructor_function_name)
 
     monitor = constructor_function(init_params)
-    
+
     try:
         start_worker_loop(reader, writer, monitor)
     except KeyboardInterrupt:

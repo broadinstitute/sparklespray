@@ -44,6 +44,7 @@ class PeriodicTask:
     def cleanup(self):
         "Release any resources after all tasks are done. (Different then finish in that it is called both on successful completions and when exceptions are raised)"
 
+
 @functools.total_ordering
 class ScheduledTask:
     def __init__(self, timestamp, task):

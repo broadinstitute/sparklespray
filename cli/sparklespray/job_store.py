@@ -107,6 +107,13 @@ class JobStore:
                 return None
         return entity_to_job(job_entity)
 
+    def get_job_must(self, job_id: str) -> Job:
+        job_key = self.client.key("Job", job_id)
+        job_entity = self.client.get(job_key)
+        if job_entity is None:
+            raise Exception("Could not find job with id {}".format(job_id))
+        return entity_to_job(job_entity)
+
     def get_last_job(self) -> Job:
         query = self.client.query(kind="Job")
         query.order = ["-submit_time"]

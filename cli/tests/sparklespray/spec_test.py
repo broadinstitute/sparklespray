@@ -1,6 +1,5 @@
 from sparklespray.spec import make_spec_from_command
-from sparklespray.submit import expand_tasks
-
+from sparklespray.commands.submit import expand_tasks
 
 def dummy_hash(text):
     return str(hash(text))

@@ -39,7 +39,10 @@ def print_log_content(timestamp, payload, from_sparkles=False, is_important=True
             prefix = "[{}]".format(timestamp.strftime("%H:%M:%S"))
             print(colored(prefix, "green"), colored(line, message_color, attrs=attrs))
         else:
-            print(colored(" " * len(prefix), "white"), colored(line, message_color, attrs=attrs))
+            print(
+                colored(" " * len(prefix), "white"),
+                colored(line, message_color, attrs=attrs),
+            )
 
 
 def config_logging(verbosity):

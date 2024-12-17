@@ -1,6 +1,4 @@
-from sparklespray.submit import expand_files_to_upload, SrcDstPair
-
-# from sparklespray.main import expand_files_to_upload, SrcDstPair
+from sparklespray.commands.submit import expand_files_to_upload, SrcDstPair
 import os
 
 

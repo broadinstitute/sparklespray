@@ -26,14 +26,17 @@ from .log import log
 
 from .batch_api import ClusterAPI, JobSpec
 from dataclasses import dataclass
+from typing import Protocol
 
 
-@dataclass
-class MinConfig:
+class MinConfig(Protocol):
     project: str
-    location: str
     zones: List[str]
     debug_log_prefix: str
+
+    @property
+    def location(self) -> str:
+        ...
 
 
 def create_cluster(config: MinConfig, jq, datastore_client, cluster_api, job_id):
@@ -81,7 +84,7 @@ class Cluster:
     @property
     def cluster_id(self):
         if self._cluster_id is None:
-            job = self.job_store.get_job(self.job_id)
+            job = self.job_store.get_job_must(self.job_id)
             self._cluster_id = job.cluster
         return self._cluster_id
 
@@ -93,7 +96,7 @@ class Cluster:
     def add_nodes(
         self, count: int
     ):  # job_id: str, preemptible: bool, debug_log_url: str):
-        job = self.job_store.get_job(self.job_id)
+        job = self.job_store.get_job_must(self.job_id)
 
         job_spec = JobSpec.model_validate_json(job.kube_job_spec)
 
@@ -111,6 +114,7 @@ class Cluster:
 
     def stop_cluster(self):
         self.cluster_api.stop_cluster(self.project, self.location, self.cluster_id)
+
 
 class CachingCaller:
     def __init__(self, fn, expiry_time=5):

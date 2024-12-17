@@ -47,8 +47,6 @@ def node_req_to_entity(client: datastore.Client, o: NodeReq) -> datastore.Entity
     return entity
 
 
-
-
 def entity_to_node_req(entity: datastore.Entity) -> NodeReq:
     # def get_str(prop: str ) -> Optional[str]:
     #     val = entity.get(prop)

@@ -41,11 +41,23 @@ def print_from_stream(fd, color):
     t.start()
     return t
 
+
 def _start_isolated_log_client(entry_point, init_params):
     python_executable = sys.executable
-    command = [python_executable, "-m", "sparklespray.livelog.isolated_log_client", entry_point]
+    command = [
+        python_executable,
+        "-m",
+        "sparklespray.livelog.isolated_log_client",
+        entry_point,
+    ]
     print(f"Executing: {' '.join(command)}")
-    proc = subprocess.Popen(command, executable=python_executable, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    proc = subprocess.Popen(
+        command,
+        executable=python_executable,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
 
     t = print_from_stream(proc.stderr, color="red")
 
@@ -53,10 +65,12 @@ def _start_isolated_log_client(entry_point, init_params):
     reader = Reader(proc.stdout)
 
     print("writing init params")
-    writer.write_obj( init_params )
+    writer.write_obj(init_params)
     return proc, reader, writer, t
 
+
 from . import isolated_log_client
+
 
 class SafeRemoteCaller:
     def __init__(self, entry_point, timeout):
@@ -67,21 +81,26 @@ class SafeRemoteCaller:
         self.entry_point = entry_point
 
     def start(self, init_params):
-        self.proc, self.reader, self.writer, self.stderr_read_thread = _start_isolated_log_client(self.entry_point, init_params)
+        (
+            self.proc,
+            self.reader,
+            self.writer,
+            self.stderr_read_thread,
+        ) = _start_isolated_log_client(self.entry_point, init_params)
 
     def _blocking_call(self, method, args, kwargs):
         assert self.reader is not None
         assert self.writer is not None
-        
+
         if self.proc is None:
             raise CommunicationError("disconnected WrappedStub")
-        self.writer.write_obj( (method, args, kwargs) )
+        self.writer.write_obj((method, args, kwargs))
         try:
             value = self.reader.read_obj(timeout=self.timeout)
         except Timeout:
             self.dispose()
             raise Timeout("Timeout trying in call to {}".format(method))
-        if not value['success']:
+        if not value["success"]:
             raise CommunicationError(value["error"])
         return value
 
@@ -98,7 +117,7 @@ class SafeRemoteCaller:
             self.proc.kill()
             self.proc.wait()
         assert self.proc.poll() is not None
-        self.proc=None
+        self.proc = None
         if self.stderr_read_thread is not None:
             self.stderr_read_thread.join()
             self.stderr_read_thread = None
@@ -111,7 +130,9 @@ class LogMonitor:
 
         cert = entity["cert"]
 
-        self.stub = SafeRemoteCaller(f"{isolated_log_client.__name__}:create_monitor", GRPC_TIMEOUT * 2)
+        self.stub = SafeRemoteCaller(
+            f"{isolated_log_client.__name__}:create_monitor", GRPC_TIMEOUT * 2
+        )
         self.stub.start((cert, node_address, entity["shared_secret"]))
         self.task_id = task_id
         self.offset = 0
@@ -124,7 +145,8 @@ class LogMonitor:
     def poll(self):
         while True:
             response = self.stub.read_output(
-                task_id=self.task_id, offset=self.offset, size=100000)
+                task_id=self.task_id, offset=self.offset, size=100000
+            )
 
             payload = response["data"].decode("utf8")
             if payload != "":
@@ -135,7 +157,7 @@ class LogMonitor:
             if response["end_of_file"]:
                 break
 
-        response = self.stub.get_process_status(        )
+        response = self.stub.get_process_status()
 
         mem_total = (
             response["total_memory"]
@@ -159,4 +181,3 @@ class LogMonitor:
                 ),
                 from_sparkles=True,
             )
-

@@ -16,6 +16,7 @@ from .node_req_store import (
 
 import json
 
+
 class Runnable(BaseModel):
     image: str
     command: List[str]
@@ -93,7 +94,9 @@ def _create_parent_id(project, location):
     return f"projects/{project}/locations/{location}"
 
 
-def create_batch_job_from_job_spec(project: str, location: str, self: JobSpec, worker_count: int):
+def create_batch_job_from_job_spec(
+    project: str, location: str, self: JobSpec, worker_count: int
+):
     job = batch.Job(
         task_groups=[
             batch.TaskGroup(

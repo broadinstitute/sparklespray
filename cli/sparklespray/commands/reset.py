@@ -25,6 +25,7 @@ def add_reset_cmd(subparser):
         help="If set, will mark all tasks as 'pending', not just 'claimed', 'killed' or 'failed' tasks. The first parameter can be either a job ID or an individual task ID",
     )
 
+
 from ..cluster_service import create_cluster
 
 
@@ -37,7 +38,7 @@ def reset_cmd(jq: JobQueue, args, config, datastore_client, cluster_api):
     else:
         job_ids = _get_jobids_from_pattern(jq, jobid_pattern)
         if len(job_ids) == 0:
-            raise Exception(f"No jobs matched pattern \"{jobid_pattern}\"")
+            raise Exception(f'No jobs matched pattern "{jobid_pattern}"')
         for jobid in job_ids:
             cluster = create_cluster(config, jq, datastore_client, cluster_api, jobid)
             cluster.stop_cluster()
@@ -59,4 +60,3 @@ def reset_cmd(jq: JobQueue, args, config, datastore_client, cluster_api):
             )
             updated = jq.reset(jobid, None, statuses_to_clear=statuses_to_clear)
             log.info("updated %d tasks", updated)
-

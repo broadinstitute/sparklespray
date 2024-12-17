@@ -28,6 +28,7 @@ from typing import TypeVar, Union
 
 T = TypeVar("T")
 
+
 class BadConfig(UserError):
     pass
 
@@ -151,8 +152,6 @@ def _parse_gcloud_config(gcloud_config_file: str, verbose: bool) -> GCloudConfig
     if verbose:
         print("Using defaults from {}: {}".format(gcloud_config_file, config))
     return config
-
-
 
 
 def load_config(
@@ -382,9 +381,9 @@ def create_func_params(
         service_account_key, scopes=SCOPES
     )
 
-    params = dict(
-        create_services_from_config(config, set(requested).difference(extras.keys()))
-    )
+    requested_only = set(requested).difference(extras.keys())
+    params_ = create_services_from_config(config, list(requested_only))
+    params = dict(params_)
     for name, value in extras.items():
         if name in requested:
             params[name] = value
@@ -401,8 +400,6 @@ class LazyInit:
             value = self.constructors[name](self)
             self.initialized[name] = value
         return self.initialized[name]
-
-
 
 
 def create_services_from_config(config: Config, requested: List[str]):
