@@ -350,6 +350,12 @@ TERMINAL_STATES = set([
     batch.JobStatus.State.SUCCEEDED
 ])
 
+def is_job_complete(job: batch.Job):
+    return job.status.state in TERMINAL_STATES
+
+def is_job_successful(job: batch.Job):
+    return job.status.state == batch.JobStatus.State.SUCCEEDED
+
 class ClusterAPI:
     def __init__(self, batch_service_client : BatchServiceClient):
         self.batch_service = batch_service_client

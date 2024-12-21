@@ -1132,4 +1132,5 @@ TODO:
 (x) get tests passing
 (x) get pyright checks passing
 (x) Fix node count 
+Fix drive assignment
 reimplement "validate"

@@ -29,8 +29,8 @@ def _test_datastore_api(job_store: JobStore, job_id: str):
     assert fetched_job.job_id == job_id
     job_store.delete(job_id)
 
-
-def validate_cmd(jq: JobQueue, io: IO, cluster: Cluster, config: Config):
+from ..batch_api import ClusterAPI
+def validate_cmd(jq: JobQueue, io: IO, config: Config, cluster_api: ClusterAPI):
     print(f"Validating config, using sparklespray {sparklespray.__version__}")
 
     service_acct = config.credentials.service_account_email  # pyright: ignore
@@ -40,7 +40,7 @@ def validate_cmd(jq: JobQueue, io: IO, cluster: Cluster, config: Config):
 
     print(f"Verifying we can access google cloud storage.")
     print(
-        f"This should work as long as the buckets used are owned by the project '{project_id}'. If not you will need to explictly grant access to the buckets to the account {service_acct}. This can be done via 'sparkles grant'"
+        f"This should work as long as the buckets used are owned by the project '{project_id}'. If not you will need to explictly grant access to {service_acct}"
     )
 
     sample_value = random_string(20)
@@ -49,31 +49,27 @@ def validate_cmd(jq: JobQueue, io: IO, cluster: Cluster, config: Config):
     assert sample_value == fetched_value
 
     print(
-        "Verifying we can read/write from the google datastore service and google pubsub"
+        "Verifying we can read/write from the google datastore service"
     )
     _test_datastore_api(jq.job_storage, sample_value)
 
-    raise NotImplementedError()
-    # print("Verifying we can access google lifesciences apis")
-    # cluster.test_pipeline_api()
+    print("Verifying we can access google's Batch apis by creating test job")
+    from ..worker_job import create_test_job
+    from ..batch_api import is_job_complete, is_job_successful
+    from ..gcp_utils import make_unique_label
+    job = create_test_job("validate-test", make_unique_label("cluster"), config.default_image, service_acct, config)
+    operation_id = cluster_api.create_job(config.project, config.location, job, 1)
 
-    # default_image = config.default_image
-
-    # print(f'Verifying google lifesciences can launch image "{default_image}"')
-    # print(
-    #     f'If this fails due to "permission denied", make sure that {service_acct} has been granted access to pull the docker image "{default_image}". You may need to explictly grant access via "sparkles grant" if the docker repo is owned by a different project than {project_id}.'
-    # )
-    # logging_url = config.default_url_prefix + "/node-logs"
-
-    # cluster.test_image(
-    #     project=project_id,
-    #     zones=config.zones,
-    #     docker_image=config.default_image,
-    #     debug_log_url=logging_url,
-    #     machine_specs=config.create_machine_specs(),
-    #     monitor_port=config.monitor_port,
-    # )
-
+    print(f"Waiting for job {operation_id} to complete ", end="", flush=True)
+    while True:
+        status = cluster_api.get_job_status(operation_id)
+        if is_job_complete(status):
+            assert is_job_successful(status), f"Job did not complete successfully: {status}"
+            break
+        else:
+            print(".", end="", flush=True)
+            time.sleep(5)
+    print(" success!")
     print("Verification successful!")
 
 

@@ -77,6 +77,7 @@ def create_job_spec(
         locations=["regions/us-central1"],
         network_tags=["sparklesworker"],
         monitor_port=monitor_port,
+        # todo
         boot_disk=Disk(
             name="bootdisk", size_gb=40, type="hyperdisk-balanced", mount_path="/"
         ),
@@ -90,4 +91,34 @@ def create_job_spec(
         scopes=["https://www.googleapis.com/auth/cloud-platform"],
     )
 
+    return job
+
+from .config import Config
+
+def create_test_job(job_id : str, cluster_name: str, docker_image: str, service_account_email: str, config: Config):
+    validate_label(job_id)
+    timestamp = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+
+    job = JobSpec(
+        task_count="1",
+        runnables=[
+            Runnable(
+                image=docker_image, command=["echo", "test"]
+            ),
+        ],
+        machine_type="n4-standard-2",
+        preemptible=True,
+        locations=[f"regions/{config.location}"],
+        network_tags=["sparklesworker"],
+        monitor_port=config.monitor_port,
+        boot_disk=Disk(
+            name="bootdisk", size_gb=40, type="hyperdisk-balanced", mount_path="/"
+        ),
+        disks=[],
+        sparkles_job=job_id,
+        sparkles_cluster=cluster_name,
+        sparkles_timestamp=timestamp,
+        service_account_email=service_account_email,
+        scopes=["https://www.googleapis.com/auth/cloud-platform"],
+    )
     return job
