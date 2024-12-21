@@ -46,7 +46,8 @@ func Main() error {
 				cli.StringFlag{Name: "tasksFile"},
 				cli.StringFlag{Name: "port"},
 				cli.IntFlag{Name: "timeout", Value: 5}, // watchdog timeout: 5 minutes means the process will be killed after 10 minutes if the main loop doesn't check in
-				cli.IntFlag{Name: "shutdownAfter", Value: 30},
+				cli.IntFlag{Name: "shutdownAfter", Value: 0},
+				cli.IntFlag{Name: "ftShutdownAfter", Value: 30},
 				cli.BoolFlag{Name: "localhost", Usage: "If set, does not try to look up instance name and IP from metadata service, but assume it's localhost"},
 			},
 			Action: consume},
@@ -224,7 +225,14 @@ func consume(c *cli.Context) error {
 	tasksFile := c.String("tasksFile")
 	port := c.String("port")
 	shutdownAfter := c.Int("shutdownAfter")
+	firstTaskShutdownAfter := c.Int("ftShutdownAfter")
 	watchdogTimeout := time.Duration(c.Int("timeout")) * time.Minute
+
+	batchTaskIndex := os.Getenv("BATCH_TASK_INDEX")
+	if batchTaskIndex == "0" {
+		shutdownAfter = firstTaskShutdownAfter
+		log.Printf("First task in batch. Updated shutdownAfter to %d", shutdownAfter)
+	}
 
 	EnableWatchdog(watchdogTimeout)
 

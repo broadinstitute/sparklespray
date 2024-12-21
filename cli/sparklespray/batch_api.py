@@ -2,6 +2,7 @@ import google.cloud.batch_v1alpha.types as batch
 from pydantic import BaseModel
 from typing import List, Dict
 import time
+from google.cloud.batch_v1alpha.services.batch_service import BatchServiceClient
 
 from .node_req_store import (
     NodeReq,
@@ -34,7 +35,9 @@ class Disk(BaseModel):
 
 class JobSpec(BaseModel):
     task_count: str
-    runnables: List[Runnable]
+
+    runnables: List[Runnable] # normal workers
+    
     machine_type: str
     preemptible: bool
     # Each location can be a region or a zone. Only one region or multiple zones in one region is supported now. For example, ["regions/us-central1"] allow VMs in any zones in region us-central1. ["zones/us-central1-a", "zones/us-central1-c"] only allow VMs in zones us-central1-a and us-central1-c.
@@ -93,23 +96,24 @@ def _create_disks(disks: List[Disk]):
 def _create_parent_id(project, location):
     return f"projects/{project}/locations/{location}"
 
-
 def create_batch_job_from_job_spec(
     project: str, location: str, self: JobSpec, worker_count: int
 ):
-    job = batch.Job(
-        task_groups=[
-            batch.TaskGroup(
-                task_count=worker_count,
-                task_count_per_node="1",
-                task_spec=batch.TaskSpec(
-                    runnables=_create_runnables(
-                        self.runnables, self.disks, self.monitor_port
+    # batch api only supports a single group at this time
+    # BATCH_TASK_INDEX
+    task_groups = [batch.TaskGroup(
+                    task_count=worker_count,
+                    task_count_per_node="1",
+                    task_spec=batch.TaskSpec(
+                        runnables=_create_runnables(
+                            self.runnables, self.disks, self.monitor_port
+                        ),
+                        volumes=_create_volumes(self.disks),
                     ),
-                    volumes=_create_volumes(self.disks),
-                ),
-            )
-        ],
+                )]
+
+    job = batch.Job(
+        task_groups=task_groups,
         allocation_policy=batch.AllocationPolicy(
             location=batch.AllocationPolicy.LocationPolicy(
                 allowed_locations=self.locations
@@ -183,32 +187,90 @@ class Event(BaseModel):
 #         return self.state in TERMINAL_STATES
 
 
-def to_node_reqs(job: batch.Job):
-    # make sure that this job only describes a single task
-    # breakpoint()
-    assert len(job.task_groups) == 1
-    assert job.task_groups[0].task_count == 1
+# def to_node_reqs(job: batch.Job, tasks: List[batch.Task]):
+#     # convert batch API states to the slightly simpler set that sparkles is using
 
+#     # PENDING (1):
+#     #     The Task is created and waiting for
+#     #     resources.
+#     # ASSIGNED (2):
+#     #     The Task is assigned to at least one VM.
+#     # RUNNING (3):
+#     #     The Task is running.
+#     # FAILED (4):
+#     #     The Task has failed.
+#     # SUCCEEDED (5):
+#     #     The Task has succeeded.
+#     # UNEXECUTED (6):
+#     #     The Task has not been executed when the Job
+#     #     finishes.
+#     assert len(job.task_groups) == 1
+#     task_group = job.task_groups[0]
+#     assert task_group.task_count == len(tasks)
+#     # if task_group.task_count != len(tasks):
+#     #     breakpoint()
+#     node_reqs = []
+#     for task in tasks:
+#         if task.status.state in [batch.TaskStatus.State.PENDING]:
+#             state = NODE_REQ_SUBMITTED
+#         elif task.status.state in [batch.TaskStatus.State.ASSIGNED]:
+#             state = NODE_REQ_STAGING
+#         elif task.status.state in [batch.TaskStatus.State.RUNNING]:
+#             state = NODE_REQ_RUNNING
+#         elif task.status.state in [batch.TaskStatus.State.FAILED]:
+#             state = NODE_REQ_FAILED
+#         elif task.status.state in [batch.TaskStatus.State.SUCCEEDED]:
+#             state = NODE_REQ_COMPLETE
+#         else:
+#             assert task.status.state in [batch.TaskStatus.State.UNEXECUTED
+#             ], f"state was {task.status.state}"
+#             state = NODE_REQ_FAILED
+
+#         job_id = job.labels["sparkles-job"]
+#         cluster_id = job.labels["sparkles-cluster"]
+
+#         assert len(job.allocation_policy.instances) == 1
+#         pm = job.allocation_policy.instances[0].policy.provisioning_model
+#         if pm == batch.AllocationPolicy.ProvisioningModel.SPOT:
+#             node_class = NODE_REQ_CLASS_PREEMPTIVE
+#         else:
+#             assert pm == batch.AllocationPolicy.ProvisioningModel.STANDARD
+#             node_class = NODE_REQ_CLASS_NORMAL
+
+#         node_reqs.append(NodeReq(
+#                 operation_id=job.name,
+#                 cluster_id=cluster_id,
+#                 status=state,
+#                 node_class=node_class,
+#                 sequence="0",
+#                 job_id=job_id,
+#                 instance_name=None,
+#             )
+#         )
+#     return node_reqs
+            
+def to_node_reqs(job: batch.Job):
     # convert batch API states to the slightly simpler set that sparkles is using
 
-    if job.status.state in [batch.JobStatus.State.QUEUED]:
-        state = NODE_REQ_SUBMITTED
-    elif job.status.state == batch.JobStatus.State.SCHEDULED:
-        state = NODE_REQ_STAGING
-    elif job.status.state in [batch.JobStatus.State.RUNNING]:
-        state = NODE_REQ_RUNNING
-    elif job.status.state in [batch.JobStatus.State.FAILED]:
-        state = NODE_REQ_FAILED
-    elif job.status.state in [batch.JobStatus.State.SUCCEEDED]:
-        state = NODE_REQ_COMPLETE
-    elif job.status.state in [batch.JobStatus.State.CANCELLED]:
-        state = NODE_REQ_FAILED
-    else:
-        assert job.status.state in [
-            batch.JobStatus.State.DELETION_IN_PROGRESS,
-            batch.JobStatus.State.CANCELLATION_IN_PROGRESS,
-        ], f"state was {job.status.state}"
-        state = NODE_REQ_FAILED
+    # PENDING (1):
+    #     The Task is created and waiting for
+    #     resources.
+    # ASSIGNED (2):
+    #     The Task is assigned to at least one VM.
+    # RUNNING (3):
+    #     The Task is running.
+    # FAILED (4):
+    #     The Task has failed.
+    # SUCCEEDED (5):
+    #     The Task has succeeded.
+    # UNEXECUTED (6):
+    #     The Task has not been executed when the Job
+    #     finishes.
+    assert len(job.task_groups) == 1
+    task_group = job.task_groups[0]
+    tasks_accounted_for = 0
+    # if task_group.task_count != len(tasks):
+    #     breakpoint()
 
     job_id = job.labels["sparkles-job"]
     cluster_id = job.labels["sparkles-cluster"]
@@ -221,17 +283,53 @@ def to_node_reqs(job: batch.Job):
         assert pm == batch.AllocationPolicy.ProvisioningModel.STANDARD
         node_class = NODE_REQ_CLASS_NORMAL
 
-    return [
-        NodeReq(
-            operation_id=job.name,
-            cluster_id=cluster_id,
-            status=state,
-            node_class=node_class,
-            sequence="0",
-            job_id=job_id,
-            instance_name=None,
+    node_reqs = []
+    #breakpoint()
+    for status_task_group in dict(job.status.task_groups).values():
+        for task_state, task_state_count in status_task_group.counts.items():
+            if task_state in [batch.TaskStatus.State.PENDING.name]:
+                state = NODE_REQ_SUBMITTED
+            elif task_state in [batch.TaskStatus.State.ASSIGNED.name]:
+                state = NODE_REQ_STAGING
+            elif task_state in [batch.TaskStatus.State.RUNNING.name]:
+                state = NODE_REQ_RUNNING
+            elif task_state in [batch.TaskStatus.State.FAILED.name]:
+                state = NODE_REQ_FAILED
+            elif task_state in [batch.TaskStatus.State.SUCCEEDED.name]:
+                state = NODE_REQ_COMPLETE
+            else:
+                assert task_state in [batch.TaskStatus.State.UNEXECUTED.name
+                ], f"state was {task_state}"
+                state = NODE_REQ_FAILED
+
+            for _ in range(task_state_count):
+                node_reqs.append(NodeReq(
+                        operation_id=job.name,
+                        cluster_id=cluster_id,
+                        status=state,
+                        node_class=node_class,
+                        sequence="0",
+                        job_id=job_id,
+                        instance_name=None,
+                    )
+                )
+                tasks_accounted_for += 1
+
+    while tasks_accounted_for < task_group.task_count:
+        node_reqs.append(NodeReq(
+                operation_id=job.name,
+                cluster_id=cluster_id,
+                status=NODE_REQ_SUBMITTED,
+                node_class=node_class,
+                sequence="0",
+                job_id=job_id,
+                instance_name=None,
+            )
         )
-    ]
+        tasks_accounted_for += 1
+
+#    assert task_group.task_count == tasks_accounted_for, f"Job defined to have {task_group.task_count} workers, but only {tasks_accounted_for} workers reported status"
+    return node_reqs
 
 
 class EventPrinter:
@@ -246,9 +344,14 @@ class EventPrinter:
                 self.last_event = event.timestamp
                 print(event.description)
 
+TERMINAL_STATES = set([
+    batch.JobStatus.State.CANCELLED,
+    batch.JobStatus.State.FAILED,
+    batch.JobStatus.State.SUCCEEDED
+])
 
 class ClusterAPI:
-    def __init__(self, batch_service_client):
+    def __init__(self, batch_service_client : BatchServiceClient):
         self.batch_service = batch_service_client
 
     def create_job(self, project: str, location: str, job: JobSpec, worker_count: int):
@@ -267,19 +370,27 @@ class ClusterAPI:
         response = self.batch_service.get_job(batch.GetJobRequest(name=name))
         return response
 
-    def stop_cluster(self, project: str, location: str, cluster_id: str):
+    def delete_node_reqs(self, project: str, location: str, cluster_id: str, only_terminal_reqs=False):
         jobs = self._get_jobs_with_label(
             project, location, "sparkles-cluster", cluster_id
         )
         for job in jobs:
+            if only_terminal_reqs and job.status.state not in TERMINAL_STATES:
+                continue
+
             self.delete(job.name)
 
     def get_node_reqs(self, project: str, location: str, cluster_id: str):
         jobs = self._get_jobs_with_label(
             project, location, "sparkles-cluster", cluster_id
         )
+        jobs= list(jobs)
+        # if len(jobs) > 0:
+        #     breakpoint()
         node_reqs = []
         for job in jobs:
+            assert len(job.task_groups) == 1
+            # tasks = self._get_tasks_for_job(job)
             node_reqs.extend(to_node_reqs(job))
         return node_reqs
 
@@ -290,3 +401,11 @@ class ClusterAPI:
                 filter=f"labels.{key}={json.dumps(value)}",
             )
         )
+    
+    def _get_tasks_for_job(self, job: batch.Job):
+        tasks = []
+        for task_group in job.task_groups:
+            these = list(self.batch_service.list_tasks(batch.ListTasksRequest(parent=task_group.name)))
+            breakpoint()
+            tasks.extend(these            )
+        return tasks

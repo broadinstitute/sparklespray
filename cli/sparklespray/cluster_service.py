@@ -100,7 +100,6 @@ class Cluster:
 
         job_spec = JobSpec.model_validate_json(job.kube_job_spec)
 
-        assert count == 1
         return self.cluster_api.create_job(self.project, self.location, job_spec, count)
 
     def has_active_node_requests(self):
@@ -113,7 +112,11 @@ class Cluster:
         return False
 
     def stop_cluster(self):
-        self.cluster_api.stop_cluster(self.project, self.location, self.cluster_id)
+        self.cluster_api.delete_node_reqs(self.project, self.location, self.cluster_id)
+
+    def delete_complete_requests(self):
+        self.cluster_api.delete_node_reqs(self.project, self.location, self.cluster_id, only_terminal_reqs=True)
+
 
 
 class CachingCaller:

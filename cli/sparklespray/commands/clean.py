@@ -28,6 +28,7 @@ def clean(
             return False
 
     jq.delete_job(job_id)
+    cluster.delete_complete_requests()
 
     return True
 

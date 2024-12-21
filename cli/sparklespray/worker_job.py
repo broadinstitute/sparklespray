@@ -30,40 +30,48 @@ def create_job_spec(
     validate_label(job_id)
     timestamp = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
 
-    consume_command = [
-        consume_exe_path,
-        "consume",
-        "--cacheDir",
-        os.path.join(consume_data, "cache"),
-        "--tasksDir",
-        os.path.join(consume_data, "tasks"),
-        "--cluster",
-        cluster_name,
-        "--projectId",
-        project,
-        "--port",
-        str(monitor_port),
-        "--timeout",
-        "10",
-        "--shutdownAfter",
-        str(60 * 10),  # keep worker around for 10 minutes?
-    ]
+    def create_runnables(shutdown_after):
+        consume_command = [
+            consume_exe_path,
+            "consume",
+            "--cacheDir",
+            os.path.join(consume_data, "cache"),
+            "--tasksDir",
+            os.path.join(consume_data, "tasks"),
+            "--cluster",
+            cluster_name,
+            "--projectId",
+            project,
+            "--port",
+            str(monitor_port),
+            "--timeout",
+            "10",
+            "--shutdownAfter",
+            "0",
+            "--ftShutdownAfter",
+            str(shutdown_after),  
+        ]
 
-    print(f"exec: {' '.join(consume_command)}")
+        print(f"exec: {' '.join(consume_command)}")
 
-    runnables = [
-        Runnable(
-            image=sparklesworker_image, command=["copyexe", "--dst", consume_exe_path]
-        ),
-        Runnable(
-            image=docker_image,
-            command=consume_command,
-        ),
-    ]
+        runnables = [
+            Runnable(
+                image=sparklesworker_image, command=["copyexe", "--dst", consume_exe_path]
+            ),
+            Runnable(
+                image=docker_image,
+                command=["printenv"],
+            ),
+            Runnable(
+                image=docker_image,
+                command=consume_command,
+            ),
+        ]
+        return runnables
 
     job = JobSpec(
         task_count="1",
-        runnables=runnables,
+        runnables=create_runnables(60*10),# keep a worker around for 10 minutes
         machine_type="n4-standard-2",
         preemptible=True,
         locations=["regions/us-central1"],

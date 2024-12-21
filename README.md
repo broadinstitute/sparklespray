@@ -1129,7 +1129,7 @@ go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.2
 * VM is preempted
 
 TODO: 
-get tests passing
-get pyright checks passing
+(x) get tests passing
+(x) get pyright checks passing
+(x) Fix node count 
 reimplement "validate"
-

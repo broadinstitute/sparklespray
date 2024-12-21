@@ -137,7 +137,7 @@ func (m *Monitor) ReadOutput(ctx context.Context, in *pb.ReadOutputRequest) (*pb
 
 	defer f.Close()
 
-	log.Printf("reading %d bytes from %s (offset %d)", in.Size, stdoutPath, in.Offset)
+	//	log.Printf("reading %d bytes from %s (offset %d)", in.Size, stdoutPath, in.Offset)
 	buffer := make([]byte, in.Size)
 	n, err := f.ReadAt(buffer, in.Offset)
 	buffer = buffer[:n]
