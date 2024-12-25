@@ -1121,6 +1121,8 @@ go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.2
 # Common failure modes
 
 * Cannot pull docker image
+   * boot volume is too small
+   * Insufficent permissions
 * Cannot execute command 
    * because command is not executable/missing
    * because image built for wrong arch
@@ -1128,9 +1130,11 @@ go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.2
 * VM becomes non-responsive
 * VM is preempted
 
+
 TODO: 
 (x) get tests passing
 (x) get pyright checks passing
 (x) Fix node count 
-Fix drive assignment
-reimplement "validate"
+(x) reimplement "validate"
+(x) Fix drive assignment
+Clean out excessive print statements (Maybe tackle this after vcr in place?)

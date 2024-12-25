@@ -60,15 +60,14 @@ class PrepConfig:
     sparklesworker_exe_path: Optional[str] = None
     sparklesworker_image: Optional[str] = None
     project: Optional[str] = None
-    zones: Optional[List[str]] = None
     region: Optional[str] = None
     account: Optional[str] = None
     service_account_key: Optional[str] = None
     credentials: Optional[str] = None
-    boot_volume_in_gb: Optional[int] = None
+    boot_volume: Optional[PersistentDiskMount] = None
     local_work_dir: Optional[str] = None
     max_preemptable_attempts_scale: Optional[int] = None
-    mounts: Optional[List[DiskMountT]] = None
+    mounts: Optional[List[PersistentDiskMount]] = None
     debug_log_prefix: Optional[str] = None
     monitor_port: Optional[int] = None
     work_root_dir: Optional[str] = None
@@ -85,14 +84,13 @@ class Config:
     sparklesworker_exe_path: str
     sparklesworker_image: str
     project: str
-    zones: List[str]
     region: str
     account: str
     service_account_key: str
-    boot_volume_in_gb: int
+    boot_volume: PersistentDiskMount
     local_work_dir: str
     max_preemptable_attempts_scale: int
-    mounts: List[DiskMountT]
+    mounts: List[PersistentDiskMount]
     debug_log_prefix: str
     work_root_dir: str
     monitor_port: int
@@ -102,7 +100,7 @@ class Config:
     def create_machine_specs(self):
         return MachineSpec(
             service_account_email=self.credentials.service_account_email,  # type: ignore
-            boot_volume_in_gb=self.boot_volume_in_gb,
+            boot_volume=self.boot_volume,
             mounts=self.mounts,
             work_root_dir=self.work_root_dir,
             machine_type=self.machine_type,
@@ -122,7 +120,6 @@ NO_DEFAULT = NoDefault()
 
 @dataclass
 class GCloudConfig:
-    zones: List[str] = dataclasses.field(default_factory=list)
     account: Optional[str] = None
     region: Optional[str] = None
     project: Optional[str] = None
@@ -140,15 +137,11 @@ def _safe_get(config, section, key, default=None):
 def _parse_gcloud_config(gcloud_config_file: str, verbose: bool) -> GCloudConfig:
     gcloud_config = RawConfigParser()
     gcloud_config.read(gcloud_config_file)
-    zone = _safe_get(gcloud_config, "compute", "zone")
-    zones = []
-    if zone:
-        zones.append(zone)
     account = _safe_get(gcloud_config, "core", "account")
     project = _safe_get(gcloud_config, "core", "project")
     region = _safe_get(gcloud_config, "compute", "region")
 
-    config = GCloudConfig(zones=zones, account=account, region=region, project=project)
+    config = GCloudConfig(account=account, region=region, project=project)
     if verbose:
         print("Using defaults from {}: {}".format(gcloud_config_file, config))
     return config
@@ -208,13 +201,6 @@ def load_config(
         return value
 
     config = PrepConfig()
-    zones = consume(
-        "zones",
-        default=gcloud_config.zones,
-        parser=lambda value: [x.strip() for x in value.split(",")],
-    )
-    assert isinstance(zones, list)
-    config.zones = zones
     config.sparkles_config_path = config_file
     config.monitor_port = consume("monitor_port", 6032, int)
     config.work_root_dir = consume("work_root_dir", "/mnt/")
@@ -261,10 +247,6 @@ def load_config(
         "cas_url_prefix", config.default_url_prefix + "/CAS/"
     )
 
-    config.boot_volume_in_gb = consume("boot_volume_in_gb", 20, int)
-
-    assert isinstance(config.zones, list)
-
     config.service_account_key = consume(
         "service_account_key",
         default=os.path.expanduser(
@@ -288,42 +270,22 @@ def load_config(
             "max_preemptable_attempts_scale", 2, int
         )
 
-    #    config.
-    #    allowed_parameters = set(
-    #        [
-    #            "default_image",
-    #            "machine_type",
-    #            "cas_url_prefix",
-    #            "default_url_prefix",
-    #            "sparklesworker_exe_path",
-    #            "project",
-    #            "zones",
-    #            "region",
-    #            "account",
-    #            "service_account_key",
-    #            "credentials",
-    #            "bootdisksizegb",  # deprecated name, replaced with boot_volume_in_gb
-    #            "boot_volume_in_gb",
-    #            "preemptible",
-    #            "local_work_dir",
-    #            "mount",
-    #            "sparkles_config_path",
-    #            "mount_count",
-    #            "pd_volume_in_gb",
-    #            "max_preemptable_attempts_scale"
-    #        ]
-    #    )
     machine_type = config.machine_type
     assert machine_type is not None
     if machine_type.startswith("n4-"):
         # N4 instances only work with "hyperdrive" so use that as the default
-        default_drive_type = "hyperdisk-balanced"
+        default_boot_drive_type = default_drive_type = "hyperdisk-balanced"
     elif machine_type.startswith("n1-") or machine_type.startswith("n2-"):
         # the original sparkles behavior was always use local-ssd
         default_drive_type = LOCAL_SSD
+        default_boot_drive_type = "pd-balanced"
     else:
         # not all machine types have local ssd, so default everything else to the standard pd-balanced
         default_drive_type = "pd-balanced"
+        default_boot_drive_type = "pd-balanced"
+
+    # assuming 40 GB is enough. A better default would be based on the docker image size
+    config.boot_volume = PersistentDiskMount(size_in_gb=consume("boot_volume_in_gb", 40, int), type=consume("boot_volume_type", default_boot_drive_type), path="/")
 
     mount_count = consume("mount_count", 1, int)
     mounts = []

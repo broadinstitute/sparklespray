@@ -42,14 +42,14 @@ DiskMountT = Union[
 
 class SubmitConfig(BaseModel):
     service_account_email: str
-    boot_volume_in_gb: int
+    boot_volume: PersistentDiskMount
     default_url_prefix: str
     machine_type: str
     image: str
     project: str
     monitor_port: int
-    zones: List[str]
-    mounts: List[DiskMountT]
+    region: str
+    mounts: List[PersistentDiskMount]
     work_root_dir: str
     sparklesworker_image: str
     target_node_count: int
@@ -58,7 +58,7 @@ class SubmitConfig(BaseModel):
 
 class MachineSpec(BaseModel):
     service_account_email: str
-    boot_volume_in_gb: int
+    boot_volume: PersistentDiskMount
     mounts: List[DiskMountT]
     work_root_dir: str
     machine_type: str

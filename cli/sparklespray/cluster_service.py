@@ -63,7 +63,6 @@ class Cluster:
         location: str,
         cluster_id: str,
         job_id: str,
-        zones: List[str],
         job_store: JobStore,
         task_store: TaskStore,
         client: datastore.Client,
@@ -71,7 +70,6 @@ class Cluster:
         debug_log_prefix: str,
     ) -> None:
         self.project = project
-        self.zones = zones
         self.client = client
         self.job_store = job_store
         self.task_store = task_store

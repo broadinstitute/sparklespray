@@ -185,7 +185,7 @@ def submit(
 
     log.info("Submitting job with id: %s", job_id)
 
-    boot_volume_in_gb = config.boot_volume_in_gb
+    boot_volume = config.boot_volume
     default_url_prefix = config.default_url_prefix
 
     default_job_url_prefix = url_join(default_url_prefix, job_id)
@@ -204,7 +204,7 @@ def submit(
 
     machine_specs = MachineSpec(
         service_account_email=config.service_account_email,
-        boot_volume_in_gb=boot_volume_in_gb,
+        boot_volume=boot_volume,
         mounts=config.mounts,
         work_root_dir=config.work_root_dir,
         machine_type=config.machine_type,
@@ -233,6 +233,8 @@ def submit(
         ), "Cannot create jobs in multiple zones if you are mounting PD volumes"
     #        cluster.ensure_named_volumes_exist(config.zones[0], config.mounts)
 
+    
+
     job = create_job_spec(
         job_id,
         config.sparklesworker_image,
@@ -242,6 +244,10 @@ def submit(
         config.project,
         config.monitor_port,
         config.service_account_email,
+        config.machine_type,
+        config.region,
+        config.boot_volume,
+        config.mounts
     )
 
     pipeline_spec = job.model_dump_json()
@@ -433,7 +439,7 @@ def submit_cmd(
     else:
         image = config.default_image
 
-    boot_volume_in_gb = config.boot_volume_in_gb
+    boot_volume = config.boot_volume
     default_url_prefix = config.default_url_prefix
 
     job_id = args.name
@@ -531,13 +537,13 @@ def submit_cmd(
     mount_ = config.mounts
     submit_config = SubmitConfig(
         service_account_email=config.credentials.service_account_email,  # pyright: ignore
-        boot_volume_in_gb=boot_volume_in_gb,
+        boot_volume=boot_volume,
         default_url_prefix=default_url_prefix,
         machine_type=machine_type,
         image=spec["image"],
         project=config.project,
         monitor_port=config.monitor_port,
-        zones=config.zones,
+        region=config.region,
         work_root_dir=config.work_root_dir,
         mounts=mount_,
         sparklesworker_image=config.sparklesworker_image,
@@ -551,7 +557,6 @@ def submit_cmd(
         config.location,
         "none",
         job_id,
-        config.zones,
         jq.job_storage,
         jq.task_storage,
         datastore_client,
