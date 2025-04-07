@@ -23,8 +23,8 @@ class MockSparkles(SparklesInterface):
     def wait_for_completion(self, name: str):
         self.wait_for_completion_calls.append(name)
     
-    def start(self, name: str, command, params, image):
-        self.start_calls.append((name, command, params, image))
+    def start(self, name: str, command, params, image, uploads=None):
+        self.start_calls.append((name, command, params, image, uploads))
         self.jobs[name] = True
         
     def get_job_path_prefix(self) -> str:
