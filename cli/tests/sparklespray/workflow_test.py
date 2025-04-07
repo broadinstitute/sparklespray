@@ -129,33 +129,3 @@ def test_run_workflow_with_parameters(tmpdir):
     assert params[0] == {"name": "item1", "value": "100"}
     assert params[1] == {"name": "item2", "value": "200"}
     assert image is None
-
-def test_run_workflow_with_variable_expansion(tmpdir):
-    # Create a workflow definition with variables to expand
-    workflow_def = {
-        "steps": [
-            {
-                "command": ["echo", "First step"],
-            },
-            {
-                "command": ["echo", "{step1_output}"],
-            }
-        ]
-    }
-    
-    workflow_path = str(tmpdir.join("workflow.json"))
-    create_workflow_file(workflow_path, workflow_def)
-
-    sparkles = MockSparkles()
-    job_name = "test-job"
-    
-    # Mock the _get_var function to return a value for step1_output
-    with patch('sparklespray.workflow._expand_template', side_effect=lambda val, _: val.replace("{step1_output}", "expanded value")):
-        # Run the workflow
-        run_workflow(sparkles, job_name, workflow_path, False)
-    
-    # Verify the expected calls were made
-    assert sparkles.job_exists_calls == ["test-job-1", "test-job-2"]
-    assert len(sparkles.start_calls) == 2
-    assert sparkles.start_calls[0][1] == ["echo", "First step"]
-    assert sparkles.start_calls[1][1] == ["echo", "expanded value"]

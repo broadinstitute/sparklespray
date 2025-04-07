@@ -105,7 +105,7 @@ def _expand_template(value: str, _get_var):
     return result
 
 
-def run_workflow(sparkles: SparklesInterface, job_name: str, workflow_def_path: str, retry: bool) -> None:
+def run_workflow(sparkles: SparklesInterface, job_name: str, workflow_def_path: str, retry: bool, command_line_parameters: Dict[str, str]) -> None:
     """
     Run a workflow defined in a JSON file.
     
@@ -125,14 +125,11 @@ def run_workflow(sparkles: SparklesInterface, job_name: str, workflow_def_path: 
         log.info(f"Starting workflow execution for job: {job_name}")
         txtui.user_print(f"Starting workflow: {job_name}")
 
-        variables = {}
+        variables = dict(command_line_parameters)
         def _get_var(name):
             if name.startswith("parameter."):
                 return "{"+name[len("parameter."):]+"}"
             return variables[name]
-
-        def expand_template(value: str):
-            return _expand_template(value, _get_var)
 
         # Process each step in the workflow
         for i, step in enumerate(workflow.steps):
@@ -189,11 +186,15 @@ def add_workflow_cmd(subparser):
     parser = subparser.add_parser("workflow", help="Manage and run workflows")
     workflow_subparser = parser.add_subparsers(dest="workflow_cmd")
     
-    # Add the 'run' subcommand
+    # Add the 'run' subcommand    
     run_parser = workflow_subparser.add_parser("run", help="Run a workflow")
     run_parser.add_argument("job_name", help="Name to use for the job")
     run_parser.add_argument("workflow_def", help="Path to a JSON file containing the workflow definition")
     run_parser.add_argument("--retry", help="if set, will retry running any failed tasks", action="store_true")
+    def key_value_pair(value: str):
+        key, value = value.split("=", 1)
+        return (key, value)
+    run_parser.add_argument("--parameter,-p", help="argument should be of the form var=value. The values will be used in expanding variables listed in the step's commands", action="append", type=key_value_pair)
     run_parser.set_defaults(func=workflow_run_cmd)
 
 def workflow_run_cmd(jq: JobQueue, io: IO, cluster: Cluster, args):
@@ -227,4 +228,8 @@ def workflow_run_cmd(jq: JobQueue, io: IO, cluster: Cluster, args):
             # Return the base path for jobs
             return io._get_url_prefix()
     
-    return run_workflow(SparklesImpl(), args.job_name, args.workflow_def, args.retry)
+    parameters={}
+    if args.parameter:
+        parameters.update(args.parameter)
+
+    return run_workflow(SparklesImpl(), args.job_name, args.workflow_def, args.retry, parameters)
