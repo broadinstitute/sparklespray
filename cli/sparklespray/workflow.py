@@ -9,6 +9,7 @@ from .io_helper import IO
 from .cluster_service import Cluster
 from .log import log
 from . import txtui
+from .task_store import STATUS_FAILED
 
 class WorkflowStep(BaseModel):
     """Represents a single step in a workflow."""
