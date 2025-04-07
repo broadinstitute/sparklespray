@@ -12,8 +12,13 @@ from . import txtui
 from .task_store import STATUS_FAILED
 from .submit import submit_cmd, construct_submit_cmd_args
 from .config import Config
+from tempfile import NamedTemporaryFile
+import csv
+import io
 
 class SparklesInterface:
+    """An abstract interface for decoupling this workflow code
+    much of the internals of sparkles"""
     def job_exists(self, name: str) -> bool:
         raise NotImplementedError()
     def clear_failed(self, name: str):
@@ -52,18 +57,17 @@ class WorkflowDefinition(BaseModel):
             except json.JSONDecodeError:
                 raise ValueError(f"Invalid JSON in workflow definition file: {file_path}")
 
-def _run_local_command(command: List[str]) -> int:
-    """Run a command locally and return the exit code."""
-    log.info(f"Running local command: {' '.join(command)}")
-    txtui.user_print(f"Running local command: {' '.join(command)}")
+# def _run_local_command(command: List[str]) -> int:
+#     """Run a command locally and return the exit code."""
+#     log.info(f"Running local command: {' '.join(command)}")
+#     txtui.user_print(f"Running local command: {' '.join(command)}")
     
-    try:
-        result = subprocess.run(command, check=False)
-        return result.returncode
-    except Exception as e:
-        log.error(f"Error running local command: {str(e)}")
-        return 1
-import io
+#     try:
+#         result = subprocess.run(command, check=False)
+#         return result.returncode
+#     except Exception as e:
+#         log.error(f"Error running local command: {str(e)}")
+#         return 1
 
 def _load_parameters_from_csv(sparkles: SparklesInterface, csv_path: str) -> List[Dict[str, str]]:
     """Load parameters from a CSV file."""
@@ -255,8 +259,6 @@ def workflow_run_cmd(jq: JobQueue, io: IO, cluster: Cluster, config: Config, arg
         
         def start(self, name: str, command, params, image: Optional[str], uploads: List[Tuple[str, str]]):
             # Submit a new job with the given parameters
-            from tempfile import NamedTemporaryFile
-            import csv
             submit_cmd_args=["-n", name, "--no-wait"]
             if image:
                 submit_cmd_args.extend(["-i", image])
@@ -270,7 +272,7 @@ def workflow_run_cmd(jq: JobQueue, io: IO, cluster: Cluster, config: Config, arg
                 for param in params:
                     w.writerow(param)
                 tmpcsv.flush()
-                
+
                 if params != [{}]:
                     submit_cmd_args.extend(["--params", tmpcsv.name])
 
