@@ -373,12 +373,7 @@ def _parse_resources(resources_str):
         spec[name] = value
     return spec
 
-
-def add_submit_cmd(subparser):
-    parser = subparser.add_parser(
-        "sub", help="Submit a command (or batch of commands) for execution"
-    )
-    parser.set_defaults(func=submit_cmd)
+def _setup_parser_for_sub_command(parser):
     parser.add_argument(
         "--machine-type",
         "-m",
@@ -482,6 +477,20 @@ def add_submit_cmd(subparser):
     )
     parser.add_argument("command", nargs=argparse.REMAINDER)
 
+def add_submit_cmd(subparser):
+    parser = subparser.add_parser(
+        "sub", help="Submit a command (or batch of commands) for execution"
+    )
+    parser.set_defaults(func=submit_cmd)
+    _setup_parser_for_sub_command(parser)
+
+def construct_submit_cmd_args(unparsed_args: List[str]):
+    # create a temp parser for converting the unparsed_args to an instance of args that `submit_cmd` will
+    # accept
+    parser = argparse.ArgumentParser()
+    _setup_parser_for_sub_command(parser)
+    args = parser.parse_args(unparsed_args)
+    return args
 
 def submit_cmd(jq: JobQueue, io: IO, cluster: Cluster, args: Any, config: Config):
     metadata: Dict[str, str] = {}
@@ -518,6 +527,7 @@ def submit_cmd(jq: JobQueue, io: IO, cluster: Cluster, args: Any, config: Config
         parameters = [{"index": str(i)} for i in range(args.seq)]
     elif args.params is not None:
         parameters = read_csv_as_dicts(args.params)
+        assert len(parameters) > 0
     else:
         parameters = [{}]
 

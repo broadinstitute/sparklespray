@@ -529,6 +529,77 @@ an "Artifacts" section where you can download the built tar.gz file.
 
 sparkles sub -u train_mlp_sm.py -u data -u benchmark_train_mlp.py --gpu n --gpu_count 0 -i tensorflow/tensorflow:latest-py3 --machine-type n1-standard-4 python benchmark_train_mlp.py --data_size small --test_description \'Machine type n1-standard-4, GPU count 0, small dataset\'
 
+## Running Workflows
+
+Sparkles now supports running multi-step workflows defined in JSON files. The workflow feature allows you to:
+
+- Define a sequence of steps to be executed in order
+- Specify different Docker images for each step
+- Pass parameters between steps
+- Fan out execution using CSV parameter files
+
+### Usage
+
+```
+sparkles workflow run JOB_NAME WORKFLOW_DEFINITION_FILE [options]
+```
+
+#### Arguments:
+
+- `JOB_NAME`: A name for your workflow job
+- `WORKFLOW_DEFINITION_FILE`: Path to a JSON file containing the workflow definition
+
+#### Options:
+
+- `--retry`: Retry any failed tasks
+- `--nodes N`: Maximum number of nodes to power on at one time
+- `--parameter VAR=VALUE` or `-p VAR=VALUE`: Define variables to be used in the workflow
+
+### Workflow Definition Format
+
+Workflows are defined in JSON files with the following structure:
+
+```json
+{
+  "steps": [
+    {
+      "command": ["echo", "Hello {job_name}"],
+      "image": "ubuntu:latest",
+      "parameters_csv": "path/to/parameters.csv"
+    },
+    {
+      "command": ["python", "process.py", "--input={prev_job_path}/output.txt"],
+      "image": "python:3.9"
+    }
+  ]
+}
+```
+
+Each step can include:
+- `command`: List of command arguments (supports variable expansion)
+- `image`: Docker image to use (optional)
+- `parameters_csv`: Path to a CSV file for fan-out execution (optional)
+- `run_local`: Boolean flag to run the command locally (currently not supported)
+
+### Variable Expansion
+
+The workflow system supports variable expansion in commands and parameter CSV paths:
+
+- `{job_name}`: Current job name
+- `{job_path}`: Path to the current job
+- `{prev_job_name}`: Previous step's job name
+- `{prev_job_path}`: Path to the previous step's job
+- Custom variables defined with `--parameter`
+
+### Example
+
+```
+# Run a workflow with custom parameters
+sparkles workflow run my-analysis workflow.json --parameter input_file=gs://mybucket/input.txt --nodes 10
+```
+
+This will execute all steps in the workflow, passing the parameters to each step as needed.
+
 ## Changing the protocol between "sparkles" and "consumer"
 
 The command line tool communicates with workers via gRPC. If a change is
