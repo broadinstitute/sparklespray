@@ -92,6 +92,11 @@ def run_workflow(sparkles: SparklesInterface, job_name: str, workflow_def_path: 
         txtui.user_print(f"Starting workflow: {job_name}")
 
         variables = {}
+        def _get_var(name):
+            if name.startswith("parameter."):
+                return "{"+name[len("parameter."):]+"}"
+            return variables[name]
+
         def _expand_template(value):
             pass
 
