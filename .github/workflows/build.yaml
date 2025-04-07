@@ -107,7 +107,7 @@ jobs:
         with:
           poetry-version: ${{ env.POETRY_VERSION }}
       - name: Download executable
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: kubequeconsume-exe-${{ github.run_number }}
           path: cli/sparklespray/bin
@@ -123,7 +123,7 @@ jobs:
       #   run: find . -print && ls -l dist && ls -l sparkles/bin
       #   working-directory: cli
       - name: Upload sparklespray-${{ env.package_version }}.tar.gz package
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: sparklespray-${{ env.package_version }}
           path: cli/dist/sparklespray-*.tar.gz
