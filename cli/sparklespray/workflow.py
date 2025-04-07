@@ -15,6 +15,15 @@ from .config import Config
 from tempfile import NamedTemporaryFile
 import csv
 import io
+from dataclasses import dataclass, field
+
+@dataclass
+class WorkflowRunArgs:
+    retry: bool = False
+    parameters: Dict[str, str] = field(default_factory=dict)
+    uploads: List[Tuple[str, str]] = field(default_factory=list)
+    machine_type: Optional[str] = None
+    image: Optional[str] = None
 
 class SparklesInterface:
     """An abstract interface for decoupling this workflow code
@@ -25,7 +34,7 @@ class SparklesInterface:
         raise NotImplementedError()
     def wait_for_completion(self, name: str):
         raise NotImplementedError()
-    def start(self, name: str, command: List[str], params: List[Dict[str,str]], image: Optional[str], uploads: List[Tuple[str,str]]):
+    def start(self, name: str, command: List[str], params: List[Dict[str,str]], image: Optional[str], uploads: List[Tuple[str,str]], machine_type: Optional[str]):
         raise NotImplementedError()
     def get_job_path_prefix(self) -> str:
         raise NotImplementedError()
@@ -39,6 +48,7 @@ class WorkflowStep(BaseModel):
     image: Optional[str] = None
     parameters_csv: Optional[str] = None
     files_to_localize: Optional[List[str]] = None
+    machine_type: Optional[str] = None
     
 class WorkflowDefinition(BaseModel):
     """Represents a workflow definition loaded from a JSON file."""
@@ -117,7 +127,7 @@ def _expand_template(value: str, _get_var):
 
 from typing import Tuple
 
-def run_workflow(sparkles: SparklesInterface, job_name: str, workflow_def_path: str, retry: bool, command_line_parameters: Dict[str, str], uploads: List[Tuple[str, str]]=[]) -> None:
+def run_workflow(sparkles: SparklesInterface, job_name: str, workflow_def_path: str, workflow_args: WorkflowRunArgs) -> None:
     """
     Run a workflow defined in a JSON file.
     
@@ -127,6 +137,12 @@ def run_workflow(sparkles: SparklesInterface, job_name: str, workflow_def_path: 
         workflow_def_path: Path to the JSON file containing the workflow definition
         retry: Whether to retry failed tasks
     """
+    retry = workflow_args.retry
+    command_line_parameters = workflow_args.parameters
+    uploads=workflow_args.uploads
+    default_image = workflow_args.image
+    default_machine_type = workflow_args.machine_type
+
     job_path_prefix = sparkles.get_job_path_prefix()
 
     src_path_by_dest = {}
@@ -189,7 +205,11 @@ def run_workflow(sparkles: SparklesInterface, job_name: str, workflow_def_path: 
                     for dst in step.files_to_localize:
                         src = src_path_by_dest[dst]
                         uploads_for_step.append((src, dst))
-                sparkles.start(sub_job_name, command, parameters, step.image, uploads_for_step)
+                
+                image = default_image if step.image is None else step.image
+                machine_type = default_machine_type if step.machine_type is None else step.machine_type
+
+                sparkles.start(sub_job_name, command, parameters, image, uploads_for_step, machine_type)
 
             sparkles.wait_for_completion(sub_job_name)
             txtui.user_print(f"Executing step {step_num}/{len(workflow.steps)} completed")
@@ -225,9 +245,12 @@ def add_workflow_cmd(subparser):
         assert os.path.exists(src), f"Requested upload of {repr(src)} but file does not exist"
         return (src, dst)
     run_parser.add_argument("--nodes", help="max number of nodes to power on at one time", type=int)
+    run_parser.add_argument("-i", "--image", help="The docker image to use for steps that don't explictly set one")
+    run_parser.add_argument("-m", "--machine-type", help="The machine type to use for steps that don't explictly set one")
     run_parser.add_argument("-p", "--parameter", help="argument should be of the form var=value. The values will be used in expanding variables listed in the step's commands", action="append", type=key_value_pair)
     run_parser.add_argument("-u", "--upload", help="file to upload. Filenames should be specified as either \"src\" or \"src:dst\" where src is the local path and dst is the name that will be used when it is stored on the remote machine. If dst is not specified, it will default to the basename of src", action="append", type=upload_file)
     run_parser.set_defaults(func=workflow_run_cmd)
+
 
 def workflow_run_cmd(jq: JobQueue, io: IO, cluster: Cluster, config: Config, args):
     """Command handler for 'workflow run'."""
@@ -257,9 +280,13 @@ def workflow_run_cmd(jq: JobQueue, io: IO, cluster: Cluster, config: Config, arg
             from .watch import watch
             watch(io, jq, name, cluster, target_nodes=self.target_nodes)
         
-        def start(self, name: str, command, params, image: Optional[str], uploads: List[Tuple[str, str]]):
+        def start(self, name: str, command, params, image: Optional[str], uploads: List[Tuple[str, str]], machine_type: Optional[str]):
             # Submit a new job with the given parameters
             submit_cmd_args=["-n", name, "--no-wait"]
+
+            if machine_type:
+                submit_cmd_args.extend(["-m", machine_type])
+
             if image:
                 submit_cmd_args.extend(["-i", image])
 
@@ -293,4 +320,11 @@ def workflow_run_cmd(jq: JobQueue, io: IO, cluster: Cluster, config: Config, arg
     if args.upload:
         uploads.extend(args.upload)
 
-    return run_workflow(SparklesImpl(args.nodes), args.job_name, args.workflow_def, args.retry, parameters, uploads)
+    workflow_args = WorkflowRunArgs(
+        retry=args.retry,
+        parameters=args.parameters,
+        uploads=args.uploads,
+        machine_type=args.machine_type,
+        image= args.image)
+
+    return run_workflow(SparklesImpl(args.nodes), args.job_name, args.workflow_def, workflow_args)
