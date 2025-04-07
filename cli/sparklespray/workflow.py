@@ -2,7 +2,7 @@ import json
 import os
 import csv
 import subprocess
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from pydantic import BaseModel, Field, validator, root_validator
 from .job_queue import JobQueue
 from .io_helper import IO
@@ -10,6 +10,8 @@ from .cluster_service import Cluster
 from .log import log
 from . import txtui
 from .task_store import STATUS_FAILED
+from .submit import submit_cmd, construct_submit_cmd_args
+from .config import Config
 
 class WorkflowStep(BaseModel):
     """Represents a single step in a workflow."""
@@ -71,7 +73,7 @@ class SparklesInterface:
         raise NotImplementedError()
     def wait_for_completion(self, name: str):
         raise NotImplementedError()
-    def start(self, name: str, command: List[str], params: List[Dict[str,str]], image: Optional[str], uploads: List[Tuple[str, str]]):
+    def start(self, name: str, command: List[str], params: List[Dict[str,str]], image: Optional[str], uploads: List[Tuple[str,str]]):
         raise NotImplementedError()
     def get_job_path_prefix(self) -> str:
         raise NotImplementedError()
@@ -218,7 +220,7 @@ def add_workflow_cmd(subparser):
     run_parser.add_argument("--upload,-u", help="file to upload. Filenames should be specified as either \"src\" or \"src:dst\" where src is the local path and dst is the name that will be used when it is stored on the remote machine. If dst is not specified, it will default to the basename of src", action="append", type=upload_file)
     run_parser.set_defaults(func=workflow_run_cmd)
 
-def workflow_run_cmd(jq: JobQueue, io: IO, cluster: Cluster, args):
+def workflow_run_cmd(jq: JobQueue, io: IO, cluster: Cluster, config: Config, args):
     """Command handler for 'workflow run'."""
     # Create a SparklesInterface implementation that uses the provided services
     class SparklesImpl(SparklesInterface):
@@ -242,11 +244,31 @@ def workflow_run_cmd(jq: JobQueue, io: IO, cluster: Cluster, args):
             from .watch import watch
             watch(jq, io, cluster, name, target_nodes=self.target_nodes)
         
-        def start(self, name: str, command, params, image):
+        def start(self, name: str, command, params, image: Optional[str], uploads: List[Tuple[str, str]]):
             # Submit a new job with the given parameters
-            from .submit import submit
-            submit(jq, io, cluster, name, command, parameters=params, 
-                   docker_image=image, wait_for_completion=False)
+            from tempfile import NamedTemporaryFile
+            import csv
+            submit_cmd=["-n", name, "--no-wait"]
+            if image:
+                submit_cmd.append("-i", image)
+
+            for src, dst in uploads:
+                submit_cmd.extend(["-u", f"{src}:{dst}"])
+
+            with NamedTemporaryFile(suffix=".csv") as tmpcsv:
+                w = csv.DictWriter(tmpcsv)
+                w.writeheader(params[0].keys())
+                for param in params:
+                    w.writerow(param)
+
+                if params != [{}]:
+                    submit_cmd.extend(["--params", tmpcsv.name])
+
+                submit_cmd.extend(command)
+
+                txtui.user_print(f"Executing: sub {' '.join(submit_cmd)}")
+                args = construct_submit_cmd_args(submit_cmd)
+                submit_cmd(jq, io, cluster, name, args, config)
                    
         def get_job_path_prefix(self) -> str:
             # Return the base path for jobs
