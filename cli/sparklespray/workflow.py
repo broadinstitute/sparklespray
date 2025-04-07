@@ -72,7 +72,7 @@ class SparklesInterface:
         raise NotImplementedError()
     def start(self, name: str, command: List[str], params: List[Dict[str,str]], image: Optional[str]):
         raise NotImplementedError()
-    def get_job_path_prefix() -> str:
+    def get_job_path_prefix(self) -> str:
         raise NotImplementedError()
 
 
@@ -222,5 +222,9 @@ def workflow_run_cmd(jq: JobQueue, io: IO, cluster: Cluster, args):
             from .submit import submit
             submit(jq, io, cluster, name, command, parameters=params, 
                    docker_image=image, wait_for_completion=False)
+                   
+        def get_job_path_prefix(self) -> str:
+            # Return the base path for jobs
+            return io._get_url_prefix()
     
     return run_workflow(SparklesImpl(), args.job_name, args.workflow_def, args.retry)

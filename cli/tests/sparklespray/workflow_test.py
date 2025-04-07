@@ -26,6 +26,9 @@ class MockSparkles(SparklesInterface):
     def start(self, name: str, command, params, image):
         self.start_calls.append((name, command, params, image))
         self.jobs[name] = True
+        
+    def get_job_path_prefix(self) -> str:
+        return "/path/to/jobs"
 
 def create_workflow_file(content):
     fd, path = tempfile.mkstemp(suffix='.json')
@@ -99,11 +102,11 @@ def test_run_workflow_with_parameters():
     with os.fdopen(fd, 'w') as f:
         f.write("name,value\nitem1,100\nitem2,200\n")
     
-    # Create a workflow definition that uses the parameters
+    # Create a workflow definition that uses the parameters and automatic variables
     workflow_def = {
         "steps": [
             {
-                "command": ["process", "data"],
+                "command": ["process", "{job_name}", "{job_path}"],
                 "run_local": False,
                 "parameters_csv": params_path
             }
@@ -113,6 +116,7 @@ def test_run_workflow_with_parameters():
     workflow_path = create_workflow_file(workflow_def)
     try:
         sparkles = MockSparkles()
+        sparkles.get_job_path_prefix = lambda: "/path/to/jobs"
         job_name = "test-job"
         
         # Run the workflow
@@ -123,7 +127,7 @@ def test_run_workflow_with_parameters():
         assert len(sparkles.start_calls) == 1
         name, command, params, image = sparkles.start_calls[0]
         assert name == "test-job-1"
-        assert command == ["process", "data"]
+        assert command == ["process", "test-job", "/path/to/jobs/test-job"]
         assert len(params) == 2
         assert params[0] == {"name": "item1", "value": "100"}
         assert params[1] == {"name": "item2", "value": "200"}
