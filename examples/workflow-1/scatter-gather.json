@@ -1,0 +1,20 @@
+{
+  "steps": [
+    {
+      "command": ["sh", "./make_params.sh"],
+      "image": "ubuntu:latest",
+      "files_to_localize": ["make_params.sh"]
+    },
+    {
+      "parameters_csv": "{prev_job_path}/1/params.csv",
+      "image": "ubuntu:latest",
+      "command": ["sh", "worker.sh", "{parameter.index}", "{parameter.fruit}"],
+      "files_to_localize": ["worker.sh"]
+    },
+    {
+      "command": ["sh", "./gather.sh", "{prev_job_path}"],
+      "image": "google/cloud-sdk:latest",
+      "files_to_localize": ["gather.sh"]
+    }
+  ]
+}

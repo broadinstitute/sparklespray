@@ -13,6 +13,20 @@ from .task_store import STATUS_FAILED
 from .submit import submit_cmd, construct_submit_cmd_args
 from .config import Config
 
+class SparklesInterface:
+    def job_exists(self, name: str) -> bool:
+        raise NotImplementedError()
+    def clear_failed(self, name: str):
+        raise NotImplementedError()
+    def wait_for_completion(self, name: str):
+        raise NotImplementedError()
+    def start(self, name: str, command: List[str], params: List[Dict[str,str]], image: Optional[str], uploads: List[Tuple[str,str]]):
+        raise NotImplementedError()
+    def get_job_path_prefix(self) -> str:
+        raise NotImplementedError()
+    def read_as_bytes(self, path) -> bytes:
+        raise NotImplementedError()
+
 class WorkflowStep(BaseModel):
     """Represents a single step in a workflow."""
     command: List[str]
@@ -49,34 +63,24 @@ def _run_local_command(command: List[str]) -> int:
     except Exception as e:
         log.error(f"Error running local command: {str(e)}")
         return 1
+import io
 
-def _load_parameters_from_csv(csv_path: str) -> List[Dict[str, str]]:
+def _load_parameters_from_csv(sparkles: SparklesInterface, csv_path: str) -> List[Dict[str, str]]:
     """Load parameters from a CSV file."""
     if not csv_path:
         return [{}]  # Return a single empty parameter set if no CSV
         
     parameters = []
-    with open(csv_path, 'r') as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            parameters.append(dict(row))
+    csv_content = sparkles.read_as_bytes(csv_path)
+    reader = csv.DictReader(io.StringIO(csv_content.decode("utf8")))
+    for row in reader:
+        parameters.append(dict(row))
     
     if not parameters:
         return [{}]  # Return a single empty parameter set if CSV is empty
         
     return parameters
 
-class SparklesInterface:
-    def job_exists(self, name: str) -> bool:
-        raise NotImplementedError()
-    def clear_failed(self, name: str):
-        raise NotImplementedError()
-    def wait_for_completion(self, name: str):
-        raise NotImplementedError()
-    def start(self, name: str, command: List[str], params: List[Dict[str,str]], image: Optional[str], uploads: List[Tuple[str,str]]):
-        raise NotImplementedError()
-    def get_job_path_prefix(self) -> str:
-        raise NotImplementedError()
 
 
 def _expand_template(value: str, _get_var):
@@ -155,6 +159,7 @@ def run_workflow(sparkles: SparklesInterface, job_name: str, workflow_def_path: 
             # else:
 
             if sparkles.job_exists(sub_job_name):
+                txtui.user_print(f"Found job {sub_job_name} for step {step_num}/{len(workflow.steps)}")
                 if retry:
                     sparkles.clear_failed(sub_job_name)
             else:
@@ -168,7 +173,7 @@ def run_workflow(sparkles: SparklesInterface, job_name: str, workflow_def_path: 
                     raise Exception(f"Could not expand variable in step {step_num}'s parameter_csv: {repr(step.parameters_csv)}")
 
                 # If this is a fan-out we'll have a list of parameters. If not, we'll get a single record for a single job
-                parameters = _load_parameters_from_csv(parameters_csv) if parameters_csv else [{}]
+                parameters = _load_parameters_from_csv(sparkles, parameters_csv) if parameters_csv else [{}]
                 
                 try:
                     command = [_expand_template(x, _get_var) if isinstance(x, str) else x for x in step.command]
@@ -185,7 +190,7 @@ def run_workflow(sparkles: SparklesInterface, job_name: str, workflow_def_path: 
             sparkles.wait_for_completion(sub_job_name)
             txtui.user_print(f"Executing step {step_num}/{len(workflow.steps)} completed")
             variables["prev_job_name"] = job_name
-            variables["prev_job_path"] = f"{job_path_prefix}/{job_name}"
+            variables["prev_job_path"] = f"{job_path_prefix}/{sub_job_name}"
         
         txtui.user_print(f"Workflow execution completed successfully")
         
@@ -216,8 +221,8 @@ def add_workflow_cmd(subparser):
         assert os.path.exists(src), f"Requested upload of {repr(src)} but file does not exist"
         return (src, dst)
     run_parser.add_argument("--nodes", help="max number of nodes to power on at one time", type=int)
-    run_parser.add_argument("--parameter,-p", help="argument should be of the form var=value. The values will be used in expanding variables listed in the step's commands", action="append", type=key_value_pair)
-    run_parser.add_argument("--upload,-u", help="file to upload. Filenames should be specified as either \"src\" or \"src:dst\" where src is the local path and dst is the name that will be used when it is stored on the remote machine. If dst is not specified, it will default to the basename of src", action="append", type=upload_file)
+    run_parser.add_argument("-p", "--parameter", help="argument should be of the form var=value. The values will be used in expanding variables listed in the step's commands", action="append", type=key_value_pair)
+    run_parser.add_argument("-u", "--upload", help="file to upload. Filenames should be specified as either \"src\" or \"src:dst\" where src is the local path and dst is the name that will be used when it is stored on the remote machine. If dst is not specified, it will default to the basename of src", action="append", type=upload_file)
     run_parser.set_defaults(func=workflow_run_cmd)
 
 def workflow_run_cmd(jq: JobQueue, io: IO, cluster: Cluster, config: Config, args):
@@ -226,6 +231,10 @@ def workflow_run_cmd(jq: JobQueue, io: IO, cluster: Cluster, config: Config, arg
     class SparklesImpl(SparklesInterface):
         def __init__(self, target_nodes):
             self.target_nodes = target_nodes
+
+        def read_as_bytes(self, path):
+            # this isn't technically right -- clean this up later
+            return io.get_as_str_must(path).encode("utf8")
 
         def job_exists(self, name: str) -> bool:
             # Check if job exists by trying to get it
@@ -242,43 +251,44 @@ def workflow_run_cmd(jq: JobQueue, io: IO, cluster: Cluster, config: Config, arg
         def wait_for_completion(self, name: str):
             # Use the existing watch functionality to wait for completion
             from .watch import watch
-            watch(jq, io, cluster, name, target_nodes=self.target_nodes)
+            watch(io, jq, name, cluster, target_nodes=self.target_nodes)
         
         def start(self, name: str, command, params, image: Optional[str], uploads: List[Tuple[str, str]]):
             # Submit a new job with the given parameters
             from tempfile import NamedTemporaryFile
             import csv
-            submit_cmd=["-n", name, "--no-wait"]
+            submit_cmd_args=["-n", name, "--no-wait"]
             if image:
-                submit_cmd.append("-i", image)
+                submit_cmd_args.extend(["-i", image])
 
             for src, dst in uploads:
-                submit_cmd.extend(["-u", f"{src}:{dst}"])
+                submit_cmd_args.extend(["-u", f"{src}:{dst}"])
 
-            with NamedTemporaryFile(suffix=".csv") as tmpcsv:
-                w = csv.DictWriter(tmpcsv)
-                w.writeheader(params[0].keys())
+            with NamedTemporaryFile(suffix=".csv", mode="wt") as tmpcsv:
+                w = csv.DictWriter(tmpcsv, params[0].keys())
+                w.writeheader()
                 for param in params:
                     w.writerow(param)
-
+                tmpcsv.flush()
+                
                 if params != [{}]:
-                    submit_cmd.extend(["--params", tmpcsv.name])
+                    submit_cmd_args.extend(["--params", tmpcsv.name])
 
-                submit_cmd.extend(command)
+                submit_cmd_args.extend(command)
 
-                txtui.user_print(f"Executing: sub {' '.join(submit_cmd)}")
-                args = construct_submit_cmd_args(submit_cmd)
-                submit_cmd(jq, io, cluster, name, args, config)
+                txtui.user_print(f"Executing: sub {' '.join(submit_cmd_args)}")
+                args = construct_submit_cmd_args(submit_cmd_args)
+                submit_cmd(jq, io, cluster, args, config)
                    
         def get_job_path_prefix(self) -> str:
             # Return the base path for jobs
-            return io._get_url_prefix()
+            return config.default_url_prefix
     
     parameters = {}
     if args.parameter:
         parameters.update(dict(args.parameter))
     uploads = []
     if args.upload:
-        parameters.extend(uploads)
+        uploads.extend(args.upload)
 
     return run_workflow(SparklesImpl(args.nodes), args.job_name, args.workflow_def, args.retry, parameters, uploads)
