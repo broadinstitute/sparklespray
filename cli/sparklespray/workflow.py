@@ -63,9 +63,9 @@ def _load_parameters_from_csv(csv_path: str) -> List[Dict[str, str]]:
     return parameters
 
 class SparklesInterface:
-    def job_exists(self, name: str) -> bool :
+    def job_exists(self, name: str) -> bool:
         raise NotImplementedError()
-    def clear_failed(self):
+    def clear_failed(self, name: str):
         raise NotImplementedError()
     def wait_for_completion(self, name: str):
         raise NotImplementedError()
@@ -106,11 +106,10 @@ def run_workflow(sparkles: SparklesInterface, job_name: str, workflow_def_path: 
     Run a workflow defined in a JSON file.
     
     Args:
-        jq: JobQueue instance
-        io: IO helper instance
-        cluster: Cluster instance
+        sparkles: SparklesInterface instance for job management
         job_name: Name to use for the job
         workflow_def_path: Path to the JSON file containing the workflow definition
+        retry: Whether to retry failed tasks
     """
     try:
         # Load and validate the workflow definition
@@ -149,15 +148,17 @@ def run_workflow(sparkles: SparklesInterface, job_name: str, workflow_def_path: 
                 txtui.user_print(f"Executing step {step_num}/{len(workflow.steps)}")
 
                 try:
-                    parameters_csv = _expand_template(step.parameters_csv, lambda name: variables[name])
+                    parameters_csv = step.parameters_csv
+                    if parameters_csv is not None:
+                        parameters_csv = _expand_template(parameters_csv, lambda name: variables[name])
                 except KeyError:
                     raise Exception(f"Could not expand variable in step {step_num}'s parameter_csv: {repr(step.parameters_csv)}")
 
                 # If this is a fan-out we'll have a list of parameters. If not, we'll get a single record for a single job
-                parameters = _load_parameters_from_csv(parameters_csv)
+                parameters = _load_parameters_from_csv(parameters_csv) if parameters_csv else [{}]
                 
                 try:
-                    command = [_expand_template(x) for x in step.command]
+                    command = [_expand_template(x, _get_var) if isinstance(x, str) else x for x in step.command]
                 except KeyError as ex:
                     raise Exception(f"Could not expand variable in step {step_num}'s command: {repr(step.command)}: {ex}")
 
@@ -187,4 +188,29 @@ def add_workflow_cmd(subparser):
 
 def workflow_run_cmd(jq: JobQueue, io: IO, cluster: Cluster, args):
     """Command handler for 'workflow run'."""
-    return run_workflow(jq, io, cluster, args.job_name, args.workflow_def, args.retry)
+    # Create a SparklesInterface implementation that uses the provided services
+    class SparklesImpl(SparklesInterface):
+        def job_exists(self, name: str) -> bool:
+            # Check if job exists by trying to get it
+            try:
+                jq.get_job(name)
+                return True
+            except:
+                return False
+        
+        def clear_failed(self, name: str):
+            # Reset failed tasks to pending
+            jq.reset(name, None, statuses_to_clear=[STATUS_FAILED])
+        
+        def wait_for_completion(self, name: str):
+            # Use the existing watch functionality to wait for completion
+            from .watch import watch
+            watch(jq, io, cluster, name)
+        
+        def start(self, name: str, command, params, image):
+            # Submit a new job with the given parameters
+            from .submit import submit
+            submit(jq, io, cluster, name, command, parameters=params, 
+                   docker_image=image, wait_for_completion=False)
+    
+    return run_workflow(SparklesImpl(), args.job_name, args.workflow_def, args.retry)
