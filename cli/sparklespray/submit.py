@@ -527,6 +527,7 @@ def submit_cmd(jq: JobQueue, io: IO, cluster: Cluster, args: Any, config: Config
         parameters = [{"index": str(i)} for i in range(args.seq)]
     elif args.params is not None:
         parameters = read_csv_as_dicts(args.params)
+        assert len(parameters) > 0
     else:
         parameters = [{}]
 
