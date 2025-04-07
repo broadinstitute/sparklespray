@@ -194,6 +194,7 @@ def add_workflow_cmd(subparser):
     def key_value_pair(value: str):
         key, value = value.split("=", 1)
         return (key, value)
+    run_parser.add_argument("--nodes", help="max number of nodes to power on at one time", type=int)
     run_parser.add_argument("--parameter,-p", help="argument should be of the form var=value. The values will be used in expanding variables listed in the step's commands", action="append", type=key_value_pair)
     run_parser.set_defaults(func=workflow_run_cmd)
 
@@ -201,6 +202,9 @@ def workflow_run_cmd(jq: JobQueue, io: IO, cluster: Cluster, args):
     """Command handler for 'workflow run'."""
     # Create a SparklesInterface implementation that uses the provided services
     class SparklesImpl(SparklesInterface):
+        def __init__(self, target_nodes):
+            self.target_nodes = target_nodes
+
         def job_exists(self, name: str) -> bool:
             # Check if job exists by trying to get it
             try:
@@ -216,7 +220,7 @@ def workflow_run_cmd(jq: JobQueue, io: IO, cluster: Cluster, args):
         def wait_for_completion(self, name: str):
             # Use the existing watch functionality to wait for completion
             from .watch import watch
-            watch(jq, io, cluster, name)
+            watch(jq, io, cluster, name, target_nodes=self.target_nodes)
         
         def start(self, name: str, command, params, image):
             # Submit a new job with the given parameters
@@ -232,4 +236,4 @@ def workflow_run_cmd(jq: JobQueue, io: IO, cluster: Cluster, args):
     if args.parameter:
         parameters.update(dict(args.parameter))
 
-    return run_workflow(SparklesImpl(), args.job_name, args.workflow_def, args.retry, parameters)
+    return run_workflow(SparklesImpl(args.nodes), args.job_name, args.workflow_def, args.retry, parameters)
