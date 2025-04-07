@@ -17,6 +17,7 @@ class WorkflowStep(BaseModel):
     run_local: bool = False
     image: Optional[str] = None
     parameters_csv: Optional[str] = None
+    files_to_localize: Optional[List[str]] = None
     
 class WorkflowDefinition(BaseModel):
     """Represents a workflow definition loaded from a JSON file."""
@@ -70,7 +71,7 @@ class SparklesInterface:
         raise NotImplementedError()
     def wait_for_completion(self, name: str):
         raise NotImplementedError()
-    def start(self, name: str, command: List[str], params: List[Dict[str,str]], image: Optional[str]):
+    def start(self, name: str, command: List[str], params: List[Dict[str,str]], image: Optional[str], uploads: List[Tuple[str, str]]):
         raise NotImplementedError()
     def get_job_path_prefix(self) -> str:
         raise NotImplementedError()
@@ -104,8 +105,9 @@ def _expand_template(value: str, _get_var):
         
     return result
 
+from typing import Tuple
 
-def run_workflow(sparkles: SparklesInterface, job_name: str, workflow_def_path: str, retry: bool, command_line_parameters: Dict[str, str]) -> None:
+def run_workflow(sparkles: SparklesInterface, job_name: str, workflow_def_path: str, retry: bool, command_line_parameters: Dict[str, str], uploads: List[Tuple[str, str]]=[]) -> None:
     """
     Run a workflow defined in a JSON file.
     
@@ -116,7 +118,11 @@ def run_workflow(sparkles: SparklesInterface, job_name: str, workflow_def_path: 
         retry: Whether to retry failed tasks
     """
     job_path_prefix = sparkles.get_job_path_prefix()
-    
+
+    src_path_by_dest = {}
+    for src, dst in uploads:
+        src_path_by_dest[dst] = src
+
     try:
         # Load and validate the workflow definition
         workflow = WorkflowDefinition.from_file(workflow_def_path)
@@ -167,7 +173,12 @@ def run_workflow(sparkles: SparklesInterface, job_name: str, workflow_def_path: 
                 except KeyError as ex:
                     raise Exception(f"Could not expand variable in step {step_num}'s command: {repr(step.command)}: {ex}")
 
-                sparkles.start(sub_job_name, command, parameters, step.image)
+                uploads_for_step = []
+                if step.files_to_localize:
+                    for dst in step.files_to_localize:
+                        src = src_path_by_dest[dst]
+                        uploads_for_step.append((src, dst))
+                sparkles.start(sub_job_name, command, parameters, step.image, uploads_for_step)
 
             sparkles.wait_for_completion(sub_job_name)
             txtui.user_print(f"Executing step {step_num}/{len(workflow.steps)} completed")
@@ -194,8 +205,17 @@ def add_workflow_cmd(subparser):
     def key_value_pair(value: str):
         key, value = value.split("=", 1)
         return (key, value)
+    def upload_file(path: str):
+        if ":" in path:
+            src, dst = path.split(":", 1)
+        else:
+            src = path
+            dst = os.path.basename(src)
+        assert os.path.exists(src), f"Requested upload of {repr(src)} but file does not exist"
+        return (src, dst)
     run_parser.add_argument("--nodes", help="max number of nodes to power on at one time", type=int)
     run_parser.add_argument("--parameter,-p", help="argument should be of the form var=value. The values will be used in expanding variables listed in the step's commands", action="append", type=key_value_pair)
+    run_parser.add_argument("--upload,-u", help="file to upload. Filenames should be specified as either \"src\" or \"src:dst\" where src is the local path and dst is the name that will be used when it is stored on the remote machine. If dst is not specified, it will default to the basename of src", action="append", type=upload_file)
     run_parser.set_defaults(func=workflow_run_cmd)
 
 def workflow_run_cmd(jq: JobQueue, io: IO, cluster: Cluster, args):
@@ -235,5 +255,8 @@ def workflow_run_cmd(jq: JobQueue, io: IO, cluster: Cluster, args):
     parameters = {}
     if args.parameter:
         parameters.update(dict(args.parameter))
+    uploads = []
+    if args.upload:
+        parameters.extend(uploads)
 
-    return run_workflow(SparklesImpl(args.nodes), args.job_name, args.workflow_def, args.retry, parameters)
+    return run_workflow(SparklesImpl(args.nodes), args.job_name, args.workflow_def, args.retry, parameters, uploads)

@@ -482,7 +482,6 @@ def add_submit_cmd(subparser):
     )
     parser.add_argument("command", nargs=argparse.REMAINDER)
 
-
 def submit_cmd(jq: JobQueue, io: IO, cluster: Cluster, args: Any, config: Config):
     metadata: Dict[str, str] = {}
 
