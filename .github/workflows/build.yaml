@@ -34,7 +34,7 @@ jobs:
       run: md5sum cli/sparklespray/bin/kubequeconsume && ls -s cli/sparklespray/bin/kubequeconsume
       
     - name: Upload executable
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: kubequeconsume-exe-${{ github.run_number }}
         path: cli/sparklespray/bin/kubequeconsume
