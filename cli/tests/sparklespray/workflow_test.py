@@ -23,7 +23,7 @@ class MockSparkles(SparklesInterface):
     def wait_for_completion(self, name: str):
         self.wait_for_completion_calls.append(name)
     
-    def start(self, name: str, command, params, image, uploads=None):
+    def start(self, name: str, command, params, image, uploads):
         self.start_calls.append((name, command, params, image, uploads))
         self.jobs[name] = True
         
@@ -55,7 +55,7 @@ def test_run_workflow_basic(tmpdir):
     
     # Verify the expected calls were made
     assert sparkles.job_exists_calls == ["test-job-1"]
-    assert sparkles.start_calls == [("test-job-1", ["echo", "Hello World"], [{}], None)]
+    assert sparkles.start_calls == [("test-job-1", ["echo", "Hello World"], [{}], None, [] ), ]
     assert sparkles.wait_for_completion_calls == ["test-job-1"]
     assert len(sparkles.clear_failed_calls) == 0
 
@@ -89,7 +89,7 @@ def test_run_workflow_with_retry(tmpdir):
     # Verify the expected calls were made
     assert sparkles.job_exists_calls == ["test-job-1", "test-job-2"]
     assert sparkles.clear_failed_calls == ["test-job-1"]
-    assert sparkles.start_calls == [("test-job-2", ["echo", "Step 2"], [{}], "python:3.9")]
+    assert sparkles.start_calls == [("test-job-2", ["echo", "Step 2"], [{}], "python:3.9", [])]
     assert sparkles.wait_for_completion_calls == ["test-job-1", "test-job-2"]
 
 def test_run_workflow_with_parameters(tmpdir):
@@ -122,10 +122,11 @@ def test_run_workflow_with_parameters(tmpdir):
     # Verify the expected calls were made
     assert sparkles.job_exists_calls == ["test-job-1"]
     assert len(sparkles.start_calls) == 1
-    name, command, params, image = sparkles.start_calls[0]
+    name, command, params, image, uploads = sparkles.start_calls[0]
     assert name == "test-job-1"
     assert command == ["process", "test-job", "/path/to/jobs/test-job"]
     assert len(params) == 2
     assert params[0] == {"name": "item1", "value": "100"}
     assert params[1] == {"name": "item2", "value": "200"}
     assert image is None
+    assert uploads == []
