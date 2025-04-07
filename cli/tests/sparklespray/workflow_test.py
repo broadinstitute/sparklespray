@@ -51,7 +51,7 @@ def test_run_workflow_basic(tmpdir):
     job_name = "test-job"
     
     # Run the workflow
-    run_workflow(sparkles, job_name, workflow_path, False)
+    run_workflow(sparkles, job_name, workflow_path, False, {})
     
     # Verify the expected calls were made
     assert sparkles.job_exists_calls == ["test-job-1"]
@@ -84,7 +84,7 @@ def test_run_workflow_with_retry(tmpdir):
     job_name = "test-job"
     
     # Run the workflow with retry flag
-    run_workflow(sparkles, job_name, workflow_path, True)
+    run_workflow(sparkles, job_name, workflow_path, True, {})
     
     # Verify the expected calls were made
     assert sparkles.job_exists_calls == ["test-job-1", "test-job-2"]
@@ -117,7 +117,7 @@ def test_run_workflow_with_parameters(tmpdir):
     job_name = "test-job"
     
     # Run the workflow
-    run_workflow(sparkles, job_name, workflow_path, False)
+    run_workflow(sparkles, job_name, workflow_path, False, {})
     
     # Verify the expected calls were made
     assert sparkles.job_exists_calls == ["test-job-1"]
