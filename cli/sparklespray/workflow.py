@@ -72,6 +72,9 @@ class SparklesInterface:
         raise NotImplementedError()
     def start(self, name: str, command: List[str], params: List[Dict[str,str]], image: Optional[str]):
         raise NotImplementedError()
+    def get_job_path_prefix() -> str:
+        raise NotImplementedError()
+
 
 def _expand_template(value: str, _get_var):
     if value is None:
@@ -112,6 +115,8 @@ def run_workflow(sparkles: SparklesInterface, job_name: str, workflow_def_path: 
         workflow_def_path: Path to the JSON file containing the workflow definition
         retry: Whether to retry failed tasks
     """
+    job_path_prefix = sparkles.get_job_path_prefix()
+    
     try:
         # Load and validate the workflow definition
         workflow = WorkflowDefinition.from_file(workflow_def_path)
@@ -133,6 +138,8 @@ def run_workflow(sparkles: SparklesInterface, job_name: str, workflow_def_path: 
         for i, step in enumerate(workflow.steps):
             step_num = i + 1
             sub_job_name = f"{job_name}-{step_num}"
+            variables["job_name"] = job_name
+            variables["job_path"] = f"{job_path_prefix}/{job_name}"
 
             assert not step.run_local, "Currently not supported because we don't have a way to tell if local jobs are complete yet"
             # if step.run_local:
@@ -167,6 +174,8 @@ def run_workflow(sparkles: SparklesInterface, job_name: str, workflow_def_path: 
 
             sparkles.wait_for_completion(sub_job_name)
             txtui.user_print(f"Executing step {step_num}/{len(workflow.steps)} completed")
+            variables["prev_job_name"] = job_name
+            variables["prev_job_path"] = job_path
         
         txtui.user_print(f"Workflow execution completed successfully")
         

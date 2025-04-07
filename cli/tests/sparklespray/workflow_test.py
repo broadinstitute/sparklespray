@@ -39,7 +39,6 @@ def test_run_workflow_basic():
         "steps": [
             {
                 "command": ["echo", "Hello World"],
-                "run_local": False
             }
         ]
     }
@@ -139,11 +138,9 @@ def test_run_workflow_with_variable_expansion():
         "steps": [
             {
                 "command": ["echo", "First step"],
-                "run_local": False
             },
             {
                 "command": ["echo", "{step1_output}"],
-                "run_local": False
             }
         ]
     }
