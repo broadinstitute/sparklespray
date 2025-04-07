@@ -98,7 +98,42 @@ def run_workflow(sparkles: SparklesInterface, job_name: str, workflow_def_path: 
             return variables[name]
 
         def _expand_template(value):
-            pass
+            if value is None:
+                return None
+                
+            if isinstance(value, list):
+                return [_expand_template(item) for item in value]
+                
+            if not isinstance(value, str):
+                return value
+                
+            result = ""
+            i = 0
+            length = len(value)
+            
+            while i < length:
+                if i + 1 < length and value[i] == '{' and value[i+1] != '{':
+                    # Found an opening brace, look for the closing one
+                    start = i + 1
+                    i += 1
+                    while i < length and value[i] != '}':
+                        i += 1
+                    
+                    if i < length:  # Found closing brace
+                        var_name = value[start:i].strip()
+                        try:
+                            replacement = _get_var(var_name)
+                            result += str(replacement)
+                        except KeyError:
+                            # If variable not found, keep the original template
+                            result += '{' + var_name + '}'
+                    else:  # No closing brace found
+                        result += '{' + value[start:]
+                else:
+                    result += value[i]
+                i += 1
+                
+            return result
 
         # Process each step in the workflow
         for i, step in enumerate(workflow.get_steps()):
