@@ -229,7 +229,7 @@ def workflow_run_cmd(jq: JobQueue, io: IO, cluster: Cluster, args):
             return io._get_url_prefix()
     
     parameters = {}
-    if hasattr(args, 'parameter') and args.parameter:
+    if args.parameter:
         parameters.update(dict(args.parameter))
 
     return run_workflow(SparklesImpl(), args.job_name, args.workflow_def, args.retry, parameters)
