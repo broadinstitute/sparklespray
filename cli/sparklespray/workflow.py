@@ -17,20 +17,6 @@ class WorkflowStep(BaseModel):
     image: Optional[str] = None
     parameters_csv: Optional[str] = None
     
-    @validator('command')
-    def validate_command(cls, v):
-        if not v:
-            raise ValueError("Command cannot be empty")
-        if not all(isinstance(cmd, str) for cmd in v):
-            raise ValueError("All command parts must be strings")
-        return v
-    
-    @validator('parameters_csv')
-    def validate_parameters_csv(cls, v):
-        if v is not None and not os.path.exists(v):
-            raise ValueError(f"Parameters CSV file not found: {v}")
-        return v
-
 class WorkflowDefinition(BaseModel):
     """Represents a workflow definition loaded from a JSON file."""
     steps: List[WorkflowStep]
@@ -47,11 +33,6 @@ class WorkflowDefinition(BaseModel):
                 return cls.parse_obj(workflow_data)
             except json.JSONDecodeError:
                 raise ValueError(f"Invalid JSON in workflow definition file: {file_path}")
-    
-    def get_steps(self) -> List[WorkflowStep]:
-        """Get the list of workflow steps."""
-        return self.steps
-
 
 def _run_local_command(command: List[str]) -> int:
     """Run a command locally and return the exit code."""
@@ -81,7 +62,17 @@ def _load_parameters_from_csv(csv_path: str) -> List[Dict[str, str]]:
         
     return parameters
 
-def run_workflow(jq: JobQueue, io: IO, cluster: Cluster, job_name: str, workflow_def_path: str) -> None:
+class SparklesInterface:
+    def job_exists(self, name: str) -> bool :
+        raise NotImplementedError()
+    def clear_failed(self):
+        raise NotImplementedError()
+    def wait_for_completion(self, name: str):
+        raise NotImplementedError()
+    def start(self, name: str, command: List[str], params: List[Dict[str,str]], image: Optional[str]):
+        raise NotImplementedError()
+
+def run_workflow(sparkles: SparklesInterface, job_name: str, workflow_def_path: str, retry: bool) -> None:
     """
     Run a workflow defined in a JSON file.
     
@@ -99,41 +90,43 @@ def run_workflow(jq: JobQueue, io: IO, cluster: Cluster, job_name: str, workflow
         # Log the start of workflow execution
         log.info(f"Starting workflow execution for job: {job_name}")
         txtui.user_print(f"Starting workflow: {job_name}")
-        
+
+        variables = {}
+        def _expand_template(value):
+            pass
+
         # Process each step in the workflow
         for i, step in enumerate(workflow.get_steps()):
             step_num = i + 1
-            txtui.user_print(f"Executing step {step_num}/{len(workflow.get_steps())}")
-            
-            if step.run_local:
-                # Run the command locally
-                exit_code = _run_local_command(step.command)
-                if exit_code != 0:
-                    raise RuntimeError(f"Local command in step {step_num} failed with exit code {exit_code}")
+            sub_job_name = f"{job_name}-{step_num}"
+
+            assert not step.run_local, "Currently not supported because we don't have a way to tell if local jobs are complete yet"
+            # if step.run_local:
+            #     # Run the command locally
+            #     exit_code = _run_local_command(step.command)
+            #     if exit_code != 0:
+            #         raise RuntimeError(f"Local command in step {step_num} failed with exit code {exit_code}")
+            # else:
+
+            if sparkles.job_exists(sub_job_name):
+                if retry:
+                    sparkles.clear_failed(sub_job_name)
             else:
-                # This is a distributed job
-                parameters = _load_parameters_from_csv(step.parameters_csv)
+                txtui.user_print(f"Executing step {step_num}/{len(workflow.steps)}")
+
+                # If this is a fan-out we'll have a list of parameters. If not, we'll get a single record for a single job
+                parameters = _load_parameters_from_csv(_expand_template(step.parameters_csv))
                 
-                # TODO: Submit the job to the cluster
-                # This would involve:
-                # 1. Creating a job with the specified command
-                # 2. Setting the docker image if specified
-                # 3. Submitting the job with the parameters
-                
-                txtui.user_print(f"Would submit distributed job for step {step_num} with {len(parameters)} parameter sets")
-                txtui.user_print(f"  Command: {' '.join(step.command)}")
-                if step.image:
-                    txtui.user_print(f"  Image: {step.image}")
-                else:
-                    txtui.user_print("  Using default image")
-                
-                # For now, just log that we would submit a job
-                log.info(f"Would submit job for step {step_num} with command: {step.command}")
+                command = [_expand_template(x) for x in command]
+                sparkles.start(sub_job_name, command, parameters, step.image)
+
+            sparkles.wait_for_completion(sub_job_name)
+            txtui.user_print(f"Executing step {step_num}/{len(workflow.steps)} completed")
         
         txtui.user_print(f"Workflow execution completed successfully")
         
     except Exception as e:
-        log.error(f"Error running workflow: {str(e)}")
+        log.error(f"Error running workflow: {str(e)}", exc_info=True)
         txtui.user_print(f"Error: {str(e)}")
         raise
 
@@ -146,8 +139,9 @@ def add_workflow_cmd(subparser):
     run_parser = workflow_subparser.add_parser("run", help="Run a workflow")
     run_parser.add_argument("job_name", help="Name to use for the job")
     run_parser.add_argument("workflow_def", help="Path to a JSON file containing the workflow definition")
+    run_parser.add_argument("--retry", help="if set, will retry running any failed tasks", action="store_true")
     run_parser.set_defaults(func=workflow_run_cmd)
 
 def workflow_run_cmd(jq: JobQueue, io: IO, cluster: Cluster, args):
     """Command handler for 'workflow run'."""
-    return run_workflow(jq, io, cluster, args.job_name, args.workflow_def)
+    return run_workflow(jq, io, cluster, args.job_name, args.workflow_def, args.retry)
