@@ -72,6 +72,35 @@ class SparklesInterface:
     def start(self, name: str, command: List[str], params: List[Dict[str,str]], image: Optional[str]):
         raise NotImplementedError()
 
+def _expand_template(value: str, _get_var):
+    if value is None:
+        return None
+        
+    result = ""
+    i = 0
+    length = len(value)
+    
+    while i < length:
+        if i + 1 < length and value[i] == '{' and value[i+1] != '{':
+            # Found an opening brace, look for the closing one
+            start = i + 1
+            i += 1
+            while i < length and value[i] != '}':
+                i += 1
+            
+            if i < length:  # Found closing brace
+                var_name = value[start:i].strip()
+                replacement = _get_var(var_name)
+                result += str(replacement)
+            else:  # No closing brace found
+                result += '{' + value[start:]
+        else:
+            result += value[i]
+        i += 1
+        
+    return result
+
+
 def run_workflow(sparkles: SparklesInterface, job_name: str, workflow_def_path: str, retry: bool) -> None:
     """
     Run a workflow defined in a JSON file.
@@ -97,46 +126,11 @@ def run_workflow(sparkles: SparklesInterface, job_name: str, workflow_def_path: 
                 return "{"+name[len("parameter."):]+"}"
             return variables[name]
 
-        def _expand_template(value):
-            if value is None:
-                return None
-                
-            if isinstance(value, list):
-                return [_expand_template(item) for item in value]
-                
-            if not isinstance(value, str):
-                return value
-                
-            result = ""
-            i = 0
-            length = len(value)
-            
-            while i < length:
-                if i + 1 < length and value[i] == '{' and value[i+1] != '{':
-                    # Found an opening brace, look for the closing one
-                    start = i + 1
-                    i += 1
-                    while i < length and value[i] != '}':
-                        i += 1
-                    
-                    if i < length:  # Found closing brace
-                        var_name = value[start:i].strip()
-                        try:
-                            replacement = _get_var(var_name)
-                            result += str(replacement)
-                        except KeyError:
-                            # If variable not found, keep the original template
-                            result += '{' + var_name + '}'
-                    else:  # No closing brace found
-                        result += '{' + value[start:]
-                else:
-                    result += value[i]
-                i += 1
-                
-            return result
+        def expand_template(value: str):
+            return _expand_template(value, _get_var)
 
         # Process each step in the workflow
-        for i, step in enumerate(workflow.get_steps()):
+        for i, step in enumerate(workflow.steps):
             step_num = i + 1
             sub_job_name = f"{job_name}-{step_num}"
 
@@ -154,10 +148,19 @@ def run_workflow(sparkles: SparklesInterface, job_name: str, workflow_def_path: 
             else:
                 txtui.user_print(f"Executing step {step_num}/{len(workflow.steps)}")
 
+                try:
+                    parameters_csv = _expand_template(step.parameters_csv, lambda name: variables[name])
+                except KeyError:
+                    raise Exception(f"Could not expand variable in step {step_num}'s parameter_csv: {repr(step.parameters_csv)}")
+
                 # If this is a fan-out we'll have a list of parameters. If not, we'll get a single record for a single job
-                parameters = _load_parameters_from_csv(_expand_template(step.parameters_csv))
+                parameters = _load_parameters_from_csv(parameters_csv)
                 
-                command = [_expand_template(x) for x in command]
+                try:
+                    command = [_expand_template(x) for x in step.command]
+                except KeyError as ex:
+                    raise Exception(f"Could not expand variable in step {step_num}'s command: {repr(step.command)}: {ex}")
+
                 sparkles.start(sub_job_name, command, parameters, step.image)
 
             sparkles.wait_for_completion(sub_job_name)
