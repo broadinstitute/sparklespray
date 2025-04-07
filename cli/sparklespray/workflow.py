@@ -175,7 +175,7 @@ def run_workflow(sparkles: SparklesInterface, job_name: str, workflow_def_path: 
             sparkles.wait_for_completion(sub_job_name)
             txtui.user_print(f"Executing step {step_num}/{len(workflow.steps)} completed")
             variables["prev_job_name"] = job_name
-            variables["prev_job_path"] = job_path
+            variables["prev_job_path"] = f"{job_path_prefix}/{job_name}"
         
         txtui.user_print(f"Workflow execution completed successfully")
         
