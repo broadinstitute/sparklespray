@@ -229,7 +229,7 @@ def _watch(
                     try:
                         log_monitor.poll()
                     except CommunicationError as ex:
-                        log.warning(
+                        log.info(
                             "Got error polling log. shutting down log watch: {}".format(
                                 ex
                             )
