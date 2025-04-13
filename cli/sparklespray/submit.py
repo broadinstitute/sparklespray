@@ -14,7 +14,7 @@ from .util import random_string, url_join
 from .model import MachineSpec, PersistentDiskMount, SubmitConfig
 from .hasher import CachingHashFunction
 from .spec import make_spec_from_command, SrcDstPair
-from .main import clean
+from .main import clean, kill
 from .util import get_timestamp
 from .job_queue import JobQueue
 from .cluster_service import Cluster
@@ -475,6 +475,15 @@ def _setup_parser_for_sub_command(parser):
         help="If set, will download all of the files from previous execution of this job to worker before running",
         action="store_true",
     )
+    def key_value_pair(text):
+        key,value = text.split("=", 1)
+        return (key,value)
+    parser.add_argument(
+        "--metadata",
+        help="adds metdata to job. parameter should be of the form key=value",
+        action="append",
+        type=key_value_pair
+    )
     parser.add_argument("command", nargs=argparse.REMAINDER)
 
 def add_submit_cmd(subparser):
@@ -492,8 +501,18 @@ def construct_submit_cmd_args(unparsed_args: List[str]):
     args = parser.parse_args(unparsed_args)
     return args
 
+def _compute_dict_hash(spec: Dict):
+    import hashlib
+    import time
+    import tempfile
+    as_bytes = json.dumps(spec, sort_keys=True).encode("utf8")
+#    fn = tempfile.mktemp(prefix=f"hash-{time.time()}-", suffix=".json", dir=".")
+#    with open(fn, "wb") as fd:
+#        fd.write(as_bytes)
+    return hashlib.sha256(as_bytes).hexdigest()
+
 def submit_cmd(jq: JobQueue, io: IO, cluster: Cluster, args: Any, config: Config):
-    metadata: Dict[str, str] = {}
+    metadata: Dict[str, str] = args.metadata if args.metadata else {}
 
     if args.image:
         image = args.image
@@ -507,13 +526,6 @@ def submit_cmd(jq: JobQueue, io: IO, cluster: Cluster, args: Any, config: Config
     job_id = args.name
     if job_id is None:
         job_id = new_job_id()
-    elif args.skipifexists:
-        job = jq.get_job(job_id, must=False)
-        if job is not None:
-            txtui.user_print(
-                f"Found existing job {job_id} and submitted job with --skipifexists so aborting"
-            )
-            return 0
 
     target_node_count = args.nodes
     machine_type = config.machine_type
@@ -634,19 +646,43 @@ def submit_cmd(jq: JobQueue, io: IO, cluster: Cluster, args: Any, config: Config
         # to ensure the local process is the one which picks up the job.
         cluster_name = "local-" + random_string(8)
 
-    txtui.user_print("Submitting job: {}".format(job_id))
-    submit(
-        jq,
-        io,
-        cluster,
-        job_id,
-        spec,
-        submit_config,
-        metadata=metadata,
-        clean_if_exists=True,
-        dry_run=args.dryrun,
-        cluster_name=cluster_name,
-    )
+    # test to see if we already have such a job submitted, in which case, we don't want to do anything
+    already_submitted = False
+    needs_kill_before_submit = False
+    spec_hash = _compute_dict_hash(spec)
+    job_env_hash = _compute_dict_hash(dict(boot_volume_in_gb=boot_volume_in_gb, image=spec["image"], kubequeconsume_exe_md5=kubequeconsume_exe_md5, machine_type=machine_type))
+    metadata["job-env-sha256"] = job_env_hash
+    metadata["job-spec-sha256"] = spec_hash
+    existing_job = jq.get_job(job_id=job_id, must=False)
+    if existing_job:
+        previous_spec_hash = existing_job.metadata.get("job-spec-sha256")
+        if previous_spec_hash == spec_hash:
+            already_submitted = True
+        if existing_job.metadata.get("job-env-sha256") != job_env_hash:
+            needs_kill_before_submit = True
+
+    if args.skipifexists and already_submitted and (  not needs_kill_before_submit):
+        txtui.user_print(f"Found existing job {job_id} with identical specification. Skipping submission.")
+    else:
+        if needs_kill_before_submit:
+            txtui.user_print(f"Found existing job {job_id} with different runtime environment. Stopping any running instances before proceeding")
+            kill(jq, cluster, job_id)
+        if existing_job:
+            txtui.user_print(f"Found existing job {job_id} with different specification. Removing before submitting new job.")
+            clean(cluster, jq, job_id)
+        txtui.user_print(f"Submitting job: {job_id}")
+        submit(
+            jq,
+            io,
+            cluster,
+            job_id,
+            spec,
+            submit_config,
+            metadata=metadata,
+            clean_if_exists=True,
+            dry_run=args.dryrun,
+            cluster_name=cluster_name,
+        )
 
     finished = False
     successful_execution = True

@@ -231,7 +231,7 @@ def make_spec_from_command(
     for task_i, dl_and_command in enumerate(list_of_dl_and_commands):
         tasks.append(
             dict(
-                downloads=[dict(d._asdict()) for d in dl_and_command.downloads],
+                downloads=sorted([dict(d._asdict()) for d in dl_and_command.downloads], key=lambda x: (x["dst"], x["src_url"])), # make sure to sort these so specs are deterministc
                 command=dl_and_command.command,
                 uploads=dict(
                     include_patterns=src_wildcards,
