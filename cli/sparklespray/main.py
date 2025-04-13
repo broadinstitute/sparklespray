@@ -506,28 +506,29 @@ def _update_if_owner_missing(cluster, jq, task):
         )
         jq.reset_task(task.task_id, status=new_status)
 
+def kill(jq: JobQueue, cluster, job_id, keepcluster=False):
+    # TODO: stop just marks the job as it shouldn't run any more.  tasks will still be claimed.
+    log.info("Marking %s as killed", job_id)
+    ok, job = jq.kill_job(job_id)
+    assert ok
+    if not keepcluster:
+        cluster.stop_cluster(job.cluster)
+        tasks = jq.get_tasks_for_cluster(job.cluster, STATUS_CLAIMED)
+        for task in tasks:
+            _update_if_owner_missing(cluster, jq, task)
+
+    # if there are any sit sitting at pending, mark them as killed
+    tasks = jq.task_storage.get_tasks(job_id, status=STATUS_PENDING)
+    txtui.user_print("Marking {} pending tasks as killed".format(len(tasks)))
+    for task in tasks:
+        jq.reset_task(task.task_id, status=STATUS_KILLED)
 
 def kill_cmd(jq: JobQueue, cluster, args):
     jobids = _get_jobids_from_pattern(jq, args.jobid_pattern)
     if len(jobids) == 0:
         log.warning("No jobs found matching pattern")
     for jobid in jobids:
-        # TODO: stop just marks the job as it shouldn't run any more.  tasks will still be claimed.
-        log.info("Marking %s as killed", jobid)
-        ok, job = jq.kill_job(jobid)
-        assert ok
-        if not args.keepcluster:
-            cluster.stop_cluster(job.cluster)
-            tasks = jq.get_tasks_for_cluster(job.cluster, STATUS_CLAIMED)
-            for task in tasks:
-                _update_if_owner_missing(cluster, jq, task)
-
-        # if there are any sit sitting at pending, mark them as killed
-        tasks = jq.task_storage.get_tasks(jobid, status=STATUS_PENDING)
-        txtui.user_print("Marking {} pending tasks as killed".format(len(tasks)))
-        for task in tasks:
-            jq.reset_task(task.task_id, status=STATUS_KILLED)
-
+        kill(jq, cluster, jobid, args.keepcluster)
 
 def version_cmd():
     log.info("version command ran")

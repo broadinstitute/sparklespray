@@ -1,5 +1,5 @@
 from pydantic import BaseModel, validator
-from typing import List, Optional, Union
+from typing import List, Optional, Union, Dict
 
 ALLOWED_DISK_TYPES = {"local-ssd", "pd-standard", "pd-balanced", "pd-ssd", "hyperdisk-balanced"}
 

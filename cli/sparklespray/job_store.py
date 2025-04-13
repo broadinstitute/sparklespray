@@ -39,13 +39,7 @@ def job_to_entity(client, o):
     entity["tasks"] = o.tasks
     entity["cluster"] = o.cluster
     entity["kube_job_spec"] = o.kube_job_spec
-    metadata = []
-    for k, v in o.metadata.items():
-        m = datastore.Entity()
-        m["name"] = k
-        m["value"] = v
-        metadata.append(m)
-    entity["metadata"] = metadata
+    entity["metadata"] = json.dumps(o.metadata)
     entity["status"] = o.status
     entity["submit_time"] = o.submit_time
     entity["target_node_count"] = o.target_node_count
@@ -55,13 +49,17 @@ def job_to_entity(client, o):
 
 
 def entity_to_job(entity):
-    metadata = entity.get("metadata", [])
+    metadata = entity.get("metadata", "{}")
+    if isinstance(metadata, list):
+        metadata = json.dumps(dict([(x['name'], x['value']) for x in metadata]))
+    elif isinstance(metadata, dict):
+        metadata = "{}"
     return Job(
         job_id=entity.key.name,
         tasks=entity.get("tasks", []),
         cluster=entity["cluster"],
         kube_job_spec=entity.get("kube_job_spec"),
-        metadata=dict([(m["name"], m["value"]) for m in metadata]),
+        metadata=json.loads(metadata),
         status=entity["status"],
         submit_time=entity.get("submit_time"),
         target_node_count=entity.get("target_node_count", 1),
