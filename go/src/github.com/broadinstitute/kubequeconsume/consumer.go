@@ -4,7 +4,6 @@ import (
 	"log"
 	"time"
 
-	"cloud.google.com/go/datastore"
 	"cloud.google.com/go/logging"
 	"golang.org/x/net/context"
 )
@@ -50,15 +49,15 @@ type TaskStatusNotification struct {
 }
 
 type Job struct {
-	JobID                  int               `datastore:"job_id"`
-	Tasks                  []string          `datastore:"tasks"`
-	KubeJobSpec            string            `datastore:"kube_job_spec"`
-	Metadata               *datastore.Entity `datastore:"metadata"`
-	Cluster                string            `datastore:"cluster"`
-	Status                 string            `datastore:"status"`
-	SubmitTime             float64           `datastore:"submit_time"`
-	MaxPreemptableAttempts int32             `datastore:"max_preemptable_attempts"`
-	TargetNodeCount        int32             `datastore:"target_node_count"`
+	JobID                  int      `datastore:"job_id"`
+	Tasks                  []string `datastore:"tasks"`
+	KubeJobSpec            string   `datastore:"kube_job_spec"`
+	Metadata               string   `datastore:"metadata"`
+	Cluster                string   `datastore:"cluster"`
+	Status                 string   `datastore:"status"`
+	SubmitTime             float64  `datastore:"submit_time"`
+	MaxPreemptableAttempts int32    `datastore:"max_preemptable_attempts"`
+	TargetNodeCount        int32    `datastore:"target_node_count"`
 }
 
 type ClusterKeys struct {
