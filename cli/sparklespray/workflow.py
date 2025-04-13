@@ -53,6 +53,7 @@ class WorkflowStep(BaseModel):
 class WorkflowDefinition(BaseModel):
     """Represents a workflow definition loaded from a JSON file."""
     steps: List[WorkflowStep]
+    files_to_localize: Optional[List[str]] = None
     
     @classmethod
     def from_file(cls, file_path: str) -> 'WorkflowDefinition':
@@ -163,12 +164,18 @@ def run_workflow(sparkles: SparklesInterface, job_name: str, workflow_def_path: 
                 return "{"+name[len("parameter."):]+"}"
             return variables[name]
 
-        # Process each step in the workflow
+        # create variables for each step
         for i, step in enumerate(workflow.steps):
             step_num = i + 1
             sub_job_name = f"{job_name}-{step_num}"
-            variables["job_name"] = job_name
-            variables["job_path"] = f"{job_path_prefix}/{job_name}"
+            variables[f"step.{step_num}.job_name"] = sub_job_name
+            variables[f"step.{step_num}.job_path"] = f"{job_path_prefix}/{sub_job_name}"
+
+        # Process each step in the workflow
+        for i, step in enumerate(workflow.steps):
+            step_num = i + 1
+            sub_job_name = variables["job_name"] = variables[f"step.{step_num}.job_name"]
+            sub_job_path = variables["job_path"] = variables[f"step.{step_num}.job_path"]
 
             assert not step.run_local, "Currently not supported because we don't have a way to tell if local jobs are complete yet"
             # if step.run_local:
@@ -182,39 +189,46 @@ def run_workflow(sparkles: SparklesInterface, job_name: str, workflow_def_path: 
                 txtui.user_print(f"Found job {sub_job_name} for step {step_num}/{len(workflow.steps)}")
                 if retry:
                     sparkles.clear_failed(sub_job_name)
-            else:
-                txtui.user_print(f"Executing step {step_num}/{len(workflow.steps)}")
 
-                try:
-                    parameters_csv = step.parameters_csv
-                    if parameters_csv is not None:
-                        parameters_csv = _expand_template(parameters_csv, lambda name: variables[name])
-                except KeyError:
-                    raise Exception(f"Could not expand variable in step {step_num}'s parameter_csv: {repr(step.parameters_csv)}")
+            txtui.user_print(f"Executing step {step_num}/{len(workflow.steps)}")
 
-                # If this is a fan-out we'll have a list of parameters. If not, we'll get a single record for a single job
-                parameters = _load_parameters_from_csv(sparkles, parameters_csv) if parameters_csv else [{}]
-                
-                try:
-                    command = [_expand_template(x, _get_var) if isinstance(x, str) else x for x in step.command]
-                except KeyError as ex:
-                    raise Exception(f"Could not expand variable in step {step_num}'s command: {repr(step.command)}: {ex}")
+            try:
+                parameters_csv = step.parameters_csv
+                if parameters_csv is not None:
+                    parameters_csv = _expand_template(parameters_csv, lambda name: variables[name])
+            except KeyError:
+                raise Exception(f"Could not expand variable in step {step_num}'s parameter_csv: {repr(step.parameters_csv)}")
 
-                uploads_for_step = []
-                if step.files_to_localize:
-                    for dst in step.files_to_localize:
-                        src = src_path_by_dest[dst]
-                        uploads_for_step.append((src, dst))
-                
-                image = default_image if step.image is None else step.image
-                machine_type = default_machine_type if step.machine_type is None else step.machine_type
+            # If this is a fan-out we'll have a list of parameters. If not, we'll get a single record for a single job
+            parameters = _load_parameters_from_csv(sparkles, parameters_csv) if parameters_csv else [{}]
+            
+            try:
+                command = [_expand_template(x, _get_var) if isinstance(x, str) else x for x in step.command]
+            except KeyError as ex:
+                raise Exception(f"Could not expand variable in step {step_num}'s command: {repr(step.command)}: {ex}")
 
-                sparkles.start(sub_job_name, command, parameters, image, uploads_for_step, machine_type)
+            uploads_for_step = set()
+
+            all_files_to_localize = []
+            if workflow.files_to_localize:
+                all_files_to_localize.extend(workflow.files_to_localize)                    
+
+            if step.files_to_localize:
+                all_files_to_localize.extend(step.files_to_localize)
+
+            for dst in all_files_to_localize:
+                src = src_path_by_dest[dst]
+                uploads_for_step.add((src, dst))
+            
+            image = default_image if step.image is None else step.image
+            machine_type = default_machine_type if step.machine_type is None else step.machine_type
+
+            sparkles.start(sub_job_name, command, parameters, image, list(uploads_for_step), machine_type)
 
             sparkles.wait_for_completion(sub_job_name)
             txtui.user_print(f"Executing step {step_num}/{len(workflow.steps)} completed")
-            variables["prev_job_name"] = job_name
-            variables["prev_job_path"] = f"{job_path_prefix}/{sub_job_name}"
+            variables["prev_job_name"] = sub_job_name
+            variables["prev_job_path"] = sub_job_path
         
         txtui.user_print(f"Workflow execution completed successfully")
         
@@ -278,11 +292,13 @@ def workflow_run_cmd(jq: JobQueue, io: IO, cluster: Cluster, config: Config, arg
         def wait_for_completion(self, name: str):
             # Use the existing watch functionality to wait for completion
             from .watch import watch
-            watch(io, jq, name, cluster, target_nodes=self.target_nodes)
+            completed_successfully =  watch(io, jq, name, cluster, target_nodes=self.target_nodes)
+            if not completed_successfully:
+                raise Exception("Job did not complete successfully")
         
         def start(self, name: str, command, params, image: Optional[str], uploads: List[Tuple[str, str]], machine_type: Optional[str]):
             # Submit a new job with the given parameters
-            submit_cmd_args=["-n", name, "--no-wait"]
+            submit_cmd_args=["-n", name, "--no-wait", "--skipifexists"]
 
             if machine_type:
                 submit_cmd_args.extend(["-m", machine_type])
@@ -305,9 +321,11 @@ def workflow_run_cmd(jq: JobQueue, io: IO, cluster: Cluster, config: Config, arg
 
                 submit_cmd_args.extend(command)
 
-                txtui.user_print(f"Executing: sub {' '.join(submit_cmd_args)}")
+                print(f"Executing: sub {' '.join(submit_cmd_args)}")
                 args = construct_submit_cmd_args(submit_cmd_args)
-                submit_cmd(jq, io, cluster, args, config)
+                exit_code = submit_cmd(jq, io, cluster, args, config)
+                if exit_code != 0:
+                    raise Exception("Sparkles job failed with exit code {exit_code}")
                    
         def get_job_path_prefix(self) -> str:
             # Return the base path for jobs
@@ -322,8 +340,8 @@ def workflow_run_cmd(jq: JobQueue, io: IO, cluster: Cluster, config: Config, arg
 
     workflow_args = WorkflowRunArgs(
         retry=args.retry,
-        parameters=args.parameters,
-        uploads=args.uploads,
+        parameters=parameters,
+        uploads=uploads,
         machine_type=args.machine_type,
         image= args.image)
 
