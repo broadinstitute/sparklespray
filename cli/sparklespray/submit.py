@@ -6,6 +6,7 @@ import re
 
 from typing import List, Optional, Tuple, Any, Dict
 from pydantic import BaseModel
+from .hasher import compute_dict_hash
 
 import sparklespray
 from .model import LOCAL_SSD
@@ -501,15 +502,6 @@ def construct_submit_cmd_args(unparsed_args: List[str]):
     args = parser.parse_args(unparsed_args)
     return args
 
-def _compute_dict_hash(spec: Dict):
-    import hashlib
-    import time
-    import tempfile
-    as_bytes = json.dumps(spec, sort_keys=True).encode("utf8")
-#    fn = tempfile.mktemp(prefix=f"hash-{time.time()}-", suffix=".json", dir=".")
-#    with open(fn, "wb") as fd:
-#        fd.write(as_bytes)
-    return hashlib.sha256(as_bytes).hexdigest()
 
 def submit_cmd(jq: JobQueue, io: IO, cluster: Cluster, args: Any, config: Config):
     metadata: Dict[str, str] = args.metadata if args.metadata else {}
@@ -649,8 +641,8 @@ def submit_cmd(jq: JobQueue, io: IO, cluster: Cluster, args: Any, config: Config
     # test to see if we already have such a job submitted, in which case, we don't want to do anything
     already_submitted = False
     needs_kill_before_submit = False
-    spec_hash = _compute_dict_hash(spec)
-    job_env_hash = _compute_dict_hash(dict(boot_volume_in_gb=boot_volume_in_gb, image=spec["image"], kubequeconsume_exe_md5=kubequeconsume_exe_md5, machine_type=machine_type))
+    spec_hash = compute_dict_hash(spec)
+    job_env_hash = compute_dict_hash(dict(boot_volume_in_gb=boot_volume_in_gb, image=spec["image"], kubequeconsume_exe_md5=kubequeconsume_exe_md5, machine_type=machine_type))
     metadata["job-env-sha256"] = job_env_hash
     metadata["job-spec-sha256"] = spec_hash
     existing_job = jq.get_job(job_id=job_id, must=False)

@@ -16,6 +16,8 @@ from tempfile import NamedTemporaryFile
 import csv
 import io
 from dataclasses import dataclass, field
+from .hasher import CachingHashFunction, compute_dict_hash
+from typing import Tuple
 
 @dataclass
 class WorkflowRunArgs:
@@ -49,11 +51,16 @@ class WorkflowStep(BaseModel):
     parameters_csv: Optional[str] = None
     files_to_localize: Optional[List[str]] = None
     machine_type: Optional[str] = None
-    
+
+class WriteOnCompletion(BaseModel):
+    filename: str
+    expression: str
+
 class WorkflowDefinition(BaseModel):
     """Represents a workflow definition loaded from a JSON file."""
     steps: List[WorkflowStep]
     files_to_localize: Optional[List[str]] = None
+    write_on_completion: Optional[List[WriteOnCompletion]] = None
     
     @classmethod
     def from_file(cls, file_path: str) -> 'WorkflowDefinition':
@@ -126,7 +133,6 @@ def _expand_template(value: str, _get_var):
         
     return result
 
-from typing import Tuple
 
 def run_workflow(sparkles: SparklesInterface, job_name: str, workflow_def_path: str, workflow_args: WorkflowRunArgs) -> None:
     """
@@ -231,7 +237,12 @@ def run_workflow(sparkles: SparklesInterface, job_name: str, workflow_def_path: 
             variables["prev_job_path"] = sub_job_path
         
         txtui.user_print(f"Workflow execution completed successfully")
-        
+        if workflow.write_on_completion:
+            for write_on_completion in workflow.write_on_completion:
+                txtui.user_print(f"Writing {write_on_completion.filename} as defined in {workflow_def_path}")
+                with open(write_on_completion.filename, "wt") as fd:
+                    fd.write(_expand_template(write_on_completion.expression, lambda name: variables[name]))
+
     except Exception as e:
         log.error(f"Error running workflow: {str(e)}", exc_info=True)
         txtui.user_print(f"Error: {str(e)}")
@@ -246,6 +257,8 @@ def add_workflow_cmd(subparser):
     run_parser = workflow_subparser.add_parser("run", help="Run a workflow")
     run_parser.add_argument("job_name", help="Name to use for the job")
     run_parser.add_argument("workflow_def", help="Path to a JSON file containing the workflow definition")
+    # run_parser.add_argument("--write-var", help="expects parameter of the format VAR:FILENAME. Will write the variable VAR to FILENAME. ")
+    run_parser.add_argument("--add-hash-to-job-id", help="if set, will append a hash of the uploaded files and the command to run onto the job id provided. This is to allow sparkles to generate a unique ID for a set of inputs which avoid an identical job from running", action="store_true")
     run_parser.add_argument("--retry", help="if set, will retry running any failed tasks", action="store_true")
     def key_value_pair(value: str):
         key, value = value.split("=", 1)
@@ -345,4 +358,25 @@ def workflow_run_cmd(jq: JobQueue, io: IO, cluster: Cluster, config: Config, arg
         machine_type=args.machine_type,
         image= args.image)
 
-    return run_workflow(SparklesImpl(args.nodes), args.job_name, args.workflow_def, workflow_args)
+    job_name = args.job_name
+    if args.add_hash_to_job_id:
+        job_hash = _calc_workflow_hash(config.cache_db_path, workflow_args)[:20]
+        job_name = f"{job_name}-{job_hash}"
+
+    return run_workflow(SparklesImpl(args.nodes), job_name, args.workflow_def, workflow_args)
+
+
+def _calc_workflow_hash(cache_db_path: str, workflow_args :WorkflowRunArgs):
+    hash_db = CachingHashFunction(cache_db_path)
+
+    def _hash_upload(src, dst):
+        return {"src": src, "dst": dst, "sha256": hash_db.get_sha256(src)}
+    
+    workflow_dict = {
+        "parameters": workflow_args.parameters,
+        "uploads": [_hash_upload(src, dst) for src,dst in workflow_args.uploads],
+        "machine_type": workflow_args.machine_type,
+        "image": workflow_args.image,
+    }
+
+    return compute_dict_hash(workflow_dict)

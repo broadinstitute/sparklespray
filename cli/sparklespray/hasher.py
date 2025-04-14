@@ -1,7 +1,7 @@
 import os
 import hashlib
 import json
-
+from typing import Dict
 
 def hashes_from_file(filename):
     sha256 = hashlib.sha256()
@@ -54,3 +54,12 @@ class CachingHashFunction:
             with open(self.filename, "wt") as fd:
                 json.dump(self.cache, fd, indent=1)
             self.dirty = False
+
+def compute_dict_hash(spec: Dict):
+    as_bytes = json.dumps(spec, sort_keys=True).encode("utf8")
+    # import time
+    # import tempfile
+#    fn = tempfile.mktemp(prefix=f"hash-{time.time()}-", suffix=".json", dir=".")
+#    with open(fn, "wb") as fd:
+#        fd.write(as_bytes)
+    return hashlib.sha256(as_bytes).hexdigest()
