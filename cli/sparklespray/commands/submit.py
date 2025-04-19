@@ -5,8 +5,10 @@ import os
 import re
 from typing import Any, Dict, List, Optional, Tuple
 from ..errors import UserError
+from google.cloud import datastore
 
 from pydantic import BaseModel
+from ..batch_api import ClusterAPI
 
 import sparklespray
 from ..cluster_service import MinConfig, Cluster, create_cluster
@@ -453,7 +455,12 @@ def add_submit_cmd(subparser):
 
 
 def submit_cmd(
-    jq: JobQueue, io: IO, datastore_client, cluster_api, args: Any, config: Config
+    jq: JobQueue, 
+    io: IO, 
+    datastore_client: datastore.Client, 
+    cluster_api: ClusterAPI, 
+    args: argparse.Namespace, 
+    config: Config
 ):
     metadata: Dict[str, str] = {}
 
