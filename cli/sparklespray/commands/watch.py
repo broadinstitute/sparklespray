@@ -75,6 +75,30 @@ def watch(
     max_poll_delay=30.0,
     loglive=None,
 ):
+    """
+    Monitor and manage a running Sparklespray job cluster.
+    
+    This function sets up monitoring tasks to track job progress, stream logs,
+    and manage cluster resources. It will continue running until all tasks
+    complete or the user interrupts with Ctrl+C.
+    
+    Args:
+        io: IO helper for interacting with cloud storage
+        jq: JobQueue for accessing job and task information
+        cluster: Cluster object managing compute resources
+        target_nodes: Number of worker nodes to maintain (defaults to job's target_node_count)
+        max_preemptable_attempts_scale: Scale factor for determining max preemptable nodes
+            (multiplied by target_nodes if provided)
+        initial_poll_delay: Starting delay between status polls in seconds
+        max_poll_delay: Maximum delay between status polls in seconds
+        loglive: Whether to stream logs from running tasks (defaults to True)
+    
+    Returns:
+        20 if interrupted by keyboard interrupt, None otherwise
+    
+    Raises:
+        Exception: If no tasks appear for the job after multiple checks
+    """
     job_id = cluster.job_id
     job = jq.get_job(job_id)
     assert job is not None
