@@ -210,11 +210,6 @@ def parse_args_for_test(cmd_line):
     args = parser.parse_args(cmd_line)
     return args
 
-@pytest.fixture
-def args():
-    """Create args object from a sample command line"""
-    return parse_args_for_test(["sub", "--name", "test-job", "echo", "hello", "world"])
-
 
 # Create a temporary file for testing
 @pytest.fixture
@@ -309,6 +304,7 @@ def test_submit_cmd_with_seq_parameter(mock_exists, mock_watch, job_queue, mock_
     
     # Verify task specs were created - should be 3 for seq=3
     assert len(call_args[1]) == 3
+
 @patch("sparklespray.commands.submit.watch")
 @patch("os.path.exists")
 def test_submit_cmd_complex_args(mock_exists, mock_watch, job_queue, mock_io, datastore_client, cluster_api, config, temp_file):
