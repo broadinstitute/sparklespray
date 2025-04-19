@@ -57,6 +57,25 @@ def create_cluster(config: MinConfig, jq, datastore_client, cluster_api, job_id)
 
 
 class Cluster:
+    """
+    Manages a compute cluster for executing distributed tasks.
+    
+    The Cluster class provides an interface for managing compute resources in Google Cloud,
+    including provisioning nodes, tracking node requests, and monitoring task execution.
+    It serves as the bridge between the job/task storage layer and the actual compute
+    infrastructure.
+    
+    Attributes:
+        project: Google Cloud project ID
+        client: Datastore client for storage operations
+        job_store: Storage for job metadata
+        task_store: Storage for task metadata and status
+        debug_log_prefix: Prefix for debug log files
+        cluster_api: API for interacting with the batch service
+        job_id: ID of the job associated with this cluster
+        location: Google Cloud region where the cluster is deployed
+        _cluster_id: Cached cluster ID (lazily loaded)
+    """
     def __init__(
         self,
         project: str,
