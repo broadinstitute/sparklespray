@@ -1,4 +1,4 @@
-from pydantic import BaseModel, validator
+from pydantic import BaseModel, field_validator
 from typing import List, Optional, Union
 
 ALLOWED_DISK_TYPES = {
@@ -26,7 +26,7 @@ class PersistentDiskMount(DiskMount):
     size_in_gb: int
     type: str
 
-    @validator("type")
+    @field_validator("type")
     def check_type(cls, v: str) -> str:
         if v not in ALLOWED_DISK_TYPES:
             raise ValueError(f"{v} was not one of {ALLOWED_DISK_TYPES}")
@@ -62,9 +62,6 @@ class MachineSpec(BaseModel):
     mounts: List[DiskMountT]
     work_root_dir: str
     machine_type: str
-
-    def as_dict(self):
-        return self.dict()
 
 
 LOCAL_SSD = "local-ssd"
