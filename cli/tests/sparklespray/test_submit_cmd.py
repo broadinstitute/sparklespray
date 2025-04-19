@@ -1,8 +1,5 @@
 import pytest
-import os
-import json
 from unittest.mock import MagicMock, patch, mock_open
-import argparse
 
 from sparklespray.commands.submit import submit_cmd
 from sparklespray.job_queue import JobQueue
