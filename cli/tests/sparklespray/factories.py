@@ -2,6 +2,7 @@ import json
 import os
 from unittest.mock import MagicMock
 from typing import Dict, List, Optional, Any
+from google.cloud import datastore
 
 from sparklespray.io_helper import IO
 
@@ -12,7 +13,6 @@ class DatastoreClientSimulator:
     """
     def __init__(self):
         self.entities: Dict[str, Dict[str, Any]] = {}
-        self.keys = []
         self.next_id = 1
 
     def key(self, kind, id=None):
@@ -20,21 +20,16 @@ class DatastoreClientSimulator:
         if id is None:
             id = self.next_id
             self.next_id += 1
-        key = MagicMock()
-        key.kind = kind
-        key.id = id
-        key.name = str(id)
-        key.__str__ = lambda self: f"{kind}({id})"
-        self.keys.append(key)
+        key = datastore.Key(kind, id, project="mockproject")
         return key
 
     def get(self, key):
         """Get an entity by key."""
         key_str = f"{key.kind}:{key.name}"
         if key_str in self.entities:
-            entity = MagicMock()
+            entity = datastore.Entity()
             for k, v in self.entities[key_str].items():
-                setattr(entity, k, v)
+                entity[k] = v
             entity.key = key
             return entity
         return None
@@ -46,9 +41,9 @@ class DatastoreClientSimulator:
         
         # Convert entity to dict for storage
         entity_dict = {}
-        for k in dir(entity):
-            if not k.startswith('_') and k != 'key':
-                entity_dict[k] = getattr(entity, k)
+        for k, v in entity.items():
+            assert not isinstance(v, MagicMock)
+            entity_dict[k] = v
         
         self.entities[key_str] = entity_dict
         return key
@@ -66,21 +61,33 @@ class DatastoreClientSimulator:
         if key_str in self.entities:
             del self.entities[key_str]
 
-    def query(self, kind=None):
+    def query(self, kind=None, filters=[]):
         """Create a query for the given kind."""
         query = MagicMock()
         query.kind = kind
         
-        def fetch():
+        def fetch(limit=None):
             results = []
             for key_str, entity_dict in self.entities.items():
                 if key_str.startswith(f"{kind}:"):
-                    entity = MagicMock()
+
+                    matched_filters = True
+                    for property, comparison, value in filters:
+                        assert comparison == "="
+                        if entity_dict[property] != value:
+                            matched_filters = False
+                    
+                    if not matched_filters: 
+                        continue
+
+                    entity_kind, entity_id = key_str.split(":", maxsplit=1)
+                    entity = datastore.Entity(self.key(entity_kind, entity_id))
                     for k, v in entity_dict.items():
-                        setattr(entity, k, v)
-                    key_name = key_str.split(':')[1]
-                    entity.key = self.key(kind, key_name)
+                        entity[k] = v
                     results.append(entity)
+
+                    if limit is not None and len(results) >= limit:
+                        break
             return results
         
         query.fetch = fetch
