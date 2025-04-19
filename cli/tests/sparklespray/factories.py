@@ -60,6 +60,11 @@ class DatastoreClientSimulator:
         key_str = f"{key.kind}:{key.name}"
         if key_str in self.entities:
             del self.entities[key_str]
+            
+    def delete_multi(self, keys):
+        """Delete multiple entities by keys."""
+        for key in keys:
+            self.delete(key)
 
     def query(self, kind=None, filters=[]):
         """Create a query for the given kind."""
