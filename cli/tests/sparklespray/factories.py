@@ -52,6 +52,13 @@ class DatastoreClientSimulator:
         
         self.entities[key_str] = entity_dict
         return key
+        
+    def put_multi(self, entities):
+        """Store multiple entities."""
+        keys = []
+        for entity in entities:
+            keys.append(self.put(entity))
+        return keys
 
     def delete(self, key):
         """Delete an entity by key."""
