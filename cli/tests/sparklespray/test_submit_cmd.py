@@ -196,26 +196,24 @@ boot_volume_type = pd-standard
     return config
 
 
+def parse_args_for_test(cmd_line):
+    """Parse command line arguments using the actual parser from main.py"""
+    from sparklespray.commands.submit import add_submit_cmd
+    import argparse
+    
+    # Create a parser with just the submit command
+    parser = argparse.ArgumentParser()
+    subparser = parser.add_subparsers()
+    add_submit_cmd(subparser)
+    
+    # Parse the command line
+    args = parser.parse_args(cmd_line)
+    return args
+
 @pytest.fixture
 def args():
-    args = argparse.Namespace()
-    args.command = ["echo", "hello", "world"]
-    args.file = None
-    args.push = []
-    args.image = None
-    args.name = "test-job"
-    args.seq = None
-    args.params = None
-    args.skip_kube_submit = False
-    args.wait_for_completion = False
-    args.results_wildcards = None
-    args.exclude_wildcards = None
-    args.nodes = 1
-    args.working_dir = "."
-    args.skipifexists = False
-    args.symlinks = False
-    args.rerun = False
-    return args
+    """Create args object from a sample command line"""
+    return parse_args_for_test(["sub", "--name", "test-job", "echo", "hello", "world"])
 
 
 # Create a temporary file for testing
@@ -229,7 +227,7 @@ def temp_file(tmp_path):
 
 @patch("sparklespray.commands.submit.watch")
 @patch("os.path.exists")
-def test_submit_cmd_basic(mock_exists, mock_watch, job_queue, mock_io, datastore_client, cluster_api, config, args, temp_file):
+def test_submit_cmd_basic(mock_exists, mock_watch, job_queue, mock_io, datastore_client, cluster_api, config, temp_file):
     # Setup mocks
     mock_exists.return_value = True
     mock_watch.return_value = 0
@@ -237,8 +235,8 @@ def test_submit_cmd_basic(mock_exists, mock_watch, job_queue, mock_io, datastore
     # Set up IO mock to handle file existence checks
     mock_io.bulk_exists_results = {}  # All files need upload
     
-    # Add a test file to push
-    args.push = [temp_file]
+    # Use args with push parameter
+    args = parse_args_for_test(["sub", "--name", "test-job", "--push", temp_file, "echo", "hello", "world"])
     
     # Run the function under test
     result = submit_cmd(job_queue, mock_io, datastore_client, cluster_api, args, config)
@@ -261,7 +259,7 @@ def test_submit_cmd_basic(mock_exists, mock_watch, job_queue, mock_io, datastore
 
 @patch("sparklespray.commands.submit.watch")
 @patch("os.path.exists")
-def test_submit_cmd_with_existing_job(mock_exists, mock_watch, job_queue, mock_io, datastore_client, cluster_api, config, args):
+def test_submit_cmd_with_existing_job(mock_exists, mock_watch, job_queue, mock_io, datastore_client, cluster_api, config):
     # Setup mocks
     mock_exists.return_value = True
     mock_watch.return_value = 0
@@ -271,8 +269,8 @@ def test_submit_cmd_with_existing_job(mock_exists, mock_watch, job_queue, mock_i
     existing_job.cluster = "existing-cluster"
     job_queue.get_job_optional = MagicMock(return_value=existing_job)
     
-    # Set skipifexists to True
-    args.skipifexists = True
+    # Use args with skipifexists flag
+    args = parse_args_for_test(["sub", "--name", "test-job", "--skipifexists", "echo", "hello", "world"])
     
     # Run the function under test
     result = submit_cmd(job_queue, mock_io, datastore_client, cluster_api, args, config)
@@ -286,13 +284,13 @@ def test_submit_cmd_with_existing_job(mock_exists, mock_watch, job_queue, mock_i
 
 @patch("sparklespray.commands.submit.watch")
 @patch("os.path.exists")
-def test_submit_cmd_with_seq_parameter(mock_exists, mock_watch, job_queue, mock_io, datastore_client, cluster_api, config, args):
+def test_submit_cmd_with_seq_parameter(mock_exists, mock_watch, job_queue, mock_io, datastore_client, cluster_api, config):
     # Setup mocks
     mock_exists.return_value = True
     mock_watch.return_value = 0
     
-    # Set up sequence parameter
-    args.seq = 3
+    # Use args with seq parameter
+    args = parse_args_for_test(["sub", "--name", "test-job", "--seq", "3", "echo", "hello", "world"])
     
     # Run the function under test
     result = submit_cmd(job_queue, mock_io, datastore_client, cluster_api, args, config)
@@ -311,3 +309,46 @@ def test_submit_cmd_with_seq_parameter(mock_exists, mock_watch, job_queue, mock_
     
     # Verify task specs were created - should be 3 for seq=3
     assert len(call_args[1]) == 3
+@patch("sparklespray.commands.submit.watch")
+@patch("os.path.exists")
+def test_submit_cmd_complex_args(mock_exists, mock_watch, job_queue, mock_io, datastore_client, cluster_api, config, temp_file):
+    # Setup mocks
+    mock_exists.return_value = True
+    mock_watch.return_value = 0
+    
+    # Set up IO mock to handle file existence checks
+    mock_io.bulk_exists_results = {}  # All files need upload
+    
+    # Use args with multiple parameters
+    args = parse_args_for_test([
+        "sub", 
+        "--name", "complex-job",
+        "--machine-type", "n1-standard-4",
+        "--image", "custom-image:latest",
+        "--nodes", "5",
+        "--cd", "/tmp/workdir",
+        "--results", "*.txt", 
+        "--results", "*.csv",
+        "--ignore", "*.tmp",
+        "--no-wait",
+        "--symlinks",
+        "echo", "complex", "command"
+    ])
+    
+    # Run the function under test
+    result = submit_cmd(job_queue, mock_io, datastore_client, cluster_api, args, config)
+    
+    # Verify the result
+    assert result == 0
+    
+    # Verify job was submitted
+    assert job_queue.submit.called
+    
+    # Get the arguments passed to submit
+    call_args = job_queue.submit.call_args[0]
+    
+    # Verify job_id
+    assert call_args[0] == "complex-job"
+    
+    # Verify task specs were created
+    assert len(call_args[1]) > 0
