@@ -2,27 +2,19 @@ import re
 import sys
 from . import txtui
 import argparse
+from .errors import UserError
 
-from .config import load_config, create_func_params, BadConfig
+from .config import load_config, create_func_params
 
 from . import txtui
-
-
-# def _resub_preempted(cluster, jq, jobid):
-#     tasks = jq.get_tasks(jobid, STATUS_CLAIMED)
-#     for task in tasks:
-#         _update_if_owner_missing(cluster, jq, task)
-
+import inspect
+import sys, io
 
 def get_func_parameters(func):
-    import inspect
-
     return inspect.getfullargspec(func)[0]
-
 
 def sparkles_main():
     # disable stdout/stderr buffering to work better when run non-interactively
-    import sys, io
 
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, line_buffering=True)
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, line_buffering=True)
@@ -32,7 +24,6 @@ def sparkles_main():
         sys.exit(retcode)
 
 
-from .errors import UserError
 
 
 def main(argv=None):
