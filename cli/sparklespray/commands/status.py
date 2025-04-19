@@ -16,6 +16,26 @@ from ..cluster_service import create_cluster
 
 
 def status_cmd(jq: JobQueue, io: IO, args, config, datastore_client, cluster_api):
+    """
+    Display the status of one or more Sparklespray jobs.
+    
+    This function retrieves and displays job status information, including:
+    - Overall job completion status
+    - Optional detailed statistics about task execution times
+    - Optional memory usage statistics from completed tasks
+    - Optional information about failed tasks
+    
+    Args:
+        jq: JobQueue instance for accessing job and task information
+        io: IO helper for interacting with cloud storage
+        args: Command line arguments containing jobid_pattern, stats and failed flags
+        config: Configuration object with project settings
+        datastore_client: Google Cloud Datastore client
+        cluster_api: API for interacting with compute clusters
+        
+    Returns:
+        None
+    """
     jobids = _get_jobids_from_pattern(jq, args.jobid_pattern)
 
     for jobid in jobids:
