@@ -8,6 +8,7 @@ from ..cluster_service import Cluster
 from ..job_store import JobStore, Job, JOB_STATUS_KILLED
 import time
 from ..config import Config
+from ..batch_api import ClusterAPI
 
 
 def _test_datastore_api(job_store: JobStore, job_id: str):
@@ -29,7 +30,6 @@ def _test_datastore_api(job_store: JobStore, job_id: str):
     assert fetched_job.job_id == job_id
     job_store.delete(job_id)
 
-from ..batch_api import ClusterAPI
 def validate_cmd(jq: JobQueue, io: IO, config: Config, cluster_api: ClusterAPI):
     print(f"Validating config, using sparklespray {sparklespray.__version__}")
 

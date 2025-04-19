@@ -10,6 +10,7 @@ from ..cluster_service import Cluster
 from ..io_helper import IO
 from ..log import log
 from .shared import _get_jobids_from_pattern
+from ..cluster_service import create_cluster
 
 
 def add_reset_cmd(subparser):
@@ -24,9 +25,6 @@ def add_reset_cmd(subparser):
         action="store_true",
         help="If set, will mark all tasks as 'pending', not just 'claimed', 'killed' or 'failed' tasks. The first parameter can be either a job ID or an individual task ID",
     )
-
-
-from ..cluster_service import create_cluster
 
 
 def reset_cmd(jq: JobQueue, args, config, datastore_client, cluster_api):
