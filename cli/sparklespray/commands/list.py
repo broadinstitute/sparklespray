@@ -9,17 +9,6 @@ from ..cluster_service import Cluster
 import dataclasses
 from .shared import _resolve_jobid
 
-# def logs_cmd(jq: JobQueue, io: IO, args):
-#     jobid = _resolve_jobid(jq, args.jobid)
-#     tasks = jq.task_storage.get_tasks(jobid)
-#     if not args.all:
-#         tasks = [t for t in tasks if t.status == STATUS_FAILED or (
-#             t.exit_code is not None and str(t.exit_code) != "0")]
-#     print("You can view any of these logs by using: gsutil cat <log_path>")
-#     print("task_id\texit_code\tlog_path\t")
-#     for t in tasks:
-#         print("{}\t{}\t{}".format(t.task_id, t.exit_code, t.log_url))
-
 
 def list_cmd(jq: JobQueue, io, args):
     job_id = _resolve_jobid(jq, args.jobid)

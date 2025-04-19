@@ -46,29 +46,6 @@ def kill_cmd(jq: JobQueue, args, config, datastore_client, cluster_api):
             jq.reset_task(task.task_id, status=STATUS_KILLED)
 
 
-#     tasks = jq.get_tasks_for_cluster(job.cluster, STATUS_CLAIMED)
-#     for task in tasks:
-#         _update_if_owner_missing(cluster, jq, task)
-
-
-# def _update_if_owner_missing(cluster : Cluster, jq : JobQueue, task : Task):
-#     if task.status != STATUS_CLAIMED:
-#         return
-#     if not cluster.is_owner_running(task.owner):
-#         job = jq.get_job(task.job_id)
-#         if job.status == JOB_STATUS_KILLED:
-#             new_status = STATUS_KILLED
-#         else:
-#             new_status = STATUS_PENDING
-#         log.info(
-#             "Task %s is owned by %s which does not appear to be running, resetting status from 'claimed' to '%s'",
-#             task.task_id,
-#             task.owner,
-#             new_status,
-#         )
-#         jq.reset_task(task.task_id, status=new_status)
-
-
 def add_kill_cmd(subparser):
     parser = subparser.add_parser("kill", help="Terminate the specified job")
     parser.set_defaults(func=kill_cmd)
