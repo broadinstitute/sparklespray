@@ -236,7 +236,7 @@ def submit(
     image = config.image
     cluster_name = _make_cluster_name(job_id, image, machine_specs, False)
 
-    existing_job = jq.get_job(job_id, must=False)
+    existing_job = jq.get_job_optional(job_id)
     if existing_job is not None:
         if clean_if_exists:
             log.info('Cleaning existing job with id "{}"'.format(job_id))
@@ -469,7 +469,7 @@ def submit_cmd(
     if job_id is None:
         job_id = new_job_id()
     elif args.skipifexists:
-        job = jq.get_job(job_id, must=False)
+        job = jq.get_job_optional(job_id)
         if job is not None:
             txtui.user_print(
                 f"Found existing job {job_id} and submitted job with --skipifexists so aborting"

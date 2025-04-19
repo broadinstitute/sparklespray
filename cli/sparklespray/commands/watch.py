@@ -100,7 +100,7 @@ def watch(
         Exception: If no tasks appear for the job after multiple checks
     """
     job_id = cluster.job_id
-    job = jq.get_job(job_id)
+    job = jq.get_job_must(job_id)
     assert job is not None
 
     if target_nodes is None:

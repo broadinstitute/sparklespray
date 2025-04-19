@@ -25,7 +25,7 @@ def _test_datastore_api(job_store: JobStore, job_id: str):
     )
 
     job_store.insert(job)
-    fetched_job = job_store.get_job(job_id)
+    fetched_job = job_store.get_job_must(job_id)
     assert isinstance(fetched_job, Job)
     assert fetched_job.job_id == job_id
     job_store.delete(job_id)

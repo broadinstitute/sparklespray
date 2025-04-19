@@ -76,11 +76,11 @@ class JobQueue:
     #     def get_tasks(self, job_id, status=None):
     #         return self.storage.get_tasks(job_id, status=status)
 
-    def get_job(self, job_id, must=True):
-        return self.job_storage.get_job(job_id, must=must)
+    def get_job_optional(self, job_id):
+        return self.job_storage.get_job(job_id)
 
-    def get_last_job(self):
-        return self.job_storage.get_last_job()
+    def get_job_must(self, job_id):
+        return self.job_storage.get_job_must(job_id)
 
     def get_jobids(self, job_id_wildcard="*"):
         job_ids = self.job_storage.get_job_ids()

@@ -97,14 +97,11 @@ class JobStore:
             self.client.put(entity_job)
         return update_ok, job
 
-    def get_job(self, job_id: str, must: bool = True) -> Optional[Job]:
+    def get_job(self, job_id: str) -> Optional[Job]:
         job_key = self.client.key("Job", job_id)
         job_entity = self.client.get(job_key)
         if job_entity is None:
-            if must:
-                raise Exception("Could not find job with id {}".format(job_id))
-            else:
-                return None
+            return None
         return entity_to_job(job_entity)
 
     def get_job_must(self, job_id: str) -> Job:
