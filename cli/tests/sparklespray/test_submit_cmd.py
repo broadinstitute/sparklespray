@@ -21,11 +21,17 @@ def datastore_client():
 
 @pytest.fixture
 def job_queue(datastore_client):
-    job_storage = MagicMock()
-    task_storage = MagicMock()
+    from sparklespray.job_store import JobStore
+    from sparklespray.task_store import TaskStore
     
-    # Setup get_job_optional to return None (no existing job)
+    # Create actual JobStore and TaskStore instances
+    job_storage = JobStore(datastore_client)
+    task_storage = TaskStore(datastore_client)
+    
+    # Create a real JobQueue instance
     job_queue = JobQueue(datastore_client, job_storage, task_storage)
+    
+    # We still need to mock some methods for testing
     job_queue.get_job_optional = MagicMock(return_value=None)
     job_queue.submit = MagicMock()
     
