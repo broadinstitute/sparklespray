@@ -150,16 +150,16 @@ def _parse_gcloud_config(gcloud_config_file: str, verbose: bool) -> GCloudConfig
 def load_config(
     config_file: str,
     overrides: Dict[str, str],
-    gcloud_config_file: str = "~/.config/gcloud/configurations/config_default",
+    gcloud_config_file: Optional[str] = "~/.config/gcloud/configurations/config_default",
     verbose: bool = False,
 ) -> Config:
 
     # first load defaults from gcloud config
-    gcloud_config_file = os.path.expanduser(gcloud_config_file)
-    if os.path.exists(gcloud_config_file):
-        gcloud_config = _parse_gcloud_config(gcloud_config_file, verbose)
-    else:
-        gcloud_config = GCloudConfig()
+    gcloud_config = GCloudConfig()
+    if gcloud_config_file is not None:
+        gcloud_config_file = os.path.expanduser(gcloud_config_file)
+        if os.path.exists(gcloud_config_file):
+            gcloud_config = _parse_gcloud_config(gcloud_config_file, verbose)
 
     config_file = get_config_path(config_file)
     config_file = os.path.expanduser(config_file)

@@ -51,36 +51,23 @@ class JobQueue:
         self.task_storage = task_storage
         self.client = client
 
-    #     def add_node(self, job_id, cluster, preemptible, debug_log_url, job=None):
-    #         return self.storage.add_node(job_id, cluster, preemptible, job, debug_log_url)
-
-    #     def get_node_reqs(self, job_id, status=None):
-    #         return self.storage.get_node_reqs(job_id, status=status)
-
-    #     def update_node_reqs(self, job_id, cluster):
-    #         return self.storage.update_node_reqs(job_id, cluster)
-
-    #     def get_pending_node_req_count(self, job_id):
-    #         return self.storage.get_pending_node_req_count(job_id)
-
     def get_tasks_for_cluster(self, cluster_name, status, max_fetch=None):
         return self.task_storage.get_tasks_for_cluster(cluster_name, status, max_fetch)
-
-    #     def get_claimed_task_ids(self):
-    #         tasks = self.storage.get_tasks(status=STATUS_CLAIMED)
-    #         tasks = [t for t in tasks if t.status == STATUS_CLAIMED]
-    #         for t in tasks:
-    #             assert t.owner is not None
-    #         return [(t.task_id, t.owner) for t in tasks]
-
-    #     def get_tasks(self, job_id, status=None):
-    #         return self.storage.get_tasks(job_id, status=status)
 
     def get_job_optional(self, job_id):
         return self.job_storage.get_job(job_id)
 
     def get_job_must(self, job_id):
         return self.job_storage.get_job_must(job_id)
+
+    def is_job_running(self, job_id):
+        running_tasks = self.task_storage.get_tasks(job_id, status=STATUS_CLAIMED)
+        if len(running_tasks) > 0:
+            return True
+        else:
+            # There's a possible issue here where there could be a node running which hasn't yet picked up pending jobs
+            # but while this query is running, it starts. For the moment, we'll ignore that situation.
+            return False
 
     def get_jobids(self, job_id_wildcard="*"):
         job_ids = self.job_storage.get_job_ids()

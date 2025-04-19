@@ -114,11 +114,6 @@ def rewrite_downloads(io, downloads, default_url_prefix):
     return [rewrite_url_in_dict(x, "src_url", default_url_prefix) for x in src_expanded]
 
 
-# include_patterns"`
-# 	ExcludePatterns []string `json:"exclude_patterns"`
-# 	UploadDstURL     string   `json:"dst_url"`
-
-
 def expand_tasks(spec, io, default_url_prefix, default_job_url_prefix):
     common = spec["common"]
     common["downloads"] = rewrite_downloads(
@@ -172,7 +167,7 @@ def submit(
     spec: dict,
     config: SubmitConfig,
     datastore_client,
-    cluster,
+    cluster : Cluster,
     metadata: Dict[str, str] = {},
     clean_if_exists: bool = False,
 ):
@@ -241,12 +236,19 @@ def submit(
     existing_job = jq.get_job_optional(job_id)
     if existing_job is not None:
         if clean_if_exists:
-            log.info('Cleaning existing job with id "{}"'.format(job_id))
-            success = delete(cluster, jq, job_id)
-            if not success:
+            log.info(f'Found existing job with id "{job_id}". Cleaning it up before resubmitting')
+
+            if jq.is_job_running(job_id):
                 raise ExistingJobException(
                     'Could not remove running job "{}", aborting!'.format(job_id)
                 )
+
+            # delete the old job so we can create a new one
+            jq.delete_job(job_id)
+
+            # do a little housekeeping on the cluster as well, otherwise these old requests will accumulate
+            cluster.delete_complete_requests()
+
         else:
             raise ExistingJobException(
                 'Existing job with id "{}", aborting!'.format(job_id)
@@ -462,7 +464,7 @@ def submit_cmd(
     args: argparse.Namespace, 
     config: Config
 ):
-    metadata: Dict[str, str] = {}
+    metadata: Dict[str, str] = {"UUID": str(uuid.uuid4()) } # assign it a unique ID so we can recognize when a job has been resubmitted with the same name
 
     if args.image:
         image = args.image
@@ -609,7 +611,6 @@ def submit_cmd(
 
     finished = False
     successful_execution = True
-
     if args.wait_for_completion:
         log.info("Waiting for job to terminate")
         successful_execution = watch(
