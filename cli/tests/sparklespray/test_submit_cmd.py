@@ -1,7 +1,7 @@
 import pytest
 import os
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch, mock_open
 import argparse
 from typing import Dict, List, Optional, Any
 
@@ -154,33 +154,44 @@ def cluster_api():
 
 
 @pytest.fixture
-def config():
-    config = MagicMock(spec=Config)
-    config.project = "test-project"
-    config.location = "us-central1"
-    config.region = "us-central1"
-    config.zones = ["us-central1-a"]
-    config.default_image = "ubuntu:latest"
-    config.machine_type = "n1-standard-1"
-    config.cas_url_prefix = "gs://mock-cas"
-    config.default_url_prefix = "gs://mock-results"
-    config.debug_log_prefix = "gs://mock-logs"
-    config.work_root_dir = "/tmp"
-    config.monitor_port = 8080
-    config.sparklesworker_image = "sparklesworker:latest"
-    config.sparklesworker_exe_path = "/tmp/sparklesworker"
-    config.cache_db_path = "/tmp/cache.db"
-    config.max_preemptable_attempts_scale = 2
+def config(tmp_path):
+    from sparklespray.config import load_config
     
-    # Create mock credentials
+    # Create a temporary config file
+    config_file = tmp_path / ".sparkles"
+    config_content = """
+project = test-project
+location = us-central1
+region = us-central1
+zones = us-central1-a
+default_image = ubuntu:latest
+machine_type = n1-standard-1
+cas_url_prefix = gs://mock-cas
+default_url_prefix = gs://mock-results
+debug_log_prefix = gs://mock-logs
+work_root_dir = /tmp
+monitor_port = 8080
+sparklesworker_image = sparklesworker:latest
+sparklesworker_exe_path = /tmp/sparklesworker
+cache_db_path = /tmp/cache.db
+max_preemptable_attempts_scale = 2
+service_account_email = test-sa@test-project.iam.gserviceaccount.com
+boot_volume_path = /
+boot_volume_size_in_gb = 10
+boot_volume_type = pd-standard
+"""
+    config_file.write_text(config_content)
+    
+    # Mock the gcloud config file reading
+    with patch("sparklespray.config.os.path.exists", return_value=True), \
+         patch("sparklespray.config.open", mock_open(read_data="[core]\nproject = test-project\n")):
+        # Load the config using the actual load_config function
+        config = load_config(str(config_file), verbose=False)
+    
+    # Add credentials attribute which is normally added by create_services_from_config
     credentials = MagicMock()
     credentials.service_account_email = "test-sa@test-project.iam.gserviceaccount.com"
     config.credentials = credentials
-    
-    # Create mock boot volume
-    from sparklespray.model import PersistentDiskMount
-    config.boot_volume = PersistentDiskMount(path="/", size_in_gb=10, type="pd-standard")
-    config.mounts = []
     
     return config
 
