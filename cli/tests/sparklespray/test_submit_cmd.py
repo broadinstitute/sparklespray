@@ -1,0 +1,302 @@
+import pytest
+import os
+import json
+from unittest.mock import MagicMock, patch
+import argparse
+from typing import Dict, List, Optional, Any
+
+from sparklespray.commands.submit import submit_cmd
+from sparklespray.job_queue import JobQueue
+from sparklespray.io_helper import IO
+from sparklespray.batch_api import ClusterAPI
+from sparklespray.config import Config
+
+
+class DatastoreClientSimulator:
+    """
+    A simulator for the Google Cloud Datastore client that stores entities in memory.
+    """
+    def __init__(self):
+        self.entities: Dict[str, Dict[str, Any]] = {}
+        self.keys = []
+        self.next_id = 1
+
+    def key(self, kind, id=None):
+        """Create a key for the given kind and ID."""
+        if id is None:
+            id = self.next_id
+            self.next_id += 1
+        key = MagicMock()
+        key.kind = kind
+        key.id = id
+        key.name = str(id)
+        key.__str__ = lambda self: f"{kind}({id})"
+        self.keys.append(key)
+        return key
+
+    def get(self, key):
+        """Get an entity by key."""
+        key_str = f"{key.kind}:{key.name}"
+        if key_str in self.entities:
+            entity = MagicMock()
+            for k, v in self.entities[key_str].items():
+                setattr(entity, k, v)
+            entity.key = key
+            return entity
+        return None
+
+    def put(self, entity):
+        """Store an entity."""
+        key = entity.key
+        key_str = f"{key.kind}:{key.name}"
+        
+        # Convert entity to dict for storage
+        entity_dict = {}
+        for k in dir(entity):
+            if not k.startswith('_') and k != 'key':
+                entity_dict[k] = getattr(entity, k)
+        
+        self.entities[key_str] = entity_dict
+        return key
+
+    def delete(self, key):
+        """Delete an entity by key."""
+        key_str = f"{key.kind}:{key.name}"
+        if key_str in self.entities:
+            del self.entities[key_str]
+
+    def query(self, kind=None):
+        """Create a query for the given kind."""
+        query = MagicMock()
+        query.kind = kind
+        
+        def fetch():
+            results = []
+            for key_str, entity_dict in self.entities.items():
+                if key_str.startswith(f"{kind}:"):
+                    entity = MagicMock()
+                    for k, v in entity_dict.items():
+                        setattr(entity, k, v)
+                    key_name = key_str.split(':')[1]
+                    entity.key = self.key(kind, key_name)
+                    results.append(entity)
+            return results
+        
+        query.fetch = fetch
+        return query
+
+
+class MockIO(IO):
+    """Mock IO helper for testing."""
+    def __init__(self):
+        self.files = {}
+        self.exists_results = {}
+        self.bulk_exists_results = {}
+        
+    def exists(self, path):
+        return self.exists_results.get(path, False)
+        
+    def bulk_exists_check(self, paths):
+        if self.bulk_exists_results:
+            return self.bulk_exists_results
+        return {path: False for path in paths}
+        
+    def put(self, src_filename, dst_url, must=True, skip_if_exists=False):
+        if os.path.exists(src_filename):
+            with open(src_filename, 'rb') as f:
+                self.files[dst_url] = f.read()
+        else:
+            self.files[dst_url] = b"mock content"
+        return dst_url
+        
+    def write_json_to_cas(self, data):
+        url = f"gs://mock-cas/{hash(json.dumps(data, sort_keys=True))}"
+        self.files[url] = json.dumps(data).encode('utf-8')
+        return url
+        
+    def write_file_to_cas(self, filename):
+        url = f"gs://mock-cas/{hash(filename)}"
+        self.files[url] = b"mock content"
+        return url
+        
+    def get_child_keys(self, prefix):
+        return [k for k in self.files.keys() if k.startswith(prefix)]
+
+
+@pytest.fixture
+def mock_io():
+    return MockIO()
+
+
+@pytest.fixture
+def datastore_client():
+    return DatastoreClientSimulator()
+
+
+@pytest.fixture
+def job_queue(datastore_client):
+    job_storage = MagicMock()
+    task_storage = MagicMock()
+    
+    # Setup get_job_optional to return None (no existing job)
+    job_queue = JobQueue(datastore_client, job_storage, task_storage)
+    job_queue.get_job_optional = MagicMock(return_value=None)
+    job_queue.submit = MagicMock()
+    
+    return job_queue
+
+
+@pytest.fixture
+def cluster_api():
+    api = MagicMock(spec=ClusterAPI)
+    api.create_job = MagicMock(return_value="mock-job-id")
+    return api
+
+
+@pytest.fixture
+def config():
+    config = MagicMock(spec=Config)
+    config.project = "test-project"
+    config.location = "us-central1"
+    config.region = "us-central1"
+    config.zones = ["us-central1-a"]
+    config.default_image = "ubuntu:latest"
+    config.machine_type = "n1-standard-1"
+    config.cas_url_prefix = "gs://mock-cas"
+    config.default_url_prefix = "gs://mock-results"
+    config.debug_log_prefix = "gs://mock-logs"
+    config.work_root_dir = "/tmp"
+    config.monitor_port = 8080
+    config.sparklesworker_image = "sparklesworker:latest"
+    config.sparklesworker_exe_path = "/tmp/sparklesworker"
+    config.cache_db_path = "/tmp/cache.db"
+    config.max_preemptable_attempts_scale = 2
+    
+    # Create mock credentials
+    credentials = MagicMock()
+    credentials.service_account_email = "test-sa@test-project.iam.gserviceaccount.com"
+    config.credentials = credentials
+    
+    # Create mock boot volume
+    from sparklespray.model import PersistentDiskMount
+    config.boot_volume = PersistentDiskMount(path="/", size_in_gb=10, type="pd-standard")
+    config.mounts = []
+    
+    return config
+
+
+@pytest.fixture
+def args():
+    args = argparse.Namespace()
+    args.command = ["echo", "hello", "world"]
+    args.file = None
+    args.push = []
+    args.image = None
+    args.name = "test-job"
+    args.seq = None
+    args.params = None
+    args.skip_kube_submit = False
+    args.wait_for_completion = False
+    args.results_wildcards = None
+    args.exclude_wildcards = None
+    args.nodes = 1
+    args.working_dir = "."
+    args.skipifexists = False
+    args.symlinks = False
+    args.rerun = False
+    return args
+
+
+# Create a temporary file for testing
+@pytest.fixture
+def temp_file(tmp_path):
+    file_path = tmp_path / "test_file.txt"
+    with open(file_path, "w") as f:
+        f.write("test content")
+    return str(file_path)
+
+
+@patch("sparklespray.commands.submit.watch")
+@patch("os.path.exists")
+def test_submit_cmd_basic(mock_exists, mock_watch, job_queue, mock_io, datastore_client, cluster_api, config, args, temp_file):
+    # Setup mocks
+    mock_exists.return_value = True
+    mock_watch.return_value = 0
+    
+    # Set up IO mock to handle file existence checks
+    mock_io.bulk_exists_results = {}  # All files need upload
+    
+    # Add a test file to push
+    args.push = [temp_file]
+    
+    # Run the function under test
+    result = submit_cmd(job_queue, mock_io, datastore_client, cluster_api, args, config)
+    
+    # Verify the result
+    assert result == 0
+    
+    # Verify job was submitted
+    assert job_queue.submit.called
+    
+    # Get the arguments passed to submit
+    call_args = job_queue.submit.call_args[0]
+    
+    # Verify job_id
+    assert call_args[0] == "test-job"
+    
+    # Verify task specs were created
+    assert len(call_args[1]) > 0
+
+
+@patch("sparklespray.commands.submit.watch")
+@patch("os.path.exists")
+def test_submit_cmd_with_existing_job(mock_exists, mock_watch, job_queue, mock_io, datastore_client, cluster_api, config, args):
+    # Setup mocks
+    mock_exists.return_value = True
+    mock_watch.return_value = 0
+    
+    # Set up job_queue to return an existing job
+    existing_job = MagicMock()
+    existing_job.cluster = "existing-cluster"
+    job_queue.get_job_optional = MagicMock(return_value=existing_job)
+    
+    # Set skipifexists to True
+    args.skipifexists = True
+    
+    # Run the function under test
+    result = submit_cmd(job_queue, mock_io, datastore_client, cluster_api, args, config)
+    
+    # Verify the result - should exit early
+    assert result == 0
+    
+    # Verify job was not submitted
+    assert not job_queue.submit.called
+
+
+@patch("sparklespray.commands.submit.watch")
+@patch("os.path.exists")
+def test_submit_cmd_with_seq_parameter(mock_exists, mock_watch, job_queue, mock_io, datastore_client, cluster_api, config, args):
+    # Setup mocks
+    mock_exists.return_value = True
+    mock_watch.return_value = 0
+    
+    # Set up sequence parameter
+    args.seq = 3
+    
+    # Run the function under test
+    result = submit_cmd(job_queue, mock_io, datastore_client, cluster_api, args, config)
+    
+    # Verify the result
+    assert result == 0
+    
+    # Verify job was submitted
+    assert job_queue.submit.called
+    
+    # Get the arguments passed to submit
+    call_args = job_queue.submit.call_args[0]
+    
+    # Verify job_id
+    assert call_args[0] == "test-job"
+    
+    # Verify task specs were created - should be 3 for seq=3
+    assert len(call_args[1]) == 3
