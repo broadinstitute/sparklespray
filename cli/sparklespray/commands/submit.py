@@ -15,7 +15,7 @@ import hashlib
 import uuid
 
 from .. import txtui
-from .clean import clean
+from .delete import delete
 from .watch import watch
 from ..config import Config
 from ..csv_utils import read_csv_as_dicts
@@ -240,7 +240,7 @@ def submit(
     if existing_job is not None:
         if clean_if_exists:
             log.info('Cleaning existing job with id "{}"'.format(job_id))
-            success = clean(cluster, jq, job_id)
+            success = delete(cluster, jq, job_id)
             if not success:
                 raise ExistingJobException(
                     'Could not remove running job "{}", aborting!'.format(job_id)

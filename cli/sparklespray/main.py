@@ -47,7 +47,7 @@ def main(argv=None):
     from .commands.logs import add_logs_cmd
     from .commands.show import add_show_cmd
     from .commands.status import add_status_cmd
-    from .commands.clean import add_clean_cmd
+    from .commands.delete import add_delete_cmd
     from .commands.kill import add_kill_cmd
     from .commands.fetch import add_fetch_cmd
     from .commands.version import add_version_cmd
@@ -80,7 +80,7 @@ def main(argv=None):
     add_show_cmd(subparser)
     add_status_cmd(subparser)
     add_watch_cmd(subparser)
-    add_clean_cmd(subparser)
+    add_delete_cmd(subparser)
     add_kill_cmd(subparser)
     add_fetch_cmd(subparser)
     add_version_cmd(subparser)
