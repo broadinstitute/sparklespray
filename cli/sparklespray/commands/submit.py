@@ -174,6 +174,29 @@ def submit(
     metadata: Dict[str, str] = {},
     clean_if_exists: bool = False,
 ):
+    """
+    Submit a job to the Sparklespray execution system.
+    
+    This function handles the core job submission process, including:
+    - Generating or retrieving SSL certificates for secure communication
+    - Expanding task specifications
+    - Creating the cluster configuration
+    - Submitting the job to the job queue
+    
+    Args:
+        jq: JobQueue instance for storing job and task information
+        io: IO helper for interacting with cloud storage
+        job_id: Unique identifier for the job
+        spec: Job specification dictionary containing tasks and common configuration
+        config: SubmitConfig with machine and environment configuration
+        datastore_client: Google Cloud Datastore client
+        cluster: Cluster instance for managing compute resources
+        metadata: Optional dictionary of metadata to attach to the job
+        clean_if_exists: If True, remove any existing job with the same ID before submission
+        
+    Raises:
+        ExistingJobException: If a job with the same ID exists and clean_if_exists is False
+    """
 
     key_store = KeyStore(datastore_client)
     cert, key = key_store.get_cert_and_key()
