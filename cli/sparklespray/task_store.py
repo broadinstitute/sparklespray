@@ -59,7 +59,7 @@ class Task(object):
         return owner.split("/")[-1]
 
 
-def task_to_entity(client, o):
+def task_to_entity(client, o: Task):
     entity_key = client.key(TASK_COLLECTION, o.task_id)
     entity = datastore.Entity(key=entity_key)
     entity["task_index"] = o.task_index
@@ -126,7 +126,7 @@ class TaskStore:
         task_key = self.client.key(TASK_COLLECTION, task_id)
         return entity_to_task(self.client.get(task_key))
 
-    def insert(self, task, batch=None):
+    def insert(self, task: Task, batch=None):
         if batch is None:
             batch = self.immediate_batch
 
