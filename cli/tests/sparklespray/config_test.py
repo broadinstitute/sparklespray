@@ -11,7 +11,6 @@ default_url_prefix=gs://bananas/1000
 project=broad-achilles
 default_image=python
 machine_type=n1-standard-2
-zones=us-central1-b
 region=us-central1
 account=apple
 sparklesworker_image=invalid-sparklesworker-name
@@ -27,7 +26,6 @@ sparklesworker_image=invalid-sparklesworker-name
     assert config.default_url_prefix == "gs://bananas/1000"
     assert config.project == "broad-achilles"
     assert config.default_image == "python"
-    assert config.zones == ["us-central1-b"]
     assert config.region == "us-central1"
     assert config.mounts == [
         PersistentDiskMount(path="/mnt", size_in_gb=100, type="local-ssd")
