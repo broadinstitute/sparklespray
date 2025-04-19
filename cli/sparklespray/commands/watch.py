@@ -10,6 +10,11 @@ from ..watch import run_tasks, PrintStatus, CompletionMonitor, StreamLogs, Resiz
 from .shared import _resolve_jobid
 
 
+class TimeoutException(Exception):
+    """Exception raised when an operation times out."""
+    pass
+
+
 def add_watch_cmd(subparser):
     parser = subparser.add_parser("watch", help="Monitor the job")
     parser.set_defaults(func=watch_cmd)
@@ -164,7 +169,7 @@ def _wait_until_tasks_exist(cluster: Cluster, job_id: str):
         time.sleep(5)
         check_attempts += 1
         if check_attempts > 20:
-            raise Exception(
+            raise TimeoutException(
                 "Even after checking many times, no tasks ever appeared. Aborting"
             )
 

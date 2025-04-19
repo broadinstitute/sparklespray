@@ -302,10 +302,10 @@ def test_watch_keyboard_interrupt(mock_run_tasks, mock_wait, job_queue, mock_io,
 @patch("sparklespray.commands.watch.time.sleep")
 def test_wait_until_tasks_exist_timeout(mock_sleep, cluster):
     """Test _wait_until_tasks_exist function with timeout"""
-    from sparklespray.commands.watch import _wait_until_tasks_exist
+    from sparklespray.commands.watch import _wait_until_tasks_exist, TimeoutException
         
-    # Call the function, should raise exception after a while
-    with pytest.raises(Exception, match="no tasks ever appeared"):
+    # Call the function, should raise TimeoutException after a while
+    with pytest.raises(TimeoutException, match="no tasks ever appeared"):
         _wait_until_tasks_exist(cluster, "test-job-id")
     
 
