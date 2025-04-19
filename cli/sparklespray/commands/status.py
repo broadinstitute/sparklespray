@@ -21,28 +21,6 @@ def status_cmd(jq: JobQueue, io: IO, args, config, datastore_client, cluster_api
     for jobid in jobids:
         cluster = create_cluster(config, jq, datastore_client, cluster_api, jobid)
 
-        # if args.detailed or args.failures:
-        #     for task in jq.get_tasks(jobid):
-        #         if args.failures and task.status != STATUS_FAILED:
-        #             continue
-
-        #         command_result_json = None
-        #         if task.command_result_url is not None:
-        #             command_result_json = io.get_as_str(task.command_result_url, must=False)
-        #         if command_result_json is not None:
-        #             command_result = json.loads(command_result_json)
-        #             command_result_block = "\n  command result: {}".format(json.dumps(command_result, indent=4))
-        #         else:
-        #             command_result_block = ""
-
-        #         log.info("task_id: %s\n"
-        #                     "  status: %s, exit_code: %s, failure_reason: %s\n"
-        #                     "  started on pod: %s\n"
-        #                     "  args: %s, history: %s%s\n"
-        #                     "  cluster: %s", task.task_id,
-        #                     task.status, task.exit_code, task.failure_reason, task.owner, task.args, task.history,
-        #                     command_result_block, task.cluster)
-        # else:
         tasks = cluster.task_store.get_tasks(jobid)
         status, complete = _summarize_task_statuses(tasks)
         txtui.user_print(f"{jobid}: {status}")
