@@ -160,96 +160,10 @@ def create_batch_job_from_job_spec(
     )
 
 
-# import enum
-
-# class State(enum.Enum):
-#     failed = "failed"
-#     pending = "pending"
-#     running = "running"
-#     succeeded = "succeeded"
-#     canceled = "canceled"
-#     cancel_pending = "cancel_pending"
-
-# TERMINAL_STATES = [State.failed, State.succeeded, State.canceled]
-
-
 class Event(BaseModel):
     description: str
     timestamp: float
 
-
-# @dataclass
-# class JobStatus:
-#     name: str
-#     state: State
-#     events: List[Event]
-#     original_response: batch.Job
-
-#     def is_done(self):
-#         return self.state in TERMINAL_STATES
-
-
-# def to_node_reqs(job: batch.Job, tasks: List[batch.Task]):
-#     # convert batch API states to the slightly simpler set that sparkles is using
-
-#     # PENDING (1):
-#     #     The Task is created and waiting for
-#     #     resources.
-#     # ASSIGNED (2):
-#     #     The Task is assigned to at least one VM.
-#     # RUNNING (3):
-#     #     The Task is running.
-#     # FAILED (4):
-#     #     The Task has failed.
-#     # SUCCEEDED (5):
-#     #     The Task has succeeded.
-#     # UNEXECUTED (6):
-#     #     The Task has not been executed when the Job
-#     #     finishes.
-#     assert len(job.task_groups) == 1
-#     task_group = job.task_groups[0]
-#     assert task_group.task_count == len(tasks)
-#     # if task_group.task_count != len(tasks):
-#     #     breakpoint()
-#     node_reqs = []
-#     for task in tasks:
-#         if task.status.state in [batch.TaskStatus.State.PENDING]:
-#             state = NODE_REQ_SUBMITTED
-#         elif task.status.state in [batch.TaskStatus.State.ASSIGNED]:
-#             state = NODE_REQ_STAGING
-#         elif task.status.state in [batch.TaskStatus.State.RUNNING]:
-#             state = NODE_REQ_RUNNING
-#         elif task.status.state in [batch.TaskStatus.State.FAILED]:
-#             state = NODE_REQ_FAILED
-#         elif task.status.state in [batch.TaskStatus.State.SUCCEEDED]:
-#             state = NODE_REQ_COMPLETE
-#         else:
-#             assert task.status.state in [batch.TaskStatus.State.UNEXECUTED
-#             ], f"state was {task.status.state}"
-#             state = NODE_REQ_FAILED
-
-#         job_id = job.labels["sparkles-job"]
-#         cluster_id = job.labels["sparkles-cluster"]
-
-#         assert len(job.allocation_policy.instances) == 1
-#         pm = job.allocation_policy.instances[0].policy.provisioning_model
-#         if pm == batch.AllocationPolicy.ProvisioningModel.SPOT:
-#             node_class = NODE_REQ_CLASS_PREEMPTIVE
-#         else:
-#             assert pm == batch.AllocationPolicy.ProvisioningModel.STANDARD
-#             node_class = NODE_REQ_CLASS_NORMAL
-
-#         node_reqs.append(NodeReq(
-#                 operation_id=job.name,
-#                 cluster_id=cluster_id,
-#                 status=state,
-#                 node_class=node_class,
-#                 sequence="0",
-#                 job_id=job_id,
-#                 instance_name=None,
-#             )
-#         )
-#     return node_reqs
             
 def to_node_reqs(job: batch.Job):
     # convert batch API states to the slightly simpler set that sparkles is using
@@ -425,7 +339,7 @@ class ClusterAPI:
         project, zone, instance = m.groups()
 
         try:
-            instance_response = self.compute_engine_client.get(compute.GetInstanceRequest(        instance=instance,
+            self.compute_engine_client.get(compute.GetInstanceRequest(        instance=instance,
         project=project,
         zone=zone))
         except NotFound:
