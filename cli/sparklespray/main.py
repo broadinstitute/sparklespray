@@ -15,6 +15,13 @@ from .job_queue import JobQueue
 from .io_helper import IO
 import json
 
+# def _resolve_jobid(jq, jobid):
+#     if jobid == "LAST":
+#         job = jq.get_last_job()
+#         return job.job_id
+#     else:
+#         return jobid
+
 
 def print_failures(jq: JobQueue, io: IO, jobid, show_all: bool):
     tasks = jq.task_storage.get_tasks(jobid)
