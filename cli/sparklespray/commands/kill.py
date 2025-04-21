@@ -6,6 +6,23 @@ from .shared import _get_jobids_from_pattern
 from ..cluster_service import Cluster, create_cluster
 
 
+def kill(jq: JobQueue, config, datastore_client, cluster_api, job_id):
+    # TODO: stop just marks the job as it shouldn't run any more.  tasks will still be claimed.
+    cluster = create_cluster(config, jq, datastore_client, cluster_api, job_id)
+    log.info("Marking %s as killed", job_id)
+    ok, job = jq.kill_job(job_id)
+    assert ok
+    if not args.keepcluster:
+        cluster.stop_cluster()
+        jq.reset(job_id, None, statuses_to_clear=[STATUS_CLAIMED])
+
+    # if there are any sit sitting at pending, mark them as killed
+    tasks = jq.task_storage.get_tasks(job_id, status=STATUS_PENDING)
+    txtui.user_print("Marking {} pending tasks as killed".format(len(tasks)))
+    for task in tasks:
+        jq.reset_task(task.task_id, status=STATUS_KILLED)
+
+
 def kill_cmd(jq: JobQueue, args, config, datastore_client, cluster_api):
     """
     Terminate a running Sparklespray job and optionally its cluster.
@@ -30,20 +47,7 @@ def kill_cmd(jq: JobQueue, args, config, datastore_client, cluster_api):
     if len(job_ids) == 0:
         log.warning("No jobs found matching pattern")
     for job_id in job_ids:
-        # TODO: stop just marks the job as it shouldn't run any more.  tasks will still be claimed.
-        cluster = create_cluster(config, jq, datastore_client, cluster_api, job_id)
-        log.info("Marking %s as killed", job_id)
-        ok, job = jq.kill_job(job_id)
-        assert ok
-        if not args.keepcluster:
-            cluster.stop_cluster()
-            jq.reset(job_id, None, statuses_to_clear=[STATUS_CLAIMED])
-
-        # if there are any sit sitting at pending, mark them as killed
-        tasks = jq.task_storage.get_tasks(job_id, status=STATUS_PENDING)
-        txtui.user_print("Marking {} pending tasks as killed".format(len(tasks)))
-        for task in tasks:
-            jq.reset_task(task.task_id, status=STATUS_KILLED)
+        kill(jq, config, datastore_client, cluster_api, job_id)
 
 
 def add_kill_cmd(subparser):

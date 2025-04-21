@@ -35,9 +35,7 @@ class PersistentDiskMount(DiskMount):
 
 from typing import TypeVar
 
-DiskMountT = Union[
-    ExistingDiskMount, PersistentDiskMount
-]  # TypeVar("DiskMountT", bound=DiskMount)
+DiskMountT = Union[ExistingDiskMount, PersistentDiskMount]
 
 
 class SubmitConfig(BaseModel):
@@ -49,7 +47,7 @@ class SubmitConfig(BaseModel):
     project: str
     monitor_port: int
     region: str
-    mounts: List[PersistentDiskMount]
+    mounts: List[DiskMountT]
     work_root_dir: str
     sparklesworker_image: str
     target_node_count: int

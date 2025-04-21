@@ -29,7 +29,7 @@ def create_job_spec(
     machine_type: str,
     location: str,
     boot_volume: PersistentDiskMount,
-    mounts: List[PersistentDiskMount],
+    mounts: List[DiskMountT],
 ):
     consume_exe_path = os.path.join(work_root_dir, "consume")
     consume_data = os.path.join(work_root_dir, "data")

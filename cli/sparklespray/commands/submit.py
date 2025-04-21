@@ -15,25 +15,10 @@ from ..cluster_service import MinConfig, Cluster, create_cluster
 from ..key_store import KeyStore
 import hashlib
 import uuid
-from .hasher import compute_dict_hash
-
+from .kill import kill
+from .delete import delete
 import sparklespray
-from .model import LOCAL_SSD
-from .csv_utils import read_csv_as_dicts
-from .util import random_string, url_join
-from .model import MachineSpec, PersistentDiskMount, SubmitConfig
-from .hasher import CachingHashFunction
-from .spec import make_spec_from_command, SrcDstPair
-from .main import clean, kill
-from .util import get_timestamp
-from .job_queue import JobQueue
-from .cluster_service import Cluster
-from .io_helper import IO
-from .watch import watch, local_watch
-from . import txtui
-from .watch import DockerFailedException
-from .config import Config
-from .gcp_utils import create_pipeline_spec
+from .watch import watch
 
 from .. import txtui
 from .delete import delete
@@ -49,7 +34,7 @@ from ..spec import SrcDstPair, make_spec_from_command
 from ..util import get_timestamp, random_string, url_join
 from datetime import datetime
 from ..certgen import create_self_signed_cert
-
+from ..hasher import compute_dict_hash
 from ..worker_job import create_job_spec
 
 
@@ -297,10 +282,10 @@ def submit(
                 'Existing job with id "{}", aborting!'.format(job_id)
             )
 
-    if len(config.mounts) > 1:
-        assert (
-            len(config.zones) == 1
-        ), "Cannot create jobs in multiple zones if you are mounting PD volumes"
+    # if len(config.mounts) > 1:
+    # assert (
+    #     len(config.zones) == 1
+    # ), "Cannot create jobs in multiple zones if you are mounting PD volumes"
     #        cluster.ensure_named_volumes_exist(config.zones[0], config.mounts)
 
     job = create_job_spec(
@@ -392,27 +377,6 @@ def expand_files_to_upload(io, filenames):
         else:
             pairs.append(SrcDstPair(src, dst))
     return pairs
-
-
-def _parse_resources(resources_str):
-    # not robust parsing at all
-    spec = {}
-    if resources_str is None:
-        return spec
-    pairs = resources_str.split(",")
-    for pair in pairs:
-        m = re.match("([^=]+)=(.*)", pair)
-        if m is None:
-            raise Exception("resource constraint malformed: {}".format(pair))
-        name, value = m.groups()
-        assert name in [
-            MEMORY_REQUEST,
-            CPU_REQUEST,
-        ], "Unknown resource requested: {}. Must be one of {} {}".format(
-            name, MEMORY_REQUEST, CPU_REQUEST
-        )
-        spec[name] = value
-    return spec
 
 
 def _setup_parser_for_sub_command(parser):
@@ -650,16 +614,16 @@ def submit_cmd(
 
     for image_ in [image, config.sparklesworker_image]:
         ok, err = has_access_to_docker_image(
-            config.credentials.service_account_email, config.credentials, image_
+            config.service_account_email, config.credentials, image_
         )
         if not ok:
             raise UserError(
-                f"{config.credentials.service_account_email} does not appear able to read docker image {image_}. This could be due to missing permission or the image not existing: {err}"
+                f"{config.service_account_email} does not appear able to read docker image {image_}. This could be due to missing permission or the image not existing: {err}"
             )
 
     mount_ = config.mounts
     submit_config = SubmitConfig(
-        service_account_email=config.credentials.service_account_email,  # pyright: ignore
+        service_account_email=config.service_account_email,  # pyright: ignore
         boot_volume=boot_volume,
         default_url_prefix=default_url_prefix,
         machine_type=machine_type,
@@ -693,15 +657,15 @@ def submit_cmd(
     spec_hash = compute_dict_hash(spec)
     job_env_hash = compute_dict_hash(
         dict(
-            boot_volume_in_gb=boot_volume_in_gb,
+            # boot_volume_in_gb=boot_volume_in_gb,
             image=spec["image"],
-            kubequeconsume_exe_md5=kubequeconsume_exe_md5,
+            # kubequeconsume_exe_md5=kubequeconsume_exe_md5,
             machine_type=machine_type,
         )
     )
     metadata["job-env-sha256"] = job_env_hash
     metadata["job-spec-sha256"] = spec_hash
-    existing_job = jq.get_job(job_id=job_id, must=False)
+    existing_job = jq.get_job_optional(job_id=job_id)
     if existing_job:
         previous_spec_hash = existing_job.metadata.get("job-spec-sha256")
         if previous_spec_hash == spec_hash:
@@ -718,24 +682,25 @@ def submit_cmd(
             txtui.user_print(
                 f"Found existing job {job_id} with different runtime environment. Stopping any running instances before proceeding"
             )
-            kill(jq, cluster, job_id)
+
+            kill(jq, cluster, datastore_client, cluster_api, job_id)
         if existing_job:
             txtui.user_print(
                 f"Found existing job {job_id} with different specification. Removing before submitting new job."
             )
-            clean(cluster, jq, job_id)
+            delete(cluster, jq, job_id)
         txtui.user_print(f"Submitting job: {job_id}")
+
         submit(
             jq,
             io,
-            cluster,
             job_id,
             spec,
             submit_config,
+            datastore_client,
+            cluster,
             metadata=metadata,
             clean_if_exists=True,
-            dry_run=args.dryrun,
-            cluster_name=cluster_name,
         )
 
     finished = False

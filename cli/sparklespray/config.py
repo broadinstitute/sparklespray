@@ -90,12 +90,16 @@ class Config:
     boot_volume: PersistentDiskMount
     local_work_dir: str
     max_preemptable_attempts_scale: int
-    mounts: List[PersistentDiskMount]
+    mounts: List[DiskMountT]
     debug_log_prefix: str
     work_root_dir: str
     monitor_port: int
     cache_db_path: str
     credentials: Credentials = dataclasses.field(repr=False)
+
+    @property
+    def service_account_email(self):
+        return self.credentials.service_account_email
 
     def create_machine_specs(self):
         return MachineSpec(
