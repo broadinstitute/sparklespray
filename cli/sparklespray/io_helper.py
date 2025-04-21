@@ -140,7 +140,7 @@ class IO:
             # log.warning("Downloading %s (%s, %s)", src_url, start, end)
             return blob.download_as_string(start=start, end=end).decode("utf8")
         else:
-            assert not must, "Could not find {}".format(path)
+            assert not must, "Could not find {}".format(src_url)
             return None
 
     def put(self, src_filename, dst_url, must=True, skip_if_exists=False):

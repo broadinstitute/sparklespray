@@ -30,7 +30,7 @@ gcloud auth login
 
 ## Setting up
 
-### Set up a python 3.9 virtual environment
+### Set up a python 3.11 virtual environment
 
 sparkles uses google's services python client libraries, which in turn have a
 fair number of their own dependencies, so it's really best to create virtual
@@ -42,7 +42,7 @@ tested with.
 Create the conda environment and activate it:
 
 ```
-conda create -n sparkles python=3.9
+conda create -n sparkles python=3.11
 conda activate sparkles
 ```
 
@@ -268,7 +268,6 @@ tasks: claimed (1), worker nodes: running(type=preemptible) (1)
 
 Didn't report that it didn't need to submit a request for a new worker, it immediately saw there already was one in the `running` state, and it immediately updated the task's state to `claimed` when it started running the task.
 
-
 ## Submitting along with multiple files that are needed by job
 
 Files can automatically be uploaded from your local host on submission, and will be downloaded to the working directory before your job starts. You can specify what files you'd like uploaded with the "-u" option.
@@ -317,6 +316,7 @@ sparkles sub --seq 5 python script.py --index {index}
 ```
 
 Common use cases:
+
 ```bash
 # Process different data shards
 sparkles sub --seq 10 python process.py --shard {index} --total-shards 10
@@ -333,6 +333,7 @@ sparkles sub --seq 12 python analyze.py --month {index} --year 2024
 Use `--params filename.csv` to run variations based on CSV file contents. Each row in the CSV generates a separate task.
 
 Basic CSV parameterization:
+
 ```csv
 # params.csv
 input_file,output_file,threshold
@@ -348,6 +349,7 @@ sparkles sub --params params.csv python script.py --input {input_file} --output 
 Advanced CSV examples:
 
 1. Machine Learning Hyperparameter Sweep:
+
 ```csv
 # hyperparams.csv
 learning_rate,batch_size,hidden_layers,dropout
@@ -369,6 +371,7 @@ sparkles sub --params hyperparams.csv \
 ```
 
 2. Data Processing Pipeline:
+
 ```csv
 # pipeline.csv
 input_path,output_path,start_date,end_date,region
@@ -388,6 +391,7 @@ sparkles sub --params pipeline.csv \
 ```
 
 3. Feature Engineering:
+
 ```csv
 # features.csv
 feature_name,window_size,aggregation,min_samples
@@ -409,11 +413,13 @@ sparkles sub --params features.csv \
 #### Parameter Substitution Rules
 
 1. Basic Substitution
+
    - Use `{param_name}` to substitute CSV column values
    - Parameters are case-sensitive
    - Missing parameters result in error
 
 2. File Path Handling
+
    ```bash
    # Automatic path joining
    sparkles sub --params params.csv python script.py \
@@ -433,12 +439,14 @@ sparkles sub --params features.csv \
 #### Best Practices for Parameterization
 
 1. CSV Organization
+
    - Use clear, descriptive column names
    - Include all required parameters
    - Keep CSV files version controlled
    - Document parameter meanings and valid ranges
 
 2. Parameter Validation
+
    ```python
    # In your script
    def validate_params(args):
@@ -448,11 +456,13 @@ sparkles sub --params features.csv \
    ```
 
 3. Output Management
+
    - Include parameters in output paths
    - Use consistent naming patterns
    - Avoid parameter values that create invalid paths
 
 4. Resource Considerations
+
    ```bash
    # Scale nodes based on parameter count
    sparkles sub --params large_sweep.csv --nodes 10 python train.py ...
@@ -485,17 +495,18 @@ region=us-east1
 
 ## Required Parameters
 
-| Parameter | Description |
-|-----------|-------------|
+| Parameter            | Description                                    |
+| -------------------- | ---------------------------------------------- |
 | `default_url_prefix` | Base GCS path for job outputs and temp storage |
-| `project` | Google Cloud project ID |
-| `default_image` | Default Docker image for jobs |
-| `machine_type` | GCE machine type (e.g., n1-standard-1) |
-| `region` | GCP region for resources |
-| `account` | GCP service account email |
-| `zones` | Which zones to create VMs in |
+| `project`            | Google Cloud project ID                        |
+| `default_image`      | Default Docker image for jobs                  |
+| `machine_type`       | GCE machine type (e.g., n1-standard-1)         |
+| `region`             | GCP region for resources                       |
+| `account`            | GCP service account email                      |
+| `zones`              | Which zones to create VMs in                   |
 
 Some configuration values can be inherited from your gcloud configuration (`~/.config/gcloud/configurations/config_default`):
+
 - `project`
 - `region`
 - `zones` (from compute/zone)
@@ -503,44 +514,50 @@ Some configuration values can be inherited from your gcloud configuration (`~/.c
 ## Optional Parameters
 
 ### General Settings
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `monitor_port` | 6032 | Port for job monitoring interface |
-| `work_root_dir` | "/mnt/" | Base directory for job execution |
-| `cas_url_prefix` | `{default_url_prefix}/CAS/` | Storage location for CAS files (temporary files) |
-| `sparklesworker_exe_path` | Auto-detected | Path to sparklesworker executable |
-| `cache_db_path` | ".kubeque-cached-file-hashes" | Path to file hash cache |
-| `debug_log_prefix` | `{default_url_prefix}/node-logs` | Location for debug logs |
+
+| Parameter                 | Default                          | Description                                      |
+| ------------------------- | -------------------------------- | ------------------------------------------------ |
+| `monitor_port`            | 6032                             | Port for job monitoring interface                |
+| `work_root_dir`           | "/mnt/"                          | Base directory for job execution                 |
+| `cas_url_prefix`          | `{default_url_prefix}/CAS/`      | Storage location for CAS files (temporary files) |
+| `sparklesworker_exe_path` | Auto-detected                    | Path to sparklesworker executable                |
+| `cache_db_path`           | ".kubeque-cached-file-hashes"    | Path to file hash cache                          |
+| `debug_log_prefix`        | `{default_url_prefix}/node-logs` | Location for debug logs                          |
 
 ### Storage Configuration
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `boot_volume_in_gb` | 20 | Size of boot disk in GB |
-| `mount_count` | 1 | Number of additional disk mounts |
-| `mount_N_path` | "/mnt" (for N=1) | Mount path for disk N |
-| `mount_N_type` | Varies* | Disk type for mount N |
-| `mount_N_size_in_gb` | 100 | Size in GB for mount N |
-| `mount_N_name` | None | Name of existing disk to mount (optional) |
 
-*Default disk type depends on machine type:
-- n4-*: "hyperdisk-balanced"
-- n1-* or n2-*: "local-ssd"
+| Parameter            | Default          | Description                               |
+| -------------------- | ---------------- | ----------------------------------------- |
+| `boot_volume_in_gb`  | 20               | Size of boot disk in GB                   |
+| `mount_count`        | 1                | Number of additional disk mounts          |
+| `mount_N_path`       | "/mnt" (for N=1) | Mount path for disk N                     |
+| `mount_N_type`       | Varies\*         | Disk type for mount N                     |
+| `mount_N_size_in_gb` | 100              | Size in GB for mount N                    |
+| `mount_N_name`       | None             | Name of existing disk to mount (optional) |
+
+\*Default disk type depends on machine type:
+
+- n4-\*: "hyperdisk-balanced"
+- n1-_ or n2-_: "local-ssd"
 - Others: "pd-balanced"
 
 ### Preemption Settings
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `preemptible` | "y" | Use preemptible instances ("y" or "n") |
-| `max_preemptable_attempts_scale` | 2 | Max retry attempts for preempted jobs |
+
+| Parameter                        | Default | Description                            |
+| -------------------------------- | ------- | -------------------------------------- |
+| `preemptible`                    | "y"     | Use preemptible instances ("y" or "n") |
+| `max_preemptable_attempts_scale` | 2       | Max retry attempts for preempted jobs  |
 
 ### Authentication Settings
-| Parameter | Default | Description |
-|-----------|---------|-------------|
+
+| Parameter             | Default                                         | Description                      |
+| --------------------- | ----------------------------------------------- | -------------------------------- |
 | `service_account_key` | `~/.sparkles-cache/service-keys/{project}.json` | Path to service account key file |
 
 ## Example Configurations
 
 Basic configuration with minimal settings:
+
 ```ini
 [config]
 default_url_prefix=gs://my-bucket/sparkles
@@ -553,6 +570,7 @@ account=my-service-account@project.iam.gserviceaccount.com
 ```
 
 Configuration with a local SSD attached for temp storage:
+
 ```ini
 [config]
 default_url_prefix=gs://my-bucket/sparkles
@@ -575,6 +593,7 @@ mount_2_size_in_gb=375
 ### Configuration File Location
 
 Sparklespray searches for the configuration file in the following order:
+
 1. Path specified by `--config` parameter
 2. `.sparkles` in the current directory
 3. `.sparkles` in any parent directory
@@ -596,11 +615,13 @@ sparkles setup
 Before running setup:
 
 1. **Google Cloud SDK**
+
    - Must be installed and in PATH
    - Authenticated via `gcloud auth login`
    - Default project configured
 
 2. **Configuration File**
+
    - Valid `.sparkles` config file
    - Must contain:
      - `project`: Google Cloud project ID
@@ -619,12 +640,14 @@ Before running setup:
 The setup command:
 
 1. **Enables Required APIs**
+
    - Google Cloud Storage
    - Cloud Datastore
    - Cloud Batch
    - Cloud Container Registry
 
 2. **Creates Resources**
+
    - Storage bucket (if doesn't exist)
    - Service account with required permissions
    - Service account key file
@@ -730,14 +753,15 @@ sparkles status [options] [jobid_pattern]
 
 ### Command Options
 
-| Option | Description |
-|--------|-------------|
-| `--stats` | Show detailed execution statistics |
+| Option     | Description                         |
+| ---------- | ----------------------------------- |
+| `--stats`  | Show detailed execution statistics  |
 | `--failed` | Show information about failed tasks |
 
 ### Basic Status Information
 
 Without any options, the command shows a summary of task statuses:
+
 ```bash
 # Check single job
 sparkles status job-20240313-abc123
@@ -760,23 +784,27 @@ sparkles status --stats job-20240313-abc123
 Statistics include:
 
 1. **Task Claim Information**
+
    ```
    Number of times a task was claimed quantiles: 1, 1, 1, 2, 5, mean: 1.4
    ```
+
    - Shows how many times tasks were retried
    - Provides min, 25%, median, 75%, max, and mean values
 
 2. **Execution Time Statistics**
+
    ```
-   task count: 100, execution time quantiles (in minutes): 
+   task count: 100, execution time quantiles (in minutes):
    2.1, 2.8, 3.2, 3.9, 8.5, mean: 3.4
    ```
+
    - Shows task runtime distribution in minutes
    - Helps identify performance outliers
 
 3. **Memory Usage**
    ```
-   max memory quantiles: 
+   max memory quantiles:
    512MB, 768MB, 1024MB, 1536MB, 2048MB, mean: 1126MB
    ```
    - Shows peak memory usage across tasks
@@ -810,23 +838,25 @@ sparkles list [options] job-id
 
 #### Command Options
 
-| Option | Description |
-|--------|-------------|
-| `--filter` | Filter tasks using expressions (can be used multiple times) |
-| `--fields` | Specify which fields to include (comma-separated) |
-| `--format` | Output format: 'csv' (default) or 'json' |
-| `--output`, `-o` | Output file (defaults to stdout) |
-| `--params` | Only show parameters from original submission |
+| Option           | Description                                                 |
+| ---------------- | ----------------------------------------------------------- |
+| `--filter`       | Filter tasks using expressions (can be used multiple times) |
+| `--fields`       | Specify which fields to include (comma-separated)           |
+| `--format`       | Output format: 'csv' (default) or 'json'                    |
+| `--output`, `-o` | Output file (defaults to stdout)                            |
+| `--params`       | Only show parameters from original submission               |
 
 #### Filtering Tasks
 
 Use `--filter` to select specific tasks. Filter expressions follow the format:
+
 ```
 field_name[.nested_field]=value
 field_name[.nested_field]!=value
 ```
 
 Example filters:
+
 ```bash
 # Show only failed tasks
 sparkles list job-id --filter "status=failed"
@@ -851,6 +881,7 @@ sparkles list job-id --fields "task_id,args.parameters.batch_size,status"
 ```
 
 Common fields:
+
 - `task_id`: Unique task identifier
 - `status`: Current task status
 - `exit_code`: Task exit code
@@ -861,6 +892,7 @@ Common fields:
 #### Output Formats
 
 1. **CSV Format** (default)
+
 ```bash
 # Output to file
 sparkles list job-id --format csv --output tasks.csv
@@ -870,6 +902,7 @@ sparkles list job-id --format csv
 ```
 
 2. **JSON Format**
+
 ```bash
 # Detailed JSON output
 sparkles list job-id --format json --output tasks.json
@@ -878,18 +911,21 @@ sparkles list job-id --format json --output tasks.json
 #### Parameter Extraction
 
 Use `--params` to focus on task parameters:
+
 ```bash
 # Extract original parameters
 sparkles list job-id --params --output params.csv
 ```
 
 Useful for:
+
 - Identifying failed parameter combinations
 - Rerunning specific parameter sets
 
 #### Example Use Cases
 
 2. **Parameter Analysis**
+
 ```bash
 # Extract parameters of successful tasks
 sparkles list job-id \
@@ -899,6 +935,7 @@ sparkles list job-id \
 ```
 
 1. **Multiple Conditions**
+
 ```bash
 sparkles list job-id \
     --filter "status=complete" \
@@ -907,6 +944,7 @@ sparkles list job-id \
 ```
 
 2. **Parameter-Based Filtering**
+
 ```bash
 sparkles list job-id \
     --filter "args.parameters.learning_rate=0.001" \
@@ -915,6 +953,7 @@ sparkles list job-id \
 ```
 
 1. **Finding Failed Tasks for Resubmission**
+
 ```bash
 # Export failed task parameters
 sparkles list job-id \
@@ -924,6 +963,7 @@ sparkles list job-id \
 ```
 
 3. **Resource Analysis**
+
 ```bash
 # Export resource usage patterns
 sparkles list job-id \
@@ -944,22 +984,24 @@ sparkles watch [options] job-id
 
 ### Command Options
 
-| Option | Default | Description |
-|--------|---------|-------------|
-| `--nodes`, `-n` | From job config | Target number of worker nodes |
-| `--verify` | False | Verify completion status and reset failed tasks |
-| `--loglive` | True | Stream output logs in real-time |
-| `--no-loglive` | False | Disable log streaming |
+| Option          | Default         | Description                                     |
+| --------------- | --------------- | ----------------------------------------------- |
+| `--nodes`, `-n` | From job config | Target number of worker nodes                   |
+| `--verify`      | False           | Verify completion status and reset failed tasks |
+| `--loglive`     | True            | Stream output logs in real-time                 |
+| `--no-loglive`  | False           | Disable log streaming                           |
 
 ### Features
 
 1. **Task Monitoring**
+
    - Tracks task status changes
    - Reports job progress
    - Shows completion statistics
    - Real-time output from running tasks
 
 2. **Node Management**
+
    - Automatic worker scaling
    - Preemptible instance handling
    - Node health monitoring
@@ -972,23 +1014,27 @@ sparkles watch [options] job-id
 ### Examples
 
 Basic job monitoring:
+
 ```bash
 # Monitor job by ID
 sparkles watch job-20240313-abc123
 ```
 
 Adjust worker count:
+
 ```bash
 # Scale to 5 workers
 sparkles watch my-job --nodes 5
 ```
 
 Verify completion and reset failed tasks (only needed for debugging an troubleshooting. Normal users should not need to ever use this option):
+
 ```bash
 sparkles watch my-job --verify
 ```
 
 Disable log streaming:
+
 ```bash
 sparkles watch my-job --no-loglive
 ```
@@ -996,18 +1042,19 @@ sparkles watch my-job --no-loglive
 #### Status Updates
 
 The watch command provides periodic status updates showing:
+
 ```
 tasks: running (5), pending (10), complete (85), failed (0)
 workers: running (3), staging (1), terminated (0)
 ```
 
 Status fields:
+
 - **Tasks**
   - `pending`: Waiting to be executed
   - `running`: Currently executing
   - `complete`: Successfully finished. (This does not mean that the command exited without any errors, but rather, the command was successfully executed and the results collected. One will need to also check the exit code to confirm that the command was successful.)
   - `failed`: Failed execution (The command failed to start or there was an issue with the worker which resulted in the command being aborted before it was complete.)
-  
 - **Workers**
   - `running`: Actively processing tasks
   - `staging`: Starting up
@@ -1017,12 +1064,14 @@ Status fields:
 #### Worker Management
 
 The watch command manages worker nodes based on:
+
 1. Target node count (`--nodes`)
 2. Preemptible instance settings
 3. Job requirements
 4. Current task queue
 
 Scaling behavior:
+
 ```python
 # Example scaling scenarios
 workers = min(target_nodes, pending_tasks)
@@ -1032,12 +1081,14 @@ preemptible = min(max_preemptable_attempts, workers)
 #### Log Streaming
 
 When `--loglive` is enabled (default):
+
 1. Automatically selects a running task
 2. Streams stdout/stderr in real-time
 3. Switches to new task if current completes
 4. Shows timestamp for each log line
 
 Example output:
+
 ```
 [22:15:30] Starting task processing...
 [22:15:31] Loading input data
@@ -1048,18 +1099,18 @@ Example output:
 #### Completion Verification
 
 When `--verify` is used:
+
 1. Checks all completed tasks
 2. Verifies output files exist
 3. Resets tasks with missing outputs
 4. Reports verification progress
 
 Example verification:
+
 ```
 Verified 85 out of 100 completed tasks successfully wrote output
 task task_123 missing gs://bucket/results/output.txt, resetting
 ```
-
-
 
 # Developing sparklespray
 
@@ -1089,6 +1140,78 @@ an "Artifacts" section where you can download the built tar.gz file.
 ```
 
 sparkles sub -u train_mlp_sm.py -u data -u benchmark_train_mlp.py --gpu n --gpu_count 0 -i tensorflow/tensorflow:latest-py3 --machine-type n1-standard-4 python benchmark_train_mlp.py --data_size small --test_description \'Machine type n1-standard-4, GPU count 0, small dataset\'
+
+## Running Workflows
+
+Sparkles now supports running multi-step workflows defined in JSON files. The workflow feature allows you to:
+
+- Define a sequence of steps to be executed in order
+- Specify different Docker images for each step
+- Pass parameters between steps
+- Fan out execution using CSV parameter files
+
+### Usage
+
+```
+sparkles workflow run JOB_NAME WORKFLOW_DEFINITION_FILE [options]
+```
+
+#### Arguments:
+
+- `JOB_NAME`: A name for your workflow job
+- `WORKFLOW_DEFINITION_FILE`: Path to a JSON file containing the workflow definition
+
+#### Options:
+
+- `--retry`: Retry any failed tasks
+- `--nodes N`: Maximum number of nodes to power on at one time
+- `--parameter VAR=VALUE` or `-p VAR=VALUE`: Define variables to be used in the workflow
+
+### Workflow Definition Format
+
+Workflows are defined in JSON files with the following structure:
+
+```json
+{
+  "steps": [
+    {
+      "command": ["echo", "Hello {job_name}"],
+      "image": "ubuntu:latest",
+      "parameters_csv": "path/to/parameters.csv"
+    },
+    {
+      "command": ["python", "process.py", "--input={prev_job_path}/output.txt"],
+      "image": "python:3.9"
+    }
+  ]
+}
+```
+
+Each step can include:
+
+- `command`: List of command arguments (supports variable expansion)
+- `image`: Docker image to use (optional)
+- `parameters_csv`: Path to a CSV file for fan-out execution (optional)
+- `run_local`: Boolean flag to run the command locally (currently not supported)
+
+### Variable Expansion
+
+The workflow system supports variable expansion in commands and parameter CSV paths:
+
+- `{job_name}`: Current job name
+- `{job_path}`: Path to the current job
+- `{prev_job_name}`: Previous step's job name
+- `{prev_job_path}`: Path to the previous step's job
+- Custom variables defined with `--parameter`
+
+### Example
+
+```
+# Run a workflow with custom parameters
+sparkles workflow run my-analysis workflow.json --parameter input_file=gs://mybucket/input.txt --nodes 10
+```
+
+This will execute all steps in the workflow, passing the parameters to each step as needed.
 
 ## Changing the protocol between "sparkles" and "consumer"
 
@@ -1123,7 +1246,7 @@ go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.2
 * Cannot pull docker image
    * boot volume is too small
    * Insufficent permissions
-* Cannot execute command 
+* Cannot execute command
    * because command is not executable/missing
    * because image built for wrong arch
 * Process exhausts memory and is killed
@@ -1131,10 +1254,11 @@ go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.2
 * VM is preempted
 
 
-TODO: 
+TODO:
 (x) get tests passing
 (x) get pyright checks passing
-(x) Fix node count 
+(x) Fix node count
 (x) reimplement "validate"
 (x) Fix drive assignment
 Clean out excessive print statements (Maybe tackle this after vcr in place?)
+```

@@ -15,6 +15,25 @@ from ..cluster_service import MinConfig, Cluster, create_cluster
 from ..key_store import KeyStore
 import hashlib
 import uuid
+from .hasher import compute_dict_hash
+
+import sparklespray
+from .model import LOCAL_SSD
+from .csv_utils import read_csv_as_dicts
+from .util import random_string, url_join
+from .model import MachineSpec, PersistentDiskMount, SubmitConfig
+from .hasher import CachingHashFunction
+from .spec import make_spec_from_command, SrcDstPair
+from .main import clean, kill
+from .util import get_timestamp
+from .job_queue import JobQueue
+from .cluster_service import Cluster
+from .io_helper import IO
+from .watch import watch, local_watch
+from . import txtui
+from .watch import DockerFailedException
+from .config import Config
+from .gcp_utils import create_pipeline_spec
 
 from .. import txtui
 from .delete import delete
@@ -375,11 +394,28 @@ def expand_files_to_upload(io, filenames):
     return pairs
 
 
-def add_submit_cmd(subparser):
-    parser = subparser.add_parser(
-        "sub", help="Submit a command (or batch of commands) for execution"
-    )
-    parser.set_defaults(func=submit_cmd)
+def _parse_resources(resources_str):
+    # not robust parsing at all
+    spec = {}
+    if resources_str is None:
+        return spec
+    pairs = resources_str.split(",")
+    for pair in pairs:
+        m = re.match("([^=]+)=(.*)", pair)
+        if m is None:
+            raise Exception("resource constraint malformed: {}".format(pair))
+        name, value = m.groups()
+        assert name in [
+            MEMORY_REQUEST,
+            CPU_REQUEST,
+        ], "Unknown resource requested: {}. Must be one of {} {}".format(
+            name, MEMORY_REQUEST, CPU_REQUEST
+        )
+        spec[name] = value
+    return spec
+
+
+def _setup_parser_for_sub_command(parser):
     parser.add_argument(
         "--machine-type",
         "-m",
@@ -475,7 +511,35 @@ def add_submit_cmd(subparser):
         help="If set, will download all of the files from previous execution of this job to worker before running",
         action="store_true",
     )
+
+    def key_value_pair(text):
+        key, value = text.split("=", 1)
+        return (key, value)
+
+    parser.add_argument(
+        "--metadata",
+        help="adds metdata to job. parameter should be of the form key=value",
+        action="append",
+        type=key_value_pair,
+    )
     parser.add_argument("command", nargs=argparse.REMAINDER)
+
+
+def add_submit_cmd(subparser):
+    parser = subparser.add_parser(
+        "sub", help="Submit a command (or batch of commands) for execution"
+    )
+    parser.set_defaults(func=submit_cmd)
+    _setup_parser_for_sub_command(parser)
+
+
+def construct_submit_cmd_args(unparsed_args: List[str]):
+    # create a temp parser for converting the unparsed_args to an instance of args that `submit_cmd` will
+    # accept
+    parser = argparse.ArgumentParser()
+    _setup_parser_for_sub_command(parser)
+    args = parser.parse_args(unparsed_args)
+    return args
 
 
 def submit_cmd(
@@ -501,13 +565,6 @@ def submit_cmd(
     job_id = args.name
     if job_id is None:
         job_id = new_job_id()
-    elif args.skipifexists:
-        job = jq.get_job_optional(job_id)
-        if job is not None:
-            txtui.user_print(
-                f"Found existing job {job_id} and submitted job with --skipifexists so aborting"
-            )
-            return 0
 
     target_node_count = args.nodes
     machine_type = config.machine_type
@@ -521,6 +578,7 @@ def submit_cmd(
         parameters = [{"index": str(i)} for i in range(args.seq)]
     elif args.params is not None:
         parameters = read_csv_as_dicts(args.params)
+        assert len(parameters) > 0
     else:
         parameters = [{}]
 
@@ -629,18 +687,56 @@ def submit_cmd(
         config.debug_log_prefix,
     )
 
-    txtui.user_print("Submitting job: {}".format(job_id))
-    submit(
-        jq,
-        io,
-        job_id,
-        spec,
-        submit_config,
-        datastore_client,
-        cluster,
-        metadata=metadata,
-        clean_if_exists=True,
+    # test to see if we already have such a job submitted, in which case, we don't want to do anything
+    already_submitted = False
+    needs_kill_before_submit = False
+    spec_hash = compute_dict_hash(spec)
+    job_env_hash = compute_dict_hash(
+        dict(
+            boot_volume_in_gb=boot_volume_in_gb,
+            image=spec["image"],
+            kubequeconsume_exe_md5=kubequeconsume_exe_md5,
+            machine_type=machine_type,
+        )
     )
+    metadata["job-env-sha256"] = job_env_hash
+    metadata["job-spec-sha256"] = spec_hash
+    existing_job = jq.get_job(job_id=job_id, must=False)
+    if existing_job:
+        previous_spec_hash = existing_job.metadata.get("job-spec-sha256")
+        if previous_spec_hash == spec_hash:
+            already_submitted = True
+        if existing_job.metadata.get("job-env-sha256") != job_env_hash:
+            needs_kill_before_submit = True
+
+    if args.skipifexists and already_submitted and (not needs_kill_before_submit):
+        txtui.user_print(
+            f"Found existing job {job_id} with identical specification. Skipping submission."
+        )
+    else:
+        if needs_kill_before_submit:
+            txtui.user_print(
+                f"Found existing job {job_id} with different runtime environment. Stopping any running instances before proceeding"
+            )
+            kill(jq, cluster, job_id)
+        if existing_job:
+            txtui.user_print(
+                f"Found existing job {job_id} with different specification. Removing before submitting new job."
+            )
+            clean(cluster, jq, job_id)
+        txtui.user_print(f"Submitting job: {job_id}")
+        submit(
+            jq,
+            io,
+            cluster,
+            job_id,
+            spec,
+            submit_config,
+            metadata=metadata,
+            clean_if_exists=True,
+            dry_run=args.dryrun,
+            cluster_name=cluster_name,
+        )
 
     finished = False
     successful_execution = True

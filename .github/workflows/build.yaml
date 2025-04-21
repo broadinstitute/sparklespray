@@ -1,48 +1,47 @@
 name: build
 
-on: 
+on:
   push:
-      paths:
-         - "*.py"
-         - "**/pyproject.toml"
-         - "**/*.py"
-         - .github/workflows/build.yaml
-         - "**/*.go"
+    paths:
+      - "*.py"
+      - "**/pyproject.toml"
+      - "**/*.py"
+      - .github/workflows/build.yaml
+      - "**/*.go"
 
 env:
   PYTHON_VERSION: "3.11"
   POETRY_VERSION: "1.4.2"
-           
+
 jobs:
   build-go:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v3
+      - uses: actions/checkout@v3
 
-    - name: Set up Go
-      uses: actions/setup-go@v3
-      with:
-        go-version: 1.19
+      - name: Set up Go
+        uses: actions/setup-go@v3
+        with:
+          go-version: 1.19
 
-    - name: Build everything
-      run: cd go/src/github.com/broadinstitute/sparklesworker && go build -v ./...
+      - name: Build everything
+        run: cd go/src/github.com/broadinstitute/sparklesworker && go build -v ./...
 
-    - name: build executable
-      run: bash scripts/build-static-exe.sh
+      - name: build executable
+        run: bash scripts/build-static-exe.sh
 
-    - name: print md5sum 
-      run: md5sum cli/sparklespray/bin/sparklesworker && ls -s cli/sparklespray/bin/sparklesworker
-      
-    - name: Upload executable
-      uses: actions/upload-artifact@v3
-      with:
-        name: sparklesworker-exe-${{ github.run_number }}
-        path: cli/sparklespray/bin/sparklesworker
-        retention-days: 5
-#    - name: Test
-#      run: cd go/src/github.com/broadinstitute/sparklesworker && go test -v ./...
+      - name: print md5sum
+        run: md5sum cli/sparklespray/bin/sparklesworker && ls -s cli/sparklespray/bin/sparklesworker
 
-          
+      - name: Upload executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: sparklesworker-exe-${{ github.run_number }}
+          path: cli/sparklespray/bin/sparklesworker
+          retention-days: 5
+  #    - name: Test
+  #      run: cd go/src/github.com/broadinstitute/sparklesworker && go test -v ./...
+
   test-python:
     runs-on: ubuntu-latest
     steps:
@@ -73,7 +72,7 @@ jobs:
         working-directory: cli
       - name: Run pyratchet
         working-directory: cli
-        run:   poetry run pyright-ratchet run pyright
+        run: poetry run pyright-ratchet run pyright
       - name: Run tests
         run: poetry run pytest
         working-directory: cli
@@ -106,11 +105,11 @@ jobs:
         with:
           poetry-version: ${{ env.POETRY_VERSION }}
       - name: Download executable
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: sparklesworker-exe-${{ github.run_number }}
           path: cli/sparklespray/bin
-      - name: print md5sum 
+      - name: print md5sum
         run: md5sum cli/sparklespray/bin/sparklesworker && ls -s cli/sparklespray/bin/sparklesworker
       - name: get package version
         run: (echo -n 'package_version=' && poetry version -s) >> "$GITHUB_ENV"
@@ -122,9 +121,8 @@ jobs:
       #   run: find . -print && ls -l dist && ls -l sparkles/bin
       #   working-directory: cli
       - name: Upload sparklespray-${{ env.package_version }}.tar.gz package
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: sparklespray-${{ env.package_version }}
           path: cli/dist/sparklespray-*.tar.gz
           retention-days: 5
-            

@@ -46,7 +46,7 @@ def entity_to_job(entity):
     try:
         metadata = json.loads(entity.get("metadata", "{}"))
     except TypeError:
-        pass
+        print("Warning: ignoring badly formed metadata on job")
     return Job(
         job_id=entity.key.name,
         tasks=entity.get("tasks", []),
