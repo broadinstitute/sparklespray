@@ -3,7 +3,9 @@ from pydantic import BaseModel
 from typing import List, Dict
 import time
 from google.cloud.batch_v1alpha.services.batch_service import BatchServiceClient
-
+from google.cloud.compute_v1.services.instances import InstancesClient
+import google.cloud.compute_v1.types as compute
+from google.api_core.exceptions import NotFound
 from .node_req_store import (
     NodeReq,
     NODE_REQ_COMPLETE,
@@ -357,8 +359,9 @@ def is_job_successful(job: batch.Job):
     return job.status.state == batch.JobStatus.State.SUCCEEDED
 
 class ClusterAPI:
-    def __init__(self, batch_service_client : BatchServiceClient):
+    def __init__(self, batch_service_client : BatchServiceClient, compute_engine_client : InstancesClient):
         self.batch_service = batch_service_client
+        self.compute_engine_client = compute_engine_client
 
     def create_job(self, project: str, location: str, job: JobSpec, worker_count: int):
         request = create_batch_job_from_job_spec(project, location, job, worker_count)
@@ -415,3 +418,18 @@ class ClusterAPI:
             breakpoint()
             tasks.extend(these            )
         return tasks
+
+    def is_instance_running(self, instance_uri):
+        m = re.match("projects/([^/]+)/zones/([^/]+)/([^/]+)", instance_uri)
+        assert m
+        project, zone, instance = m.groups()
+
+        try:
+            instance_response = self.compute_engine_client.get(compute.GetInstanceRequest(        instance=instance,
+        project=project,
+        zone=zone))
+        except NotFound:
+            return False
+        return True
+
+import re

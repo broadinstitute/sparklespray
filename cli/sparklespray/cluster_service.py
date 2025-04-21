@@ -38,16 +38,16 @@ class MinConfig(Protocol):
     def location(self) -> str:
         ...
 
+from .job_queue import JobQueue
 
-def create_cluster(config: MinConfig, jq, datastore_client, cluster_api, job_id):
-    job = jq.get_job(job_id)
+def create_cluster(config: MinConfig, jq : JobQueue, datastore_client, cluster_api, job_id):
+    job = jq.get_job_must(job_id)
 
     return Cluster(
         config.project,
         config.location,
         job.cluster,
         job_id,
-        config.zones,
         jq.job_storage,
         jq.task_storage,
         datastore_client,
@@ -134,7 +134,8 @@ class Cluster:
     def delete_complete_requests(self):
         self.cluster_api.delete_node_reqs(self.project, self.location, self.cluster_id, only_terminal_reqs=True)
 
-
+    def is_live_owner(self, owner):
+        return self.cluster_api.is_instance_running(owner)
 
 class CachingCaller:
     def __init__(self, fn, expiry_time=5):

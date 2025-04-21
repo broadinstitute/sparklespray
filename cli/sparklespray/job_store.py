@@ -2,7 +2,7 @@ from google.cloud import datastore
 
 from typing import List, Tuple, Optional, Dict
 from .datastore_batch import ImmediateBatch
-
+from .task_store import STATUS_KILLED, Task
 
 from dataclasses import dataclass
 
@@ -23,6 +23,7 @@ class Job:
 JOB_STATUS_SUBMITTED = "submitted"
 JOB_STATUS_KILLED = "killed"
 
+import json
 
 def job_to_entity(client, o):
     entity_key = client.key("Job", o.job_id)
@@ -30,13 +31,7 @@ def job_to_entity(client, o):
     entity["tasks"] = o.tasks
     entity["cluster"] = o.cluster
     entity["kube_job_spec"] = o.kube_job_spec
-    metadata = []
-    for k, v in o.metadata.items():
-        m = datastore.Entity()
-        m["name"] = k
-        m["value"] = v
-        metadata.append(m)
-    entity["metadata"] = metadata
+    entity["metadata"] = json.dumps(o.metadata)
     entity["status"] = o.status
     entity["submit_time"] = o.submit_time
     entity["target_node_count"] = o.target_node_count
@@ -46,13 +41,17 @@ def job_to_entity(client, o):
 
 
 def entity_to_job(entity):
-    metadata = entity.get("metadata", [])
+    metadata = {}
+    try:
+        metadata = json.loads(entity.get("metadata", "{}"))
+    except TypeError:
+        pass
     return Job(
         job_id=entity.key.name,
         tasks=entity.get("tasks", []),
         cluster=entity["cluster"],
         kube_job_spec=entity.get("kube_job_spec"),
-        metadata=dict([(m["name"], m["value"]) for m in metadata]),
+        metadata=metadata,
         status=entity["status"],
         submit_time=entity.get("submit_time"),
         target_node_count=entity.get("target_node_count", 1),
@@ -116,3 +115,4 @@ class JobStore:
         query.order = ["-submit_time"]
         job_entity = list(query.fetch(limit=1))[0]
         return entity_to_job(job_entity)
+

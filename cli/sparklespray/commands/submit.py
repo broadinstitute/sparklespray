@@ -159,6 +159,23 @@ def _make_cluster_name(
         hash.update(machine_json.encode("utf8"))
         return f"c-{hash.hexdigest()[:20]}"
 
+from ..gcp_permissions import has_access_to_docker_image
+def update_running_status(job_id: str, cluster : Cluster, jq: JobQueue):
+    # todo: refactor into a method which updates job status
+    possibly_running = jq.get_possibily_running_tasks(job_id)
+    running = []
+    orphaned = []
+    for task in possibly_running:
+        if cluster.is_live_owner(task.owner):
+            running.append(task)
+        else:
+            orphaned.append(task)
+
+    for task in orphaned:
+        jq.reset_task(task.task_id)
+
+    return running
+
 
 def submit(
     jq: JobQueue,
@@ -238,10 +255,12 @@ def submit(
         if clean_if_exists:
             log.info(f'Found existing job with id "{job_id}". Cleaning it up before resubmitting')
 
-            if jq.is_job_running(job_id):
+            running = update_running_status(job_id, cluster, jq)
+
+            if len(running) > 0:
                 raise ExistingJobException(
-                    'Could not remove running job "{}", aborting!'.format(job_id)
-                )
+                    'Could not remove running job "{job_id}", aborting! (Run "sparkles kill {job_id}" if you want it to stop and resubmit)')
+                
 
             # delete the old job so we can create a new one
             jq.delete_job(job_id)
@@ -566,13 +585,18 @@ def submit_cmd(
 
     max_preemptable_attempts_scale = config.max_preemptable_attempts_scale
 
+    for image_ in [image, config.sparklesworker_image]:
+        ok, err = has_access_to_docker_image(config.credentials.service_account_email, config.credentials, image_)
+        if not ok:
+            raise UserError(f"{config.credentials.service_account_email} does not appear able to read docker image {image_}. This could be due to missing permission or the image not existing: {err}")
+
     mount_ = config.mounts
     submit_config = SubmitConfig(
         service_account_email=config.credentials.service_account_email,  # pyright: ignore
         boot_volume=boot_volume,
         default_url_prefix=default_url_prefix,
         machine_type=machine_type,
-        image=spec["image"],
+        image=image,
         project=config.project,
         monitor_port=config.monitor_port,
         region=config.region,

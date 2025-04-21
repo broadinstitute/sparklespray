@@ -6,7 +6,7 @@ from .gcp_utils import normalize_label, make_unique_label, validate_label
 from .config import Config
 from .model import PersistentDiskMount, DiskMountT
 from typing import List
-
+from .log import log
 def get_consume_command(job_spec: JobSpec):
     consume_runnable = [
         x for x in job_spec.runnables if x.command[0].endswith("consume")
@@ -58,7 +58,7 @@ def create_job_spec(
             str(shutdown_after),  
         ]
 
-        print(f"exec: {' '.join(consume_command)}")
+        log.debug(f"exec: {' '.join(consume_command)}")
 
         runnables = [
             Runnable(

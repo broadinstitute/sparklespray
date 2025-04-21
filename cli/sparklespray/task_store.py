@@ -77,6 +77,8 @@ def task_to_entity(client, o: Task):
         e = datastore.Entity()
         e["timestamp"] = h.timestamp
         e["status"] = h.status
+        e["owner"] = h.owner
+        e["failure_reason"] = h.failure_reason
         history.append(e)
 
     entity["history"] = history

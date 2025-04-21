@@ -50,7 +50,7 @@ def _start_isolated_log_client(entry_point, init_params):
         "sparklespray.livelog.isolated_log_client",
         entry_point,
     ]
-    print(f"Executing: {' '.join(command)}")
+    log.debug(f"Executing: {' '.join(command)}")
     proc = subprocess.Popen(
         command,
         executable=python_executable,

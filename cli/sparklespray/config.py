@@ -363,6 +363,7 @@ class LazyInit:
             self.initialized[name] = value
         return self.initialized[name]
 
+from google.cloud.compute_v1.services.instances import InstancesClient
 
 def create_services_from_config(config: Config, requested: List[str]):
     credentials = config.credentials
@@ -383,7 +384,8 @@ def create_services_from_config(config: Config, requested: List[str]):
         batch_service_client=lambda services: BatchServiceClient(
             credentials=credentials
         ),
-        cluster_api=lambda services: ClusterAPI(services.get("batch_service_client")),
+        compute_engine_client=lambda services: InstancesClient( credentials=credentials),
+        cluster_api=lambda services: ClusterAPI(services.get("batch_service_client"), services.get("compute_engine_client")),
     )
 
     return dict([(name, services.get(name)) for name in requested])
