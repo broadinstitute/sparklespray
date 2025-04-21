@@ -10,7 +10,10 @@ from . import txtui
 import inspect
 import sys, io
 from .gcp_setup import setup_project, grant
-from .task_store import Task
+from .task_store import Task, STATUS_FAILED
+from .job_queue import JobQueue
+from .io_helper import IO
+import json
 
 
 def print_failures(jq: JobQueue, io: IO, jobid, show_all: bool):
