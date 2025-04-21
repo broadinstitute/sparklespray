@@ -51,6 +51,12 @@ class Download:
         return d
 
 
+class UnknownVariable(Exception):
+    def __init__(self, name, defined_names):
+        self.name = name
+        self.defined_names = defined_names
+
+
 def rewrite_argv_with_parameters(argv, parameters):
     l = []
     for task_params in parameters:
@@ -61,7 +67,11 @@ def rewrite_argv_with_parameters(argv, parameters):
                 if m == None:
                     return x
                 else:
-                    x = m.group(1) + task_params[m.group(2)] + m.group(3)
+                    param_name = m.group(2)
+                    if param_name not in task_params:
+                        raise UnknownVariable(param_name, sorted(task_params.keys()))
+                    param_value = task_params[param_name]
+                    x = m.group(1) + param_value + m.group(3)
 
         l.append([expand_parameters(x) for x in argv])
     return l
@@ -188,6 +198,9 @@ def is_executable(filename):
     return os.access(filename, os.X_OK)
 
 
+from .errors import UserError
+
+
 def make_spec_from_command(
     argv,
     docker_image,
@@ -211,7 +224,12 @@ def make_spec_from_command(
     if exclude_patterns is None:
         exclude_patterns = []
 
-    list_of_argvs = rewrite_argv_with_parameters(argv, parameters)
+    try:
+        list_of_argvs = rewrite_argv_with_parameters(argv, parameters)
+    except UnknownVariable as ex:
+        raise UserError(
+            f'Unknown variable "{ex.name}" in command: {argv} (known variables: {ex.defined_names})'
+        )
 
     upload_map, list_of_dl_and_commands = rewrite_argvs_files_to_upload(
         list_of_argvs,

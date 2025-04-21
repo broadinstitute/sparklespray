@@ -108,18 +108,18 @@ def main(argv=None):
         args.func(args, config)
     else:
         func_param_names = get_func_parameters(args.func)
+        func_params = create_func_params(
+            args.config,
+            overrides=overrides,
+            extras={"args": args},
+            requested=func_param_names,
+        )
+
         try:
-            func_params = create_func_params(
-                args.config,
-                overrides=overrides,
-                extras={"args": args},
-                requested=func_param_names,
-            )
+            return args.func(**func_params)
         except UserError as ex:
             print(ex.message)
             return 1
-
-        return args.func(**func_params)
 
 
 if __name__ == "__main__":
