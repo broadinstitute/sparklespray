@@ -30,6 +30,7 @@ def _test_datastore_api(job_store: JobStore, job_id: str):
     assert fetched_job.job_id == job_id
     job_store.delete(job_id)
 
+
 def validate_cmd(jq: JobQueue, io: IO, config: Config, cluster_api: ClusterAPI):
     print(f"Validating config, using sparklespray {sparklespray.__version__}")
 
@@ -48,23 +49,30 @@ def validate_cmd(jq: JobQueue, io: IO, config: Config, cluster_api: ClusterAPI):
     fetched_value = io.get_as_str(sample_url)
     assert sample_value == fetched_value
 
-    print(
-        "Verifying we can read/write from the google datastore service"
-    )
+    print("Verifying we can read/write from the google datastore service")
     _test_datastore_api(jq.job_storage, sample_value)
 
     print("Verifying we can access google's Batch apis by creating test job")
     from ..worker_job import create_test_job
     from ..batch_api import is_job_complete, is_job_successful
     from ..gcp_utils import make_unique_label
-    job = create_test_job("validate-test", make_unique_label("cluster"), config.default_image, service_acct, config)
+
+    job = create_test_job(
+        "validate-test",
+        make_unique_label("cluster"),
+        config.default_image,
+        service_acct,
+        config,
+    )
     operation_id = cluster_api.create_job(config.project, config.location, job, 1)
 
     print(f"Waiting for job {operation_id} to complete ", end="", flush=True)
     while True:
         status = cluster_api.get_job_status(operation_id)
         if is_job_complete(status):
-            assert is_job_successful(status), f"Job did not complete successfully: {status}"
+            assert is_job_successful(
+                status
+            ), f"Job did not complete successfully: {status}"
             break
         else:
             print(".", end="", flush=True)

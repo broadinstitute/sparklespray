@@ -7,6 +7,8 @@ from .config import Config
 from .model import PersistentDiskMount, DiskMountT
 from typing import List
 from .log import log
+
+
 def get_consume_command(job_spec: JobSpec):
     consume_runnable = [
         x for x in job_spec.runnables if x.command[0].endswith("consume")
@@ -26,9 +28,8 @@ def create_job_spec(
     service_account_email,
     machine_type: str,
     location: str,
-     boot_volume : PersistentDiskMount,
-     mounts : List[PersistentDiskMount]
-
+    boot_volume: PersistentDiskMount,
+    mounts: List[PersistentDiskMount],
 ):
     consume_exe_path = os.path.join(work_root_dir, "consume")
     consume_data = os.path.join(work_root_dir, "data")
@@ -55,14 +56,15 @@ def create_job_spec(
             "--shutdownAfter",
             "0",
             "--ftShutdownAfter",
-            str(shutdown_after),  
+            str(shutdown_after),
         ]
 
         log.debug(f"exec: {' '.join(consume_command)}")
 
         runnables = [
             Runnable(
-                image=sparklesworker_image, command=["copyexe", "--dst", consume_exe_path]
+                image=sparklesworker_image,
+                command=["copyexe", "--dst", consume_exe_path],
             ),
             # Runnable(
             #     image=docker_image,
@@ -78,17 +80,21 @@ def create_job_spec(
     assert len(mounts) <= 1, "Does not currently support more than one data mount"
     job = JobSpec(
         task_count="1",
-        runnables=create_runnables(60*10),# keep a worker around for 10 minutes
+        runnables=create_runnables(60 * 10),  # keep a worker around for 10 minutes
         machine_type=machine_type,
         preemptible=True,
         locations=[f"regions/{location}"],
         network_tags=["sparklesworker"],
         monitor_port=monitor_port,
         boot_disk=Disk(
-            name="bootdisk", size_gb=boot_volume.size_in_gb, type=boot_volume.type, mount_path="/"
+            name="bootdisk",
+            size_gb=boot_volume.size_in_gb,
+            type=boot_volume.type,
+            mount_path="/",
         ),
         disks=[
-            Disk(name="data", size_gb=m.size_in_gb, type=m.type, mount_path=m.path) for m in mounts
+            Disk(name="data", size_gb=m.size_in_gb, type=m.type, mount_path=m.path)
+            for m in mounts
         ],
         sparkles_job=job_id,
         sparkles_cluster=cluster_name,
@@ -100,16 +106,20 @@ def create_job_spec(
     return job
 
 
-def create_test_job(job_id : str, cluster_name: str, docker_image: str, service_account_email: str, config: Config):
+def create_test_job(
+    job_id: str,
+    cluster_name: str,
+    docker_image: str,
+    service_account_email: str,
+    config: Config,
+):
     validate_label(job_id)
     timestamp = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
 
     job = JobSpec(
         task_count="1",
         runnables=[
-            Runnable(
-                image=docker_image, command=["echo", "test"]
-            ),
+            Runnable(image=docker_image, command=["echo", "test"]),
         ],
         machine_type="n4-standard-2",
         preemptible=True,

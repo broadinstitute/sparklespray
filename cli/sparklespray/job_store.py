@@ -25,6 +25,7 @@ JOB_STATUS_KILLED = "killed"
 
 import json
 
+
 def job_to_entity(client, o):
     entity_key = client.key("Job", o.job_id)
     entity = datastore.Entity(key=entity_key, exclude_from_indexes=("kube_job_spec",))
@@ -115,4 +116,3 @@ class JobStore:
         query.order = ["-submit_time"]
         job_entity = list(query.fetch(limit=1))[0]
         return entity_to_job(job_entity)
-

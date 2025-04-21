@@ -159,8 +159,11 @@ def _make_cluster_name(
         hash.update(machine_json.encode("utf8"))
         return f"c-{hash.hexdigest()[:20]}"
 
+
 from ..gcp_permissions import has_access_to_docker_image
-def update_running_status(job_id: str, cluster : Cluster, jq: JobQueue):
+
+
+def update_running_status(job_id: str, cluster: Cluster, jq: JobQueue):
     # todo: refactor into a method which updates job status
     possibly_running = jq.get_possibily_running_tasks(job_id)
     running = []
@@ -184,19 +187,19 @@ def submit(
     spec: dict,
     config: SubmitConfig,
     datastore_client,
-    cluster : Cluster,
+    cluster: Cluster,
     metadata: Dict[str, str] = {},
     clean_if_exists: bool = False,
 ):
     """
     Submit a job to the Sparklespray execution system.
-    
+
     This function handles the core job submission process, including:
     - Generating or retrieving SSL certificates for secure communication
     - Expanding task specifications
     - Creating the cluster configuration
     - Submitting the job to the job queue
-    
+
     Args:
         jq: JobQueue instance for storing job and task information
         io: IO helper for interacting with cloud storage
@@ -207,7 +210,7 @@ def submit(
         cluster: Cluster instance for managing compute resources
         metadata: Optional dictionary of metadata to attach to the job
         clean_if_exists: If True, remove any existing job with the same ID before submission
-        
+
     Raises:
         ExistingJobException: If a job with the same ID exists and clean_if_exists is False
     """
@@ -253,14 +256,16 @@ def submit(
     existing_job = jq.get_job_optional(job_id)
     if existing_job is not None:
         if clean_if_exists:
-            log.info(f'Found existing job with id "{job_id}". Cleaning it up before resubmitting')
+            log.info(
+                f'Found existing job with id "{job_id}". Cleaning it up before resubmitting'
+            )
 
             running = update_running_status(job_id, cluster, jq)
 
             if len(running) > 0:
                 raise ExistingJobException(
-                    'Could not remove running job "{job_id}", aborting! (Run "sparkles kill {job_id}" if you want it to stop and resubmit)')
-                
+                    'Could not remove running job "{job_id}", aborting! (Run "sparkles kill {job_id}" if you want it to stop and resubmit)'
+                )
 
             # delete the old job so we can create a new one
             jq.delete_job(job_id)
@@ -279,8 +284,6 @@ def submit(
         ), "Cannot create jobs in multiple zones if you are mounting PD volumes"
     #        cluster.ensure_named_volumes_exist(config.zones[0], config.mounts)
 
-    
-
     job = create_job_spec(
         job_id,
         config.sparklesworker_image,
@@ -293,7 +296,7 @@ def submit(
         config.machine_type,
         config.region,
         config.boot_volume,
-        config.mounts
+        config.mounts,
     )
 
     pipeline_spec = job.model_dump_json()
@@ -476,14 +479,16 @@ def add_submit_cmd(subparser):
 
 
 def submit_cmd(
-    jq: JobQueue, 
-    io: IO, 
-    datastore_client: datastore.Client, 
-    cluster_api: ClusterAPI, 
-    args: argparse.Namespace, 
-    config: Config
+    jq: JobQueue,
+    io: IO,
+    datastore_client: datastore.Client,
+    cluster_api: ClusterAPI,
+    args: argparse.Namespace,
+    config: Config,
 ):
-    metadata: Dict[str, str] = {"UUID": str(uuid.uuid4()) } # assign it a unique ID so we can recognize when a job has been resubmitted with the same name
+    metadata: Dict[str, str] = {
+        "UUID": str(uuid.uuid4())
+    }  # assign it a unique ID so we can recognize when a job has been resubmitted with the same name
 
     if args.image:
         image = args.image
@@ -586,9 +591,13 @@ def submit_cmd(
     max_preemptable_attempts_scale = config.max_preemptable_attempts_scale
 
     for image_ in [image, config.sparklesworker_image]:
-        ok, err = has_access_to_docker_image(config.credentials.service_account_email, config.credentials, image_)
+        ok, err = has_access_to_docker_image(
+            config.credentials.service_account_email, config.credentials, image_
+        )
         if not ok:
-            raise UserError(f"{config.credentials.service_account_email} does not appear able to read docker image {image_}. This could be due to missing permission or the image not existing: {err}")
+            raise UserError(
+                f"{config.credentials.service_account_email} does not appear able to read docker image {image_}. This could be due to missing permission or the image not existing: {err}"
+            )
 
     mount_ = config.mounts
     submit_config = SubmitConfig(

@@ -10,8 +10,10 @@ from . import txtui
 import inspect
 import sys, io
 
+
 def get_func_parameters(func):
     return inspect.getfullargspec(func)[0]
+
 
 def sparkles_main():
     # disable stdout/stderr buffering to work better when run non-interactively
@@ -22,8 +24,6 @@ def sparkles_main():
     retcode = main()
     if retcode is not None:
         sys.exit(retcode)
-
-
 
 
 def main(argv=None):

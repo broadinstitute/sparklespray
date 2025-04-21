@@ -38,9 +38,13 @@ class MinConfig(Protocol):
     def location(self) -> str:
         ...
 
+
 from .job_queue import JobQueue
 
-def create_cluster(config: MinConfig, jq : JobQueue, datastore_client, cluster_api, job_id):
+
+def create_cluster(
+    config: MinConfig, jq: JobQueue, datastore_client, cluster_api, job_id
+):
     job = jq.get_job_must(job_id)
 
     return Cluster(
@@ -59,12 +63,12 @@ def create_cluster(config: MinConfig, jq : JobQueue, datastore_client, cluster_a
 class Cluster:
     """
     Manages a compute cluster for executing distributed tasks.
-    
+
     The Cluster class provides an interface for managing compute resources in Google Cloud,
     including provisioning nodes, tracking node requests, and monitoring task execution.
     It serves as the bridge between the job/task storage layer and the actual compute
     infrastructure.
-    
+
     Attributes:
         project: Google Cloud project ID
         client: Datastore client for storage operations
@@ -76,6 +80,7 @@ class Cluster:
         location: Google Cloud region where the cluster is deployed
         _cluster_id: Cached cluster ID (lazily loaded)
     """
+
     def __init__(
         self,
         project: str,
@@ -132,10 +137,13 @@ class Cluster:
         self.cluster_api.delete_node_reqs(self.project, self.location, self.cluster_id)
 
     def delete_complete_requests(self):
-        self.cluster_api.delete_node_reqs(self.project, self.location, self.cluster_id, only_terminal_reqs=True)
+        self.cluster_api.delete_node_reqs(
+            self.project, self.location, self.cluster_id, only_terminal_reqs=True
+        )
 
     def is_live_owner(self, owner):
         return self.cluster_api.is_instance_running(owner)
+
 
 class CachingCaller:
     def __init__(self, fn, expiry_time=5):

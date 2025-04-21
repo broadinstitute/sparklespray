@@ -38,8 +38,8 @@ class Disk(BaseModel):
 class JobSpec(BaseModel):
     task_count: str
 
-    runnables: List[Runnable] # normal workers
-    
+    runnables: List[Runnable]  # normal workers
+
     machine_type: str
     preemptible: bool
     # Each location can be a region or a zone. Only one region or multiple zones in one region is supported now. For example, ["regions/us-central1"] allow VMs in any zones in region us-central1. ["zones/us-central1-a", "zones/us-central1-c"] only allow VMs in zones us-central1-a and us-central1-c.
@@ -77,7 +77,7 @@ def _create_runnables(runnables: List[Runnable], disks: List[Disk], monitor_port
                 image_uri=runnable.image,
                 commands=runnable.command,
                 volumes=[f"{disk.mount_path}:{disk.mount_path}" for disk in disks],
-                options=f"-p {monitor_port}:{monitor_port}"
+                options=f"-p {monitor_port}:{monitor_port}",
                 # "enableImageStreaming": True
             ),
         )
@@ -98,21 +98,24 @@ def _create_disks(disks: List[Disk]):
 def _create_parent_id(project, location):
     return f"projects/{project}/locations/{location}"
 
+
 def create_batch_job_from_job_spec(
     project: str, location: str, self: JobSpec, worker_count: int
 ):
     # batch api only supports a single group at this time
     # BATCH_TASK_INDEX
-    task_groups = [batch.TaskGroup(
-                    task_count=worker_count,
-                    task_count_per_node="1",
-                    task_spec=batch.TaskSpec(
-                        runnables=_create_runnables(
-                            self.runnables, self.disks, self.monitor_port
-                        ),
-                        volumes=_create_volumes(self.disks),
-                    ),
-                )]
+    task_groups = [
+        batch.TaskGroup(
+            task_count=worker_count,
+            task_count_per_node="1",
+            task_spec=batch.TaskSpec(
+                runnables=_create_runnables(
+                    self.runnables, self.disks, self.monitor_port
+                ),
+                volumes=_create_volumes(self.disks),
+            ),
+        )
+    ]
 
     job = batch.Job(
         task_groups=task_groups,
@@ -164,7 +167,7 @@ class Event(BaseModel):
     description: str
     timestamp: float
 
-            
+
 def to_node_reqs(job: batch.Job):
     # convert batch API states to the slightly simpler set that sparkles is using
 
@@ -200,7 +203,7 @@ def to_node_reqs(job: batch.Job):
         node_class = NODE_REQ_CLASS_NORMAL
 
     node_reqs = []
-    #breakpoint()
+    # breakpoint()
     for status_task_group in dict(job.status.task_groups).values():
         for task_state, task_state_count in status_task_group.counts.items():
             if task_state in [batch.TaskStatus.State.PENDING.name]:
@@ -214,12 +217,14 @@ def to_node_reqs(job: batch.Job):
             elif task_state in [batch.TaskStatus.State.SUCCEEDED.name]:
                 state = NODE_REQ_COMPLETE
             else:
-                assert task_state in [batch.TaskStatus.State.UNEXECUTED.name
+                assert task_state in [
+                    batch.TaskStatus.State.UNEXECUTED.name
                 ], f"state was {task_state}"
                 state = NODE_REQ_FAILED
 
             for _ in range(task_state_count):
-                node_reqs.append(NodeReq(
+                node_reqs.append(
+                    NodeReq(
                         operation_id=job.name,
                         cluster_id=cluster_id,
                         status=state,
@@ -232,7 +237,8 @@ def to_node_reqs(job: batch.Job):
                 tasks_accounted_for += 1
 
     while tasks_accounted_for < task_group.task_count:
-        node_reqs.append(NodeReq(
+        node_reqs.append(
+            NodeReq(
                 operation_id=job.name,
                 cluster_id=cluster_id,
                 status=NODE_REQ_SUBMITTED,
@@ -244,7 +250,7 @@ def to_node_reqs(job: batch.Job):
         )
         tasks_accounted_for += 1
 
-#    assert task_group.task_count == tasks_accounted_for, f"Job defined to have {task_group.task_count} workers, but only {tasks_accounted_for} workers reported status"
+    #    assert task_group.task_count == tasks_accounted_for, f"Job defined to have {task_group.task_count} workers, but only {tasks_accounted_for} workers reported status"
     return node_reqs
 
 
@@ -260,20 +266,30 @@ class EventPrinter:
                 self.last_event = event.timestamp
                 print(event.description)
 
-TERMINAL_STATES = set([
-    batch.JobStatus.State.CANCELLED,
-    batch.JobStatus.State.FAILED,
-    batch.JobStatus.State.SUCCEEDED
-])
+
+TERMINAL_STATES = set(
+    [
+        batch.JobStatus.State.CANCELLED,
+        batch.JobStatus.State.FAILED,
+        batch.JobStatus.State.SUCCEEDED,
+    ]
+)
+
 
 def is_job_complete(job: batch.Job):
     return job.status.state in TERMINAL_STATES
 
+
 def is_job_successful(job: batch.Job):
     return job.status.state == batch.JobStatus.State.SUCCEEDED
 
+
 class ClusterAPI:
-    def __init__(self, batch_service_client : BatchServiceClient, compute_engine_client : InstancesClient):
+    def __init__(
+        self,
+        batch_service_client: BatchServiceClient,
+        compute_engine_client: InstancesClient,
+    ):
         self.batch_service = batch_service_client
         self.compute_engine_client = compute_engine_client
 
@@ -293,7 +309,9 @@ class ClusterAPI:
         response = self.batch_service.get_job(batch.GetJobRequest(name=name))
         return response
 
-    def delete_node_reqs(self, project: str, location: str, cluster_id: str, only_terminal_reqs=False):
+    def delete_node_reqs(
+        self, project: str, location: str, cluster_id: str, only_terminal_reqs=False
+    ):
         jobs = self._get_jobs_with_label(
             project, location, "sparkles-cluster", cluster_id
         )
@@ -307,7 +325,7 @@ class ClusterAPI:
         jobs = self._get_jobs_with_label(
             project, location, "sparkles-cluster", cluster_id
         )
-        jobs= list(jobs)
+        jobs = list(jobs)
         # if len(jobs) > 0:
         #     breakpoint()
         node_reqs = []
@@ -324,13 +342,17 @@ class ClusterAPI:
                 filter=f"labels.{key}={json.dumps(value)}",
             )
         )
-    
+
     def _get_tasks_for_job(self, job: batch.Job):
         tasks = []
         for task_group in job.task_groups:
-            these = list(self.batch_service.list_tasks(batch.ListTasksRequest(parent=task_group.name)))
+            these = list(
+                self.batch_service.list_tasks(
+                    batch.ListTasksRequest(parent=task_group.name)
+                )
+            )
             breakpoint()
-            tasks.extend(these            )
+            tasks.extend(these)
         return tasks
 
     def is_instance_running(self, instance_uri):
@@ -339,11 +361,14 @@ class ClusterAPI:
         project, zone, instance = m.groups()
 
         try:
-            self.compute_engine_client.get(compute.GetInstanceRequest(        instance=instance,
-        project=project,
-        zone=zone))
+            self.compute_engine_client.get(
+                compute.GetInstanceRequest(
+                    instance=instance, project=project, zone=zone
+                )
+            )
         except NotFound:
             return False
         return True
+
 
 import re

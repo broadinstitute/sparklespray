@@ -31,6 +31,7 @@ def make_unique_label(label):
     validate_label(new_label)
     return new_label
 
+
 def get_region(zone):
     # drop the zone suffix to get the name of the region
     # that contains the zone

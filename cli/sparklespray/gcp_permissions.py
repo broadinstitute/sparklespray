@@ -2,17 +2,22 @@ import requests
 import re
 from dataclasses import dataclass
 
+
 class DockerImageError(Exception):
     pass
+
 
 class AccessDenied(DockerImageError):
     pass
 
+
 class ImageNotFound(DockerImageError):
     pass
 
+
 def _get_access_token(credentials):
     import google.auth.transport.requests
+
     request = google.auth.transport.requests.Request()
     credentials.refresh(request)
     access_token = credentials.token
@@ -23,7 +28,7 @@ def has_access_to_docker_image(service_account, credentials, docker_image):
     """Returns True if this service account has access to pull the docker image, otherwise
     False."""
     try:
-        _check_access_to_docker_image(service_account,credentials, docker_image)
+        _check_access_to_docker_image(service_account, credentials, docker_image)
     except DockerImageError as ex:
         return False, ex
     return True, None
@@ -31,12 +36,12 @@ def has_access_to_docker_image(service_account, credentials, docker_image):
 
 def _check_access_to_docker_image(service_account, credentials, docker_image):
     "Tests to make sure that the given service account can read the docker_image. Throws an assertion error if not"
-    
+
     access_token = _get_access_token(credentials)
 
     parsed_image_name = parse_docker_image_name(docker_image)
 
-    # Now attempt to retreive the docker image manifest to see if we have access. 
+    # Now attempt to retreive the docker image manifest to see if we have access.
     # Expecting either success, manifest doesn't exist, or permission denied
     manifest_url = f"https://{parsed_image_name.host}:{parsed_image_name.port}/v2/{parsed_image_name.path}/manifests/{parsed_image_name.tag}"
 
@@ -88,6 +93,7 @@ class ArtifactRegistryPath(DockerImageName):
     project: str
     repository: str
     image_name: str
+
 
 def _default_to(value, default):
     if value is None or value == "":

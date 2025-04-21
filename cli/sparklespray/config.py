@@ -150,7 +150,9 @@ def _parse_gcloud_config(gcloud_config_file: str, verbose: bool) -> GCloudConfig
 def load_config(
     config_file: str,
     overrides: Dict[str, str],
-    gcloud_config_file: Optional[str] = "~/.config/gcloud/configurations/config_default",
+    gcloud_config_file: Optional[
+        str
+    ] = "~/.config/gcloud/configurations/config_default",
     verbose: bool = False,
 ) -> Config:
 
@@ -285,7 +287,11 @@ def load_config(
         default_boot_drive_type = "pd-balanced"
 
     # assuming 40 GB is enough. A better default would be based on the docker image size
-    config.boot_volume = PersistentDiskMount(size_in_gb=consume("boot_volume_in_gb", 40, int), type=consume("boot_volume_type", default_boot_drive_type), path="/")
+    config.boot_volume = PersistentDiskMount(
+        size_in_gb=consume("boot_volume_in_gb", 40, int),
+        type=consume("boot_volume_type", default_boot_drive_type),
+        path="/",
+    )
 
     mount_count = consume("mount_count", 1, int)
     mounts = []
@@ -363,7 +369,9 @@ class LazyInit:
             self.initialized[name] = value
         return self.initialized[name]
 
+
 from google.cloud.compute_v1.services.instances import InstancesClient
+
 
 def create_services_from_config(config: Config, requested: List[str]):
     credentials = config.credentials
@@ -384,8 +392,10 @@ def create_services_from_config(config: Config, requested: List[str]):
         batch_service_client=lambda services: BatchServiceClient(
             credentials=credentials
         ),
-        compute_engine_client=lambda services: InstancesClient( credentials=credentials),
-        cluster_api=lambda services: ClusterAPI(services.get("batch_service_client"), services.get("compute_engine_client")),
+        compute_engine_client=lambda services: InstancesClient(credentials=credentials),
+        cluster_api=lambda services: ClusterAPI(
+            services.get("batch_service_client"), services.get("compute_engine_client")
+        ),
     )
 
     return dict([(name, services.get(name)) for name in requested])

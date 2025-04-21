@@ -18,17 +18,17 @@ def run_tasks(
 ):
     """
     Runs a set of periodic monitoring tasks for a specific job and cluster.
-    
+
     This function schedules and executes monitoring tasks at appropriate intervals,
     managing their lifecycle until completion. It uses a priority queue to determine
     which task to run next based on scheduled execution time.
-    
+
     Args:
         job_id: The ID of the job being monitored
         cluster_id: The ID of the cluster running the job
         tasks: List of PeriodicTask objects to be scheduled and executed
         cluster: Cluster object providing access to task and node information
-        
+
     Returns:
         None. Tasks run until they signal completion via StopPolling.
     """

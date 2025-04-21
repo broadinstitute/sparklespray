@@ -7,7 +7,7 @@ from .task_store import (
     STATUS_FAILED,
     STATUS_COMPLETE,
     STATUS_PENDING,
-    STATUS_KILLED
+    STATUS_KILLED,
 )
 from .job_store import JobStore, Job, JOB_STATUS_SUBMITTED, JOB_STATUS_KILLED
 from .task_store import TaskStore, TaskHistory, Task
@@ -216,4 +216,3 @@ class JobQueue:
         #        log.info(f"in delete_job flushing batch: {batch}")
 
         batch.flush()
-

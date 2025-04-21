@@ -9,20 +9,20 @@ from ..cluster_service import Cluster, create_cluster
 def kill_cmd(jq: JobQueue, args, config, datastore_client, cluster_api):
     """
     Terminate a running Sparklespray job and optionally its cluster.
-    
+
     This function handles the process of killing a job, including:
     - Marking the job as killed in the job store
     - Optionally stopping the compute cluster associated with the job
     - Resetting claimed tasks to allow them to be properly terminated
     - Marking any pending tasks as killed to prevent further execution
-    
+
     Args:
         jq: JobQueue instance for accessing job and task information
         args: Command line arguments containing jobid_pattern and keepcluster flag
         config: Configuration object with project settings
         datastore_client: Google Cloud Datastore client
         cluster_api: API for interacting with compute clusters
-        
+
     Returns:
         None
     """
