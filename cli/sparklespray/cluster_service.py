@@ -31,7 +31,6 @@ from typing import Protocol
 
 class MinConfig(Protocol):
     project: str
-    zones: List[str]
     debug_log_prefix: str
 
     @property

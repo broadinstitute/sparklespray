@@ -6,13 +6,13 @@ from .shared import _get_jobids_from_pattern
 from ..cluster_service import Cluster, create_cluster
 
 
-def kill(jq: JobQueue, config, datastore_client, cluster_api, job_id):
+def kill(jq: JobQueue, config, datastore_client, cluster_api, job_id, keepcluster):
     # TODO: stop just marks the job as it shouldn't run any more.  tasks will still be claimed.
     cluster = create_cluster(config, jq, datastore_client, cluster_api, job_id)
     log.info("Marking %s as killed", job_id)
     ok, job = jq.kill_job(job_id)
     assert ok
-    if not args.keepcluster:
+    if not keepcluster:
         cluster.stop_cluster()
         jq.reset(job_id, None, statuses_to_clear=[STATUS_CLAIMED])
 
@@ -47,7 +47,7 @@ def kill_cmd(jq: JobQueue, args, config, datastore_client, cluster_api):
     if len(job_ids) == 0:
         log.warning("No jobs found matching pattern")
     for job_id in job_ids:
-        kill(jq, config, datastore_client, cluster_api, job_id)
+        kill(jq, config, datastore_client, cluster_api, job_id, args.keepcluster)
 
 
 def add_kill_cmd(subparser):

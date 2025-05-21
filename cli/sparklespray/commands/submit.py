@@ -683,7 +683,7 @@ def submit_cmd(
                 f"Found existing job {job_id} with different runtime environment. Stopping any running instances before proceeding"
             )
 
-            kill(jq, cluster, datastore_client, cluster_api, job_id)
+            kill(jq, cluster, datastore_client, cluster_api, job_id, keepcluster=False)
         if existing_job:
             txtui.user_print(
                 f"Found existing job {job_id} with different specification. Removing before submitting new job."

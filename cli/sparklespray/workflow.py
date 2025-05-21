@@ -414,7 +414,9 @@ def add_workflow_cmd(subparser):
     run_parser.set_defaults(func=workflow_run_cmd)
 
 
-def workflow_run_cmd(jq: JobQueue, io: IO, cluster: Cluster, config: Config, args):
+def workflow_run_cmd(
+    jq: JobQueue, io: IO, cluster: Cluster, config: Config, args, datastore_client
+):
     """Command handler for 'workflow run'."""
     # Create a SparklesInterface implementation that uses the provided services
     class SparklesImpl(SparklesInterface):
@@ -427,11 +429,8 @@ def workflow_run_cmd(jq: JobQueue, io: IO, cluster: Cluster, config: Config, arg
 
         def job_exists(self, name: str) -> bool:
             # Check if job exists by trying to get it
-            try:
-                jq.get_job(name)
-                return True
-            except:
-                return False
+            job = jq.get_job_optional(name)
+            return job is not None
 
         def clear_failed(self, name: str):
             # Reset failed tasks to pending
@@ -439,11 +438,12 @@ def workflow_run_cmd(jq: JobQueue, io: IO, cluster: Cluster, config: Config, arg
 
         def wait_for_completion(self, name: str):
             # Use the existing watch functionality to wait for completion
-            from .watch import watch
+            from .commands.watch import watch
 
             completed_successfully = watch(
-                io, jq, name, cluster, target_nodes=self.target_nodes
+                io, jq, cluster, target_nodes=self.target_nodes
             )
+
             if not completed_successfully:
                 raise Exception("Job did not complete successfully")
 
@@ -482,7 +482,14 @@ def workflow_run_cmd(jq: JobQueue, io: IO, cluster: Cluster, config: Config, arg
 
                 print(f"Executing: sub {' '.join(submit_cmd_args)}")
                 args = construct_submit_cmd_args(submit_cmd_args)
-                exit_code = submit_cmd(jq, io, cluster, args, config)
+                exit_code = submit_cmd(
+                    jq=jq,
+                    io=io,
+                    cluster_api=cluster.cluster_api,
+                    args=args,
+                    config=config,
+                    datastore_client=datastore_client,
+                )
                 if exit_code != 0:
                     raise Exception("Sparkles job failed with exit code {exit_code}")
 

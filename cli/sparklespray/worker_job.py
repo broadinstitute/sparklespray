@@ -7,6 +7,7 @@ from .config import Config
 from .model import PersistentDiskMount, DiskMountT
 from typing import List
 from .log import log
+from typing import cast
 
 
 def get_consume_command(job_spec: JobSpec):
@@ -94,7 +95,7 @@ def create_job_spec(
         ),
         disks=[
             Disk(name="data", size_gb=m.size_in_gb, type=m.type, mount_path=m.path)
-            for m in mounts
+            for m in cast(List[PersistentDiskMount], mounts)
         ],
         sparkles_job=job_id,
         sparkles_cluster=cluster_name,

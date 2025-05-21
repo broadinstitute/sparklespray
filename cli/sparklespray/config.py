@@ -99,7 +99,7 @@ class Config:
 
     @property
     def service_account_email(self):
-        return self.credentials.service_account_email
+        return self.credentials.service_account_email  # pyright: ignore
 
     def create_machine_specs(self):
         return MachineSpec(

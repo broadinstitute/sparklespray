@@ -59,7 +59,13 @@ def watch_cmd(
 
     max_preemptable_attempts_scale = config.max_preemptable_attempts_scale
 
-    cluster = create_cluster(config, jq, datastore_client, cluster_api, job_id)
+    cluster = create_cluster(
+        config=config,
+        jq=jq,
+        datastore_client=datastore_client,
+        cluster_api=cluster_api,
+        job_id=job_id,
+    )
 
     watch(
         io,

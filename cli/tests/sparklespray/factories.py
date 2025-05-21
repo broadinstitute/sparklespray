@@ -11,6 +11,7 @@ class DatastoreClientSimulator:
     """
     A simulator for the Google Cloud Datastore client that stores entities in memory.
     """
+
     def __init__(self):
         self.entities: Dict[str, Dict[str, Any]] = {}
         self.next_id = 1
@@ -38,16 +39,16 @@ class DatastoreClientSimulator:
         """Store an entity."""
         key = entity.key
         key_str = f"{key.kind}:{key.name}"
-        
+
         # Convert entity to dict for storage
         entity_dict = {}
         for k, v in entity.items():
             assert not isinstance(v, MagicMock)
             entity_dict[k] = v
-        
+
         self.entities[key_str] = entity_dict
         return key
-        
+
     def put_multi(self, entities):
         """Store multiple entities."""
         keys = []
@@ -60,7 +61,7 @@ class DatastoreClientSimulator:
         key_str = f"{key.kind}:{key.name}"
         if key_str in self.entities:
             del self.entities[key_str]
-            
+
     def delete_multi(self, keys):
         """Delete multiple entities by keys."""
         for key in keys:
@@ -70,7 +71,7 @@ class DatastoreClientSimulator:
         """Create a query for the given kind."""
         query = MagicMock()
         query.kind = kind
-        
+
         def fetch(limit=None):
             results = []
             for key_str, entity_dict in self.entities.items():
@@ -81,8 +82,8 @@ class DatastoreClientSimulator:
                         assert comparison == "="
                         if entity_dict[property] != value:
                             matched_filters = False
-                    
-                    if not matched_filters: 
+
+                    if not matched_filters:
                         continue
 
                     entity_kind, entity_id = key_str.split(":", maxsplit=1)
@@ -94,43 +95,47 @@ class DatastoreClientSimulator:
                     if limit is not None and len(results) >= limit:
                         break
             return results
-        
+
         query.fetch = fetch
         return query
 
 
 class MockIO(IO):
     """Mock IO helper for testing."""
+
     def __init__(self):
         self.files = {}
-        self.exists_results = {}
+        self.exists_results: Dict[str, bool] = {}
         self.bulk_exists_results = {}
-        
-    def exists(self, path):
-        return self.exists_results.get(path, False)
-        
+
+    def exists(self, src_url):
+        return self.exists_results.get(src_url, False)
+
     def bulk_exists_check(self, paths):
         if self.bulk_exists_results:
             return self.bulk_exists_results
         return {path: False for path in paths}
-        
+
     def put(self, src_filename, dst_url, must=True, skip_if_exists=False):
         if os.path.exists(src_filename):
-            with open(src_filename, 'rb') as f:
+            with open(src_filename, "rb") as f:
                 self.files[dst_url] = f.read()
         else:
             self.files[dst_url] = b"mock content"
         return dst_url
-        
-    def write_json_to_cas(self, data):
-        url = f"gs://mock-cas/{hash(json.dumps(data, sort_keys=True))}"
-        self.files[url] = json.dumps(data).encode('utf-8')
+
+    def write_json_to_cas(self, obj):
+        obj_bytes = json.dumps(obj, sort_keys=True).encode("utf-8")
+        url = f"gs://mock-cas/{hash(obj_bytes)}"
+        self.files[url] = obj_bytes
         return url
-        
+
     def write_file_to_cas(self, filename):
-        url = f"gs://mock-cas/{hash(filename)}"
-        self.files[url] = b"mock content"
+        with open(filename, "rb") as fd:
+            content = fd.read()
+        url = f"gs://mock-cas/{hash(content)}"
+        self.files[url] = content
         return url
-        
-    def get_child_keys(self, prefix):
-        return [k for k in self.files.keys() if k.startswith(prefix)]
+
+    def get_child_keys(self, src_url):
+        return [k for k in self.files.keys() if k.startswith(src_url)]
