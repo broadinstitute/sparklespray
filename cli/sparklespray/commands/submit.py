@@ -707,6 +707,15 @@ def submit_cmd(
     successful_execution = True
     if args.wait_for_completion:
         log.info("Waiting for job to terminate")
+
+        cluster = create_cluster(
+            config=config,
+            jq=jq,
+            datastore_client=datastore_client,
+            cluster_api=cluster_api,
+            job_id=job_id,
+        )
+
         successful_execution = watch(
             io, jq, cluster, target_nodes=target_node_count, loglive=True
         )

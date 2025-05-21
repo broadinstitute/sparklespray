@@ -2,6 +2,7 @@ import json
 import os
 import csv
 import subprocess
+from .errors import UserError
 from typing import Dict, Any, List, Optional, Tuple
 from pydantic import BaseModel, Field, validator, root_validator
 from .job_queue import JobQueue
@@ -287,6 +288,10 @@ def run_workflow(
                 all_files_to_localize.extend(step.files_to_localize)
 
             for dst in all_files_to_localize:
+                if dst not in src_path_by_dest:
+                    raise UserError(
+                        f"{dst} is listed as a file to localize, but it was never listed as a file to upload"
+                    )
                 src = src_path_by_dest[dst]
                 uploads_for_step.add((src, dst))
 
@@ -415,7 +420,7 @@ def add_workflow_cmd(subparser):
 
 
 def workflow_run_cmd(
-    jq: JobQueue, io: IO, cluster: Cluster, config: Config, args, datastore_client
+    jq: JobQueue, io: IO, cluster_api, config: Config, args, datastore_client
 ):
     """Command handler for 'workflow run'."""
     # Create a SparklesInterface implementation that uses the provided services
@@ -438,10 +443,18 @@ def workflow_run_cmd(
 
         def wait_for_completion(self, name: str):
             # Use the existing watch functionality to wait for completion
-            from .commands.watch import watch
+            from .commands.watch import watch, create_cluster
+
+            cluster = create_cluster(
+                config=config,
+                jq=jq,
+                datastore_client=datastore_client,
+                cluster_api=cluster_api,
+                job_id=name,
+            )
 
             completed_successfully = watch(
-                io, jq, cluster, target_nodes=self.target_nodes
+                io=io, jq=jq, cluster=cluster, target_nodes=self.target_nodes
             )
 
             if not completed_successfully:
@@ -485,7 +498,7 @@ def workflow_run_cmd(
                 exit_code = submit_cmd(
                     jq=jq,
                     io=io,
-                    cluster_api=cluster.cluster_api,
+                    cluster_api=cluster_api,
                     args=args,
                     config=config,
                     datastore_client=datastore_client,

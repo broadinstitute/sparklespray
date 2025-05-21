@@ -67,7 +67,7 @@ def watch_cmd(
         job_id=job_id,
     )
 
-    watch(
+    successful = watch(
         io,
         jq,
         cluster,
@@ -75,6 +75,11 @@ def watch_cmd(
         loglive=args.loglive,
         max_preemptable_attempts_scale=max_preemptable_attempts_scale,
     )
+
+    if successful:
+        return 0
+    else:
+        return 1
 
 
 def watch(
@@ -86,7 +91,7 @@ def watch(
     initial_poll_delay=1.0,
     max_poll_delay=30.0,
     loglive=None,
-):
+) -> bool:
     """
     Monitor and manage a running Sparklespray job cluster.
 
@@ -160,9 +165,16 @@ def watch(
 
     try:
         run_tasks(job_id, job.cluster, tasks, cluster)
+
+        tasks = cluster.task_store.get_tasks(job_id=job_id)
+        for task in tasks:
+            if task.status != STATUS_COMPLETE:
+                return False
+
+        return True
     except KeyboardInterrupt:
         print("Interrupted -- Exiting, but your job will continue to run unaffected.")
-        return 20
+        return False
 
 
 def _wait_until_tasks_exist(cluster: Cluster, job_id: str):
