@@ -3,7 +3,7 @@ name = "sparklespray"
 version = "5.2.0"
 description = "CLI for submitting batch jobs to GCP for execution"
 authors = ["Philip Montgomery <pmontgom@broadinstitute.org>"]
-include = ["sparklespray/bin/kubequeconsume"]
+include = ["sparklespray/bin/sparklesworker"]
 
 [tool.poetry.dependencies]
 python = "^3.10"
