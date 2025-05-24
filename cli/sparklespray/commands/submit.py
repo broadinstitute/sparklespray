@@ -675,7 +675,7 @@ def submit_cmd(
 
     if args.skipifexists and already_submitted and (not needs_kill_before_submit):
         txtui.user_print(
-            f"Found existing job {job_id} with identical specification. Skipping submission."
+            f"Found existing job {job_id} and --skipifexists was specified. Skipping submission."
         )
     else:
         if needs_kill_before_submit:
@@ -686,7 +686,7 @@ def submit_cmd(
             kill(jq, cluster, datastore_client, cluster_api, job_id, keepcluster=False)
         if existing_job:
             txtui.user_print(
-                f"Found existing job {job_id} with different specification. Removing before submitting new job."
+                f"Found existing job named {job_id}. Removing before submitting new job."
             )
             delete(cluster, jq, job_id)
         txtui.user_print(f"Submitting job: {job_id}")
