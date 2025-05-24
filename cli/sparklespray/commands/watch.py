@@ -168,7 +168,7 @@ def watch(
 
         tasks = cluster.task_store.get_tasks(job_id=job_id)
         for task in tasks:
-            if task.status != STATUS_COMPLETE:
+            if task.status != STATUS_COMPLETE or str(task.exit_code) != "0":
                 return False
 
         return True
