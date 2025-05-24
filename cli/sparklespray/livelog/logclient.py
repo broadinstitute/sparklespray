@@ -64,7 +64,6 @@ def _start_isolated_log_client(entry_point, init_params):
     writer = Writer(proc.stdin)
     reader = Reader(proc.stdout)
 
-    print("writing init params")
     writer.write_obj(init_params)
     return proc, reader, writer, t
 
