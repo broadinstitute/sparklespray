@@ -2,7 +2,7 @@ from .runner_types import PeriodicTask, NextPoll, ClusterStateQuery
 from .shared import (
     _count_incomplete_tasks,
     _count_preempt_attempt,
-    _count_requested_nodes,
+    _count_active_nodes,
 )
 from ..cluster_service import Cluster
 from .runner import StopPolling
@@ -32,7 +32,7 @@ class ResizeCluster(PeriodicTask):
             self.target_node_count, _count_incomplete_tasks(state.get_tasks())
         )
 
-        requested_nodes = _count_requested_nodes(state.get_nodes())
+        requested_nodes = _count_active_nodes(state.get_nodes())
         additional_nodes = max(0, target_node_count - requested_nodes)
 
         if additional_nodes > 0:

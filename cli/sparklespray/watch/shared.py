@@ -73,7 +73,7 @@ def _count_incomplete_tasks(tasks: List[Task]):
     return sum([1 for task in tasks if not is_terminal_status(task.status)])
 
 
-def _count_requested_nodes(node_reqs: List[NodeReq]):
+def _count_active_nodes(node_reqs: List[NodeReq]):
     return sum([1 for o in node_reqs if o.status in REQUESTED_NODE_STATES])
 
 
