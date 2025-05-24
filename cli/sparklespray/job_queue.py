@@ -213,6 +213,7 @@ class JobQueue:
             self.task_storage.delete(task_id, batch=batch)
 
         self.task_storage.delete(job_id, batch=batch)
+        self.job_storage.delete(job_id, batch=batch)
         #        log.info(f"in delete_job flushing batch: {batch}")
 
         batch.flush()
