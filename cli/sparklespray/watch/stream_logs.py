@@ -106,9 +106,14 @@ class StreamLogs:
                 #     "calling poll complete",
                 #     from_sparkles=True,
                 # )
+            except CommunicationError as ex:
+                log.info(
+                    f"Got CommunicationError polling log. shutting down log watch due to exception: {ex}"
+                )
+                self._abort_logging()
             except TimeoutError as ex:
                 log.info(
-                    f"Got error polling log. shutting down log watch due to exception: {ex}"
+                    f"Got timeout polling log. shutting down log watch due to exception: {ex}"
                 )
                 self._abort_logging()
 
