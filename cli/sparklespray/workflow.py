@@ -61,6 +61,12 @@ class SparklesInterface:
         raise NotImplementedError()
 
 
+@dataclass
+class FileToLocalize:
+    src: str
+    dst: str
+
+
 class WorkflowStep(BaseModel):
     """Represents a single step in a workflow."""
 
@@ -68,7 +74,8 @@ class WorkflowStep(BaseModel):
     run_local: bool = False
     image: Optional[str] = None
     parameters_csv: Optional[str] = None
-    files_to_localize: Optional[List[str]] = None
+    files_to_localize: Optional[List[Union[str, FileToLocalize]]] = None
+    paths_to_localize: Optional[List[FileToLocalize]] = None
     machine_type: Optional[str] = None
 
 
@@ -82,6 +89,7 @@ class WorkflowDefinition(BaseModel):
 
     steps: List[WorkflowStep]
     files_to_localize: Optional[List[str]] = None
+    paths_to_localize: Optional[List[FileToLocalize]] = None
     write_on_completion: Optional[List[WriteOnCompletion]] = None
 
     @classmethod
@@ -231,6 +239,8 @@ def run_workflow(
                 f"step.{step_num}.job_path"
             ]
 
+            print(json.dumps(variables, indent=2))
+
             assert (
                 not step.run_local
             ), "Currently not supported because we don't have a way to tell if local jobs are complete yet"
@@ -280,13 +290,14 @@ def run_workflow(
 
             uploads_for_step = set()
 
-            all_files_to_localize = []
-            if workflow.files_to_localize:
-                all_files_to_localize.extend(workflow.files_to_localize)
+            def _default(value, default):
+                if value is None:
+                    return default
+                return value
 
-            if step.files_to_localize:
-                all_files_to_localize.extend(step.files_to_localize)
+            all_files_to_localize = _default(workflow.files_to_localize, []) + _default(step.files_to_localize, [])
 
+            # files to localize are specified by the -u parameter when running the job
             for dst in all_files_to_localize:
                 if dst not in src_path_by_dest:
                     raise UserError(
@@ -294,6 +305,13 @@ def run_workflow(
                     )
                 src = src_path_by_dest[dst]
                 uploads_for_step.add((src, dst))
+
+            # paths to localize contain sources for each file
+            all_paths_to_localize = _default(workflow.paths_to_localize, []) + _default(step.paths_to_localize, [])
+            for path_to_localize in all_paths_to_localize:
+                uploads_for_step.add((
+                    _expand_template(path_to_localize.src, _get_var)
+                    , path_to_localize.dst))
 
             image = default_image if step.image is None else step.image
             machine_type = (
@@ -456,9 +474,9 @@ def workflow_run_cmd(
             completed_successfully = watch(
                 io=io, jq=jq, cluster=cluster, target_nodes=self.target_nodes
             )
-
+            
             if not completed_successfully:
-                raise Exception("Job did not complete successfully")
+                raise UserError("Job did not complete successfully")
 
         def start(
             self,
