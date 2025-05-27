@@ -115,13 +115,13 @@ class Cluster:
         )
 
     def add_nodes(
-        self, count: int
+        self, count: int, max_retry_count: int
     ):  # job_id: str, preemptible: bool, debug_log_url: str):
         job = self.job_store.get_job_must(self.job_id)
 
         job_spec = JobSpec.model_validate_json(job.kube_job_spec)
 
-        return self.cluster_api.create_job(self.project, self.location, job_spec, count)
+        return self.cluster_api.create_job(self.project, self.location, job_spec, count, max_retry_count)
 
     def has_active_node_requests(self):
         node_reqs = self.cluster_api.get_node_reqs(

@@ -19,7 +19,7 @@ import io
 from dataclasses import dataclass, field
 from .hasher import CachingHashFunction, compute_dict_hash
 from typing import Tuple, Union
-
+import sys
 
 @dataclass
 class WorkflowRunArgs:
@@ -326,8 +326,12 @@ def run_workflow(
                 list(uploads_for_step),
                 machine_type,
             )
-
-            sparkles.wait_for_completion(sub_job_name)
+            
+            try:
+                sparkles.wait_for_completion(sub_job_name)
+            except UserError:
+                print(f"User interrupted while waiting for waiting for job {sub_job_name} to complete")
+                raise
             txtui.user_print(
                 f"Executing step {step_num}/{len(workflow.steps)} completed"
             )
@@ -341,6 +345,9 @@ def run_workflow(
                     f"Writing {write_on_completion.filename} as defined in {workflow_def_path}"
                 )
                 handle_write_on_completion(write_on_completion, variables)
+    except UserError as e:
+        txtui.user_print(f"Error: {str(e)}")
+        sys.exit(1)
     except Exception as e:
         log.error(f"Error running workflow: {str(e)}", exc_info=True)
         txtui.user_print(f"Error: {str(e)}")

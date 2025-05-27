@@ -64,7 +64,7 @@ def validate_cmd(jq: JobQueue, io: IO, config: Config, cluster_api: ClusterAPI):
         service_acct,
         config,
     )
-    operation_id = cluster_api.create_job(config.project, config.location, job, 1)
+    operation_id = cluster_api.create_job(config.project, config.location, job, 1, 1)
 
     print(f"Waiting for job {operation_id} to complete ", end="", flush=True)
     while True:

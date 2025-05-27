@@ -100,7 +100,7 @@ def _create_parent_id(project, location):
 
 
 def create_batch_job_from_job_spec(
-    project: str, location: str, self: JobSpec, worker_count: int
+    project: str, location: str, self: JobSpec, worker_count: int, max_retry_count: int
 ):
     # batch api only supports a single group at this time
     # BATCH_TASK_INDEX
@@ -114,6 +114,9 @@ def create_batch_job_from_job_spec(
                 ),
                 volumes=_create_volumes(self.disks),
             ),
+            max_retry_count=max_retry_count,
+            lifecycle_policies=batch.LifecyclePolicy(action=batch.LifecyclePolicy.Action.RETRY_TASK, 
+                                                     action_condition=batch.LifecyclePolicy.ActionCondition(exit_codes=[50001]))
         )
     ]
 
@@ -293,8 +296,8 @@ class ClusterAPI:
         self.batch_service = batch_service_client
         self.compute_engine_client = compute_engine_client
 
-    def create_job(self, project: str, location: str, job: JobSpec, worker_count: int):
-        request = create_batch_job_from_job_spec(project, location, job, worker_count)
+    def create_job(self, project: str, location: str, job: JobSpec, worker_count: int, max_retry_count:int):
+        request = create_batch_job_from_job_spec(project, location, job, worker_count, max_retry_count)
         job_result = self.batch_service.create_job(request)
         print("created", job_result.name)
         return job_result.name
