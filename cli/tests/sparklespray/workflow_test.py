@@ -12,6 +12,7 @@ from sparklespray.workflow import (
     handle_write_on_completion,
 )
 
+from pathlib import Path
 
 class MockSparkles(SparklesInterface):
     def __init__(self):
@@ -151,7 +152,6 @@ def test_run_workflow_with_parameters(tmpdir):
     assert machine_type is None
 
 
-from pathlib import Path
 
 
 def test_write_on_completion(tmp_path: Path):
