@@ -154,6 +154,59 @@ def test_run_workflow_with_parameters(tmpdir):
 
 
 
+def test_run_workflow_with_file_localization(tmpdir):
+    # Create a workflow definition with files_to_localize and paths_to_localize
+    workflow_def = {
+        "files_to_localize": ["global_file.txt"],
+        "paths_to_localize": [
+            {"src": "gs://bucket/global_path.txt", "dst": "global_dest.txt"}
+        ],
+        "steps": [
+            {
+                "command": ["process", "data"],
+                "files_to_localize": ["step_file.txt"],
+                "paths_to_localize": [
+                    {"src": "gs://bucket/{job_name}/step_path.txt", "dst": "step_dest.txt"}
+                ],
+            }
+        ]
+    }
+
+    workflow_path = str(tmpdir.join("workflow.json"))
+    create_workflow_file(workflow_path, workflow_def)
+
+    sparkles = MockSparkles()
+    job_name = "test-job"
+
+    # Set up workflow args with uploads that match the files_to_localize
+    workflow_args = WorkflowRunArgs(
+        uploads=[
+            ("local_global_file.txt", "global_file.txt"),
+            ("local_step_file.txt", "step_file.txt"),
+        ]
+    )
+
+    # Run the workflow
+    run_workflow(sparkles, job_name, workflow_path, workflow_args)
+
+    # Verify the expected calls were made
+    assert sparkles.job_exists_calls == ["test-job-1"]
+    assert len(sparkles.start_calls) == 1
+    name, command, params, image, uploads, machine_type = sparkles.start_calls[0]
+    assert name == "test-job-1"
+    assert command == ["process", "data"]
+    
+    # Check that uploads include both files_to_localize and paths_to_localize
+    expected_uploads = {
+        ("local_global_file.txt", "global_file.txt"),  # from workflow files_to_localize
+        ("local_step_file.txt", "step_file.txt"),      # from step files_to_localize
+        ("gs://bucket/global_path.txt", "global_dest.txt"),  # from workflow paths_to_localize
+        ("gs://bucket/test-job-1/step_path.txt", "step_dest.txt"),  # from step paths_to_localize (with variable expansion)
+    }
+    assert set(uploads) == expected_uploads
+    assert sparkles.wait_for_completion_calls == ["test-job-1"]
+
+
 def test_write_on_completion(tmp_path: Path):
     dest = tmp_path / "out"
     handle_write_on_completion(
