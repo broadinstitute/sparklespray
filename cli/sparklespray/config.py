@@ -429,6 +429,6 @@ def get_config_path(config_path):
                 return config_path
             checked_paths.append(config_path)
 
-        raise Exception(
+        raise UserError(
             "Could not find config file at any of locations: {}".format(checked_paths)
         )

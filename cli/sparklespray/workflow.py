@@ -21,6 +21,7 @@ from .hasher import CachingHashFunction, compute_dict_hash
 from typing import Tuple, Union
 import sys
 
+
 @dataclass
 class WorkflowRunArgs:
     retry: bool = False
@@ -74,7 +75,7 @@ class WorkflowStep(BaseModel):
     run_local: bool = False
     image: Optional[str] = None
     parameters_csv: Optional[str] = None
-    files_to_localize: Optional[List[Union[str, FileToLocalize]]] = None
+    files_to_localize: Optional[List[str]] = None
     paths_to_localize: Optional[List[FileToLocalize]] = None
     machine_type: Optional[str] = None
 
@@ -295,7 +296,9 @@ def run_workflow(
                     return default
                 return value
 
-            all_files_to_localize = _default(workflow.files_to_localize, []) + _default(step.files_to_localize, [])
+            all_files_to_localize = _default(workflow.files_to_localize, []) + _default(
+                step.files_to_localize, []
+            )
 
             # files to localize are specified by the -u parameter when running the job
             for dst in all_files_to_localize:
@@ -307,11 +310,16 @@ def run_workflow(
                 uploads_for_step.add((src, dst))
 
             # paths to localize contain sources for each file
-            all_paths_to_localize = _default(workflow.paths_to_localize, []) + _default(step.paths_to_localize, [])
+            all_paths_to_localize = _default(workflow.paths_to_localize, []) + _default(
+                step.paths_to_localize, []
+            )
             for path_to_localize in all_paths_to_localize:
-                uploads_for_step.add((
-                    _expand_template(path_to_localize.src, _get_var)
-                    , path_to_localize.dst))
+                uploads_for_step.add(
+                    (
+                        _expand_template(path_to_localize.src, _get_var),
+                        path_to_localize.dst,
+                    )
+                )
 
             image = default_image if step.image is None else step.image
             machine_type = (
@@ -326,11 +334,13 @@ def run_workflow(
                 list(uploads_for_step),
                 machine_type,
             )
-            
+
             try:
                 sparkles.wait_for_completion(sub_job_name)
             except UserError:
-                print(f"User interrupted while waiting for waiting for job {sub_job_name} to complete")
+                print(
+                    f"User interrupted while waiting for waiting for job {sub_job_name} to complete"
+                )
                 raise
             txtui.user_print(
                 f"Executing step {step_num}/{len(workflow.steps)} completed"
@@ -481,7 +491,7 @@ def workflow_run_cmd(
             completed_successfully = watch(
                 io=io, jq=jq, cluster=cluster, target_nodes=self.target_nodes
             )
-            
+
             if not completed_successfully:
                 raise UserError("Job did not complete successfully")
 
