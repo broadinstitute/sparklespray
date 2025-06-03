@@ -8,6 +8,7 @@ from ..batch_api import JobSpec
 from ..log import log
 from ..watch import run_tasks, PrintStatus, CompletionMonitor, StreamLogs, ResizeCluster
 from .shared import _resolve_jobid
+from ..errors import NoWorkersRunning, UserError
 
 
 class TimeoutException(Exception):
@@ -175,6 +176,13 @@ def watch(
     except KeyboardInterrupt:
         print("Interrupted -- Exiting, but your job will continue to run unaffected.")
         return False
+    except NoWorkersRunning:
+        # perhaps we should tell users to inspect the logs to find cause
+        # we could tell user's to query the logs with a filter like: logName="projects/broad-achilles/logs/batch_task_logs" OR "projects/broad-achilles/logs/batch_agent_logs" labels.job_uid="sparkles-daintree-febb81b2-352d-4b0a00" timestamp>="2025-06-02T22:17:26.168Z" timestamp<="2025-06-03T00:19:30.764Z" severity>=DEFAULT
+        # or we could call attempt_to_print_log_url(job_result.name) but we'd need to call it on every batch job ID?
+        raise UserError(
+            "No remaining nodes running, but tasks are not complete. Aborting."
+        )
 
 
 def _wait_until_tasks_exist(cluster: Cluster, job_id: str):

@@ -36,6 +36,7 @@ from datetime import datetime
 from ..certgen import create_self_signed_cert
 from ..hasher import compute_dict_hash
 from ..worker_job import create_job_spec
+from ..job_queue import STATUS_FAILED
 
 
 class ExistingJobException(Exception):
@@ -462,6 +463,11 @@ def _setup_parser_for_sub_command(parser):
         action="store_true",
     )
     parser.add_argument(
+        "--retry",
+        help="If the job with this name already exists and it's running, do nothing. If it completed, but it previously failed, resubmit it.",
+        action="store_true",
+    )
+    parser.add_argument(
         "--symlinks",
         help="When localizing files, use symlinks instead of copying files into location. This should only be used when the uploaded files will not be modified by the job.",
         action="store_true",
@@ -677,7 +683,17 @@ def submit_cmd(
         txtui.user_print(
             f"Found existing job {job_id} and --skipifexists was specified. Skipping submission."
         )
+        needs_submit = False
+    elif args.retry and already_submitted and (not needs_kill_before_submit):
+        txtui.user_print(
+            f"Found existing job {job_id} and --retry was specified. Retrying any failed tasks (if there are any)."
+        )
+        jq.reset(job_id, None, statuses_to_clear=[STATUS_FAILED])
+        needs_submit = False
     else:
+        needs_submit = True
+
+    if needs_submit:
         if needs_kill_before_submit:
             txtui.user_print(
                 f"Found existing job {job_id} with different runtime environment. Stopping any running instances before proceeding"

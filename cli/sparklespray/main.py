@@ -170,6 +170,9 @@ def main(argv=None):
                 extras={"args": args},
                 requested=func_param_names,
             )
+        except UserError as ex:
+            print(ex.message)
+            return 1
         except Exception as ex:
             raise Exception(f"Could not get parameters for {args.func}") from ex
 

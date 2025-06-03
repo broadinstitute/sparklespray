@@ -240,7 +240,9 @@ def run_workflow(
                 f"step.{step_num}.job_path"
             ]
 
-            print(json.dumps(variables, indent=2))
+            log.debug(
+                f"Variables for step {step_num}: {json.dumps(variables, indent=2)}"
+            )
 
             assert (
                 not step.run_local
@@ -505,7 +507,7 @@ def workflow_run_cmd(
             machine_type: Optional[str],
         ):
             # Submit a new job with the given parameters
-            submit_cmd_args = ["-n", name, "--no-wait", "--skipifexists"]
+            submit_cmd_args = ["-n", name, "--no-wait", "--retry"]
 
             if machine_type:
                 submit_cmd_args.extend(["-m", machine_type])
