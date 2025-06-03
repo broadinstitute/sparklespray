@@ -408,7 +408,7 @@ def create_services_from_config(config: Config, requested: List[str]):
 def get_config_path(config_path):
     if config_path is not None:
         if not os.path.exists(config_path):
-            raise Exception("Could not find config at {}".format(config_path))
+            raise UserError("Could not find config at {}".format(config_path))
         return config_path
     else:
 
