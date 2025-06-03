@@ -36,3 +36,4 @@ sparklespray.code-workspace
 main
 cli/sparklespray/bin/kubequeconsume
 cli/sparklespray/bin/sparklesworker
+hermit.log

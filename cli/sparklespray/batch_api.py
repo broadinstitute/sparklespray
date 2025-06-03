@@ -287,6 +287,20 @@ def is_job_successful(job: batch.Job):
     return job.status.state == batch.JobStatus.State.SUCCEEDED
 
 
+import re
+
+
+def attempt_to_print_log_url(batch_job_name):
+    m = re.match("projects/([^/]+)/locations/([^/]+)/jobs/([^/]+)", batch_job_name)
+    if m is None:
+        print("Warning: Could not parse batch api job name")
+    else:
+        project, location, job_id = m.groups()
+        print(
+            f"You can view google's logs for the Batch API Job at:\n   https://console.cloud.google.com/batch/jobsDetail/regions/{location}/jobs/{job_id}/details?project={project}"
+        )
+
+
 class ClusterAPI:
     def __init__(
         self,
@@ -308,7 +322,8 @@ class ClusterAPI:
             project, location, job, worker_count, max_retry_count
         )
         job_result = self.batch_service.create_job(request)
-        print("created", job_result.name)
+        print(f"Created Google Batch API job: {job_result.name}")
+        attempt_to_print_log_url(job_result.name)
         return job_result.name
 
     def delete(self, name):
