@@ -14,7 +14,7 @@
     {
       "command": ["sh", "./gather.sh", "{prev_job_path}"],
       "image": "google/cloud-sdk:latest",
-      "files_to_localize": ["gather.sh"]
+      "paths_to_localize": [{ "src": "./gather.sh", "dst": "gather.sh" }]
     }
   ]
 }

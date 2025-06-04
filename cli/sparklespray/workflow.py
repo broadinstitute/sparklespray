@@ -184,7 +184,7 @@ def _expand_template(value: str, _get_var):
 def run_workflow(
     sparkles: SparklesInterface,
     job_name: str,
-    workflow_def_path: str,
+    workflow: WorkflowDefinition,
     workflow_args: WorkflowRunArgs,
 ) -> None:
     """
@@ -208,162 +208,143 @@ def run_workflow(
     for src, dst in uploads:
         src_path_by_dest[dst] = src
 
-    try:
-        # Load and validate the workflow definition
-        workflow = WorkflowDefinition.from_file(workflow_def_path)
+    # Log the start of workflow execution
+    log.info(f"Starting workflow execution for job: {job_name}")
+    txtui.user_print(f"Starting workflow: {job_name}")
 
-        # Log the start of workflow execution
-        log.info(f"Starting workflow execution for job: {job_name}")
-        txtui.user_print(f"Starting workflow: {job_name}")
+    variables = dict(command_line_parameters)
 
-        variables = dict(command_line_parameters)
+    def _get_var(name):
+        if name.startswith("parameter."):
+            return "{" + name[len("parameter.") :] + "}"
+        return variables[name]
 
-        def _get_var(name):
-            if name.startswith("parameter."):
-                return "{" + name[len("parameter.") :] + "}"
-            return variables[name]
+    # create variables for each step
+    for i, step in enumerate(workflow.steps):
+        step_num = i + 1
+        sub_job_name = f"{job_name}-{step_num}"
+        variables[f"step.{step_num}.job_name"] = sub_job_name
+        variables[f"step.{step_num}.job_path"] = f"{job_path_prefix}/{sub_job_name}"
 
-        # create variables for each step
-        for i, step in enumerate(workflow.steps):
-            step_num = i + 1
-            sub_job_name = f"{job_name}-{step_num}"
-            variables[f"step.{step_num}.job_name"] = sub_job_name
-            variables[f"step.{step_num}.job_path"] = f"{job_path_prefix}/{sub_job_name}"
+    # Process each step in the workflow
+    for i, step in enumerate(workflow.steps):
+        step_num = i + 1
+        sub_job_name = variables["job_name"] = variables[f"step.{step_num}.job_name"]
+        sub_job_path = variables["job_path"] = variables[f"step.{step_num}.job_path"]
 
-        # Process each step in the workflow
-        for i, step in enumerate(workflow.steps):
-            step_num = i + 1
-            sub_job_name = variables["job_name"] = variables[
-                f"step.{step_num}.job_name"
-            ]
-            sub_job_path = variables["job_path"] = variables[
-                f"step.{step_num}.job_path"
-            ]
+        log.debug(f"Variables for step {step_num}: {json.dumps(variables, indent=2)}")
 
-            log.debug(
-                f"Variables for step {step_num}: {json.dumps(variables, indent=2)}"
-            )
+        assert (
+            not step.run_local
+        ), "Currently not supported because we don't have a way to tell if local jobs are complete yet"
+        # if step.run_local:
+        #     # Run the command locally
+        #     exit_code = _run_local_command(step.command)
+        #     if exit_code != 0:
+        #         raise RuntimeError(f"Local command in step {step_num} failed with exit code {exit_code}")
+        # else:
 
-            assert (
-                not step.run_local
-            ), "Currently not supported because we don't have a way to tell if local jobs are complete yet"
-            # if step.run_local:
-            #     # Run the command locally
-            #     exit_code = _run_local_command(step.command)
-            #     if exit_code != 0:
-            #         raise RuntimeError(f"Local command in step {step_num} failed with exit code {exit_code}")
-            # else:
-
-            if sparkles.job_exists(sub_job_name):
-                txtui.user_print(
-                    f"Found job {sub_job_name} for step {step_num}/{len(workflow.steps)}"
-                )
-                if retry:
-                    sparkles.clear_failed(sub_job_name)
-
-            txtui.user_print(f"Executing step {step_num}/{len(workflow.steps)}")
-
-            try:
-                parameters_csv = step.parameters_csv
-                if parameters_csv is not None:
-                    parameters_csv = _expand_template(
-                        parameters_csv, lambda name: variables[name]
-                    )
-            except KeyError:
-                raise Exception(
-                    f"Could not expand variable in step {step_num}'s parameter_csv: {repr(step.parameters_csv)}"
-                )
-
-            # If this is a fan-out we'll have a list of parameters. If not, we'll get a single record for a single job
-            parameters = (
-                _load_parameters_from_csv(sparkles, parameters_csv)
-                if parameters_csv
-                else [{}]
-            )
-
-            try:
-                command = [
-                    _expand_template(x, _get_var) if isinstance(x, str) else x
-                    for x in step.command
-                ]
-            except KeyError as ex:
-                raise Exception(
-                    f"Could not expand variable in step {step_num}'s command: {repr(step.command)}: {ex}"
-                )
-
-            uploads_for_step = set()
-
-            def _default(value, default):
-                if value is None:
-                    return default
-                return value
-
-            all_files_to_localize = _default(workflow.files_to_localize, []) + _default(
-                step.files_to_localize, []
-            )
-
-            # files to localize are specified by the -u parameter when running the job
-            for dst in all_files_to_localize:
-                if dst not in src_path_by_dest:
-                    raise UserError(
-                        f"{dst} is listed as a file to localize, but it was never listed as a file to upload"
-                    )
-                src = src_path_by_dest[dst]
-                uploads_for_step.add((src, dst))
-
-            # paths to localize contain sources for each file
-            all_paths_to_localize = _default(workflow.paths_to_localize, []) + _default(
-                step.paths_to_localize, []
-            )
-            for path_to_localize in all_paths_to_localize:
-                uploads_for_step.add(
-                    (
-                        _expand_template(path_to_localize.src, _get_var),
-                        path_to_localize.dst,
-                    )
-                )
-
-            image = default_image if step.image is None else step.image
-            machine_type = (
-                default_machine_type if step.machine_type is None else step.machine_type
-            )
-
-            sparkles.start(
-                sub_job_name,
-                command,
-                parameters,
-                image,
-                list(uploads_for_step),
-                machine_type,
-            )
-
-            try:
-                sparkles.wait_for_completion(sub_job_name)
-            except UserError:
-                print(
-                    f"User interrupted while waiting for waiting for job {sub_job_name} to complete"
-                )
-                raise
+        if sparkles.job_exists(sub_job_name):
             txtui.user_print(
-                f"Executing step {step_num}/{len(workflow.steps)} completed"
+                f"Found job {sub_job_name} for step {step_num}/{len(workflow.steps)}"
             )
-            variables["prev_job_name"] = sub_job_name
-            variables["prev_job_path"] = sub_job_path
+            if retry:
+                sparkles.clear_failed(sub_job_name)
 
-        txtui.user_print(f"Workflow execution completed successfully")
-        if workflow.write_on_completion:
-            for write_on_completion in workflow.write_on_completion:
-                txtui.user_print(
-                    f"Writing {write_on_completion.filename} as defined in {workflow_def_path}"
+        txtui.user_print(f"Executing step {step_num}/{len(workflow.steps)}")
+
+        try:
+            parameters_csv = step.parameters_csv
+            if parameters_csv is not None:
+                parameters_csv = _expand_template(
+                    parameters_csv, lambda name: variables[name]
                 )
-                handle_write_on_completion(write_on_completion, variables)
-    except UserError as e:
-        txtui.user_print(f"Error: {str(e)}")
-        sys.exit(1)
-    except Exception as e:
-        log.error(f"Error running workflow: {str(e)}", exc_info=True)
-        txtui.user_print(f"Error: {str(e)}")
-        raise
+        except KeyError:
+            raise Exception(
+                f"Could not expand variable in step {step_num}'s parameter_csv: {repr(step.parameters_csv)}"
+            )
+
+        # If this is a fan-out we'll have a list of parameters. If not, we'll get a single record for a single job
+        parameters = (
+            _load_parameters_from_csv(sparkles, parameters_csv)
+            if parameters_csv
+            else [{}]
+        )
+
+        try:
+            command = [
+                _expand_template(x, _get_var) if isinstance(x, str) else x
+                for x in step.command
+            ]
+        except KeyError as ex:
+            raise Exception(
+                f"Could not expand variable in step {step_num}'s command: {repr(step.command)}: {ex}"
+            )
+
+        uploads_for_step = set()
+
+        def _default(value, default):
+            if value is None:
+                return default
+            return value
+
+        all_files_to_localize = _default(workflow.files_to_localize, []) + _default(
+            step.files_to_localize, []
+        )
+
+        # files to localize are specified by the -u parameter when running the job
+        for dst in all_files_to_localize:
+            if dst not in src_path_by_dest:
+                raise UserError(
+                    f"{dst} is listed as a file to localize, but it was never listed as a file to upload"
+                )
+            src = src_path_by_dest[dst]
+            uploads_for_step.add((src, dst))
+
+        # paths to localize contain sources for each file
+        all_paths_to_localize = _default(workflow.paths_to_localize, []) + _default(
+            step.paths_to_localize, []
+        )
+        for path_to_localize in all_paths_to_localize:
+            uploads_for_step.add(
+                (
+                    _expand_template(path_to_localize.src, _get_var),
+                    path_to_localize.dst,
+                )
+            )
+
+        image = default_image if step.image is None else step.image
+        machine_type = (
+            default_machine_type if step.machine_type is None else step.machine_type
+        )
+
+        sparkles.start(
+            sub_job_name,
+            command,
+            parameters,
+            image,
+            list(uploads_for_step),
+            machine_type,
+        )
+
+        try:
+            sparkles.wait_for_completion(sub_job_name)
+        except UserError:
+            print(
+                f"User interrupted while waiting for waiting for job {sub_job_name} to complete"
+            )
+            raise
+        txtui.user_print(f"Executing step {step_num}/{len(workflow.steps)} completed")
+        variables["prev_job_name"] = sub_job_name
+        variables["prev_job_path"] = sub_job_path
+
+    txtui.user_print(f"Workflow execution completed successfully")
+    if workflow.write_on_completion:
+        for write_on_completion in workflow.write_on_completion:
+            txtui.user_print(
+                f"Writing {write_on_completion.filename} as defined in {workflow_def_path}"
+            )
+            handle_write_on_completion(write_on_completion, variables)
 
 
 def handle_write_on_completion(write_on_completion: WriteOnCompletion, variables):
@@ -562,27 +543,64 @@ def workflow_run_cmd(
         image=args.image,
     )
 
+    # Load and validate the workflow definition
+    workflow = WorkflowDefinition.from_file(args.workflow_def)
+
     job_name = args.job_name
     if args.add_hash_to_job_id:
-        job_hash = _calc_workflow_hash(config.cache_db_path, workflow_args)[:20]
+        job_hash = _calc_workflow_hash(config.cache_db_path, workflow_args, workflow)[
+            :20
+        ]
         job_name = f"{job_name}-{job_hash}"
 
-    return run_workflow(
-        SparklesImpl(args.nodes), job_name, args.workflow_def, workflow_args
-    )
+    try:
+        return run_workflow(SparklesImpl(args.nodes), job_name, workflow, workflow_args)
+
+    except UserError as e:
+        txtui.user_print(f"Error: {str(e)}")
+        sys.exit(1)
+    except Exception as e:
+        log.error(f"Error running workflow: {str(e)}", exc_info=True)
+        txtui.user_print(f"Error: {str(e)}")
+        raise
 
 
-def _calc_workflow_hash(cache_db_path: str, workflow_args: WorkflowRunArgs):
+def _calc_workflow_hash(
+    cache_db_path: str, workflow_args: WorkflowRunArgs, workflow: WorkflowDefinition
+):
     hash_db = CachingHashFunction(cache_db_path)
 
     def _hash_upload(src, dst):
-        return {"src": src, "dst": dst, "sha256": hash_db.get_sha256(src)}
+        if src.startswith("gs://"):
+            # note: this is a bit of a compromise. Ideally we would fetch the generation ID if the src
+            # is a gcs file. However, if this is a gcs file, this is likely produced from an earlier step
+            # and therefore will not exist at the start of the job. Probably a better approach would be to
+            # computed the hash and add it to the job name per-step -- but then it'll be harder to tell which
+            # jobs are related to one another.
+            return {"dst": dst, "src": src}
+        else:
+            return {"dst": dst, "sha256": hash_db.get_sha256(src)}
+
+    uploads = [_hash_upload(src, dst) for src, dst in workflow_args.uploads]
+
+    def add_paths_to_uploads(paths: Union[None, List[FileToLocalize]]):
+        if paths:
+            for path in paths:
+                uploads.append(_hash_upload(path.src, path.dst))
+
+    add_paths_to_uploads(workflow.paths_to_localize)
+    for step in workflow.steps:
+        add_paths_to_uploads(step.paths_to_localize)
 
     workflow_dict = {
         "parameters": workflow_args.parameters,
-        "uploads": [_hash_upload(src, dst) for src, dst in workflow_args.uploads],
+        "uploads": uploads,
         "machine_type": workflow_args.machine_type,
         "image": workflow_args.image,
     }
 
-    return compute_dict_hash(workflow_dict)
+    workflow_hash = compute_dict_hash(workflow_dict)
+    print(f"Computed hash of workflow definition:")
+    print(json.dumps(workflow_dict, indent=2, sort_keys=True))
+    print(f"Resulting hash: {workflow_hash}")
+    return workflow_hash
