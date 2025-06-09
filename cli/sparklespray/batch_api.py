@@ -6,6 +6,7 @@ from google.cloud.batch_v1alpha.services.batch_service import BatchServiceClient
 from google.cloud.compute_v1.services.instances import InstancesClient
 import google.cloud.compute_v1.types as compute
 from google.api_core.exceptions import NotFound
+from .gcp_utils import normalize_label, make_unique_label, validate_label
 from .node_req_store import (
     NodeReq,
     NODE_REQ_COMPLETE,
@@ -151,13 +152,12 @@ def create_batch_job_from_job_spec(
         ),
         logs_policy=batch.LogsPolicy(destination="CLOUD_LOGGING"),
         labels={
-            "sparkles-job": self.sparkles_job,
+            "sparkles-job": normalize_label(self.sparkles_job),
             "sparkles-cluster": self.sparkles_cluster,
             # "sparkles-timestamp": self.sparkles_timestamp
         },
     )
 
-    from .gcp_utils import normalize_label, make_unique_label, validate_label
 
     return batch.CreateJobRequest(
         parent=f"projects/{project}/locations/{location}",
