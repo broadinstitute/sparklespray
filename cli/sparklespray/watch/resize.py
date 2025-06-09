@@ -37,7 +37,17 @@ class ResizeCluster(PeriodicTask):
 
         if additional_nodes > 0:
             # we haven't requested anything, so request something now
-            self.cluster.add_nodes(additional_nodes, 3, additional_nodes >= self.max_preemptable_attempts)
+
+            # figure out how many nodes can be pre-emptable by looking at max_preemptable_attempts. The
+            # rest will be non-preemptable
+            additional_preemptable_nodes = min([additional_nodes, self.max_preemptable_attempts])
+            additional_non_preemptable_nodes = additional_nodes - additional_preemptable_nodes
+
+            if additional_preemptable_nodes > 0:
+                self.cluster.add_nodes(additional_nodes, 3, True)
+            if additional_non_preemptable_nodes > 0:
+                self.cluster.add_nodes(additional_nodes, 3, False)
+
             modified = True
             return None
         # print("target_node_count > requested_nodes", target_node_count, requested_nodes)
