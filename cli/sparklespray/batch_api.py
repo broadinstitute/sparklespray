@@ -7,6 +7,7 @@ from google.cloud.compute_v1.services.instances import InstancesClient
 import google.cloud.compute_v1.types as compute
 
 from google.api_core.exceptions import NotFound
+from .gcp_utils import normalize_label, make_unique_label, validate_label
 from .node_req_store import (
     NodeReq,
     NODE_REQ_COMPLETE,
