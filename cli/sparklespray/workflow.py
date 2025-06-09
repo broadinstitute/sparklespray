@@ -342,7 +342,7 @@ def run_workflow(
     if workflow.write_on_completion:
         for write_on_completion in workflow.write_on_completion:
             txtui.user_print(
-                f"Writing {write_on_completion.filename} as defined in {workflow_def_path}"
+                f"Writing {write_on_completion.filename} as defined in workflow definition"
             )
             handle_write_on_completion(write_on_completion, variables)
 
@@ -571,12 +571,14 @@ def _calc_workflow_hash(
     hash_db = CachingHashFunction(cache_db_path)
 
     def _hash_upload(src, dst):
-        if src.startswith("gs://"):
+        if src.startswith("gs://") or "{" in src:
             # note: this is a bit of a compromise. Ideally we would fetch the generation ID if the src
             # is a gcs file. However, if this is a gcs file, this is likely produced from an earlier step
             # and therefore will not exist at the start of the job. Probably a better approach would be to
             # computed the hash and add it to the job name per-step -- but then it'll be harder to tell which
-            # jobs are related to one another.
+            # jobs are related to one another. 
+            # Secondly, had to add a check for "{" which is there because, similarly, that means src likely
+            # contains an expression which has not yet been evaluated and so we cannot know the value yet.
             return {"dst": dst, "src": src}
         else:
             return {"dst": dst, "sha256": hash_db.get_sha256(src)}
