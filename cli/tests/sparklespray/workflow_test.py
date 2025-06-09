@@ -69,8 +69,10 @@ def test_run_workflow_basic(tmpdir):
     sparkles = MockSparkles()
     job_name = "test-job"
 
+    workflow = WorkflowDefinition.from_file(workflow_path)
+
     # Run the workflow
-    run_workflow(sparkles, job_name, workflow_path, WorkflowRunArgs())
+    run_workflow(sparkles, job_name, workflow, WorkflowRunArgs())
 
     # Verify the expected calls were made
     assert sparkles.job_exists_calls == ["test-job-1"]
@@ -99,7 +101,8 @@ def test_run_workflow_with_retry(tmpdir):
     job_name = "test-job"
 
     # Run the workflow with retry flag¬129
-    run_workflow(sparkles, job_name, workflow_path, WorkflowRunArgs(retry=True))
+    workflow = WorkflowDefinition.from_file(workflow_path)
+    run_workflow(sparkles, job_name, workflow, WorkflowRunArgs(retry=True))
 
     # Verify the expected calls were made
     assert sparkles.job_exists_calls == ["test-job-1", "test-job-2"]
@@ -136,7 +139,8 @@ def test_run_workflow_with_parameters(tmpdir):
     job_name = "test-job"
 
     # Run the workflow
-    run_workflow(sparkles, job_name, workflow_path, WorkflowRunArgs())
+    workflow = WorkflowDefinition.from_file(workflow_path)
+    run_workflow(sparkles, job_name, workflow, WorkflowRunArgs())
 
     # Verify the expected calls were made
     assert sparkles.job_exists_calls == ["test-job-1"]
@@ -187,7 +191,8 @@ def test_run_workflow_with_file_localization(tmpdir):
     )
 
     # Run the workflow
-    run_workflow(sparkles, job_name, workflow_path, workflow_args)
+    workflow = WorkflowDefinition.from_file(workflow_path)
+    run_workflow(sparkles, job_name, workflow, workflow_args)
 
     # Verify the expected calls were made
     assert sparkles.job_exists_calls == ["test-job-1"]
