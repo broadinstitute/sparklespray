@@ -61,18 +61,9 @@ class JobQueue:
     def get_job_must(self, job_id):
         return self.job_storage.get_job_must(job_id)
 
-    def get_possibily_running_tasks(self, job_id):
-        running_tasks = self.task_storage.get_tasks(job_id, status=STATUS_CLAIMED)
-        return running_tasks
-        # if len(running_tasks) > 0:
-        #     for task in running_tasks:
-        #         assert task.owner is not None
-        #         print("owner", task.owner)
-        #     return True
-        # else:
-        #     # There's a possible issue here where there could be a node running which hasn't yet picked up pending jobs
-        #     # but while this query is running, it starts. For the moment, we'll ignore that situation.
-        #     return False
+    def get_claimed_tasks(self, job_id):
+        claimed_tasks = self.task_storage.get_tasks(job_id, status=STATUS_CLAIMED)
+        return claimed_tasks
 
     def get_jobids(self, job_id_wildcard="*"):
         job_ids = self.job_storage.get_job_ids()

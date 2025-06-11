@@ -9,7 +9,7 @@ from ..log import log
 from ..watch import run_tasks, PrintStatus, CompletionMonitor, StreamLogs, ResizeCluster
 from .shared import _resolve_jobid
 from ..errors import NoWorkersRunning, UserError
-
+from ..watch import ResetOrphans
 
 class TimeoutException(Exception):
     """Exception raised when an operation times out."""
@@ -162,6 +162,9 @@ def watch(
                 target_nodes,
                 max_preemptable_attempts,
             )
+        )
+        tasks.append(
+            ResetOrphans(jq, cluster)
         )
 
     try:

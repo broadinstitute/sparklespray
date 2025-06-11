@@ -5,7 +5,7 @@ from .stream_logs import StreamLogs
 from .resize import ResizeCluster
 from .runner import run_tasks
 from .status import PrintStatus
-
+from .reset_orphans import ResetOrphans
 __all__ = [
     "EstimateRateOfCompletion",
     "CompletionMonitor",
@@ -14,4 +14,5 @@ __all__ = [
     "ResizeCluster",
     "PrintStatus",
     "run_tasks",
+    "ResetOrphans"
 ]
