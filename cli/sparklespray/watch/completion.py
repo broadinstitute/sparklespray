@@ -58,7 +58,7 @@ class CompletionMonitor(PeriodicTask):
         if _count_incomplete_tasks(tasks) == 0:
             return StopPolling()
 
-        if now - self.last_active_node_time > 10:
+        if now - self.last_active_node_time > 120: # if 2 minutes with no nodes running has gone by we have a problem
             raise NoWorkersRunning()
 
         return self.next_poll_delay()

@@ -229,8 +229,8 @@ def test_watch_basic(mock_run_tasks, mock_wait, job_queue, mock_io, cluster):
     assert args[0] == "test-job-id"  # job_id
     assert args[1] == "test-cluster"  # cluster_id
     assert (
-        len(args[2]) == 4
-    )  # 4 tasks: CompletionMonitor, StreamLogs, PrintStatus, ResizeCluster
+        len(args[2]) == 5
+    )  # 4 tasks: CompletionMonitor, StreamLogs, PrintStatus, ResizeCluster, OrphanChecker
     assert args[3] == cluster  # cluster
 
     # Verify result is True (normal completion)
