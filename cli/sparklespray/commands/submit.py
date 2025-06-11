@@ -166,23 +166,7 @@ def _make_cluster_name(
 
 
 from ..gcp_permissions import has_access_to_docker_image
-
-
-def update_running_status(job_id: str, cluster: Cluster, jq: JobQueue):
-    # todo: refactor into a method which updates job status
-    possibly_running = jq.get_possibily_running_tasks(job_id)
-    running = []
-    orphaned = []
-    for task in possibly_running:
-        if cluster.is_live_owner(task.owner):
-            running.append(task)
-        else:
-            orphaned.append(task)
-
-    for task in orphaned:
-        jq.reset_task(task.task_id)
-
-    return running
+from ..reset import reset_orphaned_tasks
 
 
 def submit(
@@ -265,9 +249,9 @@ def submit(
                 f'Found existing job with id "{job_id}". Cleaning it up before resubmitting'
             )
 
-            running = update_running_status(job_id, cluster, jq)
+            orphaned_state = reset_orphaned_tasks(job_id, cluster, jq)
 
-            if len(running) > 0:
+            if orphaned_state.running_count > 0:
                 raise ExistingJobException(
                     'Could not remove running job "{job_id}", aborting! (Run "sparkles kill {job_id}" if you want it to stop and resubmit)'
                 )

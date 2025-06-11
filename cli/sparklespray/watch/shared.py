@@ -5,7 +5,7 @@ from ..node_req_store import NODE_REQ_CLASS_PREEMPTIVE
 
 from ..log import log
 from ..task_store import is_terminal_status, Task
-from ..node_req_store import REQUESTED_NODE_STATES, NodeReq
+from ..node_req_store import REQUESTED_NODE_STATES, NodeReq, NODE_REQ_RUNNING
 from typing import List
 
 
@@ -72,10 +72,14 @@ def _only_completed_tasks(tasks: List[Task]):
 def _count_incomplete_tasks(tasks: List[Task]):
     return sum([1 for task in tasks if not is_terminal_status(task.status)])
 
+def _count_claimed_tasks(tasks: List[Task]):
+    return sum([1 for task in tasks if task.status == STATUS_CLAIMED])
 
 def _count_active_nodes(node_reqs: List[NodeReq]):
     return sum([1 for o in node_reqs if o.status in REQUESTED_NODE_STATES])
 
+def _count_running_nodes(node_reqs: List[NodeReq]):
+    return sum([1 for o in node_reqs if o.status  == NODE_REQ_RUNNING])
 
 def _count_preempt_attempt(node_reqs: List[NodeReq]) -> int:
     return sum([1 for o in node_reqs if o.node_class == NODE_REQ_CLASS_PREEMPTIVE])

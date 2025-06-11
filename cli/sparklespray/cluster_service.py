@@ -142,7 +142,7 @@ class Cluster:
             self.project, self.location, self.cluster_id, only_terminal_reqs=True
         )
 
-    def is_live_owner(self, owner):
+    def is_owner_live(self, owner):
         return self.cluster_api.is_instance_running(owner)
 
 
