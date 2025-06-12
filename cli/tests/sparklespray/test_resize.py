@@ -118,7 +118,7 @@ def test_resize_cluster_caps_by_incomplete_tasks():
     
     assert len(cluster.add_nodes_calls) == 1
     assert cluster.add_nodes_calls[0]['count'] == 1  # Only need 2 more to reach 3 total
-    assert result is None
+    assert isinstance(result, NextPoll)
 
 
 def test_resize_cluster_exhausted_preemptable_budget():
