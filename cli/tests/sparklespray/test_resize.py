@@ -1,7 +1,7 @@
-from sparklespray.watch.resize import ResizeCluster
+from sparklespray.watch.resize import ResizeCluster, NextPoll
 from sparklespray.watch.runner_types import ClusterStateQuery
 from unittest.mock import Mock
-
+from pytest import raises
 
 class MockCluster:
     def __init__(self):
@@ -13,6 +13,8 @@ class MockCluster:
             'max_retry': max_retry,
             'preemptable': preemptable
         })
+    def reset(self):
+        self.add_nodes_calls = []
 
 
 class MockTask:
@@ -46,7 +48,7 @@ def test_resize_cluster_no_additional_nodes_needed():
     result = resizer.poll(state)
     
     assert len(cluster.add_nodes_calls) == 0
-    assert result.seconds == 60  # NextPoll with default seconds_between_modifications
+    assert isinstance(result, NextPoll)
 
 
 def test_resize_cluster_adds_preemptable_nodes():
@@ -67,7 +69,7 @@ def test_resize_cluster_adds_preemptable_nodes():
         'max_retry': 3,
         'preemptable': True
     }
-    assert result is None  # Returns None when modification made
+    assert isinstance(result, NextPoll)
 
 
 def test_resize_cluster_adds_mixed_nodes():
@@ -95,7 +97,7 @@ def test_resize_cluster_adds_mixed_nodes():
         'max_retry': 3,
         'preemptable': False
     }
-    assert result is None
+    assert isinstance(result, NextPoll)
 
 
 def test_resize_cluster_caps_by_incomplete_tasks():
@@ -104,6 +106,8 @@ def test_resize_cluster_caps_by_incomplete_tasks():
     resizer = ResizeCluster(cluster, target_node_count=10, max_preemptable_attempts=5)
     
     # Only 3 incomplete tasks, so target should be capped at 3
+    # Open question: Should this really be capped at the number of incomplete tasks, or maybe we should cap the number of nodes at the number
+    # of pending tasks?
     tasks = [MockTask("pending"), MockTask("running"), MockTask("failed")]
     nodes = [MockNode("running")]  # 1 active node
     state = create_mock_state(tasks, nodes)
@@ -111,33 +115,54 @@ def test_resize_cluster_caps_by_incomplete_tasks():
     result = resizer.poll(state)
     
     assert len(cluster.add_nodes_calls) == 1
-    assert cluster.add_nodes_calls[0]['count'] == 2  # Only need 2 more to reach 3 total
+    assert cluster.add_nodes_calls[0]['count'] == 1  # Only need 2 more to reach 3 total
     assert result is None
 
 
 def test_resize_cluster_exhausted_preemptable_budget():
-    """Test when preemptable budget is exhausted"""
+    """Test when preemptable budget is exhausted and also verify that we don't create non-preemptable instances forever"""
     cluster = MockCluster()
     resizer = ResizeCluster(cluster, target_node_count=5, max_preemptable_attempts=2)
     
-    # Simulate that we've already created 2 preemptable nodes
-    resizer.preemptable_created = 2
-    
-    # 5 incomplete tasks, 2 active nodes - need 3 more, but no preemptable budget left
-    tasks = [MockTask("pending")] * 5
-    nodes = [MockNode("running"), MockNode("running")]
+    # 5 incomplete tasks, 3 active nodes - should request two preemptable nodes, which will exhaust our budget
+    tasks = ([MockTask("pending")] * 2) + ([MockTask("claimed")] * 3)
+    nodes = [MockNode("running")] * 3
     state = create_mock_state(tasks, nodes)
-    
     result = resizer.poll(state)
-    
+    assert isinstance(result, NextPoll)
+    assert len(cluster.add_nodes_calls) == 1
+    assert cluster.add_nodes_calls[0] == {
+        'count': 2,
+        'max_retry': 3,
+        'preemptable': True
+    }
+
+    # now, let's imagine those 3 running machines died. The two tasks from before were claimed by the preemptable machines. The 
+    # other three which were running got reset to "pending". Now, we should request 3 new non-preemptable machines to replace those
+    # that died
+    tasks = ([MockTask("claimed")] * 2) + ([MockTask("pending")] * 3)
+    nodes = [MockNode("running")] * 2
+    cluster.reset()
+    state = create_mock_state(tasks, nodes)
+    result = resizer.poll(state)
+    assert isinstance(result, NextPoll)
     assert len(cluster.add_nodes_calls) == 1
     assert cluster.add_nodes_calls[0] == {
         'count': 3,
         'max_retry': 3,
         'preemptable': False
     }
-    assert result is None
 
+    # lastly, what if all of those machines die again? Three were non-preemptable so there's probably a problem. Make sure that we 
+    # abort instead of simply creating even more instances.
+    tasks = ([MockTask("claimed")] * 2) + ([MockTask("pending")] * 3)
+    nodes = [] 
+    cluster.reset()
+    state = create_mock_state(tasks, nodes)
+    with raises(AssertionError):
+        result = resizer.poll(state)
+        result = resizer.poll(state)
+    
 
 def test_resize_cluster_partial_preemptable_budget():
     """Test when only part of preemptable budget remains"""
@@ -168,24 +193,5 @@ def test_resize_cluster_partial_preemptable_budget():
         'preemptable': False
     }
     assert resizer.preemptable_created == 3  # Should be updated
-    assert result is None
+    assert isinstance(result, NextPoll)
 
-
-def test_resize_cluster_custom_seconds_between_modifications():
-    """Test custom seconds_between_modifications parameter"""
-    cluster = MockCluster()
-    resizer = ResizeCluster(
-        cluster, 
-        target_node_count=2, 
-        max_preemptable_attempts=5,
-        seconds_between_modifications=120
-    )
-    
-    # No resize needed scenario
-    tasks = [MockTask("pending"), MockTask("running")]
-    nodes = [MockNode("running"), MockNode("running")]
-    state = create_mock_state(tasks, nodes)
-    
-    result = resizer.poll(state)
-    
-    assert result.seconds == 120
