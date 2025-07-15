@@ -74,13 +74,18 @@ def _create_volumes(disks: List[Disk]):
 
 
 def _create_runnables(runnables: List[Runnable], disks: List[Disk], monitor_port: int):
+    #     return
+    #     [batch.Runnable(script=batch.Runnable.Script(text="""#!/bin/sh
+    # echo "in runnables script"
+    # ls -la /mnt
+    # """))] +
     return [
         batch.Runnable(
             container=batch.Runnable.Container(
                 image_uri=runnable.image,
                 commands=runnable.command,
                 volumes=[f"{disk.mount_path}:{disk.mount_path}" for disk in disks],
-                options=f"-p {monitor_port}:{monitor_port}",
+                options=f"-p {monitor_port}:{monitor_port} -u 0",
                 # "enableImageStreaming": True
             ),
         )
