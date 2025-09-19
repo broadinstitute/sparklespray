@@ -1213,6 +1213,26 @@ sparkles workflow run my-analysis workflow.json --parameter input_file=gs://mybu
 
 This will execute all steps in the workflow, passing the parameters to each step as needed.
 
+# Troubleshooting
+
+In the event that nodes fail to start, look for a line in the output like:
+
+```
+Created Google Batch API job: projects/PROJECT/locations/LOCATION/jobs/...
+You can view google's logs for the Batch API Job at:
+   https://console.cloud.google.com/batch/jobsDetail/regions/...
+```
+
+Open that link in your browser and navigate over to look at the logs. The issue can usually be seen there.
+
+The most common issues are:
+1. The service account that sparkles is using does not have access to pull the docker image. This can be identified by the image pull failing with "permission denied"
+2. The docker image is for the wrong arch (ie: docker image built on arm64 run on amd64 machine). This typically looks like an error like "failure=fork/exec /bin/sh: exec format error"
+
+# Developer info
+
+The following documentation is only relevant if you are developing the sparkles tool 
+
 ## Changing the protocol between "sparkles" and "consumer"
 
 The command line tool communicates with workers via gRPC. If a change is
