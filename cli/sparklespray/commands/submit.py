@@ -389,7 +389,9 @@ def _setup_parser_for_sub_command(parser):
         "-i",
         help="Name of docker image to run job within.  Defaults to value from sparkles config file.",
     )
-    parser.add_argument("--name", "-n", help="The name to assign to the job")
+    parser.add_argument(
+        "--name", "-n", help="The name to assign to the job", required=True
+    )
     parser.add_argument(
         "--seq",
         type=int,
