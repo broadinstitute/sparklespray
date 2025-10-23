@@ -6,6 +6,7 @@ from google.api_core import exceptions
 from google.cloud.storage.client import Client as GSClient
 from sparklespray.config import SCOPES
 from google.oauth2 import service_account
+from typing import List
 import time
 from collections import namedtuple
 from google.api_core.exceptions import PermissionDenied, Forbidden
@@ -197,7 +198,9 @@ def can_reach_datastore_api(project_id, key_path):
     raise Exception("Failed to confirm access to datastore")
 
 
-def setup_project(project_id: str, key_path: str, bucket_name: str, image_names: str):
+def setup_project(
+    project_id: str, key_path: str, bucket_name: str, image_names: List[str]
+):
     print("Enabling services for project {}...".format(project_id))
     enable_services(project_id)
     if not os.path.exists(key_path):
