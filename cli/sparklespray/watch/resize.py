@@ -67,7 +67,7 @@ class ResizeCluster(PeriodicTask):
             if additional_non_preemptable_nodes > 0:
                 assert (
                     self.non_preemptable_created <= max_non_preemptable_attempts
-                ), f"Sparkles would like to start {additional_preemptable_nodes} additional nodes, but we've already created {self.non_preemptable_created} non-preemptable nodes (max attempts allowed currently {max_non_preemptable_attempts}). This suggests we might be recreating nodes infinitely. Aborting"
+                ), f"Sparkles would like to start {additional_non_preemptable_nodes} additional nodes, but we've already created {self.non_preemptable_created} non-preemptable nodes (max attempts allowed currently {max_non_preemptable_attempts}). This suggests we might be recreating nodes infinitely. Aborting"
 
                 self.cluster.add_nodes(additional_non_preemptable_nodes, 3, False)
                 self.non_preemptable_created += additional_non_preemptable_nodes

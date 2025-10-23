@@ -9,7 +9,9 @@ def setup_cmd(args, config: Config):
     assert m is not None, "invalid remote path: {}".format(default_url_prefix)
     bucket_name = m.group(1)
 
-    setup_project(config.project, config.service_account_key, bucket_name)
+    image_names = [config.sparklesworker_image, config.default_image]
+
+    setup_project(config.project, config.service_account_key, bucket_name, image_names)
 
 
 def add_setup_cmd(subparser):

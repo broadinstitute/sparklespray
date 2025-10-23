@@ -9,6 +9,15 @@ from google.oauth2 import service_account
 import time
 from collections import namedtuple
 from google.api_core.exceptions import PermissionDenied, Forbidden
+from google.auth.exceptions import RefreshError
+import json
+import re
+
+REPO_NAME_PATTERN = "(?P<repo_name>[^/]+/[^/]+)/.*$"
+
+ARTIFACT_REGISTRY_REPO_PATTERN = (
+    "^[a-z0-9-]+-docker.pkg.dev/(?P<project_id>[a-z0-9-]+)$"
+)
 
 services_to_add = [  # "storage.googleapis.com",
     "datastore.googleapis.com",
@@ -30,18 +39,44 @@ roles_to_add = [
 ]
 
 
-def _run_cmd(cmd, args, suppress_warning=False):
+def _run_cmd(cmd, args, suppress_warning=False, max_attempts=10):
+    attempt = 0
+
     cmd = [cmd] + args
+    cmd_str = " ".join(cmd)
+
+    while attempt < max_attempts:
+        print(f"Executing: {cmd_str}")
+        try:
+            return subprocess.check_output(cmd, stderr=subprocess.STDOUT)
+        except subprocess.CalledProcessError as e:
+            if not suppress_warning:
+                print("Command failed. Output:")
+                print(e.output)
+
+            # these are some spurious errors due to it taking some time before the service
+            # account is fully ready
+            output = e.output.decode("utf-8")
+            if "Service account" in output and "does not exist" in output:
+                print(
+                    f"Got the following output: {repr(e.output)}, but this looks likely to be a spurious error and so we will the operation."
+                )
+            else:
+                raise
+
+        attempt += 1
+        print("Sleeping 10 secs and then will try again...")
+        time.sleep(10)
+
+    raise Exception("Too many failed attempts. Aborting")
+
+
+def gcloud_capturing_stdout(args):
+    cmd = ["gcloud"] + args
     cmd_str = " ".join(cmd)
     print(f"Executing: {cmd_str}")
 
-    try:
-        return subprocess.check_output(cmd, stderr=subprocess.STDOUT)
-    except subprocess.CalledProcessError as e:
-        if not suppress_warning:
-            print("Command failed. Output:")
-            print(e.output)
-        raise
+    return subprocess.check_output(cmd, text=True)
 
 
 def gcloud(args, suppress_warning=False):
@@ -72,6 +107,8 @@ def grant(service_acct, project_id, role):
 
 
 def create_service_account(service_acct, project_id, key_path):
+    creator = gcloud_capturing_stdout(["config", "get", "core/account"])
+
     gcloud(
         [
             "iam",
@@ -81,7 +118,7 @@ def create_service_account(service_acct, project_id, key_path):
             "--project",
             project_id,
             "--display-name",
-            "Service account for sparklespray",
+            f"Service account for sparklespray created by {creator}",
         ]
     )
 
@@ -115,27 +152,6 @@ def add_firewall_rule(project_id):
     protocol_and_port = "{}:{}".format(
         firewall_rule_obj.protocol, firewall_rule_obj.port
     )
-
-    def error_callback(error):
-        # If we have an error, we should try to check if rule already exists. If yes, we are all set.
-        # Assuming if the rule 'sparkles-monitor' exists, we are ok.
-        # TODO: Check the rule is on port 6032 with protocol tcp
-        # If no, we should stop here and let the user debug
-        gcloud_command = [
-            "compute",
-            "firewall-rules",
-            "describe",
-            firewall_rule_obj.name,
-            "--project",
-            project_id,
-        ]
-        gcloud(gcloud_command)
-        print("Firewall rule seems already set. Ignoring.")
-
-    #
-    # try:
-    #    gcloud(['compute', 'firewall-rules', 'describe', firewall_rule_obj.name])
-    # except subprocess.CalledProcessError as e:
 
     try:
         gcloud(
@@ -181,11 +197,11 @@ def can_reach_datastore_api(project_id, key_path):
     raise Exception("Failed to confirm access to datastore")
 
 
-def setup_project(project_id: str, key_path: str, bucket_name: str):
+def setup_project(project_id: str, key_path: str, bucket_name: str, image_names: str):
     print("Enabling services for project {}...".format(project_id))
     enable_services(project_id)
-    service_acct = "sparkles-" + random_string(10).lower()
     if not os.path.exists(key_path):
+        service_acct = "sparkles-" + random_string(10).lower()
         parent = os.path.dirname(key_path)
         if not os.path.exists(parent):
             os.makedirs(parent)
@@ -195,6 +211,11 @@ def setup_project(project_id: str, key_path: str, bucket_name: str):
         print(
             f"Not creating service account because key already exists at {key_path} Delete this and rerun if you wish to create a new service account."
         )
+
+    with open(key_path, "rt") as fd:
+        key = json.load(fd)
+        service_account_name = key["client_email"]
+    print(f"Sparkles jobs will run using the service account {service_account_name}")
 
     setup_bucket(project_id, key_path, bucket_name)
 
@@ -213,8 +234,54 @@ def setup_project(project_id: str, key_path: str, bucket_name: str):
         if can_reach_datastore_api(project_id, key_path):
             print("Success!")
 
-    print("Using gcloud to setup google authentication with Google Container Registry")
-    gcloud(["auth", "configure-docker"])
+    grant_access_to_images(service_account_name, image_names)
+
+
+def grant_access_to_images(service_account_name, image_names):
+    repositories = set()
+    for image_name in image_names:
+
+        repository = get_repository_name(image_name)
+        if repository in repositories:
+            continue
+
+        repositories.add(repository)
+
+        if looks_like_artifactory_repository(repository):
+            grant_access(service_account_name, repository)
+        else:
+            print(
+                f"{repository} does not look like the name of a Google Artifact Registry docker repository. If this is not a public repo, you will get an error when sparkles tries to use this repo."
+            )
+
+
+def get_repository_name(image_name):
+    m = re.match(REPO_NAME_PATTERN, image_name)
+    assert m is not None, f"Could not parse image name {image_name}"
+    return m.group("repo_name")
+
+
+def looks_like_artifactory_repository(repository):
+    return re.match(ARTIFACT_REGISTRY_REPO_PATTERN, repository) is not None
+
+
+def grant_access(service_account_name, repository):
+    m = re.match(ARTIFACT_REGISTRY_REPO_PATTERN, repository)
+    assert m is not None
+    project_id = m.group("project_id")
+
+    print(
+        f"Granting Artifact Registry Reader access on GCP project {project_id} to {service_account_name}"
+    )
+    gcloud(
+        [
+            "projects",
+            "add-iam-policy-binding",
+            project_id,
+            f"--member=serviceAccount:{service_account_name}",
+            f"--role=roles/artifactregistry.reader",
+        ]
+    )
 
 
 def setup_bucket(project_id, service_account_key, bucket_name):
@@ -231,7 +298,7 @@ def setup_bucket(project_id, service_account_key, bucket_name):
         try:
             needs_create = not bucket.exists()
             break
-        except Forbidden:
+        except (Forbidden, RefreshError):
             attempt += 1
             if attempt > max_attempts:
                 raise Exception(
