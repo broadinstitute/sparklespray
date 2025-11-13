@@ -4,7 +4,7 @@ from datetime import datetime
 from .batch_api import JobSpec, Runnable, Disk
 from .gcp_utils import normalize_label, make_unique_label, validate_label
 from .config import Config
-from .model import PersistentDiskMount, DiskMountT
+from .model import PersistentDiskMount, DiskMountT, DiskMount, GCSBucketMount
 from typing import List
 from .log import log
 from typing import cast
@@ -78,7 +78,23 @@ def create_job_spec(
         ]
         return runnables
 
-    assert len(mounts) <= 1, "Does not currently support more than one data mount"
+    disks: List[PersistentDiskMount] = []
+    gcs_bucket_mounts = []
+    for mount in mounts:
+        if isinstance(mount, PersistentDiskMount):
+            disks.append(
+                Disk(
+                    name="data",
+                    size_gb=mount.size_in_gb,
+                    type=mount.type,
+                    mount_path=mount.path,
+                )
+            )
+        elif isinstance(mount, GCSBucketMount):
+            gcs_bucket_mounts.append(mount)
+        else:
+            raise Exception("unimplemented")
+
     job = JobSpec(
         task_count="1",
         runnables=create_runnables(60 * 10),  # keep a worker around for 10 minutes
@@ -93,10 +109,8 @@ def create_job_spec(
             type=boot_volume.type,
             mount_path="/",
         ),
-        disks=[
-            Disk(name="data", size_gb=m.size_in_gb, type=m.type, mount_path=m.path)
-            for m in cast(List[PersistentDiskMount], mounts)
-        ],
+        disks=disks,
+        gcs_bucket_mounts=gcs_bucket_mounts,
         sparkles_job=job_id,
         sparkles_cluster=cluster_name,
         sparkles_timestamp=timestamp,

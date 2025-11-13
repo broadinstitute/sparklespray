@@ -6,6 +6,7 @@ from .model import (
     ExistingDiskMount,
     DiskMountT,
     MachineSpec,
+    GCSBucketMount,
 )
 from .io_helper import IO
 from configparser import RawConfigParser, NoSectionError, NoOptionError
@@ -209,7 +210,7 @@ def load_config(
     config = PrepConfig()
     config.sparkles_config_path = config_file
     config.monitor_port = consume("monitor_port", 6032, int)
-    config.work_root_dir = consume("work_root_dir", "/mnt/")
+    config.work_root_dir = consume("work_root_dir", "/mnt/disks/mount_1")
     for unused_property in ["default_resource_cpu", "default_resource_memory"]:
         if unused_property in config_dict:
             raise BadConfig(
@@ -295,24 +296,48 @@ def load_config(
         size_in_gb=consume("boot_volume_in_gb", 40, int),
         type=consume("boot_volume_type", default_boot_drive_type),
         path="/",
+        mount_options=[],
     )
 
     mount_count = consume("mount_count", 1, int)
     mounts = []
     for i in range(mount_count):
         if i == 0:
-            path = consume(f"mount_{i+1}_path", "/mnt")
+            path = consume(f"mount_{i+1}_path", f"/mnt/disks/mount_{i+1}")
             type = consume(f"mount_{i+1}_type", default_drive_type)
         else:
             path = consume(f"mount_{i+1}_path")
             type = consume(f"mount_{i+1}_type")
-        size_in_gb = consume(f"mount_{i+1}_size_in_gb", 100, int)
-        name = consume(f"mount_{i+1}_name", None)
+
+        mount_options = consume(
+            f"mount_{i + 1}_options",
+            [],
+            lambda value: [x for x in value.split(" ") if x != ""],
+        )
+        name: Optional[str] = consume(f"mount_{i+1}_name", None)
         if name is not None:
-            mounts.append(ExistingDiskMount(name=name, path=path))
+            if name.startswith("gs://"):
+                assert type == "gcs"
+                mounts.append(
+                    GCSBucketMount(
+                        path=path,
+                        remote_path=name[len("gs://") :],
+                        mount_options=mount_options,
+                    )
+                )
+            else:
+                mounts.append(
+                    ExistingDiskMount(name=name, path=path, mount_options=mount_options)
+                )
         else:
+            size_in_gb = consume(f"mount_{i + 1}_size_in_gb", 100, int)
             mounts.append(
-                PersistentDiskMount(path=path, type=type, size_in_gb=size_in_gb)
+                PersistentDiskMount(
+                    path=path,
+                    type=type,
+                    size_in_gb=size_in_gb,
+                    mount_options=mount_options,
+                )
             )
 
     # TODO: Add validation that no two mounts have the same path and that workdir lines up with at least one mount

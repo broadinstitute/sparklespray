@@ -7,7 +7,9 @@ from google.cloud.compute_v1.services.instances import InstancesClient
 import google.cloud.compute_v1.types as compute
 
 from google.api_core.exceptions import NotFound
+
 from .gcp_utils import normalize_label, make_unique_label, validate_label
+from .model import GCSBucketMount
 from .node_req_store import (
     NodeReq,
     NODE_REQ_COMPLETE,
@@ -21,6 +23,7 @@ from .node_req_store import (
 from .gcp_utils import normalize_label, make_unique_label, validate_label
 
 import json
+import dataclasses
 
 
 class Runnable(BaseModel):
@@ -64,13 +67,24 @@ class JobSpec(BaseModel):
     scopes: List[str]
     # project: str
     # location: str
+    gcs_bucket_mounts: List[GCSBucketMount] = dataclasses.field(default_factory=list)
 
 
-def _create_volumes(disks: List[Disk]):
-    return [
-        batch.Volume(mount_path=disk.mount_path, device_name=disk.name)
-        for disk in disks
-    ]
+def _create_volumes(disks: List[Disk], gcs_bucket_mounts: List[GCSBucketMount]):
+    volumes = []
+    for disk in disks:
+        volumes.append(batch.Volume(mount_path=disk.mount_path, device_name=disk.name))
+    for gcs_bucket_mount in gcs_bucket_mounts:
+        # always make sure to mount buckets as read-only for a variety of reasons
+        mount_options = ["-o", "ro"] + gcs_bucket_mount.mount_options
+        volumes.append(
+            batch.Volume(
+                mount_path=gcs_bucket_mount.path,
+                mount_options=mount_options,
+                gcs=batch.GCS(remote_path=gcs_bucket_mount.remote_path),
+            )
+        )
+    return volumes
 
 
 def _create_runnables(runnables: List[Runnable], disks: List[Disk], monitor_port: int):
@@ -108,7 +122,11 @@ def _create_parent_id(project, location):
 
 
 def create_batch_job_from_job_spec(
-    project: str, location: str, self: JobSpec, worker_count: int, max_retry_count: int
+    project: str,
+    location: str,
+    job_spec: JobSpec,
+    worker_count: int,
+    max_retry_count: int,
 ):
     # batch api only supports a single group at this time
     # BATCH_TASK_INDEX
@@ -118,9 +136,9 @@ def create_batch_job_from_job_spec(
             task_count_per_node="1",
             task_spec=batch.TaskSpec(
                 runnables=_create_runnables(
-                    self.runnables, self.disks, self.monitor_port
+                    job_spec.runnables, job_spec.disks, job_spec.monitor_port
                 ),
-                volumes=_create_volumes(self.disks),
+                volumes=_create_volumes(job_spec.disks, job_spec.gcs_bucket_mounts),
             ),
             # max_retry_count=max_retry_count,
             # lifecycle_policies=batch.LifecyclePolicy(action=batch.LifecyclePolicy.Action.RETRY_TASK,
@@ -132,42 +150,42 @@ def create_batch_job_from_job_spec(
         task_groups=task_groups,
         allocation_policy=batch.AllocationPolicy(
             location=batch.AllocationPolicy.LocationPolicy(
-                allowed_locations=self.locations
+                allowed_locations=job_spec.locations
             ),
             service_account=batch.ServiceAccount(
-                email=self.service_account_email, scopes=self.scopes
+                email=job_spec.service_account_email, scopes=job_spec.scopes
             ),
             instances=[
                 batch.AllocationPolicy.InstancePolicyOrTemplate(
                     policy=batch.AllocationPolicy.InstancePolicy(
-                        machine_type=self.machine_type,
+                        machine_type=job_spec.machine_type,
                         provisioning_model=(
                             batch.AllocationPolicy.ProvisioningModel.SPOT
-                            if self.preemptible
+                            if job_spec.preemptible
                             else batch.AllocationPolicy.ProvisioningModel.STANDARD
                         ),
                         boot_disk=batch.AllocationPolicy.Disk(
-                            type=self.boot_disk.type,
-                            size_gb=self.boot_disk.size_gb,
+                            type=job_spec.boot_disk.type,
+                            size_gb=job_spec.boot_disk.size_gb,
                             image="batch-cos",
                         ),
-                        disks=_create_disks(self.disks),
+                        disks=_create_disks(job_spec.disks),
                     )
                 )
             ],
-            tags=self.network_tags,
+            tags=job_spec.network_tags,
         ),
         logs_policy=batch.LogsPolicy(destination="CLOUD_LOGGING"),
         labels={
-            "sparkles-job": normalize_label(self.sparkles_job),
-            "sparkles-cluster": self.sparkles_cluster,
+            "sparkles-job": normalize_label(job_spec.sparkles_job),
+            "sparkles-cluster": job_spec.sparkles_cluster,
             # "sparkles-timestamp": self.sparkles_timestamp
         },
     )
 
     return batch.CreateJobRequest(
         parent=f"projects/{project}/locations/{location}",
-        job_id=make_unique_label(f"sparkles-{normalize_label(self.sparkles_job)}"),
+        job_id=make_unique_label(f"sparkles-{normalize_label(job_spec.sparkles_job)}"),
         job=job,
     )
 

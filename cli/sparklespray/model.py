@@ -16,10 +16,15 @@ ALLOWED_DISK_TYPES = {
 
 class DiskMount(BaseModel):
     path: str
+    mount_options: List[str]
 
 
 class ExistingDiskMount(DiskMount):
     name: str
+
+
+class GCSBucketMount(DiskMount):
+    remote_path: str
 
 
 class PersistentDiskMount(DiskMount):
@@ -35,7 +40,7 @@ class PersistentDiskMount(DiskMount):
 
 from typing import TypeVar
 
-DiskMountT = Union[ExistingDiskMount, PersistentDiskMount]
+DiskMountT = Union[ExistingDiskMount, PersistentDiskMount, GCSBucketMount]
 
 
 class SubmitConfig(BaseModel):
