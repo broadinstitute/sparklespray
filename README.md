@@ -526,17 +526,15 @@ Some configuration values can be inherited from your gcloud configuration (`~/.c
 
 ### Storage Configuration
 
-| Parameter            | Default                | Description                                      |
-| -------------------- | ---------------------- | ------------------------------------------------ |
-| `boot_volume_in_gb`  | 40                     | Size of boot disk in GB                          |
-| `boot_volume_type`   | Varies\*               | Type of boot disk                                |
-| `mount_count`        | 1                      | Number of additional disk mounts                 |
-| `mount_N_path`       | "/mnt/disks/mount_N"   | Mount path for disk N                            |
-| `mount_N_type`       | Varies\*               | Disk type for mount N                            |
-| `mount_N_size_in_gb` | 100                    | Size in GB for mount N                           |
-| `mount_N_name`       | None                   | Name of existing disk to mount (optional)        |
-| `mount_N_options`    | []                     | Mount options as space-separated string          |
-| `mount_N_remote_path`| None                   | For GCS buckets, the bucket path without gs://   |
+| Parameter            | Default              | Description                                   |
+| -------------------- | -------------------- | --------------------------------------------- |
+| `boot_volume_in_gb`  | 40                   | Size of boot disk in GB                       |
+| `boot_volume_type`   | Varies\*             | Type of boot disk                             |
+| `mount_count`        | 1                    | Number of additional disk mounts              |
+| `mount_N_path`       | "/mnt/disks/mount_N" | Mount path for disk N                         |
+| `mount_N_type`       | Varies\*             | Disk type for mount N                         |
+| `mount_N_size_in_gb` | 100                  | Size in GB for mount N                        |
+| `mount_N_name`       | None                 | Name of existing disk or bucket path to mount |
 
 \*Default disk type depends on machine type:
 
@@ -549,13 +547,16 @@ Some configuration values can be inherited from your gcloud configuration (`~/.c
 Sparklespray supports several types of disk mounts:
 
 1. **Persistent Disk Mount** (default)
+
    ```ini
    mount_1_type=pd-balanced
    mount_1_size_in_gb=100
    ```
+
    Valid types: "pd-standard", "pd-balanced", "pd-ssd", "hyperdisk-balanced"
 
 2. **Existing Disk Mount**
+
    ```ini
    mount_1_name=my-existing-disk
    ```
@@ -1259,12 +1260,13 @@ You can view google's logs for the Batch API Job at:
 Open that link in your browser and navigate over to look at the logs. The issue can usually be seen there.
 
 The most common issues are:
+
 1. The service account that sparkles is using does not have access to pull the docker image. This can be identified by the image pull failing with "permission denied"
 2. The docker image is for the wrong arch (ie: docker image built on arm64 run on amd64 machine). This typically looks like an error like "failure=fork/exec /bin/sh: exec format error"
 
 # Developer info
 
-The following documentation is only relevant if you are developing the sparkles tool 
+The following documentation is only relevant if you are developing the sparkles tool
 
 ## Changing the protocol between "sparkles" and "consumer"
 
