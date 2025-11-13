@@ -29,7 +29,10 @@ sparklesworker_image=invalid-sparklesworker-name
     assert config.region == "us-central1"
     assert config.mounts == [
         PersistentDiskMount(
-            path="/mnt", size_in_gb=100, type="local-ssd", mount_options=[]
+            path="/mnt/disks/mount_1",
+            size_in_gb=100,
+            type="local-ssd",
+            mount_options=[],
         )
     ]
 
