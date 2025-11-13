@@ -28,7 +28,9 @@ sparklesworker_image=invalid-sparklesworker-name
     assert config.default_image == "python"
     assert config.region == "us-central1"
     assert config.mounts == [
-        PersistentDiskMount(path="/mnt", size_in_gb=100, type="local-ssd")
+        PersistentDiskMount(
+            path="/mnt", size_in_gb=100, type="local-ssd", mount_options=[]
+        )
     ]
 
 

@@ -78,7 +78,7 @@ def create_job_spec(
         ]
         return runnables
 
-    disks: List[PersistentDiskMount] = []
+    disks: List[Disk] = []
     gcs_bucket_mounts = []
     for mount in mounts:
         if isinstance(mount, PersistentDiskMount):
