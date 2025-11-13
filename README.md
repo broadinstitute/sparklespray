@@ -526,20 +526,45 @@ Some configuration values can be inherited from your gcloud configuration (`~/.c
 
 ### Storage Configuration
 
-| Parameter            | Default          | Description                               |
-| -------------------- | ---------------- | ----------------------------------------- |
-| `boot_volume_in_gb`  | 20               | Size of boot disk in GB                   |
-| `mount_count`        | 1                | Number of additional disk mounts          |
-| `mount_N_path`       | "/mnt" (for N=1) | Mount path for disk N                     |
-| `mount_N_type`       | Varies\*         | Disk type for mount N                     |
-| `mount_N_size_in_gb` | 100              | Size in GB for mount N                    |
-| `mount_N_name`       | None             | Name of existing disk to mount (optional) |
+| Parameter            | Default                | Description                                      |
+| -------------------- | ---------------------- | ------------------------------------------------ |
+| `boot_volume_in_gb`  | 40                     | Size of boot disk in GB                          |
+| `boot_volume_type`   | Varies\*               | Type of boot disk                                |
+| `mount_count`        | 1                      | Number of additional disk mounts                 |
+| `mount_N_path`       | "/mnt/disks/mount_N"   | Mount path for disk N                            |
+| `mount_N_type`       | Varies\*               | Disk type for mount N                            |
+| `mount_N_size_in_gb` | 100                    | Size in GB for mount N                           |
+| `mount_N_name`       | None                   | Name of existing disk to mount (optional)        |
+| `mount_N_options`    | []                     | Mount options as space-separated string          |
+| `mount_N_remote_path`| None                   | For GCS buckets, the bucket path without gs://   |
 
 \*Default disk type depends on machine type:
 
-- n4-\*: "hyperdisk-balanced"
-- n1-_ or n2-_: "local-ssd"
-- Others: "pd-balanced"
+- n4-\*: "hyperdisk-balanced" for both boot and data disks
+- n1-\* or n2-\*: "pd-balanced" for boot, "local-ssd" for data disks
+- Others: "pd-balanced" for both boot and data disks
+
+#### Disk Mount Types
+
+Sparklespray supports several types of disk mounts:
+
+1. **Persistent Disk Mount** (default)
+   ```ini
+   mount_1_type=pd-balanced
+   mount_1_size_in_gb=100
+   ```
+   Valid types: "pd-standard", "pd-balanced", "pd-ssd", "hyperdisk-balanced"
+
+2. **Existing Disk Mount**
+   ```ini
+   mount_1_name=my-existing-disk
+   ```
+
+3. **GCS Bucket Mount**
+   ```ini
+   mount_1_type=gcs
+   mount_1_name=gs://my-bucket/path
+   ```
 
 ### Preemption Settings
 
@@ -569,7 +594,7 @@ region=us-east1
 account=my-service-account@project.iam.gserviceaccount.com
 ```
 
-Configuration with a local SSD attached for temp storage:
+Configuration with multiple disk types:
 
 ```ini
 [config]
@@ -581,13 +606,21 @@ zones=us-east1-b
 region=us-east1
 account=my-service-account@project.iam.gserviceaccount.com
 boot_volume_in_gb=50
-mount_count=2
+boot_volume_type=pd-balanced
+mount_count=3
+# Persistent disk for data
 mount_1_path=/mnt/data
 mount_1_type=pd-ssd
 mount_1_size_in_gb=200
+# Local SSD for temp storage
 mount_2_path=/mnt/temp
 mount_2_type=local-ssd
 mount_2_size_in_gb=375
+# GCS bucket mount
+mount_3_path=/mnt/gcs
+mount_3_type=gcs
+mount_3_name=gs://my-bucket/data
+mount_3_options=ro implicit_dirs
 ```
 
 ### Configuration File Location
