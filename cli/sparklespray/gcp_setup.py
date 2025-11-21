@@ -28,6 +28,7 @@ services_to_add = [  # "storage.googleapis.com",
     "compute.googleapis.com",
     "containerregistry.googleapis.com",
     "logging",
+    "batch.googleapis.com",
 ]
 
 roles_to_add = [
@@ -228,9 +229,11 @@ def setup_project(
 
     if not can_reach_datastore_api(project_id, key_path):
         print(
-            'Go to https://console.cloud.google.com/datastore/setup?project={} to choose where to store your data will reside in and then set up will be complete. Select "Cloud Datastore" and then select a region close to you, and then "Create database".'.format(
-                project_id
-            )
+            f"Go to https://console.cloud.google.com/datastore/setup?project={project_id} and "
+            f'click "Create a Firestore database". You\'ll need to choose your region and under '
+            f'configuration options choose "Firestore with Datastore compatibility". (Not creating the '
+            f"database with 'Datastore compatibility' will appear like everything is working, but sparkles will fail "
+            f"with cryptic errors when it tries to use the database)"
         )
         input("Hit enter once you've completed the above: ")
         print("checking datastore again..")
