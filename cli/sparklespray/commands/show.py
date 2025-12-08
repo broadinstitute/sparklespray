@@ -63,9 +63,17 @@ def show_cmd(jq: JobQueue, io: IO, args):
 
         def make_full_row(task: Task):
             row = dataclasses.asdict(task)
+
+            # fetch the task definition
             task_spec = json.loads(io.get_as_str_must(task.args))
             row["args_url"] = task.args
             row["args"] = task_spec
+
+            # fetch the result.json if this task completed
+            if task.exit_code is not None:
+                result = json.loads(io.get_as_str_must(task.command_result_url))
+                row["result"] = result
+
             return row
 
         def write_json_rows(rows, fd):
