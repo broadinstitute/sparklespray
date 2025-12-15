@@ -80,11 +80,11 @@ def create_job_spec(
 
     disks: List[Disk] = []
     gcs_bucket_mounts = []
-    for mount in mounts:
+    for mount_index, mount in enumerate(mounts):
         if isinstance(mount, PersistentDiskMount):
             disks.append(
                 Disk(
-                    name="data",
+                    name=f"disk{mount_index}",
                     size_gb=mount.size_in_gb,
                     type=mount.type,
                     mount_path=mount.path,
