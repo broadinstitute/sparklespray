@@ -25,6 +25,7 @@ import (
 )
 
 type Monitor struct {
+	pb.UnimplementedMonitorServer
 	mutex        sync.Mutex
 	logPerTaskId map[string]string
 }
@@ -104,17 +105,164 @@ func getMemoryUsage() (*MemoryUsage, error) {
 	return &MemoryUsage{totalSize, totalData, totalShared, totalResident, procCount}, nil
 }
 
+// CPUStats holds CPU time counters from /proc/stat (in jiffies)
+type CPUStats struct {
+	User   int64
+	System int64
+	Idle   int64
+	Iowait int64
+}
+
+// getCPUStats reads CPU counters from /proc/stat
+func getCPUStats() (*CPUStats, error) {
+	contents, err := ioutil.ReadFile("/proc/stat")
+	if err != nil {
+		return nil, err
+	}
+
+	lines := strings.Split(string(contents), "\n")
+	for _, line := range lines {
+		if strings.HasPrefix(line, "cpu ") {
+			fields := strings.Fields(line)
+			if len(fields) < 8 {
+				return nil, fmt.Errorf("unexpected /proc/stat format")
+			}
+			// fields: cpu user nice system idle iowait irq softirq ...
+			user, _ := strconv.ParseInt(fields[1], 10, 64)
+			nice, _ := strconv.ParseInt(fields[2], 10, 64)
+			system, _ := strconv.ParseInt(fields[3], 10, 64)
+			idle, _ := strconv.ParseInt(fields[4], 10, 64)
+			iowait, _ := strconv.ParseInt(fields[5], 10, 64)
+
+			return &CPUStats{
+				User:   user + nice, // combine user and nice
+				System: system,
+				Idle:   idle,
+				Iowait: iowait,
+			}, nil
+		}
+	}
+	return nil, fmt.Errorf("cpu line not found in /proc/stat")
+}
+
+// SystemMemory holds system-wide memory info from /proc/meminfo (in bytes)
+type SystemMemory struct {
+	Total     int64
+	Available int64
+	Free      int64
+}
+
+// getSystemMemory reads memory info from /proc/meminfo
+func getSystemMemory() (*SystemMemory, error) {
+	contents, err := ioutil.ReadFile("/proc/meminfo")
+	if err != nil {
+		return nil, err
+	}
+
+	mem := &SystemMemory{}
+	lines := strings.Split(string(contents), "\n")
+	for _, line := range lines {
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		value, _ := strconv.ParseInt(fields[1], 10, 64)
+		value *= 1024 // convert from kB to bytes
+
+		switch fields[0] {
+		case "MemTotal:":
+			mem.Total = value
+		case "MemAvailable:":
+			mem.Available = value
+		case "MemFree:":
+			mem.Free = value
+		}
+	}
+	return mem, nil
+}
+
+// MemoryPressure holds PSI metrics from /proc/pressure/memory
+type MemoryPressure struct {
+	SomeAvg10 int32 // percentage * 100, or -1 if unavailable
+	FullAvg10 int32
+}
+
+// getMemoryPressure reads PSI memory pressure (gracefully returns -1 if unavailable)
+func getMemoryPressure() *MemoryPressure {
+	contents, err := ioutil.ReadFile("/proc/pressure/memory")
+	if err != nil {
+		// PSI not available (older kernel or not enabled)
+		return &MemoryPressure{SomeAvg10: -1, FullAvg10: -1}
+	}
+
+	pressure := &MemoryPressure{SomeAvg10: -1, FullAvg10: -1}
+	lines := strings.Split(string(contents), "\n")
+	for _, line := range lines {
+		// Format: some avg10=0.00 avg60=0.00 avg300=0.00 total=0
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+
+		var target *int32
+		if fields[0] == "some" {
+			target = &pressure.SomeAvg10
+		} else if fields[0] == "full" {
+			target = &pressure.FullAvg10
+		} else {
+			continue
+		}
+
+		// Parse avg10=X.XX
+		for _, field := range fields[1:] {
+			if strings.HasPrefix(field, "avg10=") {
+				valStr := strings.TrimPrefix(field, "avg10=")
+				val, err := strconv.ParseFloat(valStr, 64)
+				if err == nil {
+					*target = int32(val * 100) // convert to percentage * 100
+				}
+				break
+			}
+		}
+	}
+	return pressure
+}
+
 func (m *Monitor) GetProcessStatus(ctx context.Context, in *pb.GetProcessStatusRequest) (*pb.GetProcessStatusReply, error) {
 	mem, err := getMemoryUsage()
 	if err != nil {
 		return nil, err
 	}
 
-	return &pb.GetProcessStatusReply{TotalMemory: mem.totalSize * PAGE_SIZE,
+	reply := &pb.GetProcessStatusReply{
+		TotalMemory:   mem.totalSize * PAGE_SIZE,
 		TotalData:     mem.totalData * PAGE_SIZE,
 		TotalShared:   mem.totalShared * PAGE_SIZE,
 		TotalResident: mem.totalResident * PAGE_SIZE,
-		ProcessCount:  int32(mem.procCount)}, nil
+		ProcessCount:  int32(mem.procCount),
+	}
+
+	// Add CPU stats (best effort - don't fail if unavailable)
+	if cpu, err := getCPUStats(); err == nil {
+		reply.CpuUser = cpu.User
+		reply.CpuSystem = cpu.System
+		reply.CpuIdle = cpu.Idle
+		reply.CpuIowait = cpu.Iowait
+	}
+
+	// Add system memory info (best effort)
+	if sysMem, err := getSystemMemory(); err == nil {
+		reply.MemTotal = sysMem.Total
+		reply.MemAvailable = sysMem.Available
+		reply.MemFree = sysMem.Free
+	}
+
+	// Add memory pressure (gracefully handles missing PSI)
+	pressure := getMemoryPressure()
+	reply.MemPressureSomeAvg10 = pressure.SomeAvg10
+	reply.MemPressureFullAvg10 = pressure.FullAvg10
+
+	return reply, nil
 }
 
 func (m *Monitor) ReadOutput(ctx context.Context, in *pb.ReadOutputRequest) (*pb.ReadOutputReply, error) {

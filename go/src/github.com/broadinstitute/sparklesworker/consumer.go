@@ -38,6 +38,7 @@ type Task struct {
 	Cluster          string         `datastore:"cluster" json:"cluster"`
 	MonitorAddress   string         `datastore:"monitor_address" json:"monitor_address"`
 	LogURL           string         `datastore:"log_url", json:"log_url"`
+	LastUpdated      float64        `datastore:"last_updated" json:"last_updated"`
 }
 
 type TaskStatusNotification struct {
@@ -176,6 +177,7 @@ func updateTaskClaimed(ctx context.Context, q *DataStoreQueue, task_id string, n
 		task.Status = STATUS_CLAIMED
 		task.Owner = newOwner
 		task.MonitorAddress = monitorAddress
+		task.LastUpdated = float64(now) / 1000.0
 
 		return true
 	}
@@ -206,6 +208,7 @@ func updateTaskCompleted(ctx context.Context, q Queue, task_id string, retcode s
 		task.History = append(task.History, taskHistory)
 		task.Status = STATUS_COMPLETE
 		task.ExitCode = retcode
+		task.LastUpdated = float64(now) / 1000.0
 
 		return true
 	}
@@ -237,6 +240,7 @@ func updateTaskFailed(ctx context.Context, q Queue, task_id string, failure stri
 		task.History = append(task.History, taskHistory)
 		task.Status = STATUS_FAILED
 		task.FailureReason = failure
+		task.LastUpdated = float64(now) / 1000.0
 
 		return true
 	}
@@ -267,6 +271,7 @@ func updateTaskKilled(ctx context.Context, q Queue, task_id string) (*Task, erro
 
 		task.History = append(task.History, taskHistory)
 		task.Status = STATUS_KILLED
+		task.LastUpdated = float64(now) / 1000.0
 
 		return true
 	}

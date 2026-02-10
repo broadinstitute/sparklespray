@@ -59,6 +59,9 @@ type ResourceUsage struct {
 	UnsharedMemorySize int64           `json:"unshared_memory_size"`
 	BlockInputOps      int64           `json:"block_input_ops"`
 	BlockOutputOps     int64           `json:"block_output_ops"`
+	StartTime          float64         `json:"start_time"`
+	EndTime            float64         `json:"end_time"`
+	ElapsedTime        float64         `json:"elapsed_time"`
 }
 
 type ResultStruct struct {
@@ -184,12 +187,22 @@ func downloadAll(ioc IOClient, workdir string, downloads []*TaskDownload, cacheD
 	return nil, downloaded
 }
 
-func execCommand(command string, workdir string, stdout *os.File) (*syscall.Rusage, string, error) {
+// ExecResult holds the results of command execution
+type ExecResult struct {
+	Rusage    *syscall.Rusage
+	Status    string
+	StartTime time.Time
+	EndTime   time.Time
+}
+
+func execCommand(command string, workdir string, stdout *os.File) (*ExecResult, error) {
 	attr := &os.ProcAttr{Dir: workdir, Env: nil, Files: []*os.File{nil, stdout, stdout}}
 	exePath := "/bin/sh"
+
+	startTime := time.Now()
 	proc, err := os.StartProcess(exePath, []string{exePath, "-c", command}, attr)
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 
 	var procState *os.ProcessState
@@ -198,6 +211,8 @@ func execCommand(command string, workdir string, stdout *os.File) (*syscall.Rusa
 		procState, err2 = proc.Wait()
 		return err2
 	})
+	endTime := time.Now()
+
 	if err != nil {
 		// this should not be possible
 		panic(fmt.Sprintf("Error calling proc.Wait(): %s", err))
@@ -212,7 +227,12 @@ func execCommand(command string, workdir string, stdout *os.File) (*syscall.Rusa
 		statusStr = fmt.Sprintf("%d", status.ExitStatus())
 	}
 
-	return rusage, statusStr, nil
+	return &ExecResult{
+		Rusage:    rusage,
+		Status:    statusStr,
+		StartTime: startTime,
+		EndTime:   endTime,
+	}, nil
 }
 
 type UploadMapping map[string]string
@@ -413,10 +433,11 @@ func executeTaskInDir(ioc IOClient, workdir string, taskId string, spec *TaskSpe
 
 	cwdDir := path.Join(workdir, commandWorkingDir)
 	log.Printf("Executing (working dir: %s, output written to: %s): %s", cwdDir, stdoutPath, spec.Command)
-	resourceUsage, retcode, err := execCommand(spec.Command, cwdDir, stdout)
+	execResult, err := execCommand(spec.Command, cwdDir, stdout)
 	if err != nil {
-		return retcode, err
+		return "", err
 	}
+	retcode := execResult.Status
 
 	execLifecycleScript("PostExecScript", workdir, spec.PostExecScript)
 
@@ -431,7 +452,7 @@ func executeTaskInDir(ioc IOClient, workdir string, taskId string, spec *TaskSpe
 
 	addUpload(filesToUpload, stdoutPath, spec.StdoutURL)
 
-	err = writeResultFile(ioc, spec.CommandResultURL, retcode, resourceUsage, workdir, filesToUpload, spec.Command, spec.Parameters)
+	err = writeResultFile(ioc, spec.CommandResultURL, retcode, execResult, workdir, filesToUpload, spec.Command, spec.Parameters)
 	if err != nil {
 		return retcode, err
 	}
@@ -527,7 +548,7 @@ func uploadMapped(ioc IOClient, files map[string]string) error {
 func writeResultFile(ioc IOClient,
 	CommandResultURL string,
 	retcode string,
-	resourceUsage *syscall.Rusage,
+	execResult *ExecResult,
 	workdir string,
 	filesToUpload map[string]string,
 	command string,
@@ -543,19 +564,26 @@ func writeResultFile(ioc IOClient,
 		files = append(files, &ResultFile{Src: rel_src, DstURL: dstURL})
 	}
 
+	rusage := execResult.Rusage
+	elapsedTime := execResult.EndTime.Sub(execResult.StartTime).Seconds()
+
 	result := &ResultStruct{
 		Command:    command,
 		Parameters: parameters,
 		ReturnCode: retcode,
 		Files:      files,
 		Usage: &ResourceUsage{
-			UserCPUTime:        resourceUsage.Utime,
-			SystemCPUTime:      resourceUsage.Stime,
-			MaxMemorySize:      resourceUsage.Maxrss,
-			SharedMemorySize:   resourceUsage.Isrss,
-			UnsharedMemorySize: resourceUsage.Ixrss,
-			BlockInputOps:      resourceUsage.Inblock,
-			BlockOutputOps:     resourceUsage.Oublock}}
+			UserCPUTime:        rusage.Utime,
+			SystemCPUTime:      rusage.Stime,
+			MaxMemorySize:      rusage.Maxrss,
+			SharedMemorySize:   rusage.Isrss,
+			UnsharedMemorySize: rusage.Ixrss,
+			BlockInputOps:      rusage.Inblock,
+			BlockOutputOps:     rusage.Oublock,
+			StartTime:          float64(execResult.StartTime.Unix()) + float64(execResult.StartTime.Nanosecond())/1e9,
+			EndTime:            float64(execResult.EndTime.Unix()) + float64(execResult.EndTime.Nanosecond())/1e9,
+			ElapsedTime:        elapsedTime,
+		}}
 
 	resultJson, err := json.Marshal(result)
 	if err != nil {

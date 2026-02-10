@@ -32,4 +32,19 @@ message GetProcessStatusReply {
   int64 totalData = 3;
   int64 totalShared = 4;
   int64 totalResident = 5;
+
+  // CPU stats from /proc/stat (in jiffies, compute delta for %)
+  int64 cpuUser = 6;
+  int64 cpuSystem = 7;
+  int64 cpuIdle = 8;
+  int64 cpuIowait = 9;
+
+  // System memory from /proc/meminfo (in bytes)
+  int64 memTotal = 10;
+  int64 memAvailable = 11;
+  int64 memFree = 12;
+
+  // Memory pressure from /proc/pressure/memory (percentage * 100, -1 if unavailable)
+  int32 memPressureSomeAvg10 = 13;
+  int32 memPressureFullAvg10 = 14;
 }
