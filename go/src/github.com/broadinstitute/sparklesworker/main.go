@@ -27,7 +27,7 @@ import (
 func Main() error {
 	app := cli.NewApp()
 	app.Name = "sparklesworker"
-	app.Version = "5.0.0"
+	app.Version = "5.8.2"
 	app.Compiled = time.Now()
 	app.Authors = []cli.Author{
 		cli.Author{

@@ -103,23 +103,14 @@ def _default_to(value, default):
 
 def parse_docker_image_name(docker_image):
     m = re.match(
-        r"([a-z0-9-_/]+)(?::([a-z0-9-_/.]+))?",
+        r"(?:([a-z0-9-]+\.[a-z0-9-.]+)?(?::(\d+))?/)?([a-z0-9-_/]+)(?::([a-z0-9-_/.]+))?",
         docker_image,
     )
-    if m is not None:
-        path, tag = m.groups()
-        host = ""
-        port = ""
-    else:
-        m = re.match(
-            r"(?:([a-z0-9.-]+)(?::(\\d+))?/)?([a-z0-9-_/]+)(?::([a-z0-9-_/.]+))?",
-            docker_image,
+    if m is None:
+        raise Exception(
+            f'"{docker_image}" does not appear to be a valid docker image name'
         )
-        if m is None:
-            raise Exception(
-                f'"{docker_image}" does not appear to be a valid docker image name'
-            )
-        host, port, path, tag = m.groups()
+    host, port, path, tag = m.groups()
 
     # parse this as a generic name
     generic = DockerImageName(
