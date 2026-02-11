@@ -1,4 +1,5 @@
 import time
+import uuid
 from ..task_store import STATUS_COMPLETE
 from ..config import Config
 from ..io_helper import IO
@@ -6,10 +7,18 @@ from ..job_queue import JobQueue
 from ..cluster_service import Cluster
 from ..batch_api import JobSpec
 from ..log import log
-from ..watch import run_tasks, PrintStatus, CompletionMonitor, StreamLogs, ResizeCluster
+from ..watch import (
+    run_tasks,
+    PrintStatus,
+    CompletionMonitor,
+    StreamLogs,
+    ResizeCluster,
+    Heartbeat,
+)
 from .shared import _resolve_jobid
 from ..errors import NoWorkersRunning, UserError
 from ..watch import ResetOrphans
+
 
 class TimeoutException(Exception):
     """Exception raised when an operation times out."""
@@ -121,6 +130,10 @@ def watch(
     job = jq.get_job_must(job_id)
     assert job is not None
 
+    # Create a unique ID for this watch execution and record heartbeat
+    watch_run_uuid = str(uuid.uuid4())
+    cluster.heartbeat(watch_run_uuid)
+
     if target_nodes is None:
         target_nodes = job.target_node_count
 
@@ -146,6 +159,7 @@ def watch(
         CompletionMonitor(),
         StreamLogs(loglive, cluster, io),
         PrintStatus(initial_poll_delay, max_poll_delay),
+        Heartbeat(cluster, watch_run_uuid),
     ]
     if target_nodes == 0:
         log.warning(
@@ -163,9 +177,7 @@ def watch(
                 max_preemptable_attempts,
             )
         )
-        tasks.append(
-            ResetOrphans(jq, cluster)
-        )
+        tasks.append(ResetOrphans(jq, cluster))
 
     try:
         run_tasks(job_id, job.cluster, tasks, cluster)
@@ -186,6 +198,16 @@ def watch(
         raise UserError(
             "No remaining nodes running, but tasks are not complete. Aborting."
         )
+    finally:
+        # Best effort attempt to clear the heartbeat record
+        try:
+            cleared = cluster.clear_heartbeat(watch_run_uuid)
+            if not cleared:
+                log.warning(
+                    "Could not clear heartbeat: it belongs to a different watch process"
+                )
+        except Exception as e:
+            log.warning("Failed to clear heartbeat record: %s", e)
 
 
 def _wait_until_tasks_exist(cluster: Cluster, job_id: str):

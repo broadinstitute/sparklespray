@@ -17,7 +17,7 @@ from .node_req_store import (
 # from .node_service import NodeService, MachineSpec
 from .job_store import JobStore
 from .task_store import TaskStore
-from typing import List, Set
+from typing import List, Optional, Set
 from google.cloud import datastore
 import time
 from .util import get_timestamp
@@ -27,6 +27,39 @@ from .log import log
 from .batch_api import ClusterAPI, JobSpec
 from dataclasses import dataclass
 from typing import Protocol
+
+CLUSTER_HEARTBEAT_COLLECTION = "ClusterHeartbeat"
+
+# If a heartbeat is older than this, it's considered stale and can be taken over
+SECONDS_UNTIL_STALE_HEARTBEAT = 60 * 10  # 10 minutes
+
+
+@dataclass
+class ClusterHeartbeat:
+    """Records the last heartbeat from a watch process monitoring a cluster."""
+
+    cluster_id: str
+    watch_run_uuid: str
+    timestamp: float
+
+
+def heartbeat_to_entity(
+    client: datastore.Client, o: ClusterHeartbeat
+) -> datastore.Entity:
+    entity_key = client.key(CLUSTER_HEARTBEAT_COLLECTION, o.cluster_id)
+    entity = datastore.Entity(key=entity_key)
+    entity["watch_run_uuid"] = o.watch_run_uuid
+    entity["timestamp"] = o.timestamp
+    return entity
+
+
+def entity_to_heartbeat(entity: datastore.Entity) -> ClusterHeartbeat:
+    assert entity.key is not None
+    return ClusterHeartbeat(
+        cluster_id=entity.key.name,
+        watch_run_uuid=entity["watch_run_uuid"],
+        timestamp=entity["timestamp"],
+    )
 
 
 class MinConfig(Protocol):
@@ -123,7 +156,9 @@ class Cluster:
 
         job_spec.preemptible = preemptible
 
-        return self.cluster_api.create_job(self.project, self.location, job_spec, count, max_retry_count)
+        return self.cluster_api.create_job(
+            self.project, self.location, job_spec, count, max_retry_count
+        )
 
     def has_active_node_requests(self):
         node_reqs = self.cluster_api.get_node_reqs(
@@ -144,6 +179,113 @@ class Cluster:
 
     def is_owner_live(self, owner):
         return self.cluster_api.is_instance_running(owner)
+
+    def heartbeat(
+        self,
+        watch_run_uuid: str,
+        expected_uuid: Optional[str] = None,
+    ) -> bool:
+        """Record a heartbeat for this cluster from the current watch process.
+
+        This stores a ClusterHeartbeat entity in Datastore with the cluster ID
+        as the entity key. Uses a transaction to atomically check and update,
+        preventing race conditions between multiple watch processes.
+
+        Args:
+            watch_run_uuid: UUID identifying this watch process execution
+            expected_uuid: If provided, only update if the current heartbeat's
+                watch_run_uuid matches this value (or if no heartbeat exists).
+                If None, always update unconditionally.
+
+        Returns:
+            True if the heartbeat was successfully recorded, False if the
+            expected_uuid check failed (another process owns the heartbeat).
+        """
+        key = self.client.key(CLUSTER_HEARTBEAT_COLLECTION, self.cluster_id)
+        took_over_stale = False
+
+        def update_in_transaction(transaction):
+            nonlocal took_over_stale
+            entity = transaction.get(key)
+            now = time.time()
+
+            # Check if we should proceed based on expected_uuid
+            if expected_uuid is not None and entity is not None:
+                current_uuid = entity.get("watch_run_uuid")
+                if current_uuid != expected_uuid:
+                    # Check if the heartbeat is stale
+                    current_timestamp = entity.get("timestamp", 0)
+                    if (now - current_timestamp) > SECONDS_UNTIL_STALE_HEARTBEAT:
+                        # Heartbeat is stale, take over
+                        took_over_stale = True
+                    else:
+                        # Heartbeat is fresh and belongs to another process
+                        return False
+
+            # Create or update the heartbeat
+            new_heartbeat = ClusterHeartbeat(
+                cluster_id=self.cluster_id,
+                watch_run_uuid=watch_run_uuid,
+                timestamp=now,
+            )
+            new_entity = heartbeat_to_entity(self.client, new_heartbeat)
+            transaction.put(new_entity)
+            return True
+
+        with self.client.transaction() as transaction:
+            result = update_in_transaction(transaction)
+
+        if took_over_stale:
+            log.warning(
+                "An old job watcher crashed? Taking over this job as its new watcher."
+            )
+
+        return result
+
+    def get_heartbeat(self) -> Optional[ClusterHeartbeat]:
+        """Get the current heartbeat for this cluster, if any.
+
+        Returns:
+            ClusterHeartbeat if one exists, None otherwise
+        """
+        key = self.client.key(CLUSTER_HEARTBEAT_COLLECTION, self.cluster_id)
+        entity = self.client.get(key)
+        if entity is None:
+            return None
+        return entity_to_heartbeat(entity)
+
+    def clear_heartbeat(self, watch_run_uuid: str) -> bool:
+        """Clear the heartbeat for this cluster, but only if it belongs to us.
+
+        Uses a transaction to atomically check the UUID and delete, preventing
+        accidental deletion of another process's heartbeat.
+
+        Args:
+            watch_run_uuid: Only delete if the current heartbeat's UUID matches
+
+        Returns:
+            True if the heartbeat was deleted (or didn't exist),
+            False if the heartbeat belongs to a different watch process.
+        """
+        key = self.client.key(CLUSTER_HEARTBEAT_COLLECTION, self.cluster_id)
+
+        def delete_in_transaction(transaction):
+            entity = transaction.get(key)
+
+            if entity is None:
+                # No heartbeat exists, nothing to clear
+                return True
+
+            current_uuid = entity.get("watch_run_uuid")
+            if current_uuid != watch_run_uuid:
+                # Heartbeat belongs to another process, don't delete
+                return False
+
+            transaction.delete(key)
+            return True
+
+        with self.client.transaction() as transaction:
+            return delete_in_transaction(transaction)
 
 
 class CachingCaller:

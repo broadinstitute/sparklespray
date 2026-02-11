@@ -7,6 +7,40 @@ from google.cloud import datastore
 from sparklespray.io_helper import IO
 
 
+class SimulatedTransaction:
+    """A simulated Datastore transaction for testing."""
+
+    def __init__(self, client: "DatastoreClientSimulator"):
+        self.client = client
+        self.pending_puts = []
+        self.pending_deletes = []
+
+    def get(self, key):
+        """Get an entity within the transaction."""
+        return self.client.get(key)
+
+    def put(self, entity):
+        """Queue an entity to be stored when transaction commits."""
+        self.pending_puts.append(entity)
+
+    def delete(self, key):
+        """Queue a key to be deleted when transaction commits."""
+        self.pending_deletes.append(key)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if exc_type is None:
+            # Commit: apply all pending operations
+            for entity in self.pending_puts:
+                self.client.put(entity)
+            for key in self.pending_deletes:
+                self.client.delete(key)
+        # On exception, don't apply changes (rollback)
+        return False
+
+
 class DatastoreClientSimulator:
     """
     A simulator for the Google Cloud Datastore client that stores entities in memory.
@@ -98,6 +132,10 @@ class DatastoreClientSimulator:
 
         query.fetch = fetch
         return query
+
+    def transaction(self):
+        """Create a new transaction."""
+        return SimulatedTransaction(self)
 
 
 class MockIO(IO):

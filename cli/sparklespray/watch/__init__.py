@@ -6,6 +6,8 @@ from .resize import ResizeCluster
 from .runner import run_tasks
 from .status import PrintStatus
 from .reset_orphans import ResetOrphans
+from .heartbeat import Heartbeat, HeartbeatLost
+
 __all__ = [
     "EstimateRateOfCompletion",
     "CompletionMonitor",
@@ -14,5 +16,7 @@ __all__ = [
     "ResizeCluster",
     "PrintStatus",
     "run_tasks",
-    "ResetOrphans"
+    "ResetOrphans",
+    "Heartbeat",
+    "HeartbeatLost",
 ]

@@ -229,8 +229,8 @@ def test_watch_basic(mock_run_tasks, mock_wait, job_queue, mock_io, cluster):
     assert args[0] == "test-job-id"  # job_id
     assert args[1] == "test-cluster"  # cluster_id
     assert (
-        len(args[2]) == 5
-    )  # 4 tasks: CompletionMonitor, StreamLogs, PrintStatus, ResizeCluster, OrphanChecker
+        len(args[2]) == 6
+    )  # 6 tasks: CompletionMonitor, StreamLogs, PrintStatus, Heartbeat, ResizeCluster, ResetOrphans
     assert args[3] == cluster  # cluster
 
     # Verify result is True (normal completion)
@@ -264,8 +264,8 @@ def test_watch_no_nodes(mock_run_tasks, mock_wait, job_queue, mock_io, cluster):
     assert args[0] == "test-job-id"  # job_id
     assert args[1] == "test-cluster"  # cluster_id
     assert (
-        len(args[2]) == 3
-    )  # 3 tasks: CompletionMonitor, StreamLogs, PrintStatus (no ResizeCluster)
+        len(args[2]) == 4
+    )  # 4 tasks: CompletionMonitor, StreamLogs, PrintStatus, Heartbeat (no ResizeCluster/ResetOrphans)
     assert args[3] == cluster  # cluster
 
     # Verify result is True (normal completion)
