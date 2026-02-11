@@ -204,9 +204,8 @@ class Cluster:
         key = self.client.key(CLUSTER_HEARTBEAT_COLLECTION, self.cluster_id)
         took_over_stale = False
 
-        def update_in_transaction(transaction):
-            nonlocal took_over_stale
-            entity = transaction.get(key)
+        with self.client.transaction() as transaction:
+            entity = self.client.get(key, transaction=transaction)
             now = time.time()
 
             # Check if we should proceed based on expected_uuid
@@ -230,17 +229,13 @@ class Cluster:
             )
             new_entity = heartbeat_to_entity(self.client, new_heartbeat)
             transaction.put(new_entity)
-            return True
-
-        with self.client.transaction() as transaction:
-            result = update_in_transaction(transaction)
 
         if took_over_stale:
             log.warning(
                 "An old job watcher crashed? Taking over this job as its new watcher."
             )
 
-        return result
+        return True
 
     def get_heartbeat(self) -> Optional[ClusterHeartbeat]:
         """Get the current heartbeat for this cluster, if any.
@@ -269,8 +264,8 @@ class Cluster:
         """
         key = self.client.key(CLUSTER_HEARTBEAT_COLLECTION, self.cluster_id)
 
-        def delete_in_transaction(transaction):
-            entity = transaction.get(key)
+        with self.client.transaction() as transaction:
+            entity = self.client.get(key, transaction=transaction)
 
             if entity is None:
                 # No heartbeat exists, nothing to clear
@@ -283,9 +278,6 @@ class Cluster:
 
             transaction.delete(key)
             return True
-
-        with self.client.transaction() as transaction:
-            return delete_in_transaction(transaction)
 
 
 class CachingCaller:

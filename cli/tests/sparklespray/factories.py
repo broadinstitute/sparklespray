@@ -15,10 +15,6 @@ class SimulatedTransaction:
         self.pending_puts = []
         self.pending_deletes = []
 
-    def get(self, key):
-        """Get an entity within the transaction."""
-        return self.client.get(key)
-
     def put(self, entity):
         """Queue an entity to be stored when transaction commits."""
         self.pending_puts.append(entity)
@@ -28,9 +24,12 @@ class SimulatedTransaction:
         self.pending_deletes.append(key)
 
     def __enter__(self):
+        # Set the active transaction on the client so get() can use it
+        self.client._active_transaction = self
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        self.client._active_transaction = None
         if exc_type is None:
             # Commit: apply all pending operations
             for entity in self.pending_puts:
@@ -49,6 +48,7 @@ class DatastoreClientSimulator:
     def __init__(self):
         self.entities: Dict[str, Dict[str, Any]] = {}
         self.next_id = 1
+        self._active_transaction: Optional["SimulatedTransaction"] = None
 
     def key(self, kind, id=None):
         """Create a key for the given kind and ID."""
@@ -58,7 +58,7 @@ class DatastoreClientSimulator:
         key = datastore.Key(kind, id, project="mockproject")
         return key
 
-    def get(self, key):
+    def get(self, key, transaction=None):
         """Get an entity by key."""
         key_str = f"{key.kind}:{key.name}"
         if key_str in self.entities:
