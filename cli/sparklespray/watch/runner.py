@@ -8,6 +8,7 @@ from .runner_types import (
     PeriodicTask,
     ScheduledTask,
     RateLimitedCall,
+    IncrementalTaskFetcher,
     ClusterStateQuery,
 )
 import heapq
@@ -39,7 +40,7 @@ def run_tasks(
     for task in tasks:
         heapq.heappush(timeline, ScheduledTask(now, task))
 
-    get_tasks = RateLimitedCall(lambda: cluster.task_store.get_tasks(job_id), 1)
+    get_tasks = IncrementalTaskFetcher(cluster.task_store, job_id, min_delay=1.0)
     get_nodes = RateLimitedCall(lambda: cluster.get_node_reqs(), 1)
 
     try:

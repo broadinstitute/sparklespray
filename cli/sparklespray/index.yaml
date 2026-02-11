@@ -1,0 +1,13 @@
+# Datastore composite indexes for sparklespray
+# Deploy with: gcloud datastore indexes create index.yaml --project=PROJECT_ID
+#
+# These indexes are required for queries that combine equality and inequality
+# filters on different properties.
+
+indexes:
+  # Required for IncrementalTaskFetcher.get_tasks_updated_since()
+  # Query: job_id = X AND last_updated > Y
+  - kind: SparklesV5Task
+    properties:
+      - name: job_id
+      - name: last_updated

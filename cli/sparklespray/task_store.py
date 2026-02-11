@@ -51,6 +51,7 @@ class Task(object):
     failure_reason: Optional[str] = None
     version: int = 1
     exit_code: Optional[int] = None
+    last_updated: Optional[float] = None
 
     def get_instance_name(self):
         owner = self.owner
@@ -85,6 +86,7 @@ def task_to_entity(client, o: Task):
     entity["version"] = o.version
     entity["exit_code"] = o.exit_code
     entity["log_url"] = o.log_url
+    entity["last_updated"] = o.last_updated
     return entity
 
 
@@ -116,6 +118,7 @@ def entity_to_task(entity):
         exit_code=entity.get("exit_code"),
         cluster=entity.get("cluster"),
         monitor_address=entity.get("monitor_address"),
+        last_updated=entity.get("last_updated"),
     )
 
 
@@ -182,6 +185,26 @@ class TaskStore:
                 break
         end_time = time.time()
         log.debug("get_tasks took %s seconds", end_time - start_time)
+        return tasks
+
+    def get_tasks_updated_since(
+        self, job_id: str, since_timestamp: float
+    ) -> List[Task]:
+        """Fetch only tasks modified after since_timestamp.
+
+        Requires a composite index on (job_id, last_updated) in Datastore.
+        """
+        query = self.client.query(kind=TASK_COLLECTION)
+        query.add_filter("job_id", "=", job_id)
+        query.add_filter("last_updated", ">", since_timestamp)
+        start_time = time.time()
+        tasks = [entity_to_task(e) for e in query.fetch()]
+        end_time = time.time()
+        log.debug(
+            "get_tasks_updated_since took %s seconds, returned %d tasks",
+            end_time - start_time,
+            len(tasks),
+        )
         return tasks
 
     def update_task(self, task, batch=None):

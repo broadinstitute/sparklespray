@@ -1,5 +1,6 @@
 import subprocess
 import os
+from importlib import resources
 from sparklespray.util import random_string
 from google.cloud import datastore
 from google.api_core import exceptions
@@ -13,6 +14,7 @@ from google.api_core.exceptions import PermissionDenied, Forbidden
 from google.auth.exceptions import RefreshError
 import json
 import re
+import sparklespray
 
 REPO_NAME_PATTERN = "(?P<repo_name>[^/]+/[^/]+)/.*$"
 
@@ -199,6 +201,57 @@ def can_reach_datastore_api(project_id, key_path):
     raise Exception("Failed to confirm access to datastore")
 
 
+def deploy_datastore_indexes(project_id):
+    """Deploy Datastore composite indexes required for sparklespray queries.
+
+    The indexes are defined in index.yaml and are required for queries that
+    combine equality and inequality filters on different properties.
+
+    Raises an exception if deployment fails, since the indexes are required
+    for sparklespray to function correctly.
+    """
+    index_yaml_resource = resources.files(sparklespray).joinpath("index.yaml")
+
+    if not index_yaml_resource.is_file():
+        raise Exception(
+            "index.yaml not found in sparklespray package. "
+            "This file is required to deploy Datastore indexes. "
+            "Please ensure sparklespray is installed correctly."
+        )
+
+    print("Deploying Datastore indexes...")
+    # Use as_file() to get a real filesystem path for gcloud command
+    with resources.as_file(index_yaml_resource) as index_yaml_path:
+        try:
+            gcloud(
+                [
+                    "datastore",
+                    "indexes",
+                    "create",
+                    str(index_yaml_path),
+                    "--project",
+                    project_id,
+                    "--quiet",  # Don't prompt for confirmation
+                ]
+            )
+            print(
+                "Datastore indexes deployment initiated. Note: indexes may take several "
+                "minutes to build. You can check status at: "
+                f"https://console.cloud.google.com/datastore/indexes?project={project_id}"
+            )
+        except subprocess.CalledProcessError as e:
+            output = e.output.decode("utf8") if e.output else ""
+            # If indexes already exist, that's fine
+            if "already exists" in output or "has already been created" in output:
+                print("Datastore indexes already exist.")
+            else:
+                raise Exception(
+                    f"Failed to deploy Datastore indexes: {output}\n"
+                    "You can try manually running:\n"
+                    f"  gcloud datastore indexes create <path-to-index.yaml> --project {project_id}"
+                )
+
+
 def setup_project(
     project_id: str, key_path: str, bucket_name: str, image_names: List[str]
 ):
@@ -239,6 +292,9 @@ def setup_project(
         print("checking datastore again..")
         if can_reach_datastore_api(project_id, key_path):
             print("Success!")
+
+    # Deploy Datastore indexes after database is confirmed accessible
+    deploy_datastore_indexes(project_id)
 
     grant_access_to_images(service_account_name, image_names)
 
