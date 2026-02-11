@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -24,10 +25,12 @@ import (
 	"google.golang.org/grpc/credentials"
 )
 
+const WorkerVersion = "5.8.2"
+
 func Main() error {
 	app := cli.NewApp()
 	app.Name = "sparklesworker"
-	app.Version = "5.8.2"
+	app.Version = WorkerVersion
 	app.Compiled = time.Now()
 	app.Authors = []cli.Author{
 		cli.Author{
@@ -49,6 +52,7 @@ func Main() error {
 				cli.IntFlag{Name: "shutdownAfter", Value: 0},
 				cli.IntFlag{Name: "ftShutdownAfter", Value: 30},
 				cli.BoolFlag{Name: "localhost", Usage: "If set, does not try to look up instance name and IP from metadata service, but assume it's localhost"},
+				cli.StringFlag{Name: "expectedVersion"},
 			},
 			Action: consume},
 		cli.Command{Name: "copyexe",
@@ -226,12 +230,19 @@ func consume(c *cli.Context) error {
 	port := c.String("port")
 	shutdownAfter := c.Int("shutdownAfter")
 	firstTaskShutdownAfter := c.Int("ftShutdownAfter")
+	expectedVersion := c.String("expectedVersion")
 	watchdogTimeout := time.Duration(c.Int("timeout")) * time.Minute
 
 	batchTaskIndex := os.Getenv("BATCH_TASK_INDEX")
 	if batchTaskIndex == "0" {
 		shutdownAfter = firstTaskShutdownAfter
 		log.Printf("First task in batch. Updated shutdownAfter to %d", shutdownAfter)
+	}
+
+	if expectedVersion != "" && expectedVersion != WorkerVersion {
+		errMsg := fmt.Sprintf("Job was submitted for worker version %s but this worker's version is %s", expectedVersion, WorkerVersion)
+		log.Printf(errMsg)
+		return errors.New(errMsg)
 	}
 
 	EnableWatchdog(watchdogTimeout)

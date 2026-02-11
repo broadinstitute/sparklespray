@@ -9,6 +9,9 @@ from typing import List
 from .log import log
 from typing import cast
 
+# the version of the sparkles worker is required to work with this version of sparkles cli
+sparkles_worker_expected_version = "5.8.2"
+
 
 def get_consume_command(job_spec: JobSpec):
     consume_runnable = [
@@ -58,6 +61,8 @@ def create_job_spec(
             "0",
             "--ftShutdownAfter",
             str(shutdown_after),
+            "--expectedVersion",
+            sparkles_worker_expected_version,
         ]
 
         log.debug(f"exec: {' '.join(consume_command)}")
@@ -67,10 +72,6 @@ def create_job_spec(
                 image=sparklesworker_image,
                 command=["copyexe", "--dst", consume_exe_path],
             ),
-            # Runnable(
-            #     image=docker_image,
-            #     command=["printenv"],
-            # ),
             Runnable(
                 image=docker_image,
                 command=consume_command,
