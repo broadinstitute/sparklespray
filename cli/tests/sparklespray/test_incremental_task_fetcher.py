@@ -1,10 +1,14 @@
+from typing import Optional
+
 from sparklespray.watch.runner_types import IncrementalTaskFetcher
 from sparklespray.task_store import Task, STATUS_PENDING, STATUS_COMPLETE
 from unittest.mock import Mock, call
 import time
 
 
-def make_task(task_id: str, status: str = STATUS_PENDING, last_updated: float = None):
+def make_task(
+    task_id: str, status: str = STATUS_PENDING, last_updated: Optional[float] = None
+):
     """Helper to create a Task with minimal required fields."""
     return Task(
         task_id=task_id,
