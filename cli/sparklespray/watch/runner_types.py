@@ -97,7 +97,7 @@ class IncrementalTaskFetcher:
 
     # Padding to account for Datastore eventual consistency on composite indexes.
     # 10 minutes should be sufficient based on observed propagation delays.
-    INDEX_CONSISTENCY_PADDING = 10 * 60  # seconds
+    INDEX_CONSISTENCY_PADDING = 5  # seconds
 
     # Maximum time between full fetches as a safety net.
     # Even if incremental fetches miss something, a full fetch will catch it.
