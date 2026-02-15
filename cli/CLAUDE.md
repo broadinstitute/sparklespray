@@ -97,10 +97,11 @@ Tests use pytest with mocks for GCP services:
 - `MockIO`: Mocks GCS operations
 - Fixtures in `tests/sparklespray/factories.py`
 
-## gRPC Protocol
+## Worker Communication
 
-CLI communicates with workers via gRPC. If protocol changes, regenerate code:
+CLI communicates with workers via Google Cloud Pub/Sub. Each cluster has two topics:
 
-```bash
-sh scripts/build-grpc.sh
-```
+- `incoming_topic`: CLI publishes requests, workers subscribe
+- `response_topic`: Workers publish responses, CLI subscribes
+
+The Cluster entity in Datastore stores the topic names for each cluster.

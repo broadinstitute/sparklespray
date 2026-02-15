@@ -57,7 +57,9 @@ Note: Many tests require a real Google Cloud project (`broad-achilles`) and Data
 
 - **io.go**: `IOClient` interface for GCS operations (upload/download). Also provides GCE metadata service helpers.
 
-- **server.go**: gRPC `Monitor` service for remote log tailing and memory usage reporting.
+- **server.go**: `Monitor` struct for tracking task logs and system stats functions (memory, CPU, pressure).
+
+- **pubsub.go**: Pub/Sub handler for CLI-worker communication. Handles log reading requests and status queries.
 
 - **watchdog.go**: Process watchdog that panics if the main loop doesn't check in periodically.
 
@@ -77,10 +79,6 @@ Note: Many tests require a real Google Cloud project (`broad-achilles`) and Data
 - `Task`: Datastore entity with task_id, status, owner, args, history
 - `TaskSpec`: JSON spec defining downloads, command, uploads, working_dir
 - `Queue`: Interface for task queue operations (Datastore or file-based)
-
-### Protobuf
-
-The `pb/` directory contains generated protobuf code for the gRPC Monitor service.
 
 ## Important Patterns
 
