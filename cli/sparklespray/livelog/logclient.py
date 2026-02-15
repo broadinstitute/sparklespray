@@ -1,24 +1,12 @@
 import datetime
-import logging
 from ..txtui import print_log_content
-from ..log import log
-from termcolor import colored
-import fcntl, os
-import select
-import threading
-import subprocess
-import sys
-from .pickle_pipe import create_nonblocking_file_obj, Reader, Writer
+from .pubsub_client import PubSubMonitorClient
 
-# Give all grpc calls a timeout of 10 seconds to complete
-GRPC_TIMEOUT = 10.0
+# Default timeout for pub/sub communication
+PUBSUB_TIMEOUT = 20.0
 
 
 class CommunicationError(Exception):
-    pass
-
-
-class GRPCError(CommunicationError):
     pass
 
 
@@ -26,126 +14,31 @@ class Timeout(CommunicationError):
     pass
 
 
-def print_from_stream(fd, color):
-    def print_loop():
-        nb_fd = create_nonblocking_file_obj(fd)
-
-        while True:
-            select.select([nb_fd], [], [])
-            data = nb_fd.read()
-            if len(data) == 0:
-                break
-            print(colored(data.decode("utf8"), color))
-
-    t = threading.Thread(target=print_loop, daemon=True)
-    t.start()
-    return t
-
-
-def _start_isolated_log_client(entry_point, init_params):
-    python_executable = sys.executable
-    command = [
-        python_executable,
-        "-m",
-        "sparklespray.livelog.isolated_log_client",
-        entry_point,
-    ]
-    log.debug(f"Executing: {' '.join(command)}")
-    proc = subprocess.Popen(
-        command,
-        executable=python_executable,
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
-
-    t = print_from_stream(proc.stderr, color="red")
-
-    writer = Writer(proc.stdin)
-    reader = Reader(proc.stdout)
-
-    writer.write_obj(init_params)
-    return proc, reader, writer, t
-
-
-from . import isolated_log_client
-
-
-class SafeRemoteCaller:
-    def __init__(self, entry_point, timeout):
-        self.timeout = timeout
-        self.proc = None
-        self.reader = None
-        self.writer = None
-        self.entry_point = entry_point
-
-    def start(self, init_params):
-        (
-            self.proc,
-            self.reader,
-            self.writer,
-            self.stderr_read_thread,
-        ) = _start_isolated_log_client(self.entry_point, init_params)
-
-    def _blocking_call(self, method, args, kwargs):
-        assert self.reader is not None
-        assert self.writer is not None
-
-        if self.proc is None:
-            raise CommunicationError("disconnected WrappedStub")
-        self.writer.write_obj((method, args, kwargs))
-        try:
-            value = self.reader.read_obj(timeout=self.timeout)
-        except Timeout:
-            self.dispose()
-            raise Timeout("Timeout trying in call to {}".format(method))
-        if not value["success"]:
-            raise CommunicationError(value["error"])
-        return value
-
-    def read_output(self, *args, **kwargs):
-        return self._blocking_call("read_output", args, kwargs)
-
-    def get_process_status(self, *args, **kwargs):
-        return self._blocking_call("get_process_status", args, kwargs)
-
-    def dispose(self):
-        assert self.proc is not None
-        # if the child process is still running, kill it
-        if self.proc.poll() is None:
-            self.proc.kill()
-            self.proc.wait()
-        assert self.proc.poll() is not None
-        self.proc = None
-        if self.stderr_read_thread is not None:
-            self.stderr_read_thread.join()
-            self.stderr_read_thread = None
-
-
 class LogMonitor:
-    def __init__(self, datastore_client, node_address, task_id):
-        entity_key = datastore_client.key("ClusterKeys", "sparklespray")
-        entity = datastore_client.get(entity_key)
-
-        cert = entity["cert"]
-
-        self.stub = SafeRemoteCaller(
-            f"{isolated_log_client.__name__}:create_monitor", GRPC_TIMEOUT * 2
+    def __init__(
+        self, project_id: str, incoming_topic: str, response_topic: str, task_id: str
+    ):
+        self.client = PubSubMonitorClient(
+            project_id=project_id,
+            incoming_topic=incoming_topic,
+            response_topic=response_topic,
+            timeout=PUBSUB_TIMEOUT,
         )
-        self.stub.start((cert, node_address, entity["shared_secret"]))
         self.task_id = task_id
         self.offset = 0
-
         self.prev_mem_total = 0
 
     def close(self):
-        self.stub.dispose()
+        self.client.close()
 
     def poll(self):
         while True:
-            response = self.stub.read_output(
+            response = self.client.read_output(
                 task_id=self.task_id, offset=self.offset, size=100000
             )
+
+            if not response.get("success"):
+                raise CommunicationError(response.get("error", "Unknown error"))
 
             payload = response["data"].decode("utf8")
             if payload != "":
@@ -156,7 +49,10 @@ class LogMonitor:
             if response["end_of_file"]:
                 break
 
-        response = self.stub.get_process_status()
+        response = self.client.get_process_status()
+
+        if not response.get("success"):
+            raise CommunicationError(response.get("error", "Unknown error"))
 
         mem_total = (
             response["total_memory"]

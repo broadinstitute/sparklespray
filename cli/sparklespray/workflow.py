@@ -475,6 +475,8 @@ def workflow_run_cmd(
                 io=io,
                 jq=jq,
                 cluster=cluster,
+                cluster_store=jq.cluster_store,
+                project_id=config.project,
                 target_nodes=self.target_nodes,
                 max_preemptable_attempts_scale=config.max_preemptable_attempts_scale,
             )

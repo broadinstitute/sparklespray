@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"time"
 
 	"cloud.google.com/go/pubsub"
 )
@@ -242,6 +243,8 @@ func StartPubSubSubscriber(ctx context.Context, projectID string, incomingTopic 
 		topic := client.Topic(incomingTopic)
 		sub, err = client.CreateSubscription(ctx, subName, pubsub.SubscriptionConfig{
 			Topic: topic,
+			// Auto-delete subscription after 1 hour of inactivity
+			ExpirationPolicy: time.Hour,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("failed to create subscription: %w", err)

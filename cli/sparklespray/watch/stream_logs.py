@@ -9,6 +9,7 @@ from ..log import log
 from .runner_types import NextPoll, ClusterStateQuery
 from .shared import _exception_guard, _only_running_tasks
 from ..cluster_service import Cluster
+from ..cluster_store import ClusterStore
 from .. import txtui
 from .shared import (
     _only_failed_tasks,
@@ -42,12 +43,21 @@ from collections import defaultdict
 
 class StreamLogs:
     # Stream output from one of the running processes.
-    def __init__(self, stream_logs: bool, cluster: Cluster, io):
+    def __init__(
+        self,
+        stream_logs: bool,
+        cluster: Cluster,
+        io,
+        cluster_store: ClusterStore,
+        project_id: str,
+    ):
         self.log_monitor = None
         self.cluster = cluster
         self.stream_logs = stream_logs
         self.complete_tasks_printed = 0
         self.io = io
+        self.cluster_store = cluster_store
+        self.project_id = project_id
         self.task_cooldown_counters = defaultdict(lambda: CooldownCounter(5))
 
     def start_logging(self, state: ClusterStateQuery):
@@ -58,14 +68,18 @@ class StreamLogs:
             if self.task_cooldown_counters[task.task_id].time_till_cool() > 0:
                 return
 
-            if task.monitor_address is not None:
+            # Get cluster config to find pub/sub topics
+            cluster_config = self.cluster_store.get(task.cluster)
+            if cluster_config is not None:
                 log.info(
-                    "Obtained monitor address for task %s: %s",
+                    "Starting log monitor for task %s via pub/sub topics",
                     task.task_id,
-                    task.monitor_address,
                 )
                 self.log_monitor = LogMonitor(
-                    self.cluster.client, task.monitor_address, task.task_id
+                    project_id=self.project_id,
+                    incoming_topic=cluster_config.incoming_topic,
+                    response_topic=cluster_config.response_topic,
+                    task_id=task.task_id,
                 )
                 print_log_content(
                     None,
@@ -131,6 +145,7 @@ class StreamLogs:
         self.flush_stdout_from_complete_task(
             self.log_monitor.task_id, self.log_monitor.offset
         )
+        self.log_monitor.close()
         self.log_monitor = None
 
     def flush_stdout_from_complete_task(self, task_id, offset):

@@ -5,6 +5,7 @@ from ..config import Config
 from ..io_helper import IO
 from ..job_queue import JobQueue
 from ..cluster_service import Cluster
+from ..cluster_store import ClusterStore
 from ..batch_api import JobSpec
 from ..log import log
 from ..watch import (
@@ -81,6 +82,8 @@ def watch_cmd(
         io,
         jq,
         cluster,
+        cluster_store=jq.cluster_store,
+        project_id=config.project,
         target_nodes=args.nodes,
         loglive=args.loglive,
         max_preemptable_attempts_scale=max_preemptable_attempts_scale,
@@ -96,6 +99,8 @@ def watch(
     io: IO,
     jq: JobQueue,
     cluster: Cluster,
+    cluster_store: ClusterStore,
+    project_id: str,
     target_nodes=None,
     max_preemptable_attempts_scale=None,
     initial_poll_delay=1.0,
@@ -157,7 +162,7 @@ def watch(
 
     tasks = [
         CompletionMonitor(),
-        StreamLogs(loglive, cluster, io),
+        StreamLogs(loglive, cluster, io, cluster_store, project_id),
         PrintStatus(initial_poll_delay, max_poll_delay),
         Heartbeat(cluster, watch_run_uuid),
     ]
