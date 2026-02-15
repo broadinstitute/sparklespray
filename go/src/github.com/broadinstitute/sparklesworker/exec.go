@@ -44,6 +44,7 @@ type TaskSpec struct {
 	Command            string            `json:"command"`
 	CommandResultURL   string            `json:"command_result_url"`
 	StdoutURL          string            `json:"stdout_url"`
+	DockerImage        string            `json:"docker_image,omitempty"`
 }
 
 type ResultFile struct {
@@ -195,12 +196,28 @@ type ExecResult struct {
 	EndTime   time.Time
 }
 
-func execCommand(command string, workdir string, stdout *os.File) (*ExecResult, error) {
+func execCommand(command string, workdir string, stdout *os.File, dockerImage string) (*ExecResult, error) {
+	var exePath string
+	var args []string
+
+	if dockerImage != "" {
+		exePath = "docker"
+		args = []string{
+			"docker", "run", "--rm",
+			"-v", workdir + ":" + workdir,
+			"-w", workdir,
+			dockerImage,
+			"/bin/sh", "-c", command,
+		}
+	} else {
+		exePath = "/bin/sh"
+		args = []string{exePath, "-c", command}
+	}
+
 	attr := &os.ProcAttr{Dir: workdir, Env: nil, Files: []*os.File{nil, stdout, stdout}}
-	exePath := "/bin/sh"
 
 	startTime := time.Now()
-	proc, err := os.StartProcess(exePath, []string{exePath, "-c", command}, attr)
+	proc, err := os.StartProcess(exePath, args, attr)
 	if err != nil {
 		return nil, err
 	}
@@ -393,37 +410,97 @@ func getFilesWithMatchingMTimes(a map[string]time.Time, b map[string]time.Time) 
 	return matching
 }
 
-func executeTaskInDir(ioc IOClient, workdir string, taskId string, spec *TaskSpec, cachedir string, monitor *Monitor) (string, error) {
-	stdoutPath := path.Join(workdir, "stdout.txt")
-	execLifecycleScript("PreDownloadScript", workdir, spec.PreDownloadScript)
-
-	stdout, err := os.OpenFile(stdoutPath, os.O_WRONLY|os.O_CREATE, 0766)
+func prepareTaskDirectories(tasksDir string, cacheDir string) (workDir string, absCacheDir string, err error) {
+	mode := os.FileMode(0700)
+	err = os.MkdirAll(tasksDir, mode)
 	if err != nil {
-		return "", err
+		return "", "", err
+	}
+
+	taskDir, err := ioutil.TempDir(tasksDir, "task-")
+	if err != nil {
+		return "", "", err
+	}
+
+	logDir := path.Join(taskDir, "log")
+	err = os.Mkdir(logDir, mode)
+	if err != nil {
+		return "", "", err
+	}
+
+	workDir = path.Join(taskDir, "work")
+	err = os.Mkdir(workDir, mode)
+	if err != nil {
+		return "", "", err
+	}
+
+	workDir, err = filepath.Abs(workDir)
+	if err != nil {
+		return "", "", err
+	}
+
+	absCacheDir, err = filepath.Abs(cacheDir)
+	if err != nil {
+		return "", "", err
+	}
+
+	return workDir, absCacheDir, nil
+}
+
+func downloadTaskFiles(ioc IOClient, workDir string, cacheDir string, taskId string, taskSpec *TaskSpec, monitor *Monitor) (stdout *os.File, stdoutPath string, downloaded stringset, initialMTimes map[string]time.Time, err error) {
+	stdoutPath = path.Join(workDir, "stdout.txt")
+	execLifecycleScript("PreDownloadScript", workDir, taskSpec.PreDownloadScript)
+
+	stdout, err = os.OpenFile(stdoutPath, os.O_WRONLY|os.O_CREATE, 0766)
+	if err != nil {
+		return nil, "", nil, nil, err
 	}
 
 	if monitor != nil {
 		monitor.StartWatchingLog(taskId, stdoutPath)
 	}
 
-	if len(spec.Downloads) > 0 {
-		stdout.WriteString(fmt.Sprintf("sparkles: Downloading %d files...\n", len(spec.Downloads)))
+	if len(taskSpec.Downloads) > 0 {
+		stdout.WriteString(fmt.Sprintf("sparkles: Downloading %d files...\n", len(taskSpec.Downloads)))
 	}
 
-	err, downloaded := downloadAll(ioc, workdir, spec.Downloads, cachedir)
+	err, downloaded = downloadAll(ioc, workDir, taskSpec.Downloads, cacheDir)
 	if err != nil {
-		return "", err
+		return nil, "", nil, nil, err
 	}
 
-	if len(spec.Downloads) > 0 {
+	if len(taskSpec.Downloads) > 0 {
 		stdout.WriteString(fmt.Sprintf("sparkles: download complete.\n"))
 	}
 
-	downloadedInitialMTimes := getModificationTimes(downloaded)
+	initialMTimes = getModificationTimes(downloaded)
 
-	execLifecycleScript("PostDownloadScript", workdir, spec.PostDownloadScript)
+	execLifecycleScript("PostDownloadScript", workDir, taskSpec.PostDownloadScript)
 
-	commandWorkingDir := spec.WorkingDir
+	return stdout, stdoutPath, downloaded, initialMTimes, nil
+}
+
+func uploadTaskResults(ioc IOClient, workDir string, stdoutPath string, taskSpec *TaskSpec, retcode string, execResult *ExecResult, downloaded stringset, initialMTimes map[string]time.Time) error {
+	finalMTimes := getModificationTimes(downloaded)
+	downloadsToExclude := getFilesWithMatchingMTimes(initialMTimes, finalMTimes)
+
+	filesToUpload, err := resolveUploads(workDir, taskSpec.Uploads, downloadsToExclude)
+	if err != nil {
+		return err
+	}
+
+	addUpload(filesToUpload, stdoutPath, taskSpec.StdoutURL)
+
+	err = writeResultFile(ioc, taskSpec.CommandResultURL, retcode, execResult, workDir, filesToUpload, taskSpec.Command, taskSpec.Parameters)
+	if err != nil {
+		return err
+	}
+
+	return uploadMapped(ioc, filesToUpload)
+}
+
+func determineCwd(workDir string, taskSpec *TaskSpec) string {
+	commandWorkingDir := taskSpec.WorkingDir
 	if commandWorkingDir == "" {
 		commandWorkingDir = "."
 	}
@@ -431,74 +508,33 @@ func executeTaskInDir(ioc IOClient, workdir string, taskId string, spec *TaskSpe
 		panic("bad commandWorkingDir")
 	}
 
-	cwdDir := path.Join(workdir, commandWorkingDir)
-	log.Printf("Executing (working dir: %s, output written to: %s): %s", cwdDir, stdoutPath, spec.Command)
-	execResult, err := execCommand(spec.Command, cwdDir, stdout)
+	cwdDir := path.Join(workDir, commandWorkingDir)
+	return cwdDir
+}
+
+func executeTask(ioc IOClient, taskId string, taskSpec *TaskSpec, cacheDir string, tasksDir string, monitor *Monitor) (string, error) {
+	workDir, cacheDir, err := prepareTaskDirectories(tasksDir, cacheDir)
+	if err != nil {
+		return "", err
+	}
+
+	stdout, stdoutPath, downloaded, initialMTimes, err := downloadTaskFiles(ioc, workDir, cacheDir, taskId, taskSpec, monitor)
+	if err != nil {
+		return "", err
+	}
+
+	cwdDir := determineCwd(workDir, taskSpec)
+
+	log.Printf("Executing (working dir: %s, output written to: %s): %s", cwdDir, stdoutPath, taskSpec.Command)
+	execResult, err := execCommand(taskSpec.Command, cwdDir, stdout, taskSpec.DockerImage)
 	if err != nil {
 		return "", err
 	}
 	retcode := execResult.Status
 
-	execLifecycleScript("PostExecScript", workdir, spec.PostExecScript)
+	execLifecycleScript("PostExecScript", workDir, taskSpec.PostExecScript)
 
-	downloadedFinalMTimes := getModificationTimes(downloaded)
-
-	downloadsToExclude := getFilesWithMatchingMTimes(downloadedInitialMTimes, downloadedFinalMTimes)
-
-	filesToUpload, err := resolveUploads(workdir, spec.Uploads, downloadsToExclude)
-	if err != nil {
-		return retcode, err
-	}
-
-	addUpload(filesToUpload, stdoutPath, spec.StdoutURL)
-
-	err = writeResultFile(ioc, spec.CommandResultURL, retcode, execResult, workdir, filesToUpload, spec.Command, spec.Parameters)
-	if err != nil {
-		return retcode, err
-	}
-
-	err = uploadMapped(ioc, filesToUpload)
-
-	return retcode, err
-}
-
-func executeTask(ioc IOClient, taskId string, taskSpec *TaskSpec, cacheDir string, tasksDir string, monitor *Monitor) (string, error) {
-	//	log.Printf("Job spec (%s) of claimed task: %s", json_url, json.dumps(spec, indent=2))
-
-	mode := os.FileMode(0700)
-	err := os.MkdirAll(tasksDir, mode)
-	if err != nil {
-		return "", err
-	}
-
-	taskDir, err := ioutil.TempDir(tasksDir, "task-")
-	if err != nil {
-		return "", err
-	}
-
-	logDir := path.Join(taskDir, "log")
-	err = os.Mkdir(logDir, mode)
-	if err != nil {
-		return "", err
-	}
-
-	workDir := path.Join(taskDir, "work")
-	err = os.Mkdir(workDir, mode)
-	if err != nil {
-		return "", err
-	}
-
-	workDir, err = filepath.Abs(workDir)
-	if err != nil {
-		return "", err
-	}
-
-	cacheDir, err = filepath.Abs(cacheDir)
-	if err != nil {
-		return "", err
-	}
-
-	retcode, err := executeTaskInDir(ioc, workDir, taskId, taskSpec, cacheDir, monitor)
+	err = uploadTaskResults(ioc, workDir, stdoutPath, taskSpec, retcode, execResult, downloaded, initialMTimes)
 	if err != nil {
 		return retcode, err
 	}
