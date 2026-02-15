@@ -29,7 +29,7 @@ def is_terminal_status(status):
 class TaskHistory:
     timestamp: float
     status: str
-    owner: Optional[str] = None
+    owned_by_worker_id: Optional[str] = None
     failure_reason: Optional[str] = None
 
 
@@ -41,7 +41,7 @@ class Task(object):
     task_index: int
     job_id: str
     status: str  # one of: pending, claimed, success, failed, lost
-    owner: Optional[str]
+    owned_by_worker_id: Optional[str]
     monitor_address: Optional[str]
     args: str
     history: List  # list of TaskHistory
@@ -54,10 +54,10 @@ class Task(object):
     last_updated: Optional[float] = None
 
     def get_instance_name(self):
-        owner = self.owner
-        if owner is None:
+        worker_id = self.owned_by_worker_id
+        if worker_id is None:
             return None
-        return owner.split("/")[-1]
+        return worker_id.split("/")[-1]
 
 
 def task_to_entity(client, o: Task):
@@ -67,7 +67,7 @@ def task_to_entity(client, o: Task):
     entity["job_id"] = o.job_id
     entity["status"] = o.status
     assert isinstance(o.status, str)
-    entity["owner"] = o.owner
+    entity["owned_by_worker_id"] = o.owned_by_worker_id
     entity["args"] = o.args
     entity["failure_reason"] = o.failure_reason
     entity["cluster"] = o.cluster
@@ -78,7 +78,7 @@ def task_to_entity(client, o: Task):
         e = datastore.Entity()
         e["timestamp"] = h.timestamp
         e["status"] = h.status
-        e["owner"] = h.owner
+        e["owned_by_worker_id"] = h.owned_by_worker_id
         e["failure_reason"] = h.failure_reason
         history.append(e)
 
@@ -98,7 +98,7 @@ def entity_to_task(entity):
             TaskHistory(
                 timestamp=he["timestamp"],
                 status=he["status"],
-                owner=he.get("owner"),
+                owned_by_worker_id=he.get("owned_by_worker_id"),
                 failure_reason=he.get("failure_reason"),
             )
         )
@@ -109,7 +109,7 @@ def entity_to_task(entity):
         task_index=entity["task_index"],
         job_id=entity["job_id"],
         status=entity["status"],
-        owner=entity["owner"],
+        owned_by_worker_id=entity.get("owned_by_worker_id"),
         args=entity["args"],
         history=history,
         version=entity["version"],

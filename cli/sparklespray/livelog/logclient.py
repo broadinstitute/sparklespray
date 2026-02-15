@@ -21,7 +21,7 @@ class LogMonitor:
         incoming_topic: str,
         response_topic: str,
         task_id: str,
-        owner: str,
+        worker_id: str,
     ):
         self.client = PubSubMonitorClient(
             project_id=project_id,
@@ -30,7 +30,7 @@ class LogMonitor:
             timeout=PUBSUB_TIMEOUT,
         )
         self.task_id = task_id
-        self.owner = owner
+        self.worker_id = worker_id
         self.offset = 0
         self.prev_mem_total = 0
 
@@ -40,7 +40,10 @@ class LogMonitor:
     def poll(self):
         while True:
             response = self.client.read_output(
-                task_id=self.task_id, offset=self.offset, size=100000, owner=self.owner
+                task_id=self.task_id,
+                offset=self.offset,
+                size=100000,
+                worker_id=self.worker_id,
             )
 
             if not response.get("success"):
@@ -55,7 +58,7 @@ class LogMonitor:
             if response["end_of_file"]:
                 break
 
-        response = self.client.get_process_status(owner=self.owner)
+        response = self.client.get_process_status(worker_id=self.worker_id)
 
         if not response.get("success"):
             raise CommunicationError(response.get("error", "Unknown error"))

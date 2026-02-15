@@ -126,7 +126,7 @@ class PubSubMonitorClient:
         raise TimeoutError(f"Timeout waiting for response to {message_type}")
 
     def read_output(
-        self, task_id: str, offset: int, size: int, owner: str
+        self, task_id: str, offset: int, size: int, worker_id: str
     ) -> Dict[str, Any]:
         """Read output from a task.
 
@@ -135,7 +135,12 @@ class PubSubMonitorClient:
         try:
             response = self._send_request(
                 "read_output",
-                {"task_id": task_id, "offset": offset, "size": size, "owner": owner},
+                {
+                    "task_id": task_id,
+                    "offset": offset,
+                    "size": size,
+                    "worker_id": worker_id,
+                },
             )
 
             if response.get("error"):
@@ -156,13 +161,15 @@ class PubSubMonitorClient:
         except Exception as e:
             return {"success": False, "error": str(e)}
 
-    def get_process_status(self, owner: str) -> Dict[str, Any]:
+    def get_process_status(self, worker_id: str) -> Dict[str, Any]:
         """Get process status from the worker.
 
         Returns a dict with keys: success, process_count, total_memory, etc.
         """
         try:
-            response = self._send_request("get_process_status", {"owner": owner})
+            response = self._send_request(
+                "get_process_status", {"worker_id": worker_id}
+            )
 
             if response.get("error"):
                 return {"success": False, "error": response["error"]}

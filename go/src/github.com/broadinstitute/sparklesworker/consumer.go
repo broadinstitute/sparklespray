@@ -16,20 +16,20 @@ const JOB_STATUS_KILLED = "killed"
 const STATUS_FAILED = "failed"
 
 type TaskHistory struct {
-	Timestamp     float64 `datastore:"timestamp,noindex"`
-	Status        string  `datastore:"status,noindex"`
-	FailureReason string  `datastore:"failure_reason,noindex,omitempty"`
-	Owner         string  `datastore:"owner,noindex,omitempty"`
+	Timestamp         float64 `datastore:"timestamp,noindex"`
+	Status            string  `datastore:"status,noindex"`
+	FailureReason     string  `datastore:"failure_reason,noindex,omitempty"`
+	OwnedByWorkerID   string  `datastore:"owned_by_worker_id,noindex,omitempty"`
 }
 
 type Task struct {
 	// will be of the form: job_id + task_index
-	TaskID           string         `datastore:"task_id" json:"task_id"`
-	TaskIndex        int64          `datastore:"task_index" json:"task_index"`
-	JobID            string         `datastore:"job_id" json:"job_id"`
-	Status           string         `datastore:"status" json:"status"`
-	Owner            string         `datastore:"owner" json:"owner"`
-	Args             string         `datastore:"args" json:"args"`
+	TaskID            string         `datastore:"task_id" json:"task_id"`
+	TaskIndex         int64          `datastore:"task_index" json:"task_index"`
+	JobID             string         `datastore:"job_id" json:"job_id"`
+	Status            string         `datastore:"status" json:"status"`
+	OwnedByWorkerID   string         `datastore:"owned_by_worker_id" json:"owned_by_worker_id"`
+	Args              string         `datastore:"args" json:"args"`
 	History          []*TaskHistory `datastore:"history" json:"history"`
 	CommandResultURL string         `datastore:"command_result_url" json:"command_result_url"`
 	FailureReason    string         `datastore:"failure_reason,omitempty" json:"failure_reason"`
@@ -69,7 +69,7 @@ type Cluster struct {
 const INITIAL_CLAIM_RETRY_DELAY = 1000
 
 type Options struct {
-	Owner              string
+	WorkerID           string
 	InitialClaimRetry  time.Duration
 	SleepOnEmpty       time.Duration
 	ClaimTimeout       time.Duration
@@ -169,11 +169,11 @@ func ConsumerRunLoop(ctx context.Context, queue Queue, sleepUntilNotify func(sle
 	return nil
 }
 
-func updateTaskClaimed(ctx context.Context, q *DataStoreQueue, task_id string, newOwner string) (*Task, error) {
+func updateTaskClaimed(ctx context.Context, q *DataStoreQueue, task_id string, workerID string) (*Task, error) {
 	now := getTimestampMillis()
 	event := TaskHistory{Timestamp: float64(now) / 1000.0,
-		Status: STATUS_CLAIMED,
-		Owner:  newOwner}
+		Status:          STATUS_CLAIMED,
+		OwnedByWorkerID: workerID}
 
 	mutate := func(task *Task) bool {
 		if task.Status != STATUS_PENDING {
@@ -183,7 +183,7 @@ func updateTaskClaimed(ctx context.Context, q *DataStoreQueue, task_id string, n
 
 		task.History = append(task.History, &event)
 		task.Status = STATUS_CLAIMED
-		task.Owner = newOwner
+		task.OwnedByWorkerID = workerID
 		task.LastUpdated = float64(now) / 1000.0
 
 		return true

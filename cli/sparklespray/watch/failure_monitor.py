@@ -34,9 +34,9 @@ class StartupFailureMonitor(PeriodicTask):
         # find the number of tasks per node
         task_count_by_node_name = collections.defaultdict(lambda: 0)
         for task in tasks:
-            if task.owner is None:
+            if task.owned_by_worker_id is None:
                 continue
-            node_name = task.owner.split("/")[-1]
+            node_name = task.owned_by_worker_id.split("/")[-1]
             task_count_by_node_name[node_name] += 1
 
         # find nodes which have newly completed

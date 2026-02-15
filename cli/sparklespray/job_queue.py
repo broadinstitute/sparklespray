@@ -116,7 +116,7 @@ class JobQueue:
         updated = 0
         batch = Batch(self.client)
         for task in tasks:
-            if owner is not None and owner != task.owner:
+            if owner is not None and owner != task.owned_by_worker_id:
                 continue
             self._reset_task(task, STATUS_PENDING, batch=batch)
             updated += 1
@@ -132,7 +132,7 @@ class JobQueue:
 
     def _reset_task(self, task, status, batch=None, history_status="reset"):
         now = time.time()
-        task.owner = None
+        task.owned_by_worker_id = None
         task.status = status
         task.history.append(TaskHistory(timestamp=now, status=history_status))
         self.task_storage.update_task(task, batch)

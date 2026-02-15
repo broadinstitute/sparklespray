@@ -80,7 +80,7 @@ class StreamLogs:
                     incoming_topic=cluster_config.incoming_topic,
                     response_topic=cluster_config.response_topic,
                     task_id=task.task_id,
-                    owner=task.owner,
+                    worker_id=task.owned_by_worker_id,
                 )
                 print_log_content(
                     None,

@@ -29,15 +29,15 @@ type PubSubResponse struct {
 
 // ReadOutputRequest mirrors the protobuf ReadOutputRequest
 type PubSubReadOutputRequest struct {
-	TaskID string `json:"task_id"`
-	Size   int32  `json:"size"`
-	Offset int64  `json:"offset"`
-	Owner  string `json:"owner"`
+	TaskID   string `json:"task_id"`
+	Size     int32  `json:"size"`
+	Offset   int64  `json:"offset"`
+	WorkerID string `json:"worker_id"`
 }
 
-// GetProcessStatusRequest contains the owner for filtering
+// GetProcessStatusRequest contains the worker_id for filtering
 type PubSubGetProcessStatusRequest struct {
-	Owner string `json:"owner"`
+	WorkerID string `json:"worker_id"`
 }
 
 // ReadOutputResponse mirrors the protobuf ReadOutputReply
@@ -57,7 +57,7 @@ const (
 // WorkerStatusEvent is published when worker status changes
 type WorkerStatusEvent struct {
 	Type      string `json:"type"`
-	Owner     string `json:"owner"`
+	WorkerID  string `json:"worker_id"`
 	Timestamp int64  `json:"timestamp"`
 	TaskID    string `json:"task_id,omitempty"`
 	ExitCode  string `json:"exit_code,omitempty"`
@@ -86,15 +86,15 @@ type PubSubGetProcessStatusResponse struct {
 type PubSubHandler struct {
 	monitor       *Monitor
 	responseTopic *pubsub.Topic
-	owner         string
+	workerID      string
 }
 
 // NewPubSubHandler creates a new pub/sub handler
-func NewPubSubHandler(monitor *Monitor, responseTopic *pubsub.Topic, owner string) *PubSubHandler {
+func NewPubSubHandler(monitor *Monitor, responseTopic *pubsub.Topic, workerID string) *PubSubHandler {
 	return &PubSubHandler{
 		monitor:       monitor,
 		responseTopic: responseTopic,
-		owner:         owner,
+		workerID:      workerID,
 	}
 }
 
@@ -114,7 +114,7 @@ func (h *PubSubHandler) HandleMessage(ctx context.Context, msg *pubsub.Message) 
 	response.RequestID = request.RequestID
 
 	// shouldRespond indicates whether this worker should send a response
-	// (false when owner doesn't match - another worker should handle it)
+	// (false when worker_id doesn't match - another worker should handle it)
 	var shouldRespond bool
 
 	switch request.Type {
@@ -145,8 +145,8 @@ func (h *PubSubHandler) handleReadOutput(ctx context.Context, request *PubSubMes
 	}
 
 	// Check if this request is for this worker
-	if req.Owner != "" && req.Owner != h.owner {
-		log.Printf("Ignoring read_output request for owner %s (this worker is %s)", req.Owner, h.owner)
+	if req.WorkerID != "" && req.WorkerID != h.workerID {
+		log.Printf("Ignoring read_output request for worker_id %s (this worker is %s)", req.WorkerID, h.workerID)
 		return false
 	}
 
@@ -186,8 +186,8 @@ func (h *PubSubHandler) handleGetProcessStatus(ctx context.Context, request *Pub
 	}
 
 	// Check if this request is for this worker
-	if req.Owner != "" && req.Owner != h.owner {
-		log.Printf("Ignoring get_process_status request for owner %s (this worker is %s)", req.Owner, h.owner)
+	if req.WorkerID != "" && req.WorkerID != h.workerID {
+		log.Printf("Ignoring get_process_status request for worker_id %s (this worker is %s)", req.WorkerID, h.workerID)
 		return false
 	}
 
@@ -238,7 +238,7 @@ func (h *PubSubHandler) sendResponse(ctx context.Context, response *PubSubRespon
 	result := h.responseTopic.Publish(ctx, &pubsub.Message{
 		Data: data,
 		Attributes: map[string]string{
-			"owner": h.owner,
+			"worker_id": h.workerID,
 		},
 	})
 
@@ -252,7 +252,7 @@ func (h *PubSubHandler) sendResponse(ctx context.Context, response *PubSubRespon
 
 // StartPubSubSubscriber starts listening for messages on the incoming topic
 // Returns a WorkerNotifier that can be used to publish status events
-func StartPubSubSubscriber(ctx context.Context, projectID string, incomingTopic string, responseTopic string, monitor *Monitor, owner string) (*WorkerNotifier, error) {
+func StartPubSubSubscriber(ctx context.Context, projectID string, incomingTopic string, responseTopic string, monitor *Monitor, workerID string) (*WorkerNotifier, error) {
 	if incomingTopic == "" || responseTopic == "" {
 		return nil, fmt.Errorf("pub/sub topics not configured: incomingTopic=%q, responseTopic=%q", incomingTopic, responseTopic)
 	}
@@ -263,8 +263,8 @@ func StartPubSubSubscriber(ctx context.Context, projectID string, incomingTopic 
 	}
 
 	// Get or create subscription for this worker
-	// Use owner as part of subscription name to make it unique per worker
-	subName := fmt.Sprintf("%s-%s", incomingTopic, owner)
+	// Use workerID as part of subscription name to make it unique per worker
+	subName := fmt.Sprintf("%s-%s", incomingTopic, workerID)
 	sub := client.Subscription(subName)
 
 	exists, err := sub.Exists(ctx)
@@ -286,7 +286,7 @@ func StartPubSubSubscriber(ctx context.Context, projectID string, incomingTopic 
 	}
 
 	respTopic := client.Topic(responseTopic)
-	handler := NewPubSubHandler(monitor, respTopic, owner)
+	handler := NewPubSubHandler(monitor, respTopic, workerID)
 
 	// Start receiving messages in a goroutine
 	go func() {
@@ -300,7 +300,7 @@ func StartPubSubSubscriber(ctx context.Context, projectID string, incomingTopic 
 	}()
 
 	// Create and return notifier for publishing status events
-	notifier := NewWorkerNotifier(ctx, respTopic, owner)
+	notifier := NewWorkerNotifier(ctx, respTopic, workerID)
 	return notifier, nil
 }
 
@@ -326,17 +326,17 @@ func readOutputFile(path string, size int32, offset int64) ([]byte, bool, error)
 
 // WorkerNotifier publishes worker status events to pub/sub
 type WorkerNotifier struct {
-	topic *pubsub.Topic
-	owner string
-	ctx   context.Context
+	topic    *pubsub.Topic
+	workerID string
+	ctx      context.Context
 }
 
 // NewWorkerNotifier creates a new worker notifier
-func NewWorkerNotifier(ctx context.Context, topic *pubsub.Topic, owner string) *WorkerNotifier {
+func NewWorkerNotifier(ctx context.Context, topic *pubsub.Topic, workerID string) *WorkerNotifier {
 	return &WorkerNotifier{
-		topic: topic,
-		owner: owner,
-		ctx:   ctx,
+		topic:    topic,
+		workerID: workerID,
+		ctx:      ctx,
 	}
 }
 
@@ -344,7 +344,7 @@ func NewWorkerNotifier(ctx context.Context, topic *pubsub.Topic, owner string) *
 func (n *WorkerNotifier) NotifyWorkerStarted() {
 	n.publish(WorkerStatusEvent{
 		Type:      WorkerEventStarted,
-		Owner:     n.owner,
+		WorkerID:  n.workerID,
 		Timestamp: getTimestampMillis(),
 	})
 }
@@ -353,7 +353,7 @@ func (n *WorkerNotifier) NotifyWorkerStarted() {
 func (n *WorkerNotifier) NotifyWorkerStopping() {
 	n.publish(WorkerStatusEvent{
 		Type:      WorkerEventStopping,
-		Owner:     n.owner,
+		WorkerID:  n.workerID,
 		Timestamp: getTimestampMillis(),
 	})
 }
@@ -362,7 +362,7 @@ func (n *WorkerNotifier) NotifyWorkerStopping() {
 func (n *WorkerNotifier) NotifyTaskStarted(taskID string) {
 	n.publish(WorkerStatusEvent{
 		Type:      WorkerEventTaskStarted,
-		Owner:     n.owner,
+		WorkerID:  n.workerID,
 		Timestamp: getTimestampMillis(),
 		TaskID:    taskID,
 	})
@@ -372,7 +372,7 @@ func (n *WorkerNotifier) NotifyTaskStarted(taskID string) {
 func (n *WorkerNotifier) NotifyTaskCompleted(taskID string, exitCode string, errorMsg string) {
 	n.publish(WorkerStatusEvent{
 		Type:      WorkerEventTaskCompleted,
-		Owner:     n.owner,
+		WorkerID:  n.workerID,
 		Timestamp: getTimestampMillis(),
 		TaskID:    taskID,
 		ExitCode:  exitCode,
@@ -390,7 +390,7 @@ func (n *WorkerNotifier) publish(event WorkerStatusEvent) {
 	result := n.topic.Publish(n.ctx, &pubsub.Message{
 		Data: data,
 		Attributes: map[string]string{
-			"owner":      n.owner,
+			"worker_id":  n.workerID,
 			"event_type": event.Type,
 		},
 	})

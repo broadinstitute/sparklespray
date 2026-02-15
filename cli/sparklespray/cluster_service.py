@@ -177,8 +177,8 @@ class Cluster:
             self.project, self.location, self.cluster_id, only_terminal_reqs=True
         )
 
-    def is_owner_live(self, owner):
-        return self.cluster_api.is_instance_running(owner)
+    def is_worker_live(self, worker_id):
+        return self.cluster_api.is_instance_running(worker_id)
 
     def heartbeat(
         self,

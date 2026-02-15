@@ -260,7 +260,7 @@ func consume(c *cli.Context) error {
 
 	isLocalRun := c.Bool("localhost")
 	log.Printf("isLocal = %v (cluster=%s)", isLocalRun, cluster)
-	var owner string
+	var workerID string
 	if !isLocalRun {
 		log.Printf("Querying metadata to get host instance name")
 		instanceName, err := GetInstanceName()
@@ -279,10 +279,10 @@ func consume(c *cli.Context) error {
 			log.Printf("Got zone: %s", zone)
 		}
 
-		owner = zone + "/" + instanceName
+		workerID = zone + "/" + instanceName
 	} else {
 		log.Printf("Does not appear to be running under GCP, assuming localhost should be used as the name")
-		owner = "localhost"
+		workerID = "localhost"
 	}
 
 	monitor := NewMonitor()
@@ -292,7 +292,7 @@ func consume(c *cli.Context) error {
 		InitialClaimRetry:  1 * time.Second,                            // if we get an error claiming, how long until we try again?
 		SleepOnEmpty:       1 * time.Second,                            // how often to poll the queue if is empty
 		MaxWaitForNewTasks: time.Duration(shutdownAfter) * time.Second, // how long to wait for a new task to arrive if the queue is empty
-		Owner:              owner}
+		WorkerID:           workerID}
 
 	executor := func(taskId string, taskParam string) (string, error) {
 		return ExecuteTaskFromUrl(ioc, taskId, taskParam, cacheDir, tasksDir, monitor)
@@ -319,7 +319,7 @@ func consume(c *cli.Context) error {
 	log.Printf("Got cluster config: incoming_topic=%s, response_topic=%s", clusterConfig.IncomingTopic, clusterConfig.ResponseTopic)
 
 	// Start pub/sub subscriber
-	workerNotifier, err := StartPubSubSubscriber(ctx, projectID, clusterConfig.IncomingTopic, clusterConfig.ResponseTopic, monitor, owner)
+	workerNotifier, err := StartPubSubSubscriber(ctx, projectID, clusterConfig.IncomingTopic, clusterConfig.ResponseTopic, monitor, workerID)
 	if err != nil {
 		log.Printf("Failed to start pub/sub subscriber: %v", err)
 		return err
@@ -329,7 +329,7 @@ func consume(c *cli.Context) error {
 	if tasksFile != "" {
 		queue, err = CreatePreloadedQueue(tasksFile)
 	} else {
-		queue, err = CreateDataStoreQueue(client, cluster, owner, options.InitialClaimRetry, options.ClaimTimeout)
+		queue, err = CreateDataStoreQueue(client, cluster, workerID, options.InitialClaimRetry, options.ClaimTimeout)
 	}
 	if err != nil {
 		log.Printf("failed to initialize queue: %v\n", err)

@@ -4,28 +4,31 @@ from dataclasses import dataclass
 from typing import List
 from .task_store import Task
 
+
 @dataclass
 class ResetSummary:
     running: List[Task]
-    orphaned : List[Task]
+    orphaned: List[Task]
 
     @property
     def running_count(self):
         return len(self.running)
-    
+
     @property
     def orphaned_count(self):
         return len(self.orphaned)
+
 
 def identify_orphans(cluster: Cluster, possibly_running: List[Task]):
     running = []
     orphaned = []
     for task in possibly_running:
-        if cluster.is_owner_live(task.owner):
+        if cluster.is_worker_live(task.owned_by_worker_id):
             running.append(task)
         else:
             orphaned.append(task)
     return ResetSummary(running, orphaned)
+
 
 def reset_orphaned_tasks(job_id: str, cluster: Cluster, jq: JobQueue):
     # todo: refactor into a method which updates job status

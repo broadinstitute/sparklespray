@@ -32,7 +32,7 @@ func spawnExecuteTasks(t *testing.T, projectID string, jobID string, index int, 
 	options := &Options{
 		ClaimTimeout:      60 * time.Second,
 		InitialClaimRetry: 1 * time.Second,
-		Owner:             fmt.Sprintf("thread-%d", index)}
+		WorkerID:          fmt.Sprintf("thread-%d", index)}
 
 	run := func() {
 		ready.Wait()
