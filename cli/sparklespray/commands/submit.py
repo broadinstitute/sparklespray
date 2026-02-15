@@ -179,6 +179,7 @@ def submit(
     cluster: Cluster,
     metadata: Dict[str, str] = {},
     clean_if_exists: bool = False,
+    cluster_name: Optional[str] = None,
 ):
     """
     Submit a job to the Sparklespray execution system.
@@ -240,7 +241,8 @@ def submit(
     )
 
     image = config.image
-    cluster_name = _make_cluster_name(job_id, image, machine_specs, False)
+    if cluster_name is None:
+        cluster_name = _make_cluster_name(job_id, image, machine_specs, False)
 
     existing_job = jq.get_job_optional(job_id)
     if existing_job is not None:
@@ -478,6 +480,10 @@ def _setup_parser_for_sub_command(parser):
         action="append",
         type=key_value_pair,
     )
+    parser.add_argument(
+        "--cluster",
+        help="Manually specify the cluster ID (useful for testing with a locally running worker)",
+    )
     parser.add_argument("command", nargs=argparse.REMAINDER)
 
 
@@ -503,9 +509,10 @@ def submit_cmd(
     io: IO,
     datastore_client: datastore.Client,
     cluster_api: ClusterAPI,
-    args: argparse.Namespace,
+    args,
     config: Config,
 ):
+    cluster_name = args.cluster
     metadata: Dict[str, str] = {
         "UUID": str(uuid.uuid4())
     }  # assign it a unique ID so we can recognize when a job has been resubmitted with the same name
@@ -705,6 +712,7 @@ def submit_cmd(
             cluster,
             metadata=metadata,
             clean_if_exists=True,
+            cluster_name=cluster_name,
         )
 
     finished = False
