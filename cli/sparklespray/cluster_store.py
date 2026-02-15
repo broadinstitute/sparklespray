@@ -7,7 +7,7 @@ import logging
 
 log = logging.getLogger(__name__)
 
-CLUSTER_COLLECTION = "Cluster"
+CLUSTER_COLLECTION = "SparklesV6Cluster"
 
 
 @dataclass

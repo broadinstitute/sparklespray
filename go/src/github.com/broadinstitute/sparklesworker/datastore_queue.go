@@ -22,8 +22,9 @@ func CreateDataStoreQueue(client *datastore.Client, cluster string, workerID str
 	return &DataStoreQueue{client: client, cluster: cluster, workerID: workerID, InitialClaimRetry: InitialClaimRetry, ClaimTimeout: ClaimTimeout}, nil
 }
 
-const TaskCollection = "SparklesV5Task"
-const ClusterCollection = "Cluster"
+const TaskCollection = "SparklesV6Task"
+const ClusterCollection = "SparklesV6Cluster"
+const JobCollection = "SparklesV6Job"
 
 func GetCluster(ctx context.Context, client *datastore.Client, clusterID string) (*Cluster, error) {
 	clusterKey := datastore.NameKey(ClusterCollection, clusterID, nil)
@@ -93,7 +94,7 @@ func (q *DataStoreQueue) claimTask(ctx context.Context) (*Task, error) {
 }
 
 func (q *DataStoreQueue) isJobKilled(ctx context.Context, jobID string) (bool, error) {
-	jobKey := datastore.NameKey("Job", jobID, nil)
+	jobKey := datastore.NameKey(JobCollection, jobID, nil)
 	var job Job
 	err := q.client.Get(ctx, jobKey, &job)
 	if err != nil {

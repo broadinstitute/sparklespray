@@ -9,7 +9,13 @@ from .task_store import (
     STATUS_PENDING,
     STATUS_KILLED,
 )
-from .job_store import JobStore, Job, JOB_STATUS_SUBMITTED, JOB_STATUS_KILLED
+from .job_store import (
+    JobStore,
+    Job,
+    JOB_STATUS_SUBMITTED,
+    JOB_STATUS_KILLED,
+    JOB_COLLECTION,
+)
 from .task_store import TaskStore, TaskHistory, Task
 from .cluster_store import ClusterStore
 
@@ -169,7 +175,7 @@ class JobQueue:
                 status="pending",
                 args=arg,
                 history=[TaskHistory(timestamp=now, status="pending")],
-                owner=None,
+                owned_by_worker_id=None,
                 command_result_url=command_result_url,
                 cluster=cluster,
                 monitor_address=None,
@@ -199,7 +205,7 @@ class JobQueue:
 
         self.task_storage.delete(job_id, batch=batch)
 
-        job_key = self.client.key("Job", job_id)
+        job_key = self.client.key(JOB_COLLECTION, job_id)
         entity_job = self.client.get(job_key)
         assert entity_job is not None, f"Could not get from datastore: {job_key}"
 

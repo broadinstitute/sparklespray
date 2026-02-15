@@ -6,6 +6,8 @@ from .task_store import STATUS_KILLED, Task
 
 from dataclasses import dataclass
 
+JOB_COLLECTION = "SparklesV6Job"
+
 
 @dataclass
 class Job:
@@ -27,7 +29,7 @@ import json
 
 
 def job_to_entity(client, o):
-    entity_key = client.key("Job", o.job_id)
+    entity_key = client.key(JOB_COLLECTION, o.job_id)
     entity = datastore.Entity(key=entity_key, exclude_from_indexes=("kube_job_spec",))
     entity["tasks"] = o.tasks
     entity["cluster"] = o.cluster
@@ -72,7 +74,7 @@ class JobStore:
         if batch is None:
             batch = self.immediate_batch
 
-        key = self.client.key("Job", job_id)
+        key = self.client.key(JOB_COLLECTION, job_id)
         batch.delete(key)
 
     def insert(self, job: Job, batch=None) -> None:
@@ -83,7 +85,7 @@ class JobStore:
         batch.put(entity)
 
     def get_job_ids(self) -> List[str]:
-        query = self.client.query(kind="Job")
+        query = self.client.query(kind=JOB_COLLECTION)
         jobs_it = query.fetch()
         jobids = []
         for entity_job in jobs_it:
@@ -91,7 +93,7 @@ class JobStore:
         return jobids
 
     def update_job(self, job_id: str, mutate_fn) -> Tuple[bool, Job]:
-        job_key = self.client.key("Job", job_id)
+        job_key = self.client.key(JOB_COLLECTION, job_id)
         entity_job = self.client.get(job_key)
         job = entity_to_job(entity_job)
         update_ok = mutate_fn(job)
@@ -101,21 +103,21 @@ class JobStore:
         return update_ok, job
 
     def get_job(self, job_id: str) -> Optional[Job]:
-        job_key = self.client.key("Job", job_id)
+        job_key = self.client.key(JOB_COLLECTION, job_id)
         job_entity = self.client.get(job_key)
         if job_entity is None:
             return None
         return entity_to_job(job_entity)
 
     def get_job_must(self, job_id: str) -> Job:
-        job_key = self.client.key("Job", job_id)
+        job_key = self.client.key(JOB_COLLECTION, job_id)
         job_entity = self.client.get(job_key)
         if job_entity is None:
             raise Exception("Could not find job with id {}".format(job_id))
         return entity_to_job(job_entity)
 
     def get_last_job(self) -> Job:
-        query = self.client.query(kind="Job")
+        query = self.client.query(kind=JOB_COLLECTION)
         query.order = ["-submit_time"]
         job_entity = list(query.fetch(limit=1))[0]
         return entity_to_job(job_entity)

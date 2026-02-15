@@ -6,6 +6,8 @@ import dataclasses
 from typing import Optional
 from typing import Optional
 
+NODE_REQ_COLLECTION = "SparklesV6NodeReq"
+
 NODE_REQ_SUBMITTED = "submitted"
 NODE_REQ_STAGING = "staging"
 NODE_REQ_RUNNING = "running"
@@ -36,7 +38,7 @@ class NodeReq:
 
 def node_req_to_entity(client: datastore.Client, o: NodeReq) -> datastore.Entity:
     assert o.operation_id is not None
-    entity_key = client.key("NodeReq", o.operation_id)
+    entity_key = client.key(NODE_REQ_COLLECTION, o.operation_id)
     entity = datastore.Entity(key=entity_key)
     entity["cluster_id"] = o.cluster_id
     entity["job_id"] = o.job_id
