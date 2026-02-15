@@ -327,19 +327,16 @@ func consume(c *cli.Context) error {
 	// Fetch cluster config for pub/sub topics
 	clusterConfig, err := GetCluster(ctx, client, cluster)
 	if err != nil {
-		log.Printf("Warning: failed to get cluster config: %v (pub/sub will be disabled)", err)
-		clusterConfig = &Cluster{} // Use empty config, pub/sub will be skipped
-	} else {
-		log.Printf("Got cluster config: incoming_topic=%s, response_topic=%s", clusterConfig.IncomingTopic, clusterConfig.ResponseTopic)
+		log.Printf("Failed to get cluster config: %v", err)
+		return err
 	}
+	log.Printf("Got cluster config: incoming_topic=%s, response_topic=%s", clusterConfig.IncomingTopic, clusterConfig.ResponseTopic)
 
-	// Start pub/sub subscriber if topics are configured
-	var workerNotifier *WorkerNotifier
-	if clusterConfig.IncomingTopic != "" && clusterConfig.ResponseTopic != "" {
-		workerNotifier, err = StartPubSubSubscriber(ctx, projectID, clusterConfig.IncomingTopic, clusterConfig.ResponseTopic, monitor, owner)
-		if err != nil {
-			log.Printf("Warning: failed to start pub/sub subscriber: %v", err)
-		}
+	// Start pub/sub subscriber
+	workerNotifier, err := StartPubSubSubscriber(ctx, projectID, clusterConfig.IncomingTopic, clusterConfig.ResponseTopic, monitor, owner)
+	if err != nil {
+		log.Printf("Failed to start pub/sub subscriber: %v", err)
+		return err
 	}
 
 	monitorAddress := ""

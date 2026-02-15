@@ -220,8 +220,7 @@ func (h *PubSubHandler) sendResponse(ctx context.Context, response *PubSubRespon
 // Returns a WorkerNotifier that can be used to publish status events
 func StartPubSubSubscriber(ctx context.Context, projectID string, incomingTopic string, responseTopic string, monitor *Monitor, owner string) (*WorkerNotifier, error) {
 	if incomingTopic == "" || responseTopic == "" {
-		log.Printf("Pub/sub topics not configured, skipping pub/sub subscriber")
-		return nil, nil
+		return nil, fmt.Errorf("pub/sub topics not configured: incomingTopic=%q, responseTopic=%q", incomingTopic, responseTopic)
 	}
 
 	client, err := pubsub.NewClient(ctx, projectID)
@@ -296,11 +295,8 @@ type WorkerNotifier struct {
 	ctx   context.Context
 }
 
-// NewWorkerNotifier creates a new worker notifier (can be nil if pub/sub is not configured)
+// NewWorkerNotifier creates a new worker notifier
 func NewWorkerNotifier(ctx context.Context, topic *pubsub.Topic, owner string) *WorkerNotifier {
-	if topic == nil {
-		return nil
-	}
 	return &WorkerNotifier{
 		topic: topic,
 		owner: owner,
@@ -310,9 +306,6 @@ func NewWorkerNotifier(ctx context.Context, topic *pubsub.Topic, owner string) *
 
 // NotifyWorkerStarted publishes a worker started event
 func (n *WorkerNotifier) NotifyWorkerStarted() {
-	if n == nil {
-		return
-	}
 	n.publish(WorkerStatusEvent{
 		Type:      WorkerEventStarted,
 		Owner:     n.owner,
@@ -322,9 +315,6 @@ func (n *WorkerNotifier) NotifyWorkerStarted() {
 
 // NotifyWorkerStopping publishes a worker stopping event
 func (n *WorkerNotifier) NotifyWorkerStopping() {
-	if n == nil {
-		return
-	}
 	n.publish(WorkerStatusEvent{
 		Type:      WorkerEventStopping,
 		Owner:     n.owner,
@@ -334,9 +324,6 @@ func (n *WorkerNotifier) NotifyWorkerStopping() {
 
 // NotifyTaskStarted publishes a task started event
 func (n *WorkerNotifier) NotifyTaskStarted(taskID string) {
-	if n == nil {
-		return
-	}
 	n.publish(WorkerStatusEvent{
 		Type:      WorkerEventTaskStarted,
 		Owner:     n.owner,
@@ -347,9 +334,6 @@ func (n *WorkerNotifier) NotifyTaskStarted(taskID string) {
 
 // NotifyTaskCompleted publishes a task completed event
 func (n *WorkerNotifier) NotifyTaskCompleted(taskID string, exitCode string, errorMsg string) {
-	if n == nil {
-		return
-	}
 	n.publish(WorkerStatusEvent{
 		Type:      WorkerEventTaskCompleted,
 		Owner:     n.owner,
