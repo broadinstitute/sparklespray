@@ -61,12 +61,6 @@ type Job struct {
 	TargetNodeCount        int32    `datastore:"target_node_count"`
 }
 
-type ClusterKeys struct {
-	Cert         []byte `datastore:"cert"`
-	PrivateKey   []byte `datastore:"private_key"`
-	SharedSecret string `datastore:"shared_secret"`
-}
-
 type Cluster struct {
 	IncomingTopic string `datastore:"incoming_topic"`
 	ResponseTopic string `datastore:"response_topic"`
@@ -175,7 +169,7 @@ func ConsumerRunLoop(ctx context.Context, queue Queue, sleepUntilNotify func(sle
 	return nil
 }
 
-func updateTaskClaimed(ctx context.Context, q *DataStoreQueue, task_id string, newOwner string, monitorAddress string) (*Task, error) {
+func updateTaskClaimed(ctx context.Context, q *DataStoreQueue, task_id string, newOwner string) (*Task, error) {
 	now := getTimestampMillis()
 	event := TaskHistory{Timestamp: float64(now) / 1000.0,
 		Status: STATUS_CLAIMED,
@@ -190,7 +184,6 @@ func updateTaskClaimed(ctx context.Context, q *DataStoreQueue, task_id string, n
 		task.History = append(task.History, &event)
 		task.Status = STATUS_CLAIMED
 		task.Owner = newOwner
-		task.MonitorAddress = monitorAddress
 		task.LastUpdated = float64(now) / 1000.0
 
 		return true

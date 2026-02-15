@@ -21,8 +21,6 @@ import (
 	"golang.org/x/net/context"
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/option"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
 )
 
 const WorkerVersion = "5.8.2"
@@ -47,7 +45,6 @@ func Main() error {
 				cli.StringFlag{Name: "cluster"},
 				cli.StringFlag{Name: "tasksDir"},
 				cli.StringFlag{Name: "tasksFile"},
-				cli.StringFlag{Name: "port"},
 				cli.IntFlag{Name: "timeout", Value: 5}, // watchdog timeout: 5 minutes means the process will be killed after 10 minutes if the main loop doesn't check in
 				cli.IntFlag{Name: "shutdownAfter", Value: 0},
 				cli.IntFlag{Name: "ftShutdownAfter", Value: 30},
@@ -227,7 +224,6 @@ func consume(c *cli.Context) error {
 	cluster := c.String("cluster")
 	tasksDir := c.String("tasksDir")
 	tasksFile := c.String("tasksFile")
-	port := c.String("port")
 	shutdownAfter := c.Int("shutdownAfter")
 	firstTaskShutdownAfter := c.Int("ftShutdownAfter")
 	expectedVersion := c.String("expectedVersion")
@@ -263,9 +259,8 @@ func consume(c *cli.Context) error {
 	}
 
 	isLocalRun := c.Bool("localhost")
-	log.Printf("isLocal = %s (cluster=%s)", isLocalRun, cluster)
+	log.Printf("isLocal = %v (cluster=%s)", isLocalRun, cluster)
 	var owner string
-	var externalIP string
 	if !isLocalRun {
 		log.Printf("Querying metadata to get host instance name")
 		instanceName, err := GetInstanceName()
@@ -285,16 +280,8 @@ func consume(c *cli.Context) error {
 		}
 
 		owner = zone + "/" + instanceName
-		externalIP, err = GetExternalIP()
-		if err != nil {
-			log.Printf("GetExternalIP failed: %v", err)
-			return err
-		} else {
-			log.Printf("Got externalIP: %s", externalIP)
-		}
 	} else {
 		log.Printf("Does not appear to be running under GCP, assuming localhost should be used as the name")
-		externalIP = "localhost"
 		owner = "localhost"
 	}
 
@@ -317,8 +304,7 @@ func consume(c *cli.Context) error {
 	}
 
 	log.Printf("Creating data store client")
-	transportCreds := grpc.WithTransportCredentials(credentials.NewClientTLSFromCert(certs, ""))
-	client, err := datastore.NewClient(ctx, projectID, option.WithGRPCDialOption(transportCreds))
+	client, err := datastore.NewClient(ctx, projectID)
 	if err != nil {
 		log.Printf("Creating datastore client failed: %v", err)
 		return err
@@ -339,29 +325,11 @@ func consume(c *cli.Context) error {
 		return err
 	}
 
-	monitorAddress := ""
-	if port != "" {
-		entityKey := datastore.NameKey("ClusterKeys", "sparklespray", nil)
-		var clusterKeys ClusterKeys
-		err := client.Get(ctx, entityKey, &clusterKeys)
-		if err != nil {
-			log.Printf("failed to get cluster keys: %v\n", err)
-			return err
-		}
-
-		err = monitor.StartServer(":"+port, clusterKeys.Cert, clusterKeys.PrivateKey, clusterKeys.SharedSecret)
-		if err != nil {
-			log.Printf("Failed to start grpc server: %v", err)
-			return err
-		}
-		monitorAddress = externalIP + ":" + port
-	}
-
 	var queue Queue
 	if tasksFile != "" {
 		queue, err = CreatePreloadedQueue(tasksFile)
 	} else {
-		queue, err = CreateDataStoreQueue(client, cluster, owner, options.InitialClaimRetry, options.ClaimTimeout, monitorAddress)
+		queue, err = CreateDataStoreQueue(client, cluster, owner, options.InitialClaimRetry, options.ClaimTimeout)
 	}
 	if err != nil {
 		log.Printf("failed to initialize queue: %v\n", err)

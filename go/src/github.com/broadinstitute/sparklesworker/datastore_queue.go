@@ -14,13 +14,12 @@ type DataStoreQueue struct {
 	client            *datastore.Client
 	cluster           string
 	owner             string
-	monitorAddress    string
 	InitialClaimRetry time.Duration
 	ClaimTimeout      time.Duration
 }
 
-func CreateDataStoreQueue(client *datastore.Client, cluster string, owner string, InitialClaimRetry time.Duration, ClaimTimeout time.Duration, monitorAddress string) (*DataStoreQueue, error) {
-	return &DataStoreQueue{client: client, cluster: cluster, owner: owner, monitorAddress: monitorAddress, InitialClaimRetry: InitialClaimRetry, ClaimTimeout: ClaimTimeout}, nil
+func CreateDataStoreQueue(client *datastore.Client, cluster string, owner string, InitialClaimRetry time.Duration, ClaimTimeout time.Duration) (*DataStoreQueue, error) {
+	return &DataStoreQueue{client: client, cluster: cluster, owner: owner, InitialClaimRetry: InitialClaimRetry, ClaimTimeout: ClaimTimeout}, nil
 }
 
 const TaskCollection = "SparklesV5Task"
@@ -73,7 +72,7 @@ func (q *DataStoreQueue) claimTask(ctx context.Context) (*Task, error) {
 		// pick a random task to avoid contention
 		task := tasks[rand.Int31n(int32(len(tasks)))]
 
-		finalTask, err := updateTaskClaimed(ctx, q, task.TaskID, q.owner, q.monitorAddress)
+		finalTask, err := updateTaskClaimed(ctx, q, task.TaskID, q.owner)
 		if err == nil {
 			maxSleepTime = INITIAL_CLAIM_RETRY_DELAY
 			return finalTask, nil
