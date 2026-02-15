@@ -28,7 +28,7 @@ from .batch_api import ClusterAPI, JobSpec
 from dataclasses import dataclass
 from typing import Protocol
 
-CLUSTER_HEARTBEAT_COLLECTION = "SparklesV6ClusterHeartbeat"
+CLUSTER_HEARTBEAT_COLLECTION = "SparklesV6ClusterWatchHeartbeat"
 
 # If a heartbeat is older than this, it's considered stale and can be taken over
 SECONDS_UNTIL_STALE_HEARTBEAT = 60 * 10  # 10 minutes
