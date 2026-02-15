@@ -12,7 +12,6 @@ from ..batch_api import ClusterAPI
 
 import sparklespray
 from ..cluster_service import MinConfig, Cluster, create_cluster
-from ..key_store import KeyStore
 import hashlib
 import uuid
 from .kill import kill
@@ -33,7 +32,6 @@ from ..model import LOCAL_SSD, MachineSpec, PersistentDiskMount, SubmitConfig
 from ..spec import SrcDstPair, make_spec_from_command
 from ..util import get_timestamp, random_string, url_join
 from datetime import datetime
-from ..certgen import create_self_signed_cert
 from ..hasher import compute_dict_hash
 from ..worker_job import create_job_spec
 from ..job_queue import STATUS_FAILED
@@ -204,14 +202,6 @@ def submit(
     Raises:
         ExistingJobException: If a job with the same ID exists and clean_if_exists is False
     """
-
-    key_store = KeyStore(datastore_client)
-    cert, key = key_store.get_cert_and_key()
-    if cert is None:
-        log.info("No cert and key for cluster found -- generating now")
-
-        cert, key = create_self_signed_cert()
-        key_store.set_cert_and_key(cert, key)
 
     log.info("Submitting job with id: %s", job_id)
 
