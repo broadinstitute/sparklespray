@@ -208,7 +208,7 @@ func updateTaskCompleted(ctx context.Context, q Queue, task_id string, retcode s
 
 	mutate := func(task *Task) bool {
 		if task.Status != STATUS_CLAIMED {
-			log.Printf("While attempting to mark task %v as complete, found task had status %v. Aborting", task.Status)
+			log.Printf("While attempting to mark task as complete, found task had status %v. Aborting", task.Status)
 			return false
 		}
 
@@ -240,7 +240,7 @@ func updateTaskFailed(ctx context.Context, q Queue, task_id string, failure stri
 
 	mutate := func(task *Task) bool {
 		if task.Status != STATUS_CLAIMED {
-			log.Printf("While attempting to mark task %v as complete, found task had status %v. Aborting", task.Status)
+			log.Printf("While attempting to mark task as complete, found task had status %v. Aborting", task.Status)
 			return false
 		}
 
@@ -272,7 +272,7 @@ func updateTaskKilled(ctx context.Context, q Queue, task_id string) (*Task, erro
 
 	mutate := func(task *Task) bool {
 		if task.Status != STATUS_CLAIMED {
-			log.Printf("While attempting to mark task %v as killed, found task had status %v. Aborting", task.Status)
+			log.Printf("While attempting to mark task as killed, found task had status %v. Aborting", task.Status)
 			return false
 		}
 

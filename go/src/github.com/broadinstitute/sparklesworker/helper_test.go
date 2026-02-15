@@ -3,6 +3,7 @@ package sparklesworker
 import (
 	"io/ioutil"
 	"log"
+	"net/http"
 	"os"
 	"path"
 	"testing"
@@ -57,6 +58,10 @@ func (ioc *MockIOClient) DownloadAsBytes(srcUrl string) ([]byte, error) {
 	return make([]byte, 0), nil
 }
 
+func (ioc *MockIOClient) IsExists(url string) (bool, error) {
+	return true, nil
+}
+
 func TestResolveUploads(t *testing.T) {
 	tempDir, err := ioutil.TempDir("", "testTmp")
 	check(err)
@@ -80,8 +85,8 @@ func TestResolveUploads(t *testing.T) {
 
 	log.Printf("toUploadFile=%v\n", toUploadFile)
 
-	uploadSpecs := []*TaskUpload{&TaskUpload{DstURL: "gs://fake/dest", SrcWildcard: "*"}}
-	filesToUpload, err := resolveUploads(workdir, uploadSpecs, downloaded)
+	uploadSpec := &UploadSpec{DstURL: "gs://fake/dest", IncludePatterns: []string{"*"}}
+	filesToUpload, err := resolveUploads(workdir, uploadSpec, downloaded)
 	assert.Nil(t, err)
 
 	assert.Len(t, filesToUpload, 1)
@@ -99,7 +104,7 @@ func TestIOClient(t *testing.T) {
 	destURL := "gs://broad-achilles-kubeque/test/TestIOClient"
 
 	ctx := context.Background()
-	ioc, err := NewIOClient(ctx)
+	ioc, err := NewIOClient(ctx, http.DefaultClient)
 	assert.Nil(t, err)
 
 	sourceFile, _ := ioutil.TempFile("", "sample")
@@ -122,12 +127,11 @@ func TestExecute(t *testing.T) {
 	tmpdir, err := ioutil.TempDir("", "testTmp")
 	assert.Nil(t, err)
 
-	workdir := path.Join(tmpdir, "work")
-	assert.Nil(t, os.Mkdir(workdir, 0700))
-	cachedir := path.Join(tmpdir, "cache")
+	tasksDir := path.Join(tmpdir, "tasks")
+	cacheDir := path.Join(tmpdir, "cache")
 
 	ctx := context.Background()
-	ioc, err := NewIOClient(ctx)
+	ioc, err := NewIOClient(ctx, http.DefaultClient)
 	assert.Nil(t, err)
 
 	spec := &TaskSpec{
@@ -135,9 +139,11 @@ func TestExecute(t *testing.T) {
 		PreExecScript:    "ls",
 		Command:          "bash -c 'echo hello'",
 		CommandResultURL: urlprefix + "result.json",
-		StdoutURL:        urlprefix + "stdout.txt"}
+		StdoutURL:        urlprefix + "stdout.txt",
+		Uploads:          &UploadSpec{},
+	}
 
-	retcode, err := executeTaskInDir(ioc, workdir, spec, cachedir)
+	retcode, err := executeTask(ioc, "test-task", spec, cacheDir, tasksDir, nil)
 	assert.Nil(t, err)
 	assert.Equal(t, "0", retcode)
 }

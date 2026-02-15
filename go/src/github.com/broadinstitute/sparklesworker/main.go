@@ -101,7 +101,7 @@ func copyexe(c *cli.Context) error {
 		return fmt.Errorf("failed copying %s to %s writing: %s", executablePath, dst, err)
 	}
 
-	log.Printf("Installed", executablePath, dst)
+	log.Printf("Installed %s to %s", executablePath, dst)
 
 	return nil
 }

@@ -150,7 +150,7 @@ func downloadAll(ioc IOClient, workdir string, downloads []*TaskDownload, cacheD
 				log.Printf("Warning: Removing existing file %s", destination)
 				err = os.Remove(destination)
 				if err != nil {
-					return fmt.Errorf("Could not remove existing file %s that is the destination of new DL", destination, err), downloaded
+					return fmt.Errorf("Could not remove existing file %s that is the destination of new DL: %v", destination, err), downloaded
 				}
 			}
 
@@ -399,7 +399,7 @@ func getFilesWithMatchingMTimes(a map[string]time.Time, b map[string]time.Time) 
 	for key, aTime := range a {
 		bTime, ok := b[key]
 		if !ok {
-			log.Printf("While checking if %s was updated, could not find the file. Skipping...")
+			log.Printf("While checking if %s was updated, could not find the file. Skipping...", key)
 			continue
 		}
 
