@@ -95,7 +95,7 @@ func getTimestampMillis() int64 {
 	return int64(time.Now().UnixNano()) / int64(time.Millisecond)
 }
 
-func ConsumerRunLoop(ctx context.Context, queue Queue, sleepUntilNotify func(sleepTime time.Duration), executor Executor, SleepOnEmpty time.Duration, MaxWaitForNewTasks time.Duration) error {
+func ConsumerRunLoop(ctx context.Context, queue Queue, sleepUntilNotify func(sleepTime time.Duration), executor Executor, SleepOnEmpty time.Duration, MaxWaitForNewTasks time.Duration, notifier *WorkerNotifier) error {
 	firstClaim := true
 	lastClaim := time.Now()
 	log.Printf("Starting ConsumerRunLoop, sleeping %v once queue drains", SleepOnEmpty)
@@ -129,6 +129,9 @@ func ConsumerRunLoop(ctx context.Context, queue Queue, sleepUntilNotify func(sle
 		log.Printf("Claimed task %s", claimed.TaskID)
 		firstClaim = false
 
+		// Notify that task has started
+		notifier.NotifyTaskStarted(claimed.TaskID)
+
 		jobKilled, err := queue.isJobKilled(ctx, claimed.JobID)
 		if err != nil {
 			log.Printf("Got error in isJobKilled for %s: %v", claimed.JobID, err)
@@ -140,17 +143,21 @@ func ConsumerRunLoop(ctx context.Context, queue Queue, sleepUntilNotify func(sle
 			if err != nil {
 				log.Printf("Got error executing task %s: %v, marking task as failed", claimed.TaskID, err)
 
-				_, err = updateTaskFailed(ctx, queue, claimed.TaskID, err.Error())
-				if err != nil {
-					log.Printf("Got error updating task %s failed: %v", claimed.TaskID, err)
-					return err
+				_, updateErr := updateTaskFailed(ctx, queue, claimed.TaskID, err.Error())
+				if updateErr != nil {
+					log.Printf("Got error updating task %s failed: %v", claimed.TaskID, updateErr)
+					return updateErr
 				}
+				// Notify task completed with error
+				notifier.NotifyTaskCompleted(claimed.TaskID, "", err.Error())
 			} else {
-				_, err = updateTaskCompleted(ctx, queue, claimed.TaskID, retcode)
-				if err != nil {
-					log.Printf("Got error updating task %s is complete: %v", claimed.TaskID, err)
-					return err
+				_, updateErr := updateTaskCompleted(ctx, queue, claimed.TaskID, retcode)
+				if updateErr != nil {
+					log.Printf("Got error updating task %s is complete: %v", claimed.TaskID, updateErr)
+					return updateErr
 				}
+				// Notify task completed successfully
+				notifier.NotifyTaskCompleted(claimed.TaskID, retcode, "")
 			}
 		} else {
 			_, err = updateTaskKilled(ctx, queue, claimed.TaskID)
@@ -158,6 +165,8 @@ func ConsumerRunLoop(ctx context.Context, queue Queue, sleepUntilNotify func(sle
 				log.Printf("Got error updating task %s was killed: %v", claimed.TaskID, err)
 				return err
 			}
+			// Notify task completed (killed)
+			notifier.NotifyTaskCompleted(claimed.TaskID, "", "killed")
 		}
 
 	}

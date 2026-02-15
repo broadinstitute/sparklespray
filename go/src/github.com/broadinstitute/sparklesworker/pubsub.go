@@ -39,6 +39,24 @@ type PubSubReadOutputResponse struct {
 	EndOfFile bool   `json:"end_of_file"`
 }
 
+// Worker status event types
+const (
+	WorkerEventStarted       = "worker_started"
+	WorkerEventStopping      = "worker_stopping"
+	WorkerEventTaskStarted   = "task_started"
+	WorkerEventTaskCompleted = "task_completed"
+)
+
+// WorkerStatusEvent is published when worker status changes
+type WorkerStatusEvent struct {
+	Type      string `json:"type"`
+	Owner     string `json:"owner"`
+	Timestamp int64  `json:"timestamp"`
+	TaskID    string `json:"task_id,omitempty"`
+	ExitCode  string `json:"exit_code,omitempty"`
+	Error     string `json:"error,omitempty"`
+}
+
 // GetProcessStatusResponse mirrors the protobuf GetProcessStatusReply
 type PubSubGetProcessStatusResponse struct {
 	ProcessCount         int32 `json:"process_count"`
@@ -199,15 +217,16 @@ func (h *PubSubHandler) sendResponse(ctx context.Context, response *PubSubRespon
 }
 
 // StartPubSubSubscriber starts listening for messages on the incoming topic
-func StartPubSubSubscriber(ctx context.Context, projectID string, incomingTopic string, responseTopic string, monitor *Monitor, owner string) error {
+// Returns a WorkerNotifier that can be used to publish status events
+func StartPubSubSubscriber(ctx context.Context, projectID string, incomingTopic string, responseTopic string, monitor *Monitor, owner string) (*WorkerNotifier, error) {
 	if incomingTopic == "" || responseTopic == "" {
 		log.Printf("Pub/sub topics not configured, skipping pub/sub subscriber")
-		return nil
+		return nil, nil
 	}
 
 	client, err := pubsub.NewClient(ctx, projectID)
 	if err != nil {
-		return fmt.Errorf("failed to create pub/sub client: %w", err)
+		return nil, fmt.Errorf("failed to create pub/sub client: %w", err)
 	}
 
 	// Get or create subscription for this worker
@@ -217,7 +236,7 @@ func StartPubSubSubscriber(ctx context.Context, projectID string, incomingTopic 
 
 	exists, err := sub.Exists(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to check subscription existence: %w", err)
+		return nil, fmt.Errorf("failed to check subscription existence: %w", err)
 	}
 
 	if !exists {
@@ -226,7 +245,7 @@ func StartPubSubSubscriber(ctx context.Context, projectID string, incomingTopic 
 			Topic: topic,
 		})
 		if err != nil {
-			return fmt.Errorf("failed to create subscription: %w", err)
+			return nil, fmt.Errorf("failed to create subscription: %w", err)
 		}
 		log.Printf("Created pub/sub subscription: %s", subName)
 	}
@@ -245,7 +264,9 @@ func StartPubSubSubscriber(ctx context.Context, projectID string, incomingTopic 
 		}
 	}()
 
-	return nil
+	// Create and return notifier for publishing status events
+	notifier := NewWorkerNotifier(ctx, respTopic, owner)
+	return notifier, nil
 }
 
 // readOutputFile reads from a file at the given offset
@@ -266,4 +287,99 @@ func readOutputFile(path string, size int32, offset int64) ([]byte, bool, error)
 	}
 
 	return buffer, eof, nil
+}
+
+// WorkerNotifier publishes worker status events to pub/sub
+type WorkerNotifier struct {
+	topic *pubsub.Topic
+	owner string
+	ctx   context.Context
+}
+
+// NewWorkerNotifier creates a new worker notifier (can be nil if pub/sub is not configured)
+func NewWorkerNotifier(ctx context.Context, topic *pubsub.Topic, owner string) *WorkerNotifier {
+	if topic == nil {
+		return nil
+	}
+	return &WorkerNotifier{
+		topic: topic,
+		owner: owner,
+		ctx:   ctx,
+	}
+}
+
+// NotifyWorkerStarted publishes a worker started event
+func (n *WorkerNotifier) NotifyWorkerStarted() {
+	if n == nil {
+		return
+	}
+	n.publish(WorkerStatusEvent{
+		Type:      WorkerEventStarted,
+		Owner:     n.owner,
+		Timestamp: getTimestampMillis(),
+	})
+}
+
+// NotifyWorkerStopping publishes a worker stopping event
+func (n *WorkerNotifier) NotifyWorkerStopping() {
+	if n == nil {
+		return
+	}
+	n.publish(WorkerStatusEvent{
+		Type:      WorkerEventStopping,
+		Owner:     n.owner,
+		Timestamp: getTimestampMillis(),
+	})
+}
+
+// NotifyTaskStarted publishes a task started event
+func (n *WorkerNotifier) NotifyTaskStarted(taskID string) {
+	if n == nil {
+		return
+	}
+	n.publish(WorkerStatusEvent{
+		Type:      WorkerEventTaskStarted,
+		Owner:     n.owner,
+		Timestamp: getTimestampMillis(),
+		TaskID:    taskID,
+	})
+}
+
+// NotifyTaskCompleted publishes a task completed event
+func (n *WorkerNotifier) NotifyTaskCompleted(taskID string, exitCode string, errorMsg string) {
+	if n == nil {
+		return
+	}
+	n.publish(WorkerStatusEvent{
+		Type:      WorkerEventTaskCompleted,
+		Owner:     n.owner,
+		Timestamp: getTimestampMillis(),
+		TaskID:    taskID,
+		ExitCode:  exitCode,
+		Error:     errorMsg,
+	})
+}
+
+func (n *WorkerNotifier) publish(event WorkerStatusEvent) {
+	data, err := json.Marshal(event)
+	if err != nil {
+		log.Printf("Failed to marshal worker status event: %v", err)
+		return
+	}
+
+	result := n.topic.Publish(n.ctx, &pubsub.Message{
+		Data: data,
+		Attributes: map[string]string{
+			"owner":      n.owner,
+			"event_type": event.Type,
+		},
+	})
+
+	// Don't block on publish, just log errors
+	go func() {
+		_, err := result.Get(n.ctx)
+		if err != nil {
+			log.Printf("Failed to publish worker status event: %v", err)
+		}
+	}()
 }

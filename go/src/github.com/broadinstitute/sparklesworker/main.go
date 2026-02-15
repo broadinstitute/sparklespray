@@ -334,8 +334,9 @@ func consume(c *cli.Context) error {
 	}
 
 	// Start pub/sub subscriber if topics are configured
+	var workerNotifier *WorkerNotifier
 	if clusterConfig.IncomingTopic != "" && clusterConfig.ResponseTopic != "" {
-		err = StartPubSubSubscriber(ctx, projectID, clusterConfig.IncomingTopic, clusterConfig.ResponseTopic, monitor, owner)
+		workerNotifier, err = StartPubSubSubscriber(ctx, projectID, clusterConfig.IncomingTopic, clusterConfig.ResponseTopic, monitor, owner)
 		if err != nil {
 			log.Printf("Warning: failed to start pub/sub subscriber: %v", err)
 		}
@@ -370,11 +371,18 @@ func consume(c *cli.Context) error {
 		return err
 	}
 
-	err = ConsumerRunLoop(ctx, queue, sleepUntilNotify, executor, options.SleepOnEmpty, options.MaxWaitForNewTasks)
+	// Notify that worker has started
+	workerNotifier.NotifyWorkerStarted()
+
+	err = ConsumerRunLoop(ctx, queue, sleepUntilNotify, executor, options.SleepOnEmpty, options.MaxWaitForNewTasks, workerNotifier)
 	if err != nil {
 		log.Printf("consumerRunLoop exited with: %v\n", err)
+		workerNotifier.NotifyWorkerStopping()
 		return err
 	}
+
+	// Notify that worker is stopping
+	workerNotifier.NotifyWorkerStopping()
 
 	return nil
 }
