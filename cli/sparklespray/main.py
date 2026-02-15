@@ -6,7 +6,6 @@ from .errors import UserError
 
 from .config import load_config, create_func_params
 
-from . import txtui
 import inspect
 import sys, io
 from .gcp_setup import setup_project, grant
@@ -14,13 +13,6 @@ from .task_store import Task, STATUS_FAILED
 from .job_queue import JobQueue
 from .io_helper import IO
 import json
-
-# def _resolve_jobid(jq, jobid):
-#     if jobid == "LAST":
-#         job = jq.get_last_job()
-#         return job.job_id
-#     else:
-#         return jobid
 
 
 def print_failures(jq: JobQueue, io: IO, jobid, show_all: bool):

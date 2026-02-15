@@ -10,6 +10,8 @@ from google.api_core.exceptions import NotFound
 
 from .gcp_utils import normalize_label, make_unique_label, validate_label
 from .model import GCSBucketMount
+
+import re
 from .node_req_store import (
     NodeReq,
     NODE_REQ_COMPLETE,
@@ -20,7 +22,6 @@ from .node_req_store import (
     NODE_REQ_CLASS_NORMAL,
     NODE_REQ_CLASS_PREEMPTIVE,
 )
-from .gcp_utils import normalize_label, make_unique_label, validate_label
 
 import json
 import dataclasses
@@ -311,9 +312,6 @@ def is_job_successful(job: batch.Job):
     return job.status.state == batch.JobStatus.State.SUCCEEDED
 
 
-import re
-
-
 def attempt_to_print_log_url(batch_job_name):
     m = re.match("projects/([^/]+)/locations/([^/]+)/jobs/([^/]+)", batch_job_name)
     if m is None:
@@ -420,6 +418,3 @@ class ClusterAPI:
         except NotFound:
             return False
         return True
-
-
-import re

@@ -10,11 +10,8 @@ from .node_req_store import (
     NODE_REQ_COMPLETE,
     REQUESTED_NODE_STATES,
     NODE_REQ_FAILED,
-    REQUESTED_NODE_STATES,
     FINAL_NODE_STATES,
 )
-
-# from .node_service import NodeService, MachineSpec
 from .job_store import JobStore
 from .task_store import TaskStore
 from typing import List, Optional, Set

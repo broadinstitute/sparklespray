@@ -1,7 +1,7 @@
 import json
 import os
 import csv
-import subprocess
+import io
 from .errors import UserError
 from typing import Dict, Any, List, Optional, Tuple
 from pydantic import BaseModel, Field, validator, root_validator
@@ -14,8 +14,6 @@ from .task_store import STATUS_FAILED
 from .commands.submit import submit_cmd, construct_submit_cmd_args
 from .config import Config
 from tempfile import NamedTemporaryFile
-import csv
-import io
 from dataclasses import dataclass, field
 from .hasher import CachingHashFunction, compute_dict_hash
 from typing import Tuple, Union
@@ -107,19 +105,6 @@ class WorkflowDefinition(BaseModel):
                 raise ValueError(
                     f"Invalid JSON in workflow definition file: {file_path}"
                 )
-
-
-# def _run_local_command(command: List[str]) -> int:
-#     """Run a command locally and return the exit code."""
-#     log.info(f"Running local command: {' '.join(command)}")
-#     txtui.user_print(f"Running local command: {' '.join(command)}")
-
-#     try:
-#         result = subprocess.run(command, check=False)
-#         return result.returncode
-#     except Exception as e:
-#         log.error(f"Error running local command: {str(e)}")
-#         return 1
 
 
 def _load_parameters_from_csv(
@@ -237,12 +222,6 @@ def run_workflow(
         assert (
             not step.run_local
         ), "Currently not supported because we don't have a way to tell if local jobs are complete yet"
-        # if step.run_local:
-        #     # Run the command locally
-        #     exit_code = _run_local_command(step.command)
-        #     if exit_code != 0:
-        #         raise RuntimeError(f"Local command in step {step_num} failed with exit code {exit_code}")
-        # else:
 
         if sparkles.job_exists(sub_job_name):
             txtui.user_print(

@@ -16,12 +16,9 @@ import hashlib
 import uuid
 from .kill import kill
 from .delete import delete
-import sparklespray
 from .watch import watch
 
 from .. import txtui
-from .delete import delete
-from .watch import watch
 from ..config import Config
 from ..csv_utils import read_csv_as_dicts
 from ..hasher import CachingHashFunction

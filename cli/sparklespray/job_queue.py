@@ -28,29 +28,6 @@ import time
 from typing import Dict, List
 
 
-def get_credentials(account, cred_file="~/.config/gcloud/credentials"):
-    return None
-    # cred_file = os.path.expanduser(cred_file)
-    # with open(cred_file, "rt") as fd:
-    #     all_credentials = json.load(fd)
-    #
-    #     client_credentials = None
-    # for c in all_credentials["data"]:
-    #     if c["key"]["type"] == "google-cloud-sdk" and c["key"]["account"] == account:
-    #         client_credentials = c["credential"]
-    #
-    # assert client_credentials is not None, "Could not find credentials for {} in {}".format(account, cred_file)
-    #
-    # return GoogleCredentials(
-    #     access_token=None,
-    #     client_id=client_credentials['client_id'],
-    #     client_secret=client_credentials['client_secret'],
-    #     refresh_token=client_credentials['refresh_token'],
-    #     token_expiry=None,
-    #     token_uri=oauth2client.GOOGLE_TOKEN_URI,
-    #     user_agent='Python client library')
-
-
 class JobQueue:
     def __init__(
         self,

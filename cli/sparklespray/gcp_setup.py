@@ -198,54 +198,6 @@ def can_reach_datastore_api(project_id, key_path):
     raise Exception("Failed to confirm access to datastore")
 
 
-def indices_are_good_enough(existing_indices, new_indices):
-    # the format of these two is not exactly the same so canonicalize and compare
-    # example format of existing:
-    #  gcloud datastore indexes list --project depmap-portal-pipeline       (base)
-    # ---
-    # ancestor: NONE
-    # indexId: CICAgOjXh4EK
-    # kind: SparklesV5Task
-    # projectId: depmap-portal-pipeline
-    # properties:
-    # - direction: ASCENDING
-    #   name: job_id
-    # - direction: ASCENDING
-    #   name: last_updated
-    # state: READY
-    #
-    # example format of new_indices:
-    # indexes:
-    #   # Required for IncrementalTaskFetcher.get_tasks_updated_since()
-    #   # Query: job_id = X AND last_updated > Y
-    #   - kind: SparklesV5Task
-    #     properties:
-    #       - name: job_id
-    #       - name: last_updated
-    return False
-    canonicalized_existing = {}
-    for record in existing_indices:
-        canonicalized_existing[record["kind"]] = [
-            x["name"] for x in record["properties"]
-        ]
-
-    canonicalized_new = {}
-    for record in new_indices["indexes"]:
-        canonicalized_new[record["kind"]] = [x["name"] for x in record["properties"]]
-
-    print("existing: ", canonicalized_existing)
-    print("new: ", canonicalized_new)
-
-    # don't worry about extra indices, but make sure we have the ones we need
-    for kind, columns in canonicalized_new.items():
-        if kind not in canonicalized_existing:
-            return False
-        if canonicalized_existing[kind] != canonicalized_new[kind]:
-            return False
-
-    return True
-
-
 def deploy_datastore_indexes(project_id):
     """Deploy Datastore composite indexes required for sparklespray queries.
 
@@ -295,51 +247,6 @@ def deploy_datastore_indexes(project_id):
                     "You can try manually running:\n"
                     f"  gcloud datastore indexes create <path-to-index.yaml> --project {project_id}"
                 )
-
-    # # Use as_file() to get a real filesystem path for gcloud command
-    # with resources.as_file(index_yaml_resource) as index_yaml_path:
-    #     print("Checking to see if we need to recreate indices")
-    #     # indexes create is kind of slow, so make sure we really need to do it
-    #     existing_indices_yaml = gcloud_capturing_stdout([
-    #                 "datastore",
-    #                 "indexes",
-    #                 "list",
-    #                 "--project",
-    #                 project_id,
-    #             ])
-    #     new_indices = yaml.safe_load(index_yaml_path.open("rt"))
-    #     existing_indices = yaml.safe_load(io.StringIO(existing_indices_yaml))
-    #
-    #     if not indices_are_good_enough(existing_indices, new_indices):
-    #         print("Deploying Datastore new indexes...")
-    #         try:
-    #             gcloud(
-    #                 [
-    #                     "datastore",
-    #                     "indexes",
-    #                     "create",
-    #                     str(index_yaml_path),
-    #                     "--project",
-    #                     project_id,
-    #                     "--quiet",  # Don't prompt for confirmation
-    #                 ]
-    #             )
-    #             print(
-    #                 "Datastore indexes deployment initiated. Note: indexes may take several "
-    #                 "minutes to build. You can check status at: "
-    #                 f"https://console.cloud.google.com/datastore/indexes?project={project_id}"
-    #             )
-    #         except subprocess.CalledProcessError as e:
-    #             output = e.output.decode("utf8") if e.output else ""
-    #             # If indexes already exist, that's fine
-    #             if "already exists" in output or "has already been created" in output:
-    #                 print("Datastore indexes already exist.")
-    #             else:
-    #                 raise Exception(
-    #                     f"Failed to deploy Datastore indexes: {output}\n"
-    #                     "You can try manually running:\n"
-    #                     f"  gcloud datastore indexes create <path-to-index.yaml> --project {project_id}"
-    #                 )
 
 
 def setup_project(
