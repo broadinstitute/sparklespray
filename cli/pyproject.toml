@@ -17,6 +17,7 @@ pyOpenSSL="^22.0.0"
 types-protobuf = "^4.21.0.2"
 google-cloud-batch = "^0.17.31"
 google-cloud-compute = "^1.30.0"
+google-cloud-pubsub = "^2.18.0"
 
 [tool.poetry.dev-dependencies]
 pytest = "^7.1.2"

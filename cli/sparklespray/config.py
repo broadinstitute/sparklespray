@@ -14,6 +14,7 @@ from .cluster_service import Cluster
 from .task_store import TaskStore
 from .job_store import JobStore
 from .job_queue import JobQueue
+from .cluster_store import ClusterStore
 from google.cloud import datastore
 from .util import url_join
 from google.oauth2 import service_account
@@ -411,9 +412,13 @@ def create_services_from_config(config: Config, requested: List[str]):
             services.get("datastore_client"),
             services.get("job_store"),
             services.get("task_store"),
+            services.get("cluster_store"),
         ),
         job_store=lambda services: JobStore(services.get("datastore_client")),
         task_store=lambda services: TaskStore(services.get("datastore_client")),
+        cluster_store=lambda services: ClusterStore(
+            services.get("datastore_client"), project_id
+        ),
         datastore_client=lambda services: datastore.Client(
             project_id, credentials=credentials
         ),

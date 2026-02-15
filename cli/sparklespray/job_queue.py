@@ -11,6 +11,7 @@ from .task_store import (
 )
 from .job_store import JobStore, Job, JOB_STATUS_SUBMITTED, JOB_STATUS_KILLED
 from .task_store import TaskStore, TaskHistory, Task
+from .cluster_store import ClusterStore
 
 from fnmatch import fnmatch
 from .datastore_batch import Batch
@@ -46,11 +47,16 @@ def get_credentials(account, cred_file="~/.config/gcloud/credentials"):
 
 class JobQueue:
     def __init__(
-        self, client: datastore.Client, job_storage: JobStore, task_storage: TaskStore
+        self,
+        client: datastore.Client,
+        job_storage: JobStore,
+        task_storage: TaskStore,
+        cluster_store: ClusterStore,
     ):
         self.job_storage = job_storage
         self.task_storage = task_storage
         self.client = client
+        self.cluster_store = cluster_store
 
     def get_tasks_for_cluster(self, cluster_name, status, max_fetch=None):
         return self.task_storage.get_tasks_for_cluster(cluster_name, status, max_fetch)
@@ -98,6 +104,7 @@ class JobQueue:
             if (
                 clear_nonzero_exit
                 and task.status == STATUS_COMPLETE
+                and task.exit_code is not None
                 and int(task.exit_code) != 0
             ):
                 return True
@@ -148,6 +155,9 @@ class JobQueue:
         tasks: List[Task] = []
         now = time.time()
 
+        # Create cluster config and pub/sub topics
+        self.cluster_store.create_cluster(cluster)
+
         batch = Batch(self.client)
         task_index = 1
         for arg, command_result_url, log_url in args:
@@ -193,6 +203,9 @@ class JobQueue:
         entity_job = self.client.get(job_key)
         assert entity_job is not None, f"Could not get from datastore: {job_key}"
 
+        # Get the cluster name before deleting the job
+        cluster_name = entity_job.get("cluster")
+
         task_ids = set(entity_job.get("tasks", []))
         # If we've got a mismatch between the data store and the data in the Job object, take the union
         # to get things back into sync
@@ -208,3 +221,7 @@ class JobQueue:
         #        log.info(f"in delete_job flushing batch: {batch}")
 
         batch.flush()
+
+        # Delete cluster config and pub/sub topics
+        if cluster_name:
+            self.cluster_store.delete_cluster(cluster_name)
