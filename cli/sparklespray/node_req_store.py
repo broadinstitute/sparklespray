@@ -1,12 +1,5 @@
-from google.cloud import datastore
-from .datastore_batch import ImmediateBatch, Batch, Batcher
-from typing import List
 from dataclasses import dataclass
-import dataclasses
 from typing import Optional
-from typing import Optional
-
-NODE_REQ_COLLECTION = "SparklesV6NodeReq"
 
 NODE_REQ_SUBMITTED = "submitted"
 NODE_REQ_STAGING = "staging"
@@ -34,33 +27,3 @@ class NodeReq:
     sequence: str
     job_id: str
     instance_name: Optional[str]
-
-
-def node_req_to_entity(client: datastore.Client, o: NodeReq) -> datastore.Entity:
-    assert o.operation_id is not None
-    entity_key = client.key(NODE_REQ_COLLECTION, o.operation_id)
-    entity = datastore.Entity(key=entity_key)
-    entity["cluster_id"] = o.cluster_id
-    entity["job_id"] = o.job_id
-    entity["status"] = o.status
-    entity["node_class"] = o.node_class
-    entity["sequence"] = o.sequence
-    entity["instance_name"] = o.instance_name
-    return entity
-
-
-def entity_to_node_req(entity: datastore.Entity) -> NodeReq:
-    # def get_str(prop: str ) -> Optional[str]:
-    #     val = entity.get(prop)
-    #     assert val is None or isinstance(val, str)
-    #     return val
-    assert entity.key is not None
-    return NodeReq(
-        operation_id=entity.key.name,
-        cluster_id=entity["cluster_id"],
-        status=entity["status"],
-        node_class=entity["node_class"],
-        sequence=entity["sequence"],
-        job_id=entity["job_id"],
-        instance_name=entity["instance_name"],
-    )
