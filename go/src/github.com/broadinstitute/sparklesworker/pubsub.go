@@ -32,6 +32,12 @@ type PubSubReadOutputRequest struct {
 	TaskID string `json:"task_id"`
 	Size   int32  `json:"size"`
 	Offset int64  `json:"offset"`
+	Owner  string `json:"owner"`
+}
+
+// GetProcessStatusRequest contains the owner for filtering
+type PubSubGetProcessStatusRequest struct {
+	Owner string `json:"owner"`
 }
 
 // ReadOutputResponse mirrors the protobuf ReadOutputReply
@@ -107,28 +113,41 @@ func (h *PubSubHandler) HandleMessage(ctx context.Context, msg *pubsub.Message) 
 	response.Type = request.Type
 	response.RequestID = request.RequestID
 
+	// shouldRespond indicates whether this worker should send a response
+	// (false when owner doesn't match - another worker should handle it)
+	var shouldRespond bool
+
 	switch request.Type {
 	case "read_output":
-		h.handleReadOutput(ctx, &request, &response)
+		shouldRespond = h.handleReadOutput(ctx, &request, &response)
 	case "get_process_status":
-		h.handleGetProcessStatus(ctx, &request, &response)
+		shouldRespond = h.handleGetProcessStatus(ctx, &request, &response)
 	default:
 		response.Error = fmt.Sprintf("unknown message type: %s", request.Type)
+		shouldRespond = true
 	}
 
-	// Send response
-	if err := h.sendResponse(ctx, &response); err != nil {
-		log.Printf("Failed to send pub/sub response: %v", err)
+	// Only send response if this worker should handle the request
+	if shouldRespond {
+		if err := h.sendResponse(ctx, &response); err != nil {
+			log.Printf("Failed to send pub/sub response: %v", err)
+		}
 	}
 
 	msg.Ack()
 }
 
-func (h *PubSubHandler) handleReadOutput(ctx context.Context, request *PubSubMessage, response *PubSubResponse) {
+func (h *PubSubHandler) handleReadOutput(ctx context.Context, request *PubSubMessage, response *PubSubResponse) bool {
 	var req PubSubReadOutputRequest
 	if err := json.Unmarshal(request.Payload, &req); err != nil {
 		response.Error = fmt.Sprintf("failed to unmarshal read_output payload: %v", err)
-		return
+		return true
+	}
+
+	// Check if this request is for this worker
+	if req.Owner != "" && req.Owner != h.owner {
+		log.Printf("Ignoring read_output request for owner %s (this worker is %s)", req.Owner, h.owner)
+		return false
 	}
 
 	// Use the monitor's ReadOutput logic (reusing the same code path)
@@ -142,27 +161,40 @@ func (h *PubSubHandler) handleReadOutput(ctx context.Context, request *PubSubMes
 
 	if !ok {
 		response.Error = fmt.Sprintf("unknown task: %s", req.TaskID)
-		return
+		return true
 	}
 
 	// Read the file
 	data, eof, err := readOutputFile(stdoutPath, req.Size, req.Offset)
 	if err != nil {
 		response.Error = fmt.Sprintf("failed to read output: %v", err)
-		return
+		return true
 	}
 
 	response.Payload = PubSubReadOutputResponse{
 		Data:      data,
 		EndOfFile: eof,
 	}
+	return true
 }
 
-func (h *PubSubHandler) handleGetProcessStatus(ctx context.Context, request *PubSubMessage, response *PubSubResponse) {
+func (h *PubSubHandler) handleGetProcessStatus(ctx context.Context, request *PubSubMessage, response *PubSubResponse) bool {
+	var req PubSubGetProcessStatusRequest
+	if err := json.Unmarshal(request.Payload, &req); err != nil {
+		// Payload might be empty for backwards compatibility, continue
+		log.Printf("Could not unmarshal get_process_status payload (may be empty): %v", err)
+	}
+
+	// Check if this request is for this worker
+	if req.Owner != "" && req.Owner != h.owner {
+		log.Printf("Ignoring get_process_status request for owner %s (this worker is %s)", req.Owner, h.owner)
+		return false
+	}
+
 	mem, err := getMemoryUsage()
 	if err != nil {
 		response.Error = fmt.Sprintf("failed to get memory usage: %v", err)
-		return
+		return true
 	}
 
 	resp := PubSubGetProcessStatusResponse{
@@ -194,6 +226,7 @@ func (h *PubSubHandler) handleGetProcessStatus(ctx context.Context, request *Pub
 	resp.MemPressureFullAvg10 = pressure.FullAvg10
 
 	response.Payload = resp
+	return true
 }
 
 func (h *PubSubHandler) sendResponse(ctx context.Context, response *PubSubResponse) error {
