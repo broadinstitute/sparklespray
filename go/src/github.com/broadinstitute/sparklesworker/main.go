@@ -324,6 +324,23 @@ func consume(c *cli.Context) error {
 		return err
 	}
 
+	// Fetch cluster config for pub/sub topics
+	clusterConfig, err := GetCluster(ctx, client, cluster)
+	if err != nil {
+		log.Printf("Warning: failed to get cluster config: %v (pub/sub will be disabled)", err)
+		clusterConfig = &Cluster{} // Use empty config, pub/sub will be skipped
+	} else {
+		log.Printf("Got cluster config: incoming_topic=%s, response_topic=%s", clusterConfig.IncomingTopic, clusterConfig.ResponseTopic)
+	}
+
+	// Start pub/sub subscriber if topics are configured
+	if clusterConfig.IncomingTopic != "" && clusterConfig.ResponseTopic != "" {
+		err = StartPubSubSubscriber(ctx, projectID, clusterConfig.IncomingTopic, clusterConfig.ResponseTopic, monitor, owner)
+		if err != nil {
+			log.Printf("Warning: failed to start pub/sub subscriber: %v", err)
+		}
+	}
+
 	monitorAddress := ""
 	if port != "" {
 		entityKey := datastore.NameKey("ClusterKeys", "sparklespray", nil)

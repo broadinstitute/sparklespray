@@ -24,6 +24,17 @@ func CreateDataStoreQueue(client *datastore.Client, cluster string, owner string
 }
 
 const TaskCollection = "SparklesV5Task"
+const ClusterCollection = "Cluster"
+
+func GetCluster(ctx context.Context, client *datastore.Client, clusterID string) (*Cluster, error) {
+	clusterKey := datastore.NameKey(ClusterCollection, clusterID, nil)
+	var cluster Cluster
+	err := client.Get(ctx, clusterKey, &cluster)
+	if err != nil {
+		return nil, err
+	}
+	return &cluster, nil
+}
 
 func getTasks(ctx context.Context, client *datastore.Client, cluster string, status string, maxFetch int) ([]*Task, error) {
 	q := datastore.NewQuery(TaskCollection).FilterField("cluster", "=", cluster).FilterField("status", "=", status).Limit(maxFetch)

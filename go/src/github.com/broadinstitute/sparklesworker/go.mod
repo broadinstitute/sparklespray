@@ -5,9 +5,9 @@ go 1.19
 require (
 	cloud.google.com/go/datastore v1.11.0
 	cloud.google.com/go/logging v1.7.0
+	cloud.google.com/go/pubsub v1.30.0
 	cloud.google.com/go/storage v1.28.1
 	github.com/bmatcuk/doublestar v1.1.1
-	github.com/golang/protobuf v1.5.3
 	github.com/stretchr/testify v1.8.1
 	github.com/urfave/cli v1.20.0
 	golang.org/x/net v0.17.0
@@ -25,6 +25,7 @@ require (
 	cloud.google.com/go/longrunning v0.4.1 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/golang/groupcache v0.0.0-20200121045136-8c9f03a8e57e // indirect
+	github.com/golang/protobuf v1.5.3 // indirect
 	github.com/google/go-cmp v0.5.9 // indirect
 	github.com/google/uuid v1.3.0 // indirect
 	github.com/googleapis/enterprise-certificate-proxy v0.2.3 // indirect

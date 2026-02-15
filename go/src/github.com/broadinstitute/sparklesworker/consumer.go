@@ -67,6 +67,11 @@ type ClusterKeys struct {
 	SharedSecret string `datastore:"shared_secret"`
 }
 
+type Cluster struct {
+	IncomingTopic string `datastore:"incoming_topic"`
+	ResponseTopic string `datastore:"response_topic"`
+}
+
 const INITIAL_CLAIM_RETRY_DELAY = 1000
 
 type Options struct {
