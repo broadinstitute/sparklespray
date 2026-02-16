@@ -46,6 +46,7 @@ func Main() error {
 				cli.StringFlag{Name: "cacheDir", Usage: "Directory for caching downloaded files (defaults to dir/cache)"},
 				cli.StringFlag{Name: "cluster", Usage: "Cluster ID to consume tasks from"},
 				cli.StringFlag{Name: "tasksDir", Usage: "Directory for task working directories (defaults to dir/tasks)"},
+				cli.StringFlag{Name: "database", Usage: "Firestore Database ID"},
 				cli.IntFlag{Name: "timeout", Value: 5, Usage: "Watchdog timeout in minutes; process is killed after 2x this value if main loop doesn't check in"},
 				cli.IntFlag{Name: "shutdownAfter", Value: 0, Usage: "Seconds to wait for new tasks before shutting down (0 = wait indefinitely)"},
 				cli.IntFlag{Name: "ftShutdownAfter", Value: 30, Usage: "Shutdown delay in seconds for the first task in a batch job"},
@@ -238,6 +239,7 @@ func consume(c *cli.Context) error {
 	firstTaskShutdownAfter := c.Int("ftShutdownAfter")
 	expectedVersion := c.String("expectedVersion")
 	watchdogTimeout := time.Duration(c.Int("timeout")) * time.Minute
+	database := c.String("database")
 
 	batchTaskIndex := os.Getenv("BATCH_TASK_INDEX")
 	if batchTaskIndex == "0" {
@@ -314,12 +316,12 @@ func consume(c *cli.Context) error {
 	}
 
 	sleepUntilNotify := func(sleepTime time.Duration) {
-		log.Printf("Going to sleep (max: %d milliseconds)", sleepTime/time.Millisecond)
+		log.Printf("Nothing to do. Sleeping for %d ms...", sleepTime/time.Millisecond)
 		time.Sleep(sleepTime)
 	}
 
 	log.Printf("Creating data store client")
-	client, err := datastore.NewClient(ctx, projectID)
+	client, err := datastore.NewClientWithDatabase(ctx, projectID, database)
 	if err != nil {
 		log.Printf("Creating datastore client failed: %v", err)
 		return err
@@ -334,11 +336,12 @@ func consume(c *cli.Context) error {
 	log.Printf("Got cluster config: incoming_topic=%s, response_topic=%s", clusterConfig.IncomingTopic, clusterConfig.ResponseTopic)
 
 	// Start pub/sub subscriber
-	workerNotifier, err := StartPubSubSubscriber(ctx, projectID, clusterConfig.IncomingTopic, clusterConfig.ResponseTopic, monitor, workerID)
+	workerNotifier, cleanupSubscription, err := StartPubSubSubscriber(ctx, projectID, clusterConfig.IncomingTopic, clusterConfig.ResponseTopic, monitor, workerID)
 	if err != nil {
 		log.Printf("Failed to start pub/sub subscriber: %v", err)
 		return err
 	}
+	defer cleanupSubscription()
 
 	queue, err := CreateDataStoreQueue(client, cluster, workerID, options.InitialClaimRetry, options.ClaimTimeout)
 	if err != nil {

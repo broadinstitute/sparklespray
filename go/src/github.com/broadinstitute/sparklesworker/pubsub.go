@@ -251,15 +251,16 @@ func (h *PubSubHandler) sendResponse(ctx context.Context, response *PubSubRespon
 }
 
 // StartPubSubSubscriber starts listening for messages on the incoming topic
-// Returns a WorkerNotifier that can be used to publish status events
-func StartPubSubSubscriber(ctx context.Context, projectID string, incomingTopic string, responseTopic string, monitor *Monitor, workerID string) (*WorkerNotifier, error) {
+// Returns a WorkerNotifier that can be used to publish status events,
+// and a cleanup function that should be deferred to delete the subscription on exit.
+func StartPubSubSubscriber(ctx context.Context, projectID string, incomingTopic string, responseTopic string, monitor *Monitor, workerID string) (*WorkerNotifier, func(), error) {
 	if incomingTopic == "" || responseTopic == "" {
-		return nil, fmt.Errorf("pub/sub topics not configured: incomingTopic=%q, responseTopic=%q", incomingTopic, responseTopic)
+		return nil, nil, fmt.Errorf("pub/sub topics not configured: incomingTopic=%q, responseTopic=%q", incomingTopic, responseTopic)
 	}
 
 	client, err := pubsub.NewClient(ctx, projectID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create pub/sub client: %w", err)
+		return nil, nil, fmt.Errorf("failed to create pub/sub client: %w", err)
 	}
 
 	// Get or create subscription for this worker
@@ -269,20 +270,35 @@ func StartPubSubSubscriber(ctx context.Context, projectID string, incomingTopic 
 
 	exists, err := sub.Exists(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to check subscription existence: %w", err)
+		return nil, nil, fmt.Errorf("failed to check subscription existence: %w", err)
 	}
 
 	if !exists {
 		topic := client.Topic(incomingTopic)
 		sub, err = client.CreateSubscription(ctx, subName, pubsub.SubscriptionConfig{
 			Topic: topic,
-			// Auto-delete subscription after 1 hour of inactivity
-			ExpirationPolicy: time.Hour,
+			// Auto-delete subscription after 1 day of inactivity as a fallback
+			ExpirationPolicy: 24 * time.Hour,
 		})
 		if err != nil {
-			return nil, fmt.Errorf("failed to create subscription: %w", err)
+			return nil, nil, fmt.Errorf("failed to create subscription: %w", err)
 		}
 		log.Printf("Created pub/sub subscription: %s", subName)
+	}
+
+	// Create cleanup function to delete the subscription on exit
+	cleanup := func() {
+		// Use a background context since the original ctx may be cancelled
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		if err := sub.Delete(cleanupCtx); err != nil {
+			log.Printf("Failed to delete pub/sub subscription %s: %v", subName, err)
+		} else {
+			log.Printf("Deleted pub/sub subscription: %s", subName)
+		}
+
+		client.Close()
 	}
 
 	respTopic := client.Topic(responseTopic)
@@ -301,7 +317,7 @@ func StartPubSubSubscriber(ctx context.Context, projectID string, incomingTopic 
 
 	// Create and return notifier for publishing status events
 	notifier := NewWorkerNotifier(ctx, respTopic, workerID)
-	return notifier, nil
+	return notifier, cleanup, nil
 }
 
 // readOutputFile reads from a file at the given offset
