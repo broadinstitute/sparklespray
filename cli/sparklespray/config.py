@@ -71,9 +71,10 @@ class PrepConfig:
     max_preemptable_attempts_scale: Optional[int] = None
     mounts: Optional[List[PersistentDiskMount]] = None
     debug_log_prefix: Optional[str] = None
-    monitor_port: Optional[int] = None
     work_root_dir: Optional[str] = None
     cache_db_path: Optional[str] = None
+    database: Optional[str] = None
+    pubsub_topics: Optional[str] = None
 
 
 @dataclass
@@ -95,9 +96,10 @@ class Config:
     mounts: List[DiskMountT]
     debug_log_prefix: str
     work_root_dir: str
-    monitor_port: int
     cache_db_path: str
     credentials: Credentials = dataclasses.field(repr=False)
+    database: str
+    pubsub_topics: str
 
     @property
     def service_account_email(self):
@@ -210,7 +212,6 @@ def load_config(
 
     config = PrepConfig()
     config.sparkles_config_path = config_file
-    config.monitor_port = consume("monitor_port", 6032, int)
     config.work_root_dir = consume("work_root_dir", "/mnt/disks/mount_1")
     for unused_property in ["default_resource_cpu", "default_resource_memory"]:
         if unused_property in config_dict:
@@ -245,6 +246,13 @@ def load_config(
             f"Missing the following required parameters in {config_file}: {', '.join(missing_values)}"
         )
 
+    config.database = consume("database", "sparkles-v6")
+    pubsub_topics = consume("pubsub_topics", "shared")
+    if pubsub_topics not in ["shared", "per-cluster"]:
+        raise BadConfig(
+            f"pubsub_topics must be 'shared' or 'per-cluster', got: {pubsub_topics}"
+        )
+    config.pubsub_topics = pubsub_topics
     config.sparklesworker_image = consume("sparklesworker_image")
     config.sparklesworker_exe_path = consume(
         "sparklesworker_exe_path",
@@ -417,10 +425,10 @@ def create_services_from_config(config: Config, requested: List[str]):
         job_store=lambda services: JobStore(services.get("datastore_client")),
         task_store=lambda services: TaskStore(services.get("datastore_client")),
         cluster_store=lambda services: ClusterStore(
-            services.get("datastore_client"), project_id
+            services.get("datastore_client"), project_id, config.pubsub_topics
         ),
         datastore_client=lambda services: datastore.Client(
-            project_id, credentials=credentials
+            project_id, credentials=credentials, database=config.database
         ),
         io=lambda services: IO(project_id, config.cas_url_prefix, credentials),
         batch_service_client=lambda services: BatchServiceClient(

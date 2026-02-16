@@ -58,10 +58,13 @@ def _delete_topic_if_exists(
 
 
 class ClusterStore:
-    def __init__(self, client: datastore.Client, project_id: str) -> None:
+    def __init__(
+        self, client: datastore.Client, project_id: str, pubsub_topics: str = "shared"
+    ) -> None:
         self.client = client
         self.project_id = project_id
         self.publisher = pubsub_v1.PublisherClient()
+        self.pubsub_topics = pubsub_topics
 
     def _make_topic_path(self, topic_name: str) -> str:
         return self.publisher.topic_path(self.project_id, topic_name)
@@ -82,10 +85,20 @@ class ClusterStore:
 
         Creates the incoming and response pub/sub topics, then stores
         the cluster config in Datastore.
+
+        If pubsub_topics is "shared", uses fixed topic names "sparkles-inbound"
+        and "sparkles-outbound" that are shared across all clusters.
+        If pubsub_topics is "per-cluster", generates unique topic names based
+        on cluster_id.
         """
-        # Generate topic names based on cluster_id
-        incoming_topic_name = f"sparkles-{cluster_id}-incoming"
-        response_topic_name = f"sparkles-{cluster_id}-response"
+        # Generate topic names based on mode
+        if self.pubsub_topics == "shared":
+            incoming_topic_name = "sparkles-inbound"
+            response_topic_name = "sparkles-outbound"
+        else:
+            # per-cluster mode
+            incoming_topic_name = f"sparkles-{cluster_id}-incoming"
+            response_topic_name = f"sparkles-{cluster_id}-response"
 
         incoming_topic_path = self._make_topic_path(incoming_topic_name)
         response_topic_path = self._make_topic_path(response_topic_name)
@@ -110,7 +123,8 @@ class ClusterStore:
     def delete_cluster(self, cluster_id: str) -> None:
         """Delete a cluster and its pub/sub topics.
 
-        Deletes the pub/sub topics and removes the cluster config from Datastore.
+        Deletes the pub/sub topics (unless using shared topics) and removes
+        the cluster config from Datastore.
         """
         # Get the cluster config to find the topic names
         config = self.get(cluster_id)
@@ -118,14 +132,16 @@ class ClusterStore:
             log.debug(f"Cluster {cluster_id} not found, nothing to delete")
             return
 
-        # Delete the pub/sub topics
-        if config.incoming_topic:
-            incoming_topic_path = self._make_topic_path(config.incoming_topic)
-            _delete_topic_if_exists(self.publisher, incoming_topic_path)
+        # Only delete the pub/sub topics if using per-cluster mode
+        # Shared topics are kept permanently
+        if self.pubsub_topics != "shared":
+            if config.incoming_topic:
+                incoming_topic_path = self._make_topic_path(config.incoming_topic)
+                _delete_topic_if_exists(self.publisher, incoming_topic_path)
 
-        if config.response_topic:
-            response_topic_path = self._make_topic_path(config.response_topic)
-            _delete_topic_if_exists(self.publisher, response_topic_path)
+            if config.response_topic:
+                response_topic_path = self._make_topic_path(config.response_topic)
+                _delete_topic_if_exists(self.publisher, response_topic_path)
 
         # Delete the cluster config from Datastore
         entity_key = self.client.key(CLUSTER_COLLECTION, cluster_id)

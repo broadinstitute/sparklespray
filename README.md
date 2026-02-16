@@ -523,6 +523,23 @@ Some configuration values can be inherited from your gcloud configuration (`~/.c
 | `sparklesworker_exe_path` | Auto-detected                    | Path to sparklesworker executable                |
 | `cache_db_path`           | ".kubeque-cached-file-hashes"    | Path to file hash cache                          |
 | `debug_log_prefix`        | `{default_url_prefix}/node-logs` | Location for debug logs                          |
+| `pubsub_topics`           | "shared"                         | Pub/Sub topic management mode (see below)        |
+
+### Pub/Sub Topic Configuration
+
+Sparklespray uses Google Cloud Pub/Sub for communication between the CLI and workers. The `pubsub_topics` parameter controls how these topics are created and managed:
+
+| Value         | Description                                                                                                                                                                                                                                                |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `shared`      | (Default) Uses fixed topic names `sparkles-inbound` and `sparkles-outbound` shared across all jobs. Topics are created once and never deleted. This is faster for job startup since topics don't need to be created for each job.                          |
+| `per-cluster` | Creates unique topics per cluster (e.g., `sparkles-{cluster_id}-incoming`). Topics are deleted when the job is cleaned up. Use this for complete isolation between jobs or when running multiple independent Sparklespray deployments in the same project. |
+
+Example:
+
+```ini
+[config]
+pubsub_topics=shared
+```
 
 ### Storage Configuration
 
