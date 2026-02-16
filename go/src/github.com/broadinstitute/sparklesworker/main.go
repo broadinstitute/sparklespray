@@ -38,31 +38,35 @@ func Main() error {
 
 	app.Commands = []cli.Command{
 		cli.Command{
-			Name: "consume",
+			Name:  "consume",
+			Usage: "Consume and execute tasks from the queue",
 			Flags: []cli.Flag{
-				cli.StringFlag{Name: "projectId"},
-				cli.StringFlag{Name: "cacheDir"},
-				cli.StringFlag{Name: "cluster"},
-				cli.StringFlag{Name: "tasksDir"},
-				cli.StringFlag{Name: "tasksFile"},
-				cli.IntFlag{Name: "timeout", Value: 5}, // watchdog timeout: 5 minutes means the process will be killed after 10 minutes if the main loop doesn't check in
-				cli.IntFlag{Name: "shutdownAfter", Value: 0},
-				cli.IntFlag{Name: "ftShutdownAfter", Value: 30},
-				cli.BoolFlag{Name: "localhost", Usage: "If set, does not try to look up instance name and IP from metadata service, but assume it's localhost"},
-				cli.StringFlag{Name: "expectedVersion"},
+				cli.StringFlag{Name: "projectId", Usage: "Google Cloud project ID"},
+				cli.StringFlag{Name: "dir", Value: "./sparklesworker", Usage: "Base directory for worker data (used as default for cacheDir and tasksDir)"},
+				cli.StringFlag{Name: "cacheDir", Usage: "Directory for caching downloaded files (defaults to dir/cache)"},
+				cli.StringFlag{Name: "cluster", Usage: "Cluster ID to consume tasks from"},
+				cli.StringFlag{Name: "tasksDir", Usage: "Directory for task working directories (defaults to dir/tasks)"},
+				cli.IntFlag{Name: "timeout", Value: 5, Usage: "Watchdog timeout in minutes; process is killed after 2x this value if main loop doesn't check in"},
+				cli.IntFlag{Name: "shutdownAfter", Value: 0, Usage: "Seconds to wait for new tasks before shutting down (0 = wait indefinitely)"},
+				cli.IntFlag{Name: "ftShutdownAfter", Value: 30, Usage: "Shutdown delay in seconds for the first task in a batch job"},
+				cli.BoolFlag{Name: "localhost", Usage: "If set, does not try to look up instance name and IP from metadata service, but assumes localhost"},
+				cli.StringFlag{Name: "expectedVersion", Usage: "Expected worker version; exits with error if version does not match"},
 			},
 			Action: consume},
-		cli.Command{Name: "copyexe",
+		cli.Command{
+			Name:  "copyexe",
+			Usage: "Copy the worker executable to a destination path",
 			Flags: []cli.Flag{
-				cli.StringFlag{Name: "dst"},
+				cli.StringFlag{Name: "dst", Usage: "Destination path for the copied executable"},
 			},
 			Action: copyexe},
 		cli.Command{
-			Name: "fetch",
+			Name:  "fetch",
+			Usage: "Download a file from Google Cloud Storage with MD5 verification",
 			Flags: []cli.Flag{
-				cli.StringFlag{Name: "expectMD5"},
-				cli.StringFlag{Name: "src"},
-				cli.StringFlag{Name: "dst"},
+				cli.StringFlag{Name: "expectMD5", Usage: "Expected MD5 hash (hex-encoded) of the downloaded file"},
+				cli.StringFlag{Name: "src", Usage: "Source GCS path (gs://bucket/object)"},
+				cli.StringFlag{Name: "dst", Usage: "Destination local file path"},
 			},
 			Action: fetch}}
 
@@ -220,10 +224,16 @@ func consume(c *cli.Context) error {
 	}
 
 	projectID := c.String("projectId")
+	dir := c.String("dir")
 	cacheDir := c.String("cacheDir")
+	if cacheDir == "" {
+		cacheDir = path.Join(dir, "cache")
+	}
 	cluster := c.String("cluster")
 	tasksDir := c.String("tasksDir")
-	tasksFile := c.String("tasksFile")
+	if tasksDir == "" {
+		tasksDir = path.Join(dir, "tasks")
+	}
 	shutdownAfter := c.Int("shutdownAfter")
 	firstTaskShutdownAfter := c.Int("ftShutdownAfter")
 	expectedVersion := c.String("expectedVersion")
@@ -325,12 +335,7 @@ func consume(c *cli.Context) error {
 		return err
 	}
 
-	var queue Queue
-	if tasksFile != "" {
-		queue, err = CreatePreloadedQueue(tasksFile)
-	} else {
-		queue, err = CreateDataStoreQueue(client, cluster, workerID, options.InitialClaimRetry, options.ClaimTimeout)
-	}
+	queue, err := CreateDataStoreQueue(client, cluster, workerID, options.InitialClaimRetry, options.ClaimTimeout)
 	if err != nil {
 		log.Printf("failed to initialize queue: %v\n", err)
 		return err
