@@ -196,7 +196,7 @@ type ExecResult struct {
 	EndTime   time.Time
 }
 
-func execCommand(command string, workdir string, stdout *os.File, dockerImage string) (*ExecResult, error) {
+func execCommand(command string, rootdir string, workdir string, stdout *os.File, dockerImage string) (*ExecResult, error) {
 	var exePath string
 	var args []string
 
@@ -204,7 +204,7 @@ func execCommand(command string, workdir string, stdout *os.File, dockerImage st
 		exePath = "docker"
 		args = []string{
 			"docker", "run", "--rm",
-			"-v", workdir + ":" + workdir,
+			"-v", rootdir + ":" + rootdir,
 			"-w", workdir,
 			dockerImage,
 			"/bin/sh", "-c", command,
@@ -512,7 +512,7 @@ func determineCwd(workDir string, taskSpec *TaskSpec) string {
 	return cwdDir
 }
 
-func executeTask(ioc IOClient, taskId string, taskSpec *TaskSpec, cacheDir string, tasksDir string, monitor *Monitor) (string, error) {
+func ExecuteTask(ioc IOClient, taskId string, taskSpec *TaskSpec, rootDir string, cacheDir string, tasksDir string, monitor *Monitor) (string, error) {
 	workDir, cacheDir, err := prepareTaskDirectories(tasksDir, cacheDir)
 	if err != nil {
 		return "", err
@@ -526,7 +526,7 @@ func executeTask(ioc IOClient, taskId string, taskSpec *TaskSpec, cacheDir strin
 	cwdDir := determineCwd(workDir, taskSpec)
 
 	log.Printf("Executing (working dir: %s, output written to: %s): %s", cwdDir, stdoutPath, taskSpec.Command)
-	execResult, err := execCommand(taskSpec.Command, cwdDir, stdout, taskSpec.DockerImage)
+	execResult, err := execCommand(taskSpec.Command, rootDir, cwdDir, stdout, taskSpec.DockerImage)
 	if err != nil {
 		return "", err
 	}
@@ -649,13 +649,4 @@ func loadTaskSpec(ioc IOClient, taskURL string) (*TaskSpec, error) {
 	}
 
 	return &taskSpec, nil
-}
-
-func ExecuteTaskFromUrl(ioc IOClient, taskId string, taskURL string, cacheDir string, tasksDir string, monitor *Monitor) (string, error) {
-	taskSpec, err := loadTaskSpec(ioc, taskURL)
-	if err != nil {
-		return "", err
-	}
-
-	return executeTask(ioc, taskId, taskSpec, cacheDir, tasksDir, monitor)
 }

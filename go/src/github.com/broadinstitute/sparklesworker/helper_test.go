@@ -143,7 +143,7 @@ func TestExecute(t *testing.T) {
 		Uploads:          &UploadSpec{},
 	}
 
-	retcode, err := executeTask(ioc, "test-task", spec, cacheDir, tasksDir, nil)
+	retcode, err := ExecuteTask(ioc, "test-task", spec, cacheDir, tasksDir, nil)
 	assert.Nil(t, err)
 	assert.Equal(t, "0", retcode)
 }

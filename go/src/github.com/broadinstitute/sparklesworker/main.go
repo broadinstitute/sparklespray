@@ -305,7 +305,12 @@ func consume(c *cli.Context) error {
 		WorkerID:           workerID}
 
 	executor := func(taskId string, taskParam string) (string, error) {
-		return ExecuteTaskFromUrl(ioc, taskId, taskParam, cacheDir, tasksDir, monitor)
+		taskSpec, err := loadTaskSpec(ioc, taskParam)
+		if err != nil {
+			return "", err
+		}
+
+		return ExecuteTask(ioc, taskId, taskSpec, dir, cacheDir, tasksDir, monitor)
 	}
 
 	sleepUntilNotify := func(sleepTime time.Duration) {
