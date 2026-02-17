@@ -15,7 +15,7 @@ def make_task(
         task_index=int(task_id.split(".")[-1]) if "." in task_id else 1,
         job_id="test-job",
         status=status,
-        owner=None,
+        owned_by_worker_id=None,
         monitor_address=None,
         args="{}",
         history=[],

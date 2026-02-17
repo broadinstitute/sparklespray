@@ -69,9 +69,16 @@ def job_storage(datastore_client):
 
 
 @pytest.fixture
-def job_queue(datastore_client, task_storage, job_storage):
+def cluster_store(datastore_client):
+    from sparklespray.cluster_store import ClusterStore
+
+    return ClusterStore(datastore_client, "test-project")
+
+
+@pytest.fixture
+def job_queue(datastore_client, task_storage, job_storage, cluster_store):
     # Create a real JobQueue instance
-    job_queue = JobQueue(datastore_client, job_storage, task_storage)
+    job_queue = JobQueue(datastore_client, job_storage, task_storage, cluster_store)
 
     # Create a mock job
     job = MagicMock()
@@ -204,13 +211,17 @@ def cluster(datastore_client, mock_node_reqs, task_storage, job_storage, job):
 
 @patch("sparklespray.commands.watch._wait_until_tasks_exist")
 @patch("sparklespray.commands.watch.run_tasks")
-def test_watch_basic(mock_run_tasks, mock_wait, job_queue, mock_io, cluster):
+def test_watch_basic(
+    mock_run_tasks, mock_wait, job_queue, mock_io, cluster, cluster_store
+):
     """Test basic watch functionality"""
     # Call the watch function
     result = watch(
         mock_io,
         job_queue,
         cluster,
+        cluster_store,
+        "test-project",
         target_nodes=2,
         max_preemptable_attempts_scale=1,
         initial_poll_delay=0.1,
@@ -239,13 +250,17 @@ def test_watch_basic(mock_run_tasks, mock_wait, job_queue, mock_io, cluster):
 
 @patch("sparklespray.commands.watch._wait_until_tasks_exist")
 @patch("sparklespray.commands.watch.run_tasks")
-def test_watch_no_nodes(mock_run_tasks, mock_wait, job_queue, mock_io, cluster):
+def test_watch_no_nodes(
+    mock_run_tasks, mock_wait, job_queue, mock_io, cluster, cluster_store
+):
     """Test watch with target_nodes=0"""
     # Call the watch function with target_nodes=0
     result = watch(
         mock_io,
         job_queue,
         cluster,
+        cluster_store,
+        "test-project",
         target_nodes=0,
         max_preemptable_attempts_scale=1,
         initial_poll_delay=0.1,
@@ -275,7 +290,7 @@ def test_watch_no_nodes(mock_run_tasks, mock_wait, job_queue, mock_io, cluster):
 @patch("sparklespray.commands.watch._wait_until_tasks_exist")
 @patch("sparklespray.commands.watch.run_tasks", side_effect=KeyboardInterrupt)
 def test_watch_keyboard_interrupt(
-    mock_run_tasks, mock_wait, job_queue, mock_io, cluster
+    mock_run_tasks, mock_wait, job_queue, mock_io, cluster, cluster_store
 ):
     """Test watch with KeyboardInterrupt"""
     # Call the watch function, which should catch the KeyboardInterrupt
@@ -283,6 +298,8 @@ def test_watch_keyboard_interrupt(
         mock_io,
         job_queue,
         cluster,
+        cluster_store,
+        "test-project",
         target_nodes=2,
         max_preemptable_attempts_scale=1,
         initial_poll_delay=0.1,

@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch, ANY
 
 from sparklespray.commands.watch import watch_cmd
 from sparklespray.job_queue import JobQueue
@@ -25,13 +25,15 @@ def datastore_client():
 def job_queue(datastore_client):
     from sparklespray.job_store import JobStore
     from sparklespray.task_store import TaskStore
+    from sparklespray.cluster_store import ClusterStore
 
     # Create actual JobStore and TaskStore instances
     job_storage = JobStore(datastore_client)
     task_storage = TaskStore(datastore_client)
+    cluster_store = ClusterStore(datastore_client, "test-project")
 
     # Create a real JobQueue instance
-    job_queue = JobQueue(datastore_client, job_storage, task_storage)
+    job_queue = JobQueue(datastore_client, job_storage, task_storage, cluster_store)
 
     # Mock get_job_ids to return a test job
     job_queue.get_jobids = MagicMock(return_value=["test-job-id"])
@@ -112,6 +114,8 @@ def test_watch_cmd_basic(
         mock_io,
         job_queue,
         mock_cluster,
+        cluster_store=ANY,
+        project_id="test-project",
         target_nodes=None,
         loglive=True,
         max_preemptable_attempts_scale=2,
@@ -186,6 +190,8 @@ def test_watch_cmd_with_nodes(
         mock_io,
         job_queue,
         mock_cluster,
+        cluster_store=ANY,
+        project_id="test-project",
         target_nodes=5,
         loglive=True,
         max_preemptable_attempts_scale=2,
