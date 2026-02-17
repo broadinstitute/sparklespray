@@ -13,6 +13,7 @@ from .runner_types import (
     ClusterStateQuery,
 )
 import heapq
+from threading import Event
 
 
 def run_tasks(
@@ -20,7 +21,8 @@ def run_tasks(
     cluster_id: str,
     tasks: List[PeriodicTask],
     cluster: Cluster,
-    changed_task_queue: Optional[Queue] = None,
+    changed_task_queue: Queue,
+    task_event_arrived: Event,
 ):
     """
     Runs a set of periodic monitoring tasks for a specific job and cluster.
@@ -62,7 +64,18 @@ def run_tasks(
 
             # if it's not yet time for this task, sleep until then
             if scheduled_task.timestamp > now:
-                time.sleep(scheduled_task.timestamp - now)
+                time_to_sleep = scheduled_task.timestamp - now
+                was_set = task_event_arrived.wait(time_to_sleep)
+                if was_set:
+                    # clear this before we call notify on each task to avoid a race
+                    task_event_arrived.clear()
+
+                    # wake up the tasks in case the want to know
+                    now = time.time()
+                    for task in tasks:
+                        task.on_pubsub_notify(
+                            ClusterStateQuery(now, get_tasks, get_nodes)
+                        )
 
             # now, run the task and find out if we need to run it again later
             # print("calling", scheduled_task.task)

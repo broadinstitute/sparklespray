@@ -34,11 +34,17 @@ class StablizedValue:
         return default
 
 
+from .runner import ClusterStateQuery
+
+
 class CompletionMonitor(PeriodicTask):
     def __init__(self):
         self.cur_delay = self.initial_delay = 0.5
         self.max_delay = 20
         self.last_active_node_time = None
+
+    def on_pubsub_notify(self, state: ClusterStateQuery):
+        self.poll(state)
 
     def next_poll_delay(self):
         self.cur_delay = min(self.max_delay, self.cur_delay * 2)
@@ -58,7 +64,9 @@ class CompletionMonitor(PeriodicTask):
         if _count_incomplete_tasks(tasks) == 0:
             return StopPolling()
 
-        if now - self.last_active_node_time > 120: # if 2 minutes with no nodes running has gone by we have a problem
+        if (
+            now - self.last_active_node_time > 120
+        ):  # if 2 minutes with no nodes running has gone by we have a problem
             raise NoWorkersRunning()
 
         return self.next_poll_delay()

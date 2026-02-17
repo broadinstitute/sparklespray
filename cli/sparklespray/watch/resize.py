@@ -33,6 +33,9 @@ class ResizeCluster(PeriodicTask):
         self.preemptable_created = 0
         self.non_preemptable_created = 0
 
+    def on_pubsub_notify(self, state: ClusterStateQuery):
+        self.poll(state)
+
     def poll(self, state: ClusterStateQuery):
         modified = False
 

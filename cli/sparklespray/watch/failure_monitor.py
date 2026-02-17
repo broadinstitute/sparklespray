@@ -4,6 +4,8 @@ from ..log import log
 from .runner_types import PeriodicTask
 from dataclasses import dataclass
 
+from .runner import ClusterStateQuery
+
 
 @dataclass
 class NodesCompleted:
@@ -19,6 +21,9 @@ class StartupFailureMonitor(PeriodicTask):
         self.previously_completed = set(completed_node_names)
         self.prev_completed_node_names_count = None
         self.event_log = []
+
+    def on_pubsub_notify(self, state: ClusterStateQuery):
+        self.poll(state)
 
     def update(self, timestamp, tasks, completed_node_names):
         # if len(self.event_log) == 0:

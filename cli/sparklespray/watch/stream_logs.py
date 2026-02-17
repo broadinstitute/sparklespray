@@ -174,6 +174,9 @@ class StreamLogs:
         print_log_content(datetime.datetime.now(), rest_of_stdout)
         self.complete_tasks_printed += 1
 
+    def on_pubsub_notify(self, state: ClusterStateQuery):
+        self.poll(state)
+
     def poll(self, state: ClusterStateQuery):
         if self.stream_logs:
             if self.log_monitor is None:

@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from time import time
 from ..task_store import STATUS_CLAIMED
 
+from .runner import ClusterStateQuery
+
 
 @dataclass
 class StablizedSetElement:
@@ -70,6 +72,9 @@ class ResetOrphans(PeriodicTask):
         self.jq = jq
         self.seconds_between_modifications = seconds_between_modifications
         self.likely_orphans = StablizedSet()
+
+    def on_pubsub_notify(self, state: ClusterStateQuery):
+        self.poll(state)
 
     def poll(self, state: ClusterStateQuery):
         tasks = state.get_tasks()

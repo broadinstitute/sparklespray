@@ -41,6 +41,9 @@ class PeriodicTask:
         "Function to be implemented with behavior for this task. Task should return None, if this task should stop, or NextPoll(delay) if it should be called again after `delay` seconds."
         return None
 
+    def on_pubsub_notify(self, state: ClusterStateQuery):
+        "Called when we get a pub/sub response which indicates something that we care about may have changed."
+
     def finish(self, state: ClusterStateQuery):
         "Function called after job is done and no more calls to poll() will be made"
 

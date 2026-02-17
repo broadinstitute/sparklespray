@@ -18,6 +18,9 @@ class PrintStatus(PeriodicTask):
         self.max_poll_delay = max_poll_delay
         self.prev_summary = None
 
+    def on_pubsub_notify(self, state: ClusterStateQuery):
+        self.poll(state)
+
     def poll(self, state: ClusterStateQuery):
         summary = format_summary(state.get_tasks(), state.get_nodes())
         if self.prev_summary != summary:

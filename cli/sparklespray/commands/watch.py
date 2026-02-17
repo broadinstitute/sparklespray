@@ -170,6 +170,9 @@ def watch(
     # Used for both log streaming and receiving task update notifications
     pubsub_client: Optional[PubSubMonitorClient] = None
     changed_task_queue: Queue = Queue()
+    from threading import Event
+
+    task_event_arrived: Event = Event()
 
     cluster_config = cluster_store.get(job.cluster)
     if cluster_config is not None:
@@ -185,6 +188,7 @@ def watch(
             task_id = data.get("task_id")
             if task_id:
                 changed_task_queue.put(task_id)
+            task_event_arrived.set()
 
         pubsub_client.add_listener("task_started", on_task_event)
         pubsub_client.add_listener("task_completed", on_task_event)
@@ -222,7 +226,9 @@ def watch(
         tasks.append(ResetOrphans(jq, cluster))
 
     try:
-        run_tasks(job_id, job.cluster, tasks, cluster, changed_task_queue)
+        run_tasks(
+            job_id, job.cluster, tasks, cluster, changed_task_queue, task_event_arrived
+        )
 
         tasks = cluster.task_store.get_tasks(job_id=job_id)
         for task in tasks:
