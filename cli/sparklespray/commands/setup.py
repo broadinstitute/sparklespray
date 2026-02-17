@@ -11,7 +11,13 @@ def setup_cmd(args, config: Config):
 
     image_names = [config.sparklesworker_image, config.default_image]
 
-    setup_project(config.project, config.service_account_key, bucket_name, image_names)
+    setup_project(
+        config.project,
+        config.service_account_key,
+        bucket_name,
+        image_names,
+        config.database,
+    )
 
 
 def add_setup_cmd(subparser):

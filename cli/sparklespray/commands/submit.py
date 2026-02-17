@@ -145,7 +145,7 @@ def expand_tasks(spec, io, default_url_prefix, default_job_url_prefix):
     return tasks
 
 
-def _make_cluster_name(
+def _make_cluster_id(
     job_name: str, image: str, machine_spec: MachineSpec, unique_name: bool
 ):
 
@@ -174,7 +174,6 @@ def submit(
     cluster: Cluster,
     metadata: Dict[str, str] = {},
     clean_if_exists: bool = False,
-    cluster_name: Optional[str] = None,
 ):
     """
     Submit a job to the Sparklespray execution system.
@@ -192,7 +191,7 @@ def submit(
         spec: Job specification dictionary containing tasks and common configuration
         config: SubmitConfig with machine and environment configuration
         datastore_client: Google Cloud Datastore client
-        cluster: Cluster instance for managing compute resources
+        cluster: Cluster instance for managing compute resources (must have cluster_id set)
         metadata: Optional dictionary of metadata to attach to the job
         clean_if_exists: If True, remove any existing job with the same ID before submission
 
@@ -219,17 +218,7 @@ def submit(
         command_result_urls.append(task["command_result_url"])
         log_urls.append(task["stdout_url"])
 
-    machine_specs = MachineSpec(
-        service_account_email=config.service_account_email,
-        boot_volume=boot_volume,
-        mounts=config.mounts,
-        work_root_dir=config.work_root_dir,
-        machine_type=config.machine_type,
-    )
-
-    image = config.image
-    if cluster_name is None:
-        cluster_name = _make_cluster_name(job_id, image, machine_specs, False)
+    cluster_id = cluster.cluster_id
 
     existing_job = jq.get_job_optional(job_id)
     if existing_job is not None:
@@ -267,9 +256,9 @@ def submit(
         config.sparklesworker_image,
         config.work_root_dir,
         config.image,
-        cluster_name,
+        cluster_id,
         config.project,
-        config.monitor_port,
+        config.database_id,
         config.service_account_email,
         config.machine_type,
         config.region,
@@ -288,7 +277,7 @@ def submit(
         list(zip(task_spec_urls, command_result_urls, log_urls)),
         pipeline_spec,
         metadata,
-        cluster_name,
+        cluster_id,
         config.target_node_count,
         max_preemptable_attempts,
     )
@@ -391,13 +380,6 @@ def _setup_parser_for_sub_command(parser):
         "-p",
         help="Parameterize the command by the rows in the specified CSV file.  If the CSV file has 5 rows, then 5 commands will be submitted.",
     )
-    # parser.add_argument("--fetch", help="After run is complete, automatically download the results")
-    parser.add_argument(
-        "--skipkube",
-        action="store_true",
-        dest="skip_kube_submit",
-        help="Do all steps except submitting the job to kubernetes",
-    )
     parser.add_argument(
         "--no-wait",
         action="store_false",
@@ -447,10 +429,6 @@ def _setup_parser_for_sub_command(parser):
         help="When localizing files, use symlinks instead of copying files into location. This should only be used when the uploaded files will not be modified by the job.",
         action="store_true",
     )
-    # parser.add_argument(
-    #     "--use-vm",
-    #     help="Instead of powering on a new VM, use an existing GCP VM by providing it's ssh connect string (mostly for testing)",
-    # )
     parser.add_argument(
         "--rerun",
         help="If set, will download all of the files from previous execution of this job to worker before running",
@@ -469,7 +447,7 @@ def _setup_parser_for_sub_command(parser):
     )
     parser.add_argument(
         "--cluster",
-        help="Manually specify the cluster ID (useful for testing with a locally running worker)",
+        help="Manually specify the cluster ID",
     )
     parser.add_argument("command", nargs=argparse.REMAINDER)
 
@@ -499,7 +477,7 @@ def submit_cmd(
     args,
     config: Config,
 ):
-    cluster_name = args.cluster
+    cluster_id_from_args = args.cluster
     metadata: Dict[str, str] = {
         "UUID": str(uuid.uuid4())
     }  # assign it a unique ID so we can recognize when a job has been resubmitted with the same name
@@ -615,7 +593,7 @@ def submit_cmd(
         machine_type=machine_type,
         image=image,
         project=config.project,
-        monitor_port=config.monitor_port,
+        database_id=config.database,
         region=config.region,
         work_root_dir=config.work_root_dir,
         mounts=mount_,
@@ -625,10 +603,23 @@ def submit_cmd(
     )
     assert mount_ == submit_config.mounts
 
+    # Compute cluster_id if not provided via args
+    if cluster_id_from_args is not None:
+        cluster_id = cluster_id_from_args
+    else:
+        machine_spec = MachineSpec(
+            service_account_email=config.service_account_email,
+            boot_volume=boot_volume,
+            mounts=mount_,
+            work_root_dir=config.work_root_dir,
+            machine_type=machine_type,
+        )
+        cluster_id = _make_cluster_id(job_id, image, machine_spec, False)
+
     cluster = Cluster(
         config.project,
         config.location,
-        "none",
+        cluster_id,
         job_id,
         jq.job_storage,
         jq.task_storage,
@@ -699,7 +690,6 @@ def submit_cmd(
             cluster,
             metadata=metadata,
             clean_if_exists=True,
-            cluster_name=cluster_name,
         )
 
     finished = False

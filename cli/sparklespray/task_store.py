@@ -169,9 +169,9 @@ class TaskStore:
         log.debug("get_tasks took %s seconds", end_time - start_time)
         return tasks
 
-    def get_tasks_for_cluster(self, cluster_name, status, max_fetch=None):
+    def get_tasks_for_cluster(self, cluster_id, status, max_fetch=None):
         query = self.client.query(kind=TASK_COLLECTION)
-        query.add_filter("cluster", "=", cluster_name)
+        query.add_filter("cluster", "=", cluster_id)
         query.add_filter("status", "=", status)
         start_time = time.time()
         tasks_it = query.fetch(limit=max_fetch)

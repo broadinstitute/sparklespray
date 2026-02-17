@@ -50,7 +50,7 @@ class SubmitConfig(BaseModel):
     machine_type: str
     image: str
     project: str
-    monitor_port: int
+    database_id: str
     region: str
     mounts: List[DiskMountT]
     work_root_dir: str

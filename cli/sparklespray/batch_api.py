@@ -52,7 +52,6 @@ class JobSpec(BaseModel):
     # Each location can be a region or a zone. Only one region or multiple zones in one region is supported now. For example, ["regions/us-central1"] allow VMs in any zones in region us-central1. ["zones/us-central1-a", "zones/us-central1-c"] only allow VMs in zones us-central1-a and us-central1-c.
     locations: List[str]
     # The tags identify valid sources or targets for network firewalls.
-    monitor_port: int
     network_tags: List[str]
 
     # Custom labels to apply to the job and all the Compute Engine resources that both are created by this allocation policy and support labels.
@@ -88,7 +87,7 @@ def _create_volumes(disks: List[Disk], gcs_bucket_mounts: List[GCSBucketMount]):
     return volumes
 
 
-def _create_runnables(runnables: List[Runnable], disks: List[Disk], monitor_port: int):
+def _create_runnables(runnables: List[Runnable], disks: List[Disk]):
     #     return
     #     [batch.Runnable(script=batch.Runnable.Script(text="""#!/bin/sh
     # echo "in runnables script"
@@ -100,7 +99,7 @@ def _create_runnables(runnables: List[Runnable], disks: List[Disk], monitor_port
                 image_uri=runnable.image,
                 commands=runnable.command,
                 volumes=[f"{disk.mount_path}:{disk.mount_path}" for disk in disks],
-                options=f"-p {monitor_port}:{monitor_port} -u 0",
+                options=f"-u 0",
                 # "enableImageStreaming": True
             ),
         )
@@ -136,9 +135,7 @@ def create_batch_job_from_job_spec(
             task_count=worker_count,
             task_count_per_node="1",
             task_spec=batch.TaskSpec(
-                runnables=_create_runnables(
-                    job_spec.runnables, job_spec.disks, job_spec.monitor_port
-                ),
+                runnables=_create_runnables(job_spec.runnables, job_spec.disks),
                 volumes=_create_volumes(job_spec.disks, job_spec.gcs_bucket_mounts),
             ),
             # max_retry_count=max_retry_count,

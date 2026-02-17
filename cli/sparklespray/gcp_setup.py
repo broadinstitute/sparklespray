@@ -198,7 +198,7 @@ def can_reach_datastore_api(project_id, key_path):
     raise Exception("Failed to confirm access to datastore")
 
 
-def deploy_datastore_indexes(project_id):
+def deploy_datastore_indexes(project_id, database):
     """Deploy Datastore composite indexes required for sparklespray queries.
 
     The indexes are defined in index.yaml and are required for queries that
@@ -218,39 +218,54 @@ def deploy_datastore_indexes(project_id):
 
     print("Deploying Datastore indexes...")
     # Use as_file() to get a real filesystem path for gcloud command
-    with resources.as_file(index_yaml_resource) as index_yaml_path:
-        try:
-            gcloud(
-                [
-                    "datastore",
-                    "indexes",
-                    "create",
-                    str(index_yaml_path),
-                    "--project",
-                    project_id,
-                    "--quiet",  # Don't prompt for confirmation
-                ]
-            )
-            print(
-                "Datastore indexes deployment initiated. Note: indexes may take several "
-                "minutes to build. You can check status at: "
-                f"https://console.cloud.google.com/datastore/indexes?project={project_id}"
-            )
-        except subprocess.CalledProcessError as e:
-            output = e.output.decode("utf8") if e.output else ""
-            # If indexes already exist, that's fine
-            if "already exists" in output or "has already been created" in output:
-                print("Datastore indexes already exist.")
-            else:
-                raise Exception(
-                    f"Failed to deploy Datastore indexes: {output}\n"
-                    "You can try manually running:\n"
-                    f"  gcloud datastore indexes create <path-to-index.yaml> --project {project_id}"
+    completed = False
+    while not completed:
+        with resources.as_file(index_yaml_resource) as index_yaml_path:
+            try:
+                gcloud(
+                    [
+                        "datastore",
+                        "indexes",
+                        "create",
+                        "--database",
+                        database,
+                        str(index_yaml_path),
+                        "--project",
+                        project_id,
+                        "--quiet",  # Don't prompt for confirmation
+                    ]
                 )
+                completed = True
+            except subprocess.CalledProcessError as e:
+                output = e.output.decode("utf8") if e.output else ""
+                # If indexes already exist, that's fine
+                if "already exists" in output or "has already been created" in output:
+                    print("Datastore indexes already exist.")
+                elif "does not exist" in output:
+                    print(
+                        f"Got a 'does not exist' error trying to create index. The database may not have been created yet.\n\n"
+                        f"Go to https://console.cloud.google.com/datastore/setup?project={project_id} and "
+                        f'click "Create a Firestore database" and enter the database ID as "{database}". \nYou\'ll need to choose your region and under '
+                        f'configuration options choose "Firestore with Datastore compatibility". (Not creating the '
+                        f"database with 'Datastore compatibility' will appear like everything is working, but sparkles will fail "
+                        f"with cryptic errors when it tries to use the database)"
+                    )
+                    input("Hit enter once you've completed the above: ")
+                    print("checking datastore again..")
+                else:
+                    raise Exception(
+                        f"Failed to deploy Datastore indexes: {output}\n"
+                        "You can try manually running:\n"
+                        f"  gcloud datastore indexes create <path-to-index.yaml> --project {project_id}"
+                    )
 
 
 def setup_project(
-    project_id: str, key_path: str, bucket_name: str, image_names: List[str]
+    project_id: str,
+    key_path: str,
+    bucket_name: str,
+    image_names: List[str],
+    database: str,
 ):
     print("Enabling services for project {}...".format(project_id))
     enable_services(project_id)
@@ -277,22 +292,7 @@ def setup_project(
     print("Adding firewall rule...")
     add_firewall_rule(project_id)
 
-    if not can_reach_datastore_api(project_id, key_path):
-        print(
-            f"Go to https://console.cloud.google.com/datastore/setup?project={project_id} and "
-            f'click "Create a Firestore database". You\'ll need to choose your region and under '
-            f'configuration options choose "Firestore with Datastore compatibility". (Not creating the '
-            f"database with 'Datastore compatibility' will appear like everything is working, but sparkles will fail "
-            f"with cryptic errors when it tries to use the database)"
-        )
-        input("Hit enter once you've completed the above: ")
-        print("checking datastore again..")
-        if can_reach_datastore_api(project_id, key_path):
-            print("Success!")
-
-    # Deploy Datastore indexes after database is confirmed accessible
-    deploy_datastore_indexes(project_id)
-
+    deploy_datastore_indexes(project_id, database)
     grant_access_to_images(service_account_name, image_names)
 
 

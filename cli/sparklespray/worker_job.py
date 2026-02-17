@@ -26,9 +26,9 @@ def create_job_spec(
     sparklesworker_image,
     work_root_dir,
     docker_image,
-    cluster_name,
+    cluster_id,
     project,
-    monitor_port,
+    database_id,
     service_account_email,
     machine_type: str,
     location: str,
@@ -41,20 +41,19 @@ def create_job_spec(
     validate_label(job_id)
     timestamp = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
 
+    # example command go run main.go consume --dir ~/dev/sparklespray/tmproot --cluster test-cluster --localhost --projectId depmap-portal-pipeline --database sparkles-v6
     def create_runnables(shutdown_after):
         consume_command = [
             consume_exe_path,
             "consume",
-            "--cacheDir",
-            os.path.join(consume_data, "cache"),
-            "--tasksDir",
-            os.path.join(consume_data, "tasks"),
+            "--dir",
+            consume_data,
+            "--database",
+            database_id,
             "--cluster",
-            cluster_name,
+            cluster_id,
             "--projectId",
             project,
-            "--port",
-            str(monitor_port),
             "--timeout",
             "10",
             "--shutdownAfter",
@@ -103,7 +102,6 @@ def create_job_spec(
         preemptible=True,
         locations=[f"regions/{location}"],
         network_tags=["sparklesworker"],
-        monitor_port=monitor_port,
         boot_disk=Disk(
             name="bootdisk",
             size_gb=boot_volume.size_in_gb,
@@ -113,7 +111,7 @@ def create_job_spec(
         disks=disks,
         gcs_bucket_mounts=gcs_bucket_mounts,
         sparkles_job=job_id,
-        sparkles_cluster=cluster_name,
+        sparkles_cluster=cluster_id,
         sparkles_timestamp=timestamp,
         service_account_email=service_account_email,
         scopes=["https://www.googleapis.com/auth/cloud-platform"],
@@ -124,7 +122,7 @@ def create_job_spec(
 
 def create_test_job(
     job_id: str,
-    cluster_name: str,
+    cluster_id: str,
     docker_image: str,
     service_account_email: str,
     config: Config,
@@ -147,7 +145,7 @@ def create_test_job(
         ),
         disks=[],
         sparkles_job=job_id,
-        sparkles_cluster=cluster_name,
+        sparkles_cluster=cluster_id,
         sparkles_timestamp=timestamp,
         service_account_email=service_account_email,
         scopes=["https://www.googleapis.com/auth/cloud-platform"],

@@ -16,20 +16,20 @@ const JOB_STATUS_KILLED = "killed"
 const STATUS_FAILED = "failed"
 
 type TaskHistory struct {
-	Timestamp         float64 `datastore:"timestamp,noindex"`
-	Status            string  `datastore:"status,noindex"`
-	FailureReason     string  `datastore:"failure_reason,noindex,omitempty"`
-	OwnedByWorkerID   string  `datastore:"owned_by_worker_id,noindex,omitempty"`
+	Timestamp       float64 `datastore:"timestamp,noindex"`
+	Status          string  `datastore:"status,noindex"`
+	FailureReason   string  `datastore:"failure_reason,noindex,omitempty"`
+	OwnedByWorkerID string  `datastore:"owned_by_worker_id,noindex,omitempty"`
 }
 
 type Task struct {
 	// will be of the form: job_id + task_index
-	TaskID            string         `datastore:"task_id" json:"task_id"`
-	TaskIndex         int64          `datastore:"task_index" json:"task_index"`
-	JobID             string         `datastore:"job_id" json:"job_id"`
-	Status            string         `datastore:"status" json:"status"`
-	OwnedByWorkerID   string         `datastore:"owned_by_worker_id" json:"owned_by_worker_id"`
-	Args              string         `datastore:"args" json:"args"`
+	TaskID           string         `datastore:"task_id" json:"task_id"`
+	TaskIndex        int64          `datastore:"task_index" json:"task_index"`
+	JobID            string         `datastore:"job_id" json:"job_id"`
+	Status           string         `datastore:"status" json:"status"`
+	OwnedByWorkerID  string         `datastore:"owned_by_worker_id" json:"owned_by_worker_id"`
+	Args             string         `datastore:"args" json:"args"`
 	History          []*TaskHistory `datastore:"history" json:"history"`
 	CommandResultURL string         `datastore:"command_result_url" json:"command_result_url"`
 	FailureReason    string         `datastore:"failure_reason,omitempty" json:"failure_reason"`

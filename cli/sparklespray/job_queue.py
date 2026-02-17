@@ -41,8 +41,8 @@ class JobQueue:
         self.client = client
         self.cluster_store = cluster_store
 
-    def get_tasks_for_cluster(self, cluster_name, status, max_fetch=None):
-        return self.task_storage.get_tasks_for_cluster(cluster_name, status, max_fetch)
+    def get_tasks_for_cluster(self, cluster_id, status, max_fetch=None):
+        return self.task_storage.get_tasks_for_cluster(cluster_id, status, max_fetch)
 
     def get_job_optional(self, job_id):
         return self.job_storage.get_job(job_id)
@@ -186,8 +186,8 @@ class JobQueue:
         entity_job = self.client.get(job_key)
         assert entity_job is not None, f"Could not get from datastore: {job_key}"
 
-        # Get the cluster name before deleting the job
-        cluster_name = entity_job.get("cluster")
+        # Get the cluster ID before deleting the job
+        cluster_id = entity_job.get("cluster")
 
         task_ids = set(entity_job.get("tasks", []))
         # If we've got a mismatch between the data store and the data in the Job object, take the union
@@ -206,5 +206,5 @@ class JobQueue:
         batch.flush()
 
         # Delete cluster config and pub/sub topics
-        if cluster_name:
-            self.cluster_store.delete_cluster(cluster_name)
+        if cluster_id:
+            self.cluster_store.delete_cluster(cluster_id)

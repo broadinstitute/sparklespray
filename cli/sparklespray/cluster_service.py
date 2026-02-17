@@ -107,7 +107,7 @@ class Cluster:
         cluster_api: API for interacting with the batch service
         job_id: ID of the job associated with this cluster
         location: Google Cloud region where the cluster is deployed
-        _cluster_id: Cached cluster ID (lazily loaded)
+        cluster_id: The cluster identifier
     """
 
     def __init__(
@@ -130,14 +130,7 @@ class Cluster:
         self.cluster_api = cluster_api
         self.job_id = job_id
         self.location = location
-        self._cluster_id = None
-
-    @property
-    def cluster_id(self):
-        if self._cluster_id is None:
-            job = self.job_store.get_job_must(self.job_id)
-            self._cluster_id = job.cluster
-        return self._cluster_id
+        self.cluster_id = cluster_id
 
     def get_node_reqs(self):
         return self.cluster_api.get_node_reqs(

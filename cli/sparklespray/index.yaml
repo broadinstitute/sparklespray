@@ -7,7 +7,7 @@
 indexes:
   # Required for IncrementalTaskFetcher.get_tasks_updated_since()
   # Query: job_id = X AND last_updated > Y
-  - kind: SparklesV5Task
+  - kind: SparklesV6Task
     properties:
       - name: job_id
       - name: last_updated
