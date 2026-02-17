@@ -1,5 +1,6 @@
 import time
 import uuid
+from typing import Optional
 from ..task_store import STATUS_COMPLETE
 from ..config import Config
 from ..io_helper import IO
@@ -8,6 +9,7 @@ from ..cluster_service import Cluster
 from ..cluster_store import ClusterStore
 from ..batch_api import JobSpec
 from ..log import log
+from ..pubsub_client import PubSubMonitorClient
 from ..watch import (
     run_tasks,
     PrintStatus,
@@ -19,6 +21,9 @@ from ..watch import (
 from .shared import _resolve_jobid
 from ..errors import NoWorkersRunning, UserError
 from ..watch import ResetOrphans
+
+# Default timeout for pub/sub communication
+PUBSUB_TIMEOUT = 20.0
 
 
 class TimeoutException(Exception):
@@ -160,9 +165,26 @@ def watch(
     if loglive is None:
         loglive = True
 
+    # Create a single pub/sub client for log streaming (shared across all LogMonitors)
+    pubsub_client: Optional[PubSubMonitorClient] = None
+    if loglive:
+        cluster_config = cluster_store.get(job.cluster)
+        if cluster_config is not None:
+            pubsub_client = PubSubMonitorClient(
+                project_id=project_id,
+                incoming_topic=cluster_config.incoming_topic,
+                response_topic=cluster_config.response_topic,
+                timeout=PUBSUB_TIMEOUT,
+            )
+        else:
+            log.warning(
+                "Could not get cluster config for %s, live logging disabled",
+                job.cluster,
+            )
+
     tasks = [
         CompletionMonitor(),
-        StreamLogs(loglive, cluster, io, cluster_store, project_id),
+        StreamLogs(loglive, cluster, io, pubsub_client),
         PrintStatus(initial_poll_delay, max_poll_delay),
         Heartbeat(cluster, watch_run_uuid),
     ]
@@ -204,6 +226,13 @@ def watch(
             "No remaining nodes running, but tasks are not complete. Aborting."
         )
     finally:
+        # Clean up the pub/sub client
+        if pubsub_client is not None:
+            try:
+                pubsub_client.close()
+            except Exception as e:
+                log.warning("Failed to close pub/sub client: %s", e)
+
         # Best effort attempt to clear the heartbeat record
         try:
             cleared = cluster.clear_heartbeat(watch_run_uuid)

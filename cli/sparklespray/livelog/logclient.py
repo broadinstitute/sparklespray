@@ -1,9 +1,6 @@
 import datetime
 from ..txtui import print_log_content
-from .pubsub_client import PubSubMonitorClient
-
-# Default timeout for pub/sub communication
-PUBSUB_TIMEOUT = 20.0
+from ..pubsub_client import PubSubMonitorClient
 
 
 class CommunicationError(Exception):
@@ -15,27 +12,23 @@ class Timeout(CommunicationError):
 
 
 class LogMonitor:
+    """Monitors log output from a running task.
+
+    Uses a shared PubSubMonitorClient to communicate with workers.
+    The client is passed in and managed externally (not closed by this class).
+    """
+
     def __init__(
         self,
-        project_id: str,
-        incoming_topic: str,
-        response_topic: str,
+        client: PubSubMonitorClient,
         task_id: str,
         worker_id: str,
     ):
-        self.client = PubSubMonitorClient(
-            project_id=project_id,
-            incoming_topic=incoming_topic,
-            response_topic=response_topic,
-            timeout=PUBSUB_TIMEOUT,
-        )
+        self.client = client
         self.task_id = task_id
         self.worker_id = worker_id
         self.offset = 0
         self.prev_mem_total = 0
-
-    def close(self):
-        self.client.close()
 
     def poll(self):
         while True:
