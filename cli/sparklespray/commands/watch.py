@@ -1,6 +1,7 @@
 import time
 import uuid
-from typing import Optional
+from queue import Queue
+from typing import Optional, Dict, Any
 from ..task_store import STATUS_COMPLETE
 from ..config import Config
 from ..io_helper import IO
@@ -165,26 +166,40 @@ def watch(
     if loglive is None:
         loglive = True
 
-    # Create a single pub/sub client for log streaming (shared across all LogMonitors)
+    # Create a single pub/sub client for communication with workers
+    # Used for both log streaming and receiving task update notifications
     pubsub_client: Optional[PubSubMonitorClient] = None
-    if loglive:
-        cluster_config = cluster_store.get(job.cluster)
-        if cluster_config is not None:
-            pubsub_client = PubSubMonitorClient(
-                project_id=project_id,
-                incoming_topic=cluster_config.incoming_topic,
-                response_topic=cluster_config.response_topic,
-                timeout=PUBSUB_TIMEOUT,
-            )
-        else:
-            log.warning(
-                "Could not get cluster config for %s, live logging disabled",
-                job.cluster,
-            )
+    changed_task_queue: Queue = Queue()
+
+    cluster_config = cluster_store.get(job.cluster)
+    if cluster_config is not None:
+        pubsub_client = PubSubMonitorClient(
+            project_id=project_id,
+            incoming_topic=cluster_config.incoming_topic,
+            response_topic=cluster_config.response_topic,
+            timeout=PUBSUB_TIMEOUT,
+        )
+
+        # Register listeners for task update events to populate the changed_task_queue
+        def on_task_event(data: Dict[str, Any]) -> None:
+            task_id = data.get("task_id")
+            if task_id:
+                changed_task_queue.put(task_id)
+
+        pubsub_client.add_listener("task_started", on_task_event)
+        pubsub_client.add_listener("task_completed", on_task_event)
+    else:
+        log.warning(
+            "Could not get cluster config for %s, live logging and task notifications disabled",
+            job.cluster,
+        )
+
+    # Only pass pubsub_client to StreamLogs if loglive is enabled
+    stream_logs_client = pubsub_client if loglive else None
 
     tasks = [
         CompletionMonitor(),
-        StreamLogs(loglive, cluster, io, pubsub_client),
+        StreamLogs(loglive, cluster, io, stream_logs_client),
         PrintStatus(initial_poll_delay, max_poll_delay),
         Heartbeat(cluster, watch_run_uuid),
     ]
@@ -207,7 +222,7 @@ def watch(
         tasks.append(ResetOrphans(jq, cluster))
 
     try:
-        run_tasks(job_id, job.cluster, tasks, cluster)
+        run_tasks(job_id, job.cluster, tasks, cluster, changed_task_queue)
 
         tasks = cluster.task_store.get_tasks(job_id=job_id)
         for task in tasks:

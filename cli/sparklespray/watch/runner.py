@@ -1,7 +1,8 @@
 import time
+from queue import Queue
+from typing import List, Optional
 from ..cluster_service import Cluster
 
-from typing import List
 from .runner_types import PeriodicTask, NextPoll, StopPolling
 
 from .runner_types import (
@@ -15,7 +16,11 @@ import heapq
 
 
 def run_tasks(
-    job_id: str, cluster_id: str, tasks: List[PeriodicTask], cluster: Cluster
+    job_id: str,
+    cluster_id: str,
+    tasks: List[PeriodicTask],
+    cluster: Cluster,
+    changed_task_queue: Optional[Queue] = None,
 ):
     """
     Runs a set of periodic monitoring tasks for a specific job and cluster.
@@ -29,6 +34,9 @@ def run_tasks(
         cluster_id: The ID of the cluster running the job
         tasks: List of PeriodicTask objects to be scheduled and executed
         cluster: Cluster object providing access to task and node information
+        changed_task_queue: Optional queue of task IDs that have changed (populated
+            by pub/sub listeners). If provided, IncrementalTaskFetcher will use
+            this to know which tasks to fetch instead of polling by timestamp.
 
     Returns:
         None. Tasks run until they signal completion via StopPolling.
@@ -40,7 +48,9 @@ def run_tasks(
     for task in tasks:
         heapq.heappush(timeline, ScheduledTask(now, task))
 
-    get_tasks = IncrementalTaskFetcher(cluster.task_store, job_id, min_delay=1.0)
+    get_tasks = IncrementalTaskFetcher(
+        cluster.task_store, job_id, changed_task_queue, min_delay=1.0
+    )
     get_nodes = RateLimitedCall(lambda: cluster.get_node_reqs(), 1)
 
     try:

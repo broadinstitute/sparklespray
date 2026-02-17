@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 import functools
-from typing import Dict, List, TYPE_CHECKING, Union
+from queue import Queue, Empty
+from typing import Dict, List, TYPE_CHECKING, Union, Optional
 import time
 
 if TYPE_CHECKING:
@@ -82,33 +83,29 @@ class IncrementalTaskFetcher:
     """Fetches only changed tasks and merges with cached state.
 
     On first call, fetches all tasks for the job. On subsequent calls,
-    only fetches tasks that have been updated since the last fetch
-    (using the last_updated field) and merges them into the cache.
+    checks a queue of task IDs that have changed (populated by pub/sub
+    listeners) and fetches those specific tasks by ID.
 
-    Because Datastore composite indexes are eventually consistent, we use
-    a padding interval when querying to avoid missing recently updated tasks.
-    This means we may fetch some duplicates, but since we update a dict keyed
-    by task_id, duplicates are harmless.
-
-    As an additional safety net, we periodically do a full fetch of all tasks
-    to ensure we never miss an update even if eventual consistency delays
-    exceed the padding interval.
+    As a safety net, periodically does a full fetch of all tasks to ensure
+    we never miss an update even if a pub/sub message is lost.
     """
 
-    # Padding to account for Datastore eventual consistency on composite indexes.
-    # 10 minutes should be sufficient based on observed propagation delays.
-    INDEX_CONSISTENCY_PADDING = 5  # seconds
-
     # Maximum time between full fetches as a safety net.
-    # Even if incremental fetches miss something, a full fetch will catch it.
+    # Even if pub/sub misses something, a full fetch will catch it.
     MAX_TIME_UNTIL_FULL_REFRESH = 30 * 60  # seconds
 
-    def __init__(self, task_store: "TaskStore", job_id: str, min_delay: float = 1.0):
+    def __init__(
+        self,
+        task_store: "TaskStore",
+        job_id: str,
+        changed_task_queue: Optional[Queue] = None,
+        min_delay: float = 1.0,
+    ):
         self.task_store = task_store
         self.job_id = job_id
+        self.changed_task_queue = changed_task_queue
         self.min_delay = min_delay
         self.cached_tasks: Dict[str, "Task"] = {}
-        self.last_updated_watermark: float = 0.0
         self.prev_call_timestamp: float = 0.0
         self.last_full_fetch_timestamp: float = 0.0
 
@@ -129,23 +126,33 @@ class IncrementalTaskFetcher:
             # Full fetch: get all tasks
             tasks = self.task_store.get_tasks(job_id=self.job_id)
             self.cached_tasks = {t.task_id: t for t in tasks}
-            self._update_watermark(tasks)
             self.last_full_fetch_timestamp = now
+            # Clear any pending items in the queue since we just did a full fetch
+            self._drain_queue()
         else:
-            # Incremental fetch: only changed tasks.
-            # Subtract padding to handle eventual consistency - we may get
-            # duplicates but won't miss recently updated tasks.
-            query_since = self.last_updated_watermark - self.INDEX_CONSISTENCY_PADDING
-            changed = self.task_store.get_tasks_updated_since(self.job_id, query_since)
-            for task in changed:
-                self.cached_tasks[task.task_id] = task
-            self._update_watermark(changed)
+            # Incremental fetch: get task IDs from the queue and fetch them by ID
+            changed_task_ids = self._drain_queue()
+            if changed_task_ids:
+                for task_id in changed_task_ids:
+                    task = self.task_store.get_task(task_id)
+                    if task is not None:
+                        self.cached_tasks[task_id] = task
 
         return list(self.cached_tasks.values())
 
-    def _update_watermark(self, tasks: List["Task"]) -> None:
-        """Update the watermark to the max last_updated from the given tasks."""
-        for task in tasks:
-            if task.last_updated is not None:
-                if task.last_updated > self.last_updated_watermark:
-                    self.last_updated_watermark = task.last_updated
+    def _drain_queue(self) -> List[str]:
+        """Drain all task IDs from the changed_task_queue.
+
+        Returns a list of unique task IDs that were in the queue.
+        """
+        if self.changed_task_queue is None:
+            return []
+
+        task_ids = set()
+        while True:
+            try:
+                task_id = self.changed_task_queue.get_nowait()
+                task_ids.add(task_id)
+            except Empty:
+                break
+        return list(task_ids)
