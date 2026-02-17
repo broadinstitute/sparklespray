@@ -9,13 +9,13 @@ import threading
 import uuid
 from typing import Dict, Any, Optional, TypeVar, Generic, Callable, List
 from google.cloud import pubsub_v1
-from google.protobuf import duration_pb2
+from google.api_core.exceptions import AlreadyExists
 from concurrent.futures import TimeoutError as FuturesTimeoutError
 
 log = logging.getLogger(__name__)
 
-# Subscription expiration: auto-delete after 1 hour of inactivity
-SUBSCRIPTION_EXPIRATION_SECONDS = 3600
+# Subscription expiration: auto-delete after 1 day of inactivity
+SUBSCRIPTION_EXPIRATION_SECONDS = 60 * 60 * 24
 
 # Default timeout for waiting for a response
 DEFAULT_TIMEOUT = 20.0
@@ -120,24 +120,26 @@ class PubSubMonitorClient:
         """Create a temporary subscription for receiving responses."""
         try:
             # Set expiration policy so subscription auto-deletes after inactivity
-            expiration_policy = pubsub_v1.types.ExpirationPolicy(
-                ttl=duration_pb2.Duration(seconds=SUBSCRIPTION_EXPIRATION_SECONDS)
-            )
             self.subscriber.create_subscription(
-                name=self.subscription_path,
-                topic=self.response_topic_path,
-                ack_deadline_seconds=30,
-                expiration_policy=expiration_policy,
+                request={
+                    "name": self.subscription_path,
+                    "topic": self.response_topic_path,
+                    "ack_deadline_seconds": 30,
+                    "expiration_policy": {
+                        "ttl": {"seconds": SUBSCRIPTION_EXPIRATION_SECONDS}
+                    },
+                }
             )
             log.debug(f"Created subscription: {self.subscription_path}")
-        except Exception as e:
-            # Subscription might already exist
-            log.debug(f"Subscription setup: {e}")
+        except AlreadyExists:
+            # Subscription already exists, which is fine
+            log.debug(f"Subscription already exists: {self.subscription_path}")
 
         # Start receiving messages
         def callback(message):
             try:
                 data = json.loads(message.data.decode("utf-8"))
+                log.debug(f"pubsub message received: {data}")
                 message_type = data.get("type")
                 request_id = data.get("request_id")
 
