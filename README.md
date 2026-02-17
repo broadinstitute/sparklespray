@@ -1283,7 +1283,11 @@ The most common issues are:
 
 # Developer info
 
-The following documentation is only relevant if you are developing the sparkles tool
+The following documentation is only relevant if you are developing the sparkles tool.
+
+## Architecture Documentation
+
+- [Pub/Sub Cluster Communication](docs/pubsub-cluster-communication.md) - Message types and protocols for CLI-worker communication
 
 ## Changing the protocol between "sparkles" and "consumer"
 
