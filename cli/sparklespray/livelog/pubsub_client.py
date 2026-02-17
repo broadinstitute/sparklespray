@@ -5,9 +5,9 @@ Replaces the gRPC-based communication with pub/sub topics.
 
 import json
 import logging
-import time
+import threading
 import uuid
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, TypeVar, Generic
 from google.cloud import pubsub_v1
 from google.protobuf import duration_pb2
 from concurrent.futures import TimeoutError as FuturesTimeoutError
@@ -19,6 +19,57 @@ SUBSCRIPTION_EXPIRATION_SECONDS = 3600
 
 # Default timeout for waiting for a response
 DEFAULT_TIMEOUT = 20.0
+
+T = TypeVar("T")
+
+
+class Future(Generic[T]):
+    """A simple Future implementation using threading primitives.
+
+    Allows one thread to wait for a result that will be provided by another thread,
+    without busy-waiting. Uses threading.Event for efficient blocking.
+    """
+
+    def __init__(self):
+        self._event = threading.Event()
+        self._result: Optional[T] = None
+        self._exception: Optional[BaseException] = None
+
+    def set_result(self, result: T) -> None:
+        """Set the result and wake up any waiting threads."""
+        self._result = result
+        self._event.set()
+
+    def set_exception(self, exception: BaseException) -> None:
+        """Set an exception and wake up any waiting threads."""
+        self._exception = exception
+        self._event.set()
+
+    def result(self, timeout: Optional[float] = None) -> T:
+        """Wait for and return the result.
+
+        Args:
+            timeout: Maximum time to wait in seconds. None means wait forever.
+
+        Returns:
+            The result value.
+
+        Raises:
+            TimeoutError: If timeout expires before result is available.
+            Exception: If set_exception was called, re-raises that exception.
+        """
+        if not self._event.wait(timeout):
+            raise TimeoutError("Timeout waiting for result")
+
+        if self._exception is not None:
+            raise self._exception
+
+        # _result is guaranteed to be set if _event is set and no exception
+        return self._result  # type: ignore
+
+    def done(self) -> bool:
+        """Return True if the future has a result or exception."""
+        return self._event.is_set()
 
 
 class PubSubMonitorClient:
@@ -52,8 +103,9 @@ class PubSubMonitorClient:
             project_id, self.subscription_id
         )
 
-        # Pending responses keyed by request_id
-        self._pending_responses: Dict[str, Any] = {}
+        # Pending responses keyed by request_id, values are Future objects
+        self._pending_responses: Dict[str, Future[Dict[str, Any]]] = {}
+        self._lock = threading.Lock()
         self._streaming_pull_future = None
 
         self._setup_subscription()
@@ -81,8 +133,11 @@ class PubSubMonitorClient:
             try:
                 data = json.loads(message.data.decode("utf-8"))
                 request_id = data.get("request_id")
-                if request_id and request_id in self._pending_responses:
-                    self._pending_responses[request_id] = data
+                if request_id:
+                    with self._lock:
+                        future = self._pending_responses.get(request_id)
+                    if future is not None:
+                        future.set_result(data)
                 message.ack()
             except Exception as e:
                 log.warning(f"Error processing response message: {e}")
@@ -104,26 +159,25 @@ class PubSubMonitorClient:
             "payload": payload or {},
         }
 
-        # Register that we're waiting for this response
-        self._pending_responses[request_id] = None
+        # Create a Future to receive the response
+        response_future: Future[Dict[str, Any]] = Future()
+        with self._lock:
+            self._pending_responses[request_id] = response_future
 
-        # Publish the request
-        data = json.dumps(request).encode("utf-8")
-        future = self.publisher.publish(self.incoming_topic_path, data)
-        future.result(timeout=10)  # Wait for publish to complete
+        try:
+            # Publish the request
+            data = json.dumps(request).encode("utf-8")
+            publish_future = self.publisher.publish(self.incoming_topic_path, data)
+            publish_future.result(timeout=10)  # Wait for publish to complete
 
-        # Wait for the response
-        start_time = time.time()
-        while time.time() - start_time < self.timeout:
-            response = self._pending_responses.get(request_id)
-            if response is not None:
-                del self._pending_responses[request_id]
-                return response
-            time.sleep(0.1)
-
-        # Timeout
-        del self._pending_responses[request_id]
-        raise TimeoutError(f"Timeout waiting for response to {message_type}")
+            # Wait for the response using the Future (no busy-waiting)
+            return response_future.result(timeout=self.timeout)
+        except TimeoutError:
+            raise TimeoutError(f"Timeout waiting for response to {message_type}")
+        finally:
+            # Clean up the pending response entry
+            with self._lock:
+                self._pending_responses.pop(request_id, None)
 
     def read_output(
         self, task_id: str, offset: int, size: int, worker_id: str
