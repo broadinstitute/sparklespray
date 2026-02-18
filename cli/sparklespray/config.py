@@ -100,10 +100,7 @@ class Config:
     credentials: Credentials = dataclasses.field(repr=False)
     database: str
     pubsub_topics: str
-
-    @property
-    def service_account_email(self):
-        return self.credentials.service_account_email  # pyright: ignore
+    service_account_email: Optional[str] = None
 
     def create_machine_specs(self):
         return MachineSpec(
@@ -371,6 +368,17 @@ def load_config(
     return Config(**dataclasses.asdict(config))
 
 
+def _load_service_account_credentials(service_account_key):
+    if not os.path.exists(service_account_key):
+        raise Exception("Could not find service account key at %s", service_account_key)
+
+    credentials = service_account.Credentials.from_service_account_file(
+        service_account_key, scopes=SCOPES
+    )
+
+    return credentials, credentials.service_account_email  # pyright: ignore
+
+
 def create_func_params(
     config_file: str, overrides: Dict[str, str], extras: Dict, requested: List
 ) -> Dict:
@@ -379,13 +387,10 @@ def create_func_params(
     config = load_config(config_file, overrides)
     extras["config"] = config
 
-    service_account_key = config.service_account_key
-    if not os.path.exists(service_account_key):
-        raise Exception("Could not find service account key at %s", service_account_key)
-
-    config.credentials = service_account.Credentials.from_service_account_file(
-        service_account_key, scopes=SCOPES
-    )
+    (
+        config.credentials,
+        config.service_account_email,
+    ) = _load_service_account_credentials(config.service_account_key)
 
     requested_only = set(requested).difference(extras.keys())
     params_ = create_services_from_config(config, list(requested_only))

@@ -97,6 +97,112 @@ Tests use pytest with mocks for GCP services:
 - `MockIO`: Mocks GCS operations
 - Fixtures in `tests/sparklespray/factories.py`
 
+### Integration Tests with Emulators
+
+For end-to-end testing without connecting to real GCP services, the test suite includes fixtures that start local emulators. These emulators allow testing the full stack locally, including the Go worker.
+
+#### Prerequisites
+
+Install the required emulators:
+
+```bash
+# Pub/Sub and Firestore emulators (requires gcloud SDK)
+gcloud components install pubsub-emulator
+gcloud components install cloud-firestore-emulator
+
+# required by cloud-firestore-emulator
+brew install openjdk
+
+# GCS emulator
+go install github.com/fsouza/fake-gcs-server@latest
+
+# Go (for running sparklesworker)
+# Install from https://go.dev/
+```
+
+#### Available Fixtures
+
+The fixtures are defined in `tests/conftest.py`:
+
+| Fixture              | Scope    | Description                                                           |
+| -------------------- | -------- | --------------------------------------------------------------------- |
+| `pubsub_emulator`    | session  | Starts Pub/Sub emulator, sets `PUBSUB_EMULATOR_HOST`                  |
+| `firestore_emulator` | session  | Starts Firestore in Datastore mode, sets `DATASTORE_EMULATOR_HOST`    |
+| `fake_gcs_server`    | session  | Starts fake-gcs-server Docker container, sets `STORAGE_EMULATOR_HOST` |
+| `emulators`          | session  | Combined fixture starting all three emulators                         |
+| `sparklesworker`     | session  | Starts the Go worker process connected to emulators                   |
+| `datastore_client`   | function | Datastore client connected to emulator                                |
+| `pubsub_clients`     | function | Publisher/subscriber clients connected to emulator                    |
+| `storage_client`     | function | GCS client connected to emulator                                      |
+| `io_helper`          | function | `IO` instance configured for the GCS emulator                         |
+| `e2e_test_env`       | function | Complete test environment with all services                           |
+
+#### How It Works
+
+The Google Cloud client libraries (both Python and Go) automatically detect these environment variables and connect to emulators instead of production services:
+
+- `PUBSUB_EMULATOR_HOST` → Pub/Sub client
+- `DATASTORE_EMULATOR_HOST` → Datastore client
+- `STORAGE_EMULATOR_HOST` → GCS client
+
+The fixtures:
+
+1. Find a free port on localhost
+2. Start the emulator process
+3. Set the environment variable
+4. Yield control to the test
+5. Clean up the emulator process on teardown
+
+#### Example Usage
+
+```python
+import pytest
+
+@pytest.mark.emulator
+def test_pubsub_messaging(pubsub_clients):
+    """Test Pub/Sub messaging with the emulator."""
+    publisher = pubsub_clients["publisher"]
+    project = pubsub_clients["project"]
+
+    # Create topic and publish message
+    topic_path = publisher.topic_path(project, "test-topic")
+    publisher.create_topic(request={"name": topic_path})
+    publisher.publish(topic_path, b"test message")
+
+@pytest.mark.emulator
+def test_datastore_operations(datastore_client):
+    """Test Datastore operations with the emulator."""
+    key = datastore_client.key("Task", "test-1")
+    entity = datastore.Entity(key=key)
+    entity["status"] = "pending"
+    datastore_client.put(entity)
+
+    retrieved = datastore_client.get(key)
+    assert retrieved["status"] == "pending"
+
+@pytest.mark.emulator
+def test_full_job_execution(e2e_test_env):
+    """End-to-end test with worker processing tasks."""
+    datastore = e2e_test_env["datastore_client"]
+    io = e2e_test_env["io"]
+    worker = e2e_test_env["worker"]
+
+    # Submit a job - the worker will pick it up and execute
+    # ...
+```
+
+#### Running Emulator Tests
+
+```bash
+# Run only emulator tests
+poetry run pytest tests/ -m emulator
+
+# Run all tests including emulator tests
+poetry run pytest tests/ --longrun
+```
+
+Tests will be skipped automatically if prerequisites are not available (gcloud, Docker, or Go not installed).
+
 ## Worker Communication
 
 CLI communicates with workers via Google Cloud Pub/Sub. Each cluster has two topics:

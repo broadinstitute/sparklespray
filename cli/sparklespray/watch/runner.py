@@ -15,6 +15,10 @@ from .runner_types import (
 import heapq
 from threading import Event
 
+# this function exists so we can monkey patch our own in for testing
+def _make_get_node_reqs_callable(cluster):
+    return lambda: cluster.get_node_reqs()
+
 
 def run_tasks(
     job_id: str,
@@ -53,7 +57,7 @@ def run_tasks(
     get_tasks = IncrementalTaskFetcher(
         cluster.task_store, job_id, changed_task_queue, min_delay=1.0
     )
-    get_nodes = RateLimitedCall(lambda: cluster.get_node_reqs(), 1)
+    get_nodes = RateLimitedCall(_make_get_node_reqs_callable(cluster), 1)
 
     try:
         while True:

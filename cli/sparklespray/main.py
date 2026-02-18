@@ -13,6 +13,9 @@ from .task_store import Task, STATUS_FAILED
 from .job_queue import JobQueue
 from .io_helper import IO
 import json
+import logging
+
+log = logging.getLogger(__name__)
 
 
 def print_failures(jq: JobQueue, io: IO, jobid, show_all: bool):
@@ -166,6 +169,7 @@ def main(argv=None):
             print(ex.message)
             return 1
         except Exception as ex:
+            log.exception("Error", ex)
             raise Exception(f"Could not get parameters for {args.func}") from ex
 
         try:
