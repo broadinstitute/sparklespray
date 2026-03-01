@@ -40,7 +40,7 @@ type Task struct {
 	JobID           string         `datastore:"job_id" json:"job_id"`
 	Status          string         `datastore:"status" json:"status"`
 	OwnedByWorkerID string         `datastore:"owned_by_worker_id" json:"owned_by_worker_id"`
-	TaskSpec        *TaskSpec      `datastore:"task_spec" json:"task_spec"`
+	TaskSpec        *TaskSpec      `datastore:"-" json:"task_spec"`
 	History         []*TaskHistory `datastore:"history" json:"history"`
 	FailureReason   string         `datastore:"failure_reason,omitempty" json:"failure_reason"`
 	Version         int32          `datastore:"version" json:"version"`

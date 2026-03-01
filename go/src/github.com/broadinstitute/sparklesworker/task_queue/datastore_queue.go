@@ -2,6 +2,7 @@ package task_queue
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log"
 	"math/rand"
@@ -15,6 +16,55 @@ const ClusterCollection = "SparklesV6Cluster"
 const JobCollection = "SparklesV6Job"
 
 const InitialClaimRetryDelay = 1000
+
+// taskAlias is used in Save/Load to avoid infinite recursion when calling
+// datastore.SaveStruct/LoadStruct on Task.
+type taskAlias Task
+
+// Save implements datastore.PropertyLoadSaver. TaskSpec is serialized as a
+// JSON string because it contains a map[string]string which Datastore does
+// not support natively.
+func (t *Task) Save() ([]datastore.Property, error) {
+	props, err := datastore.SaveStruct((*taskAlias)(t))
+	if err != nil {
+		return nil, err
+	}
+	if t.TaskSpec != nil {
+		specJSON, err := json.Marshal(t.TaskSpec)
+		if err != nil {
+			return nil, err
+		}
+		props = append(props, datastore.Property{
+			Name:    "task_spec",
+			Value:   string(specJSON),
+			NoIndex: true,
+		})
+	}
+	return props, nil
+}
+
+// Load implements datastore.PropertyLoadSaver.
+func (t *Task) Load(ps []datastore.Property) error {
+	var taskSpecJSON string
+	remaining := ps[:0]
+	for _, p := range ps {
+		if p.Name == "task_spec" {
+			if s, ok := p.Value.(string); ok {
+				taskSpecJSON = s
+			}
+		} else {
+			remaining = append(remaining, p)
+		}
+	}
+	if err := datastore.LoadStruct((*taskAlias)(t), remaining); err != nil {
+		return err
+	}
+	if taskSpecJSON != "" {
+		t.TaskSpec = &TaskSpec{}
+		return json.Unmarshal([]byte(taskSpecJSON), t.TaskSpec)
+	}
+	return nil
+}
 
 // Cluster represents cluster configuration stored in Datastore
 type Cluster struct {
