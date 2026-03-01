@@ -10,26 +10,19 @@ import (
 	"path"
 	"regexp"
 
-	"google.golang.org/api/option"
-
 	"cloud.google.com/go/storage"
+	"github.com/broadinstitute/sparklesworker/consumer"
+	"github.com/broadinstitute/sparklesworker/watchdog"
 	"golang.org/x/net/context"
+	"google.golang.org/api/option"
 )
-
-type IOClient interface {
-	Upload(srcPath string, destURL string) error
-	UploadBytes(destURL string, data []byte) error
-	Download(srcURL string, destPath string) error
-	DownloadAsBytes(srcURL string) ([]byte, error)
-	IsExists(url string) (bool, error)
-}
 
 type GCSIOClient struct {
 	ctx    context.Context
 	client *storage.Client
 }
 
-func NewIOClient(ctx context.Context, httpClient *http.Client) (IOClient, error) {
+func NewIOClient(ctx context.Context, httpClient *http.Client) (consumer.IOClient, error) {
 	client, err := storage.NewClient(ctx, option.WithHTTPClient(httpClient))
 	if err != nil {
 		return nil, err
@@ -53,7 +46,7 @@ func (ioc *GCSIOClient) Upload(src string, destURL string) error {
 	w := obj.NewWriter(ioc.ctx)
 	defer w.Close()
 
-	if _, err := io.Copy(NotifyOnWrite(w), r); err != nil {
+	if _, err := io.Copy(watchdog.NotifyOnWrite(w), r); err != nil {
 		return err
 	}
 
@@ -151,7 +144,7 @@ func (ioc *GCSIOClient) Download(srcUrl string, destPath string) error {
 	}
 	defer r.Close()
 
-	if _, err := io.Copy(NotifyOnWrite(w), r); err != nil {
+	if _, err := io.Copy(watchdog.NotifyOnWrite(w), r); err != nil {
 		return err
 	}
 

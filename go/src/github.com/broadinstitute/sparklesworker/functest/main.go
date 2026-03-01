@@ -4,18 +4,18 @@ import (
 	"log"
 	"time"
 
-	"github.com/broadinstitute/sparklesworker"
+	"github.com/broadinstitute/sparklesworker/watchdog"
 )
 
 func main() {
-	sparklesworker.EnableWatchdog(5 * time.Second)
+	watchdog.Enable(5 * time.Second)
 	i := 0
 	for {
 		log.Printf("Sleeping for a sec...")
 		time.Sleep(time.Second)
 		if i < 10 {
 			log.Printf("Calling notify")
-			sparklesworker.NotifyWatchdog()
+			watchdog.Notify()
 		}
 		i++
 	}

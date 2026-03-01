@@ -1,4 +1,4 @@
-package sparklesworker
+package watchdog
 
 import (
 	"io"
@@ -12,10 +12,10 @@ import (
 // ...but a single process watchdog is a crosscutting
 // service akin to logging, so I'm going to go with it.
 
-var watchdogEnabled = false
+var enabled = false
 var notifications chan bool
 
-func watchdogLoop(period time.Duration) {
+func loop(period time.Duration) {
 	failureCount := 0
 	for {
 		select {
@@ -34,18 +34,18 @@ func watchdogLoop(period time.Duration) {
 	}
 }
 
-func EnableWatchdog(period time.Duration) {
-	if !watchdogEnabled {
-		watchdogEnabled = true
+func Enable(period time.Duration) {
+	if !enabled {
+		enabled = true
 		notifications = make(chan bool, 100)
-		go watchdogLoop(period)
+		go loop(period)
 	} else {
 		log.Printf("Warning: Watchdog already enabled, cannot start again")
 	}
 }
 
-func NotifyWatchdog() {
-	if watchdogEnabled {
+func Notify() {
+	if enabled {
 		notifications <- true
 	}
 }
@@ -66,20 +66,20 @@ func NotifyUntilComplete(blockingCall func() error) error {
 		case err := <-errorChan:
 			return err
 		case <-time.After(time.Second):
-			NotifyWatchdog()
+			Notify()
 		}
 	}
 }
 
-type NotifyOnWriteWriter struct {
+type notifyOnWriteWriter struct {
 	nested io.Writer
 }
 
-func (w *NotifyOnWriteWriter) Write(b []byte) (int, error) {
-	NotifyWatchdog()
+func (w *notifyOnWriteWriter) Write(b []byte) (int, error) {
+	Notify()
 	return w.nested.Write(b)
 }
 
 func NotifyOnWrite(w io.Writer) io.Writer {
-	return &NotifyOnWriteWriter{nested: w}
+	return &notifyOnWriteWriter{nested: w}
 }
