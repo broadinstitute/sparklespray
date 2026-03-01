@@ -1,6 +1,7 @@
 package sparklesworker
 
 import (
+	"context"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -8,23 +9,24 @@ import (
 	"path"
 	"testing"
 
+	"github.com/broadinstitute/sparklesworker/consumer"
+	"github.com/broadinstitute/sparklesworker/task_queue"
 	"github.com/stretchr/testify/assert"
-	"golang.org/x/net/context"
 )
 
 /*
 test
-func executeTaskInDir(workdir string, spec *TaskSpec) error {
-local_to_url_mapping = resolveUploads(workdir, spec.uploads, downloaded)
+func executeTaskInDir(workdir string, spec *consumer.TaskSpec) error {
+local_to_url_mapping = consumer.ResolveUploads(workdir, spec.uploads, downloaded)
 
 gcp ops:
+
 	make files, and upload via:
-	uploadMapped(...)
+	consumer.UploadMapped(...)
 	download files to different dir:
-	func downloadAll(workdir string, downloads []*TaskDownload) (error, stringset) {
+	func downloadAll(workdir string, downloads []*consumer.TaskDownload) (error, consumer.Stringset) {
 
 */
-
 func check(err error) {
 	if err != nil {
 		panic(err.Error())
@@ -75,7 +77,7 @@ func TestResolveUploads(t *testing.T) {
 	check(err)
 
 	// one where we pretend it was downloaded
-	downloaded := make(stringset)
+	downloaded := make(consumer.Stringset)
 	downloaded[downloadedFile] = true
 
 	// and one which is new
@@ -85,14 +87,14 @@ func TestResolveUploads(t *testing.T) {
 
 	log.Printf("toUploadFile=%v\n", toUploadFile)
 
-	uploadSpec := &UploadSpec{DstURL: "gs://fake/dest", IncludePatterns: []string{"*"}}
-	filesToUpload, err := resolveUploads(workdir, uploadSpec, downloaded)
+	uploadSpec := &task_queue.UploadSpec{DstURL: "gs://fake/dest", IncludePatterns: []string{"*"}}
+	filesToUpload, err := consumer.ResolveUploads(workdir, uploadSpec, downloaded)
 	assert.Nil(t, err)
 
 	assert.Len(t, filesToUpload, 1)
 
 	ioc := NewMockIOClient()
-	uploadMapped(ioc, filesToUpload)
+	consumer.UploadMapped(ioc, filesToUpload)
 
 	assert.Len(t, ioc.uploaded, 1)
 	assert.Equal(t, toUploadFile+" -> gs://fake/dest/needUpload.txt", ioc.uploaded[0])
@@ -129,21 +131,22 @@ func TestExecute(t *testing.T) {
 
 	tasksDir := path.Join(tmpdir, "tasks")
 	cacheDir := path.Join(tmpdir, "cache")
+	rootDir := tmpdir
 
 	ctx := context.Background()
 	ioc, err := NewIOClient(ctx, http.DefaultClient)
 	assert.Nil(t, err)
 
-	spec := &TaskSpec{
+	spec := &task_queue.TaskSpec{
 		WorkingDir:       ".",
 		PreExecScript:    "ls",
 		Command:          "bash -c 'echo hello'",
 		CommandResultURL: urlprefix + "result.json",
 		StdoutURL:        urlprefix + "stdout.txt",
-		Uploads:          &UploadSpec{},
+		Uploads:          &task_queue.UploadSpec{},
 	}
 
-	retcode, err := ExecuteTask(ioc, "test-task", spec, cacheDir, tasksDir, nil)
+	retcode, err := consumer.ExecuteTask(ioc, "test-task", spec, rootDir, cacheDir, tasksDir, nil)
 	assert.Nil(t, err)
 	assert.Equal(t, "0", retcode)
 }

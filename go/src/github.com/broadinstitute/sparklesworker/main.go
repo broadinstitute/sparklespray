@@ -17,9 +17,11 @@ import (
 
 	"cloud.google.com/go/datastore"
 	"cloud.google.com/go/storage"
+	"github.com/broadinstitute/sparklesworker/consumer"
 	"github.com/broadinstitute/sparklesworker/control"
 	"github.com/broadinstitute/sparklesworker/monitor"
 	"github.com/broadinstitute/sparklesworker/task_queue"
+	"github.com/broadinstitute/sparklesworker/watchdog"
 	"github.com/redis/go-redis/v9"
 	"github.com/urfave/cli"
 	"golang.org/x/net/context"
@@ -254,11 +256,11 @@ func consume(c *cli.Context) error {
 
 	if expectedVersion != "" && expectedVersion != WorkerVersion {
 		errMsg := fmt.Sprintf("Job was submitted for worker version %s but this worker's version is %s", expectedVersion, WorkerVersion)
-		log.Printf(errMsg)
+		log.Print(errMsg)
 		return errors.New(errMsg)
 	}
 
-	EnableWatchdog(watchdogTimeout)
+	watchdog.Enable(watchdogTimeout)
 
 	ctx := context.Background()
 
@@ -304,20 +306,15 @@ func consume(c *cli.Context) error {
 
 	mon := monitor.New()
 
-	options := &Options{
+	options := &consumer.Options{
 		ClaimTimeout:       30 * time.Second,                           // how long do we keep trying if we get an error claiming a task
 		InitialClaimRetry:  1 * time.Second,                            // if we get an error claiming, how long until we try again?
 		SleepOnEmpty:       1 * time.Second,                            // how often to poll the queue if is empty
 		MaxWaitForNewTasks: time.Duration(shutdownAfter) * time.Second, // how long to wait for a new task to arrive if the queue is empty
 		WorkerID:           workerID}
 
-	executor := func(taskId string, taskParam string) (string, error) {
-		taskSpec, err := loadTaskSpec(ioc, taskParam)
-		if err != nil {
-			return "", err
-		}
-
-		return ExecuteTask(ioc, taskId, taskSpec, dir, cacheDir, tasksDir, mon)
+	executor := func(taskId string, taskSpec *task_queue.TaskSpec) (string, error) {
+		return consumer.ExecuteTask(ioc, taskId, taskSpec, dir, cacheDir, tasksDir, mon)
 	}
 
 	sleepUntilNotify := func(sleepTime time.Duration) {
@@ -373,7 +370,7 @@ func consume(c *cli.Context) error {
 
 		// Create Redis queue
 		redisQueue := task_queue.NewRedisQueue(redisClient, cluster, workerID, options.InitialClaimRetry, options.ClaimTimeout)
-		redisQueue.WatchdogNotifier = NotifyWatchdog
+		redisQueue.WatchdogNotifier = watchdog.Notify
 		queue = redisQueue
 	} else {
 		log.Printf("Using Google Cloud backend (Pub/Sub + Datastore)")
@@ -385,7 +382,7 @@ func consume(c *cli.Context) error {
 		}
 
 		dsQueue := task_queue.NewDataStoreQueue(client, cluster, workerID, options.InitialClaimRetry, options.ClaimTimeout)
-		dsQueue.WatchdogNotifier = NotifyWatchdog
+		dsQueue.WatchdogNotifier = watchdog.Notify
 		queue = dsQueue
 	}
 	defer cleanupControlChannel()
@@ -393,7 +390,7 @@ func consume(c *cli.Context) error {
 	// Notify that worker has started
 	notifier.NotifyWorkerStarted()
 
-	err = ConsumerRunLoop(ctx, queue, sleepUntilNotify, executor, options.SleepOnEmpty, options.MaxWaitForNewTasks, notifier)
+	err = consumer.RunLoop(ctx, queue, sleepUntilNotify, executor, options.SleepOnEmpty, options.MaxWaitForNewTasks, notifier)
 	if err != nil {
 		log.Printf("consumerRunLoop exited with: %v\n", err)
 		notifier.NotifyWorkerStopping()

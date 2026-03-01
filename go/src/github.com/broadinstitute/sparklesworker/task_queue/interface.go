@@ -4,23 +4,51 @@ import (
 	"context"
 )
 
+type TaskDownload struct {
+	IsCASKey    bool   `json:"is_cas_key"`
+	Executable  bool   `json:"executable"`
+	SymlinkSafe bool   `json:"symlink_safe"`
+	Dst         string `json:"dst"`
+	SrcURL      string `json:"src_url"`
+}
+
+type UploadSpec struct {
+	IncludePatterns []string `json:"include_patterns"`
+	ExcludePatterns []string `json:"exclude_patterns"`
+	DstURL          string   `json:"dst_url"`
+}
+
+type TaskSpec struct {
+	WorkingDir         string            `json:"working_dir,omitempty"`
+	PreDownloadScript  string            `json:"pre-download-script,omitempty"`
+	PostDownloadScript string            `json:"post-download-script,omitempty"`
+	PostExecScript     string            `json:"post-exec-script,omitempty"`
+	PreExecScript      string            `json:"pre-exec-script,omitempty"`
+	Parameters         map[string]string `json:"parameters,omitempty"`
+	Uploads            *UploadSpec       `json:"uploads"`
+	Downloads          []*TaskDownload   `json:"downloads"`
+	Command            string            `json:"command"`
+	CommandResultURL   string            `json:"command_result_url"`
+	StdoutURL          string            `json:"stdout_url"`
+	DockerImage        string            `json:"docker_image,omitempty"`
+}
+
 // Task represents a task in the queue
 type Task struct {
-	TaskID           string         `datastore:"task_id" json:"task_id"`
-	TaskIndex        int64          `datastore:"task_index" json:"task_index"`
-	JobID            string         `datastore:"job_id" json:"job_id"`
-	Status           string         `datastore:"status" json:"status"`
-	OwnedByWorkerID  string         `datastore:"owned_by_worker_id" json:"owned_by_worker_id"`
-	Args             string         `datastore:"args" json:"args"`
-	History          []*TaskHistory `datastore:"history" json:"history"`
-	CommandResultURL string         `datastore:"command_result_url" json:"command_result_url"`
-	FailureReason    string         `datastore:"failure_reason,omitempty" json:"failure_reason"`
-	Version          int32          `datastore:"version" json:"version"`
-	ExitCode         string         `datastore:"exit_code" json:"exit_code"`
-	Cluster          string         `datastore:"cluster" json:"cluster"`
-	MonitorAddress   string         `datastore:"monitor_address" json:"monitor_address"`
-	LogURL           string         `datastore:"log_url" json:"log_url"`
-	LastUpdated      float64        `datastore:"last_updated" json:"last_updated"`
+	TaskID          string         `datastore:"task_id" json:"task_id"`
+	TaskIndex       int64          `datastore:"task_index" json:"task_index"`
+	JobID           string         `datastore:"job_id" json:"job_id"`
+	Status          string         `datastore:"status" json:"status"`
+	OwnedByWorkerID string         `datastore:"owned_by_worker_id" json:"owned_by_worker_id"`
+	TaskSpec        *TaskSpec      `datastore:"task_spec" json:"task_spec"`
+	History         []*TaskHistory `datastore:"history" json:"history"`
+	FailureReason   string         `datastore:"failure_reason,omitempty" json:"failure_reason"`
+	Version         int32          `datastore:"version" json:"version"`
+	ExitCode        string         `datastore:"exit_code" json:"exit_code"`
+	Cluster         string         `datastore:"cluster" json:"cluster"`
+	MonitorAddress  string         `datastore:"monitor_address" json:"monitor_address"`
+	LogURL          string         `datastore:"log_url" json:"log_url"`
+	LastUpdated     float64        `datastore:"last_updated" json:"last_updated"`
 }
 
 // TaskHistory represents a history entry for a task

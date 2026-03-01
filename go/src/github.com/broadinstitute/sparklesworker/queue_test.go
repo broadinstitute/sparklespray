@@ -10,6 +10,7 @@ import (
 
 	"cloud.google.com/go/datastore"
 
+	"github.com/broadinstitute/sparklesworker/consumer"
 	"github.com/broadinstitute/sparklesworker/control"
 	"github.com/broadinstitute/sparklesworker/task_queue"
 	"github.com/stretchr/testify/assert"
@@ -37,16 +38,16 @@ func spawnExecuteTasks(t *testing.T, projectID string, jobID string, index int, 
 
 	run := func() {
 		ready.Wait()
-		executor := func(taskID string, taskParam string) (string, error) {
+		executor := func(taskID string, taskSpec *task_queue.TaskSpec) (string, error) {
 			// remember we executed this task
-			taskParamPerClient[index] = append(taskParamPerClient[index], taskParam)
-			log.Printf("client %d executed %s\n", index, taskParam)
+			taskParamPerClient[index] = append(taskParamPerClient[index], taskSpec.Command)
+			log.Printf("client %d executed %s\n", index, taskSpec.Command)
 			return "0", nil
 		}
 		sleepFunc := func(sleepTime time.Duration) {
 			time.Sleep(sleepTime)
 		}
-		err := ConsumerRunLoop(ctx, queue, sleepFunc, executor, 1*time.Second, 10*time.Second, nil)
+		err := consumer.RunLoop(ctx, queue, sleepFunc, executor, 1*time.Second, 10*time.Second, nil)
 		if err != nil {
 			log.Printf("consumerRunLoop returned error: %v\n", err)
 		}
@@ -92,7 +93,7 @@ func newTask(jobID string, index int) *task_queue.Task {
 		TaskIndex: int64(index),
 		JobID:     jobID,
 		Status:    task_queue.StatusPending,
-		Args:      fmt.Sprintf("param-%d", index),
+		TaskSpec:  &task_queue.TaskSpec{Command: fmt.Sprintf("param-%d", index)},
 		History: []*task_queue.TaskHistory{
 			{
 				Timestamp: float64(control.GetTimestampMillis()) / 1000.0,
