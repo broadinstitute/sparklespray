@@ -71,7 +71,8 @@ func toUnixFloat(t time.Time) float64 {
 }
 
 type ResultStruct struct {
-	Command    string            `json:"command"`
+	ExePath    string            `json:"exe_path"`
+	ExeArgs    []string          `json:"exe_args"`
 	Parameters map[string]string `json:"parameters,omitempty"`
 	ReturnCode string            `json:"return_code"`
 	Files      []*ResultFile     `json:"files"`
@@ -199,6 +200,8 @@ type ExecResult struct {
 	Status    string
 	StartTime time.Time
 	EndTime   time.Time
+	ExePath   string
+	ExeArgs   []string
 }
 
 func execCommand(command string, rootdir string, workdir string, stdout *os.File, dockerImage string) (*ExecResult, error) {
@@ -254,6 +257,8 @@ func execCommand(command string, rootdir string, workdir string, stdout *os.File
 		Status:    statusStr,
 		StartTime: startTime,
 		EndTime:   endTime,
+		ExePath:   exePath,
+		ExeArgs:   args,
 	}, nil
 }
 
@@ -505,13 +510,13 @@ func downloadTaskFiles(ioc IOClient, workDir string, cacheDir string, taskId str
 	}, nil
 }
 
-func uploadTaskResults(ioc IOClient, workDir string, stdoutPath string, taskSpec *task_queue.TaskSpec, retcode string, execResult *ExecResult, downloaded Stringset, initialMTimes map[string]time.Time, dlStats *TransferStats) error {
+func uploadTaskResults(ioc IOClient, workDir string, stdoutPath string, taskSpec *task_queue.TaskSpec, downloaded Stringset, initialMTimes map[string]time.Time) (UploadMapping, *TransferStats, error) {
 	finalMTimes := getModificationTimes(downloaded)
 	downloadsToExclude := getFilesWithMatchingMTimes(initialMTimes, finalMTimes)
 
 	filesToUpload, err := ResolveUploads(workDir, taskSpec.Uploads, downloadsToExclude)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 
 	addUpload(filesToUpload, stdoutPath, taskSpec.StdoutURL)
@@ -525,11 +530,11 @@ func uploadTaskResults(ioc IOClient, workDir string, stdoutPath string, taskSpec
 	}
 
 	if err = UploadMapped(ioc, filesToUpload); err != nil {
-		return err
+		return nil, nil, err
 	}
 	ulStats.EndTime = time.Now()
 
-	return writeResultFile(ioc, taskSpec.CommandResultURL, retcode, execResult, workDir, filesToUpload, taskSpec.Command, taskSpec.Parameters, dlStats, ulStats)
+	return filesToUpload, ulStats, nil
 }
 
 func determineCwd(workDir string, taskSpec *task_queue.TaskSpec) string {
@@ -567,7 +572,12 @@ func ExecuteTask(ioc IOClient, taskId string, taskSpec *task_queue.TaskSpec, roo
 
 	execLifecycleScript("PostExecScript", workDir, taskSpec.PostExecScript)
 
-	err = uploadTaskResults(ioc, workDir, dl.StdoutPath, taskSpec, retcode, execResult, dl.Downloaded, dl.InitialMTimes, dl.DlStats)
+	filesToUpload, ulStats, err := uploadTaskResults(ioc, workDir, dl.StdoutPath, taskSpec, dl.Downloaded, dl.InitialMTimes)
+	if err != nil {
+		return retcode, err
+	}
+
+	err = writeResultFile(ioc, taskSpec.CommandResultURL, retcode, execResult, workDir, filesToUpload, taskSpec.Parameters, dl.DlStats, ulStats)
 	if err != nil {
 		return retcode, err
 	}
@@ -620,7 +630,6 @@ func writeResultFile(ioc IOClient,
 	execResult *ExecResult,
 	workdir string,
 	filesToUpload map[string]string,
-	command string,
 	parameters map[string]string,
 	dlStats *TransferStats,
 	ulStats *TransferStats) error {
@@ -639,7 +648,8 @@ func writeResultFile(ioc IOClient,
 	elapsedTime := execResult.EndTime.Sub(execResult.StartTime).Seconds()
 
 	result := &ResultStruct{
-		Command:    command,
+		ExePath:    execResult.ExePath,
+		ExeArgs:    execResult.ExeArgs,
 		Parameters: parameters,
 		ReturnCode: retcode,
 		Files:      files,
