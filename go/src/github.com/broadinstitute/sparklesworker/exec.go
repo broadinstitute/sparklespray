@@ -16,6 +16,7 @@ import (
 
 	"cloud.google.com/go/logging"
 	"github.com/bmatcuk/doublestar"
+	"github.com/broadinstitute/sparklesworker/monitor"
 )
 
 type TaskDownload struct {
@@ -335,7 +336,6 @@ func execLifecycleScript(label string, workdir string, script string) {
 }
 
 // Perhaps should not be hardcoded, and could be determined at compile time somehow.
-const PAGE_SIZE = 4 * 1024
 
 func startWatchingLog(loggingClient *logging.Client, taskID string, stdoutPath string) (chan bool, error) {
 	log.Printf("Starting watch of logfile: %s", stdoutPath)
@@ -447,7 +447,7 @@ func prepareTaskDirectories(tasksDir string, cacheDir string) (workDir string, a
 	return workDir, absCacheDir, nil
 }
 
-func downloadTaskFiles(ioc IOClient, workDir string, cacheDir string, taskId string, taskSpec *TaskSpec, monitor *Monitor) (stdout *os.File, stdoutPath string, downloaded stringset, initialMTimes map[string]time.Time, err error) {
+func downloadTaskFiles(ioc IOClient, workDir string, cacheDir string, taskId string, taskSpec *TaskSpec, monitor *monitor.Monitor) (stdout *os.File, stdoutPath string, downloaded stringset, initialMTimes map[string]time.Time, err error) {
 	stdoutPath = path.Join(workDir, "stdout.txt")
 	execLifecycleScript("PreDownloadScript", workDir, taskSpec.PreDownloadScript)
 
@@ -512,7 +512,7 @@ func determineCwd(workDir string, taskSpec *TaskSpec) string {
 	return cwdDir
 }
 
-func ExecuteTask(ioc IOClient, taskId string, taskSpec *TaskSpec, rootDir string, cacheDir string, tasksDir string, monitor *Monitor) (string, error) {
+func ExecuteTask(ioc IOClient, taskId string, taskSpec *TaskSpec, rootDir string, cacheDir string, tasksDir string, monitor *monitor.Monitor) (string, error) {
 	workDir, cacheDir, err := prepareTaskDirectories(tasksDir, cacheDir)
 	if err != nil {
 		return "", err

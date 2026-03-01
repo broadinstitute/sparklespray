@@ -17,6 +17,10 @@ import (
 
 	"cloud.google.com/go/datastore"
 	"cloud.google.com/go/storage"
+	"github.com/broadinstitute/sparklesworker/control"
+	"github.com/broadinstitute/sparklesworker/monitor"
+	"github.com/broadinstitute/sparklesworker/task_queue"
+	"github.com/redis/go-redis/v9"
 	"github.com/urfave/cli"
 	"golang.org/x/net/context"
 	"golang.org/x/oauth2/google"
@@ -52,6 +56,7 @@ func Main() error {
 				cli.IntFlag{Name: "ftShutdownAfter", Value: 30, Usage: "Shutdown delay in seconds for the first task in a batch job"},
 				cli.BoolFlag{Name: "localhost", Usage: "If set, does not try to look up instance name and IP from metadata service, but assumes localhost"},
 				cli.StringFlag{Name: "expectedVersion", Usage: "Expected worker version; exits with error if version does not match"},
+				cli.StringFlag{Name: "redisAddr", Usage: "Redis server address (e.g., localhost:6379) for control channel; if empty, Redis control channel is disabled"},
 			},
 			Action: consume},
 		cli.Command{
@@ -297,7 +302,7 @@ func consume(c *cli.Context) error {
 		workerID = "localhost"
 	}
 
-	monitor := NewMonitor()
+	mon := monitor.New()
 
 	options := &Options{
 		ClaimTimeout:       30 * time.Second,                           // how long do we keep trying if we get an error claiming a task
@@ -312,7 +317,7 @@ func consume(c *cli.Context) error {
 			return "", err
 		}
 
-		return ExecuteTask(ioc, taskId, taskSpec, dir, cacheDir, tasksDir, monitor)
+		return ExecuteTask(ioc, taskId, taskSpec, dir, cacheDir, tasksDir, mon)
 	}
 
 	sleepUntilNotify := func(sleepTime time.Duration) {
@@ -328,39 +333,75 @@ func consume(c *cli.Context) error {
 	}
 
 	// Fetch cluster config for pub/sub topics
-	clusterConfig, err := GetCluster(ctx, client, cluster)
+	clusterConfig, err := task_queue.GetCluster(ctx, client, cluster)
 	if err != nil {
 		log.Printf("Failed to get cluster config: %v", err)
 		return err
 	}
 	log.Printf("Got cluster config: incoming_topic=%s, response_topic=%s", clusterConfig.IncomingTopic, clusterConfig.ResponseTopic)
 
-	// Start pub/sub subscriber
-	workerNotifier, cleanupSubscription, err := StartPubSubSubscriber(ctx, projectID, clusterConfig.IncomingTopic, clusterConfig.ResponseTopic, monitor, workerID)
-	if err != nil {
-		log.Printf("Failed to start pub/sub subscriber: %v", err)
-		return err
-	}
-	defer cleanupSubscription()
+	// Create message handler for control channel
+	msgHandler := monitor.NewHandler(mon, workerID)
 
-	queue, err := CreateDataStoreQueue(client, cluster, workerID, options.InitialClaimRetry, options.ClaimTimeout)
-	if err != nil {
-		log.Printf("failed to initialize queue: %v\n", err)
-		return err
+	// Start control channel and queue - use Redis if configured, otherwise use Pub/Sub and Datastore
+	var notifier *control.Notifier
+	var cleanupControlChannel func()
+	var queue task_queue.TaskQueue
+
+	redisAddr := c.String("redisAddr")
+	if redisAddr != "" {
+		log.Printf("Using Redis backend at %s", redisAddr)
+
+		// Create Redis client
+		redisClient := redis.NewClient(&redis.Options{
+			Addr: redisAddr,
+		})
+
+		// Test connection
+		if err := redisClient.Ping(ctx).Err(); err != nil {
+			log.Printf("Failed to connect to Redis at %s: %v", redisAddr, err)
+			return err
+		}
+		defer redisClient.Close()
+
+		// Start Redis control channel
+		notifier, cleanupControlChannel, err = control.StartRedisChannel(ctx, redisClient, cluster, workerID, msgHandler.HandleMessage)
+		if err != nil {
+			log.Printf("Failed to start Redis control channel: %v", err)
+			return err
+		}
+
+		// Create Redis queue
+		redisQueue := task_queue.NewRedisQueue(redisClient, cluster, workerID, options.InitialClaimRetry, options.ClaimTimeout)
+		redisQueue.WatchdogNotifier = NotifyWatchdog
+		queue = redisQueue
+	} else {
+		log.Printf("Using Google Cloud backend (Pub/Sub + Datastore)")
+
+		notifier, cleanupControlChannel, err = control.StartPubSubChannel(ctx, projectID, clusterConfig.IncomingTopic, clusterConfig.ResponseTopic, workerID, msgHandler.HandleMessage)
+		if err != nil {
+			log.Printf("Failed to start pub/sub subscriber: %v", err)
+			return err
+		}
+
+		dsQueue := task_queue.NewDataStoreQueue(client, cluster, workerID, options.InitialClaimRetry, options.ClaimTimeout)
+		dsQueue.WatchdogNotifier = NotifyWatchdog
+		queue = dsQueue
 	}
+	defer cleanupControlChannel()
 
 	// Notify that worker has started
-	workerNotifier.NotifyWorkerStarted()
+	notifier.NotifyWorkerStarted()
 
-	err = ConsumerRunLoop(ctx, queue, sleepUntilNotify, executor, options.SleepOnEmpty, options.MaxWaitForNewTasks, workerNotifier)
+	err = ConsumerRunLoop(ctx, queue, sleepUntilNotify, executor, options.SleepOnEmpty, options.MaxWaitForNewTasks, notifier)
 	if err != nil {
 		log.Printf("consumerRunLoop exited with: %v\n", err)
-		workerNotifier.NotifyWorkerStopping()
+		notifier.NotifyWorkerStopping()
 		return err
 	}
 
 	// Notify that worker is stopping
-	workerNotifier.NotifyWorkerStopping()
+	notifier.NotifyWorkerStopping()
 
 	return nil
 }

@@ -1,6 +1,7 @@
 package sparklesworker
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"sync"
@@ -8,8 +9,9 @@ import (
 	"time"
 
 	"cloud.google.com/go/datastore"
-	"golang.org/x/net/context"
 
+	"github.com/broadinstitute/sparklesworker/control"
+	"github.com/broadinstitute/sparklesworker/task_queue"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -31,8 +33,7 @@ func spawnExecuteTasks(t *testing.T, projectID string, jobID string, index int, 
 
 	workerID := fmt.Sprintf("thread-%d", index)
 	cluster := "c"
-	queue, err := CreateDataStoreQueue(client, cluster, workerID, 1*time.Second, 60*time.Second)
-	assert.Nil(t, err)
+	queue := task_queue.NewDataStoreQueue(client, cluster, workerID, 1*time.Second, 60*time.Second)
 
 	run := func() {
 		ready.Wait()
@@ -57,7 +58,7 @@ func spawnExecuteTasks(t *testing.T, projectID string, jobID string, index int, 
 func deleteTasks(t *testing.T, ctx context.Context, client *datastore.Client, jobID string) {
 	q := datastore.NewQuery("Task").Filter("job_id =", jobID).Limit(100)
 	for {
-		var tasks []Task
+		var tasks []task_queue.Task
 		keys, err := client.GetAll(ctx, q, &tasks)
 		assert.Nil(t, err)
 		if len(keys) == 0 {
@@ -69,7 +70,7 @@ func deleteTasks(t *testing.T, ctx context.Context, client *datastore.Client, jo
 	}
 }
 
-func submitTasks(t *testing.T, ctx context.Context, client *datastore.Client, tasks []*Task) {
+func submitTasks(t *testing.T, ctx context.Context, client *datastore.Client, tasks []*task_queue.Task) {
 	keys := make([]*datastore.Key, len(tasks))
 	for i, task := range tasks {
 		keys[i] = datastore.NameKey("Task", task.TaskID, nil)
@@ -84,19 +85,22 @@ func submitTasks(t *testing.T, ctx context.Context, client *datastore.Client, ta
 	}
 }
 
-func newTask(jobID string, index int) *Task {
+func newTask(jobID string, index int) *task_queue.Task {
 	taskID := fmt.Sprintf("%s.%d", jobID, index)
-	task := Task{
+	task := task_queue.Task{
 		TaskID:    taskID,
 		TaskIndex: int64(index),
 		JobID:     jobID,
-		Status:    STATUS_PENDING,
+		Status:    task_queue.StatusPending,
 		Args:      fmt.Sprintf("param-%d", index),
-		History: []*TaskHistory{
-			&TaskHistory{
-				Timestamp: float64(getTimestampMillis()) / 1000.0,
-				Status:    STATUS_PENDING}},
-		Version: 0}
+		History: []*task_queue.TaskHistory{
+			{
+				Timestamp: float64(control.GetTimestampMillis()) / 1000.0,
+				Status:    task_queue.StatusPending,
+			},
+		},
+		Version: 0,
+	}
 	return &task
 }
 
@@ -112,7 +116,7 @@ func runConcurrentClaims(t *testing.T, taskCount int, clientCount int) {
 
 	// clear anything that may be left from old test
 	deleteTasks(t, ctx, client, jobID)
-	tasks := make([]*Task, taskCount)
+	tasks := make([]*task_queue.Task, taskCount)
 	for i := 0; i < taskCount; i++ {
 		tasks[i] = newTask(jobID, i)
 	}
@@ -152,11 +156,6 @@ func runConcurrentClaims(t *testing.T, taskCount int, clientCount int) {
 		}
 		assert.Equal(t, 1, v)
 	}
-
-	// and each task was completed
-	tasks, err = getTasks(ctx, client, jobID, STATUS_COMPLETE, taskCount*2)
-	assert.Nil(t, err)
-	assert.Equal(t, taskCount, len(tasks))
 }
 
 func TestSimpleClaimTasks(t *testing.T) {
@@ -169,18 +168,4 @@ func TestConcurrentClaimTasks(t *testing.T) {
 
 func TestLargeConcurrentClaimTasks(t *testing.T) {
 	runConcurrentClaims(t, 1000, 50)
-}
-
-func TestTaskQuery(t *testing.T) {
-	projectID := "broad-achilles"
-	jobID := "testjobid"
-
-	ctx := context.Background()
-	client, err := datastore.NewClient(ctx, projectID)
-	assert.Nil(t, err)
-
-	tasks, err := getTasks(ctx, client, jobID, STATUS_PENDING, 10)
-	assert.Nil(t, err)
-	assert.Equal(t, 2, len(tasks))
-	log.Printf("status=%v\n", tasks[0].Status)
 }

@@ -1,41 +1,59 @@
-package sparklesworker
+package monitor
 
 import (
 	"fmt"
-	"io/ioutil"
 	"log"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 )
 
+// PageSize is the system page size in bytes
+const PageSize = 4 * 1024
+
 // Monitor tracks log files for running tasks
 type Monitor struct {
 	mutex        sync.Mutex
-	logPerTaskId map[string]string
+	LogPerTaskId map[string]string
 }
 
-func NewMonitor() *Monitor {
-	return &Monitor{logPerTaskId: make(map[string]string)}
+// New creates a new Monitor
+func New() *Monitor {
+	return &Monitor{LogPerTaskId: make(map[string]string)}
 }
 
+// StartWatchingLog registers a log file for a task
 func (m *Monitor) StartWatchingLog(taskId string, stdoutPath string) {
 	log.Printf("StartWatchingLog(\"%s\", \"%s\")", taskId, stdoutPath)
 
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
-	m.logPerTaskId[taskId] = stdoutPath
+	m.LogPerTaskId[taskId] = stdoutPath
+}
+
+// GetLogPath returns the log path for a task (thread-safe)
+func (m *Monitor) GetLogPath(taskId string) (string, bool) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
+	path, ok := m.LogPerTaskId[taskId]
+	return path, ok
 }
 
 // MemoryUsage holds memory stats from /proc/*/statm
 type MemoryUsage struct {
-	totalSize, totalData, totalShared, totalResident int64 // sum of size of each process visible
-	procCount                                        int   // number of processes visible
+	TotalSize     int64 // sum of size of each process visible
+	TotalData     int64
+	TotalShared   int64
+	TotalResident int64
+	ProcCount     int // number of processes visible
 }
 
-func getMemoryUsage() (*MemoryUsage, error) {
+// GetMemoryUsage reads memory stats from /proc/*/statm
+func GetMemoryUsage() (*MemoryUsage, error) {
 	filenames, err := filepath.Glob("/proc/*/statm")
 	if err != nil {
 		return nil, err
@@ -48,14 +66,14 @@ func getMemoryUsage() (*MemoryUsage, error) {
 	totalResident := int64(0)
 
 	for _, filename := range filenames {
-		contents, err := ioutil.ReadFile(filename)
+		contents, err := os.ReadFile(filename)
 		if err != nil {
 			log.Printf("Could not read %s for memory stats, skipping...", filename)
 			continue
 		}
 
-		str_contents := string(contents)
-		fields := strings.Split(str_contents, " ")
+		strContents := string(contents)
+		fields := strings.Split(strContents, " ")
 
 		// from the /proc docs
 		// 		size       (1) total program size
@@ -71,7 +89,6 @@ func getMemoryUsage() (*MemoryUsage, error) {
 		size, err := strconv.ParseInt(fields[0], 10, 64)
 		var resident int64
 		var shared int64
-		// var text int64
 		var data int64
 		if err == nil {
 			resident, err = strconv.ParseInt(fields[1], 10, 64)
@@ -79,9 +96,6 @@ func getMemoryUsage() (*MemoryUsage, error) {
 		if err == nil {
 			shared, err = strconv.ParseInt(fields[2], 10, 64)
 		}
-		// if err == nil {
-		// 	text, err = strconv.ParseInt(fields[3], 10, 64)
-		// }
 		if err == nil {
 			data, err = strconv.ParseInt(fields[5], 10, 64)
 		}
@@ -109,9 +123,9 @@ type CPUStats struct {
 	Iowait int64
 }
 
-// getCPUStats reads CPU counters from /proc/stat
-func getCPUStats() (*CPUStats, error) {
-	contents, err := ioutil.ReadFile("/proc/stat")
+// GetCPUStats reads CPU counters from /proc/stat
+func GetCPUStats() (*CPUStats, error) {
+	contents, err := os.ReadFile("/proc/stat")
 	if err != nil {
 		return nil, err
 	}
@@ -148,9 +162,9 @@ type SystemMemory struct {
 	Free      int64
 }
 
-// getSystemMemory reads memory info from /proc/meminfo
-func getSystemMemory() (*SystemMemory, error) {
-	contents, err := ioutil.ReadFile("/proc/meminfo")
+// GetSystemMemory reads memory info from /proc/meminfo
+func GetSystemMemory() (*SystemMemory, error) {
+	contents, err := os.ReadFile("/proc/meminfo")
 	if err != nil {
 		return nil, err
 	}
@@ -183,9 +197,9 @@ type MemoryPressure struct {
 	FullAvg10 int32
 }
 
-// getMemoryPressure reads PSI memory pressure (gracefully returns -1 if unavailable)
-func getMemoryPressure() *MemoryPressure {
-	contents, err := ioutil.ReadFile("/proc/pressure/memory")
+// GetMemoryPressure reads PSI memory pressure (gracefully returns -1 if unavailable)
+func GetMemoryPressure() *MemoryPressure {
+	contents, err := os.ReadFile("/proc/pressure/memory")
 	if err != nil {
 		// PSI not available (older kernel or not enabled)
 		return &MemoryPressure{SomeAvg10: -1, FullAvg10: -1}

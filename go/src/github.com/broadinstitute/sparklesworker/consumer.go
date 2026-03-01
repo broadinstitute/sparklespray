@@ -5,68 +5,10 @@ import (
 	"time"
 
 	"cloud.google.com/go/logging"
+	"github.com/broadinstitute/sparklesworker/control"
+	"github.com/broadinstitute/sparklesworker/task_queue"
 	"golang.org/x/net/context"
 )
-
-const STATUS_CLAIMED = "claimed"
-const STATUS_PENDING = "pending"
-const STATUS_COMPLETE = "complete"
-const STATUS_KILLED = "killed"
-const JOB_STATUS_KILLED = "killed"
-const STATUS_FAILED = "failed"
-
-type TaskHistory struct {
-	Timestamp       float64 `datastore:"timestamp,noindex"`
-	Status          string  `datastore:"status,noindex"`
-	FailureReason   string  `datastore:"failure_reason,noindex,omitempty"`
-	OwnedByWorkerID string  `datastore:"owned_by_worker_id,noindex,omitempty"`
-}
-
-type Task struct {
-	// will be of the form: job_id + task_index
-	TaskID           string         `datastore:"task_id" json:"task_id"`
-	TaskIndex        int64          `datastore:"task_index" json:"task_index"`
-	JobID            string         `datastore:"job_id" json:"job_id"`
-	Status           string         `datastore:"status" json:"status"`
-	OwnedByWorkerID  string         `datastore:"owned_by_worker_id" json:"owned_by_worker_id"`
-	Args             string         `datastore:"args" json:"args"`
-	History          []*TaskHistory `datastore:"history" json:"history"`
-	CommandResultURL string         `datastore:"command_result_url" json:"command_result_url"`
-	FailureReason    string         `datastore:"failure_reason,omitempty" json:"failure_reason"`
-	Version          int32          `datastore:"version" json:"version"`
-	ExitCode         string         `datastore:"exit_code" json:"exit_code"`
-	Cluster          string         `datastore:"cluster" json:"cluster"`
-	MonitorAddress   string         `datastore:"monitor_address" json:"monitor_address"`
-	LogURL           string         `datastore:"log_url", json:"log_url"`
-	LastUpdated      float64        `datastore:"last_updated" json:"last_updated"`
-}
-
-type TaskStatusNotification struct {
-	TaskID        string `json:"task_id"`
-	Status        string `json:"status"`
-	ExitCode      string `json:"exit_code"`
-	FailureReason string `json:"failure_reason"`
-	Version       int32  `json:"version"`
-}
-
-type Job struct {
-	JobID                  int      `datastore:"job_id"`
-	Tasks                  []string `datastore:"tasks"`
-	KubeJobSpec            string   `datastore:"kube_job_spec"`
-	Metadata               string   `datastore:"metadata"`
-	Cluster                string   `datastore:"cluster"`
-	Status                 string   `datastore:"status"`
-	SubmitTime             float64  `datastore:"submit_time"`
-	MaxPreemptableAttempts int32    `datastore:"max_preemptable_attempts"`
-	TargetNodeCount        int32    `datastore:"target_node_count"`
-}
-
-type Cluster struct {
-	IncomingTopic string `datastore:"incoming_topic"`
-	ResponseTopic string `datastore:"response_topic"`
-}
-
-const INITIAL_CLAIM_RETRY_DELAY = 1000
 
 type Options struct {
 	WorkerID           string
@@ -77,24 +19,14 @@ type Options struct {
 	LoggingClient      *logging.Client
 }
 
-type Queue interface {
-	claimTask(ctx context.Context) (*Task, error)
-	isJobKilled(ctx context.Context, JobID string) (bool, error)
-	atomicUpdateTask(ctx context.Context, task_id string, mutateTaskCallback func(task *Task) bool) (*Task, error)
-}
-
 type Executor func(taskId string, taskParam string) (string, error)
 
-func getTimestampMillis() int64 {
-	return int64(time.Now().UnixNano()) / int64(time.Millisecond)
-}
-
-func ConsumerRunLoop(ctx context.Context, queue Queue, sleepUntilNotify func(sleepTime time.Duration), executor Executor, SleepOnEmpty time.Duration, MaxWaitForNewTasks time.Duration, notifier *WorkerNotifier) error {
+func ConsumerRunLoop(ctx context.Context, queue task_queue.TaskQueue, sleepUntilNotify func(sleepTime time.Duration), executor Executor, SleepOnEmpty time.Duration, MaxWaitForNewTasks time.Duration, notifier *control.Notifier) error {
 	firstClaim := true
 	lastClaim := time.Now()
 	log.Printf("Starting ConsumerRunLoop, sleeping %v once queue drains", SleepOnEmpty)
 	for {
-		claimed, err := queue.claimTask(ctx)
+		claimed, err := queue.ClaimTask(ctx)
 		if err != nil {
 			return err
 		}
@@ -126,9 +58,9 @@ func ConsumerRunLoop(ctx context.Context, queue Queue, sleepUntilNotify func(sle
 		// Notify that task has started
 		notifier.NotifyTaskStarted(claimed.TaskID)
 
-		jobKilled, err := queue.isJobKilled(ctx, claimed.JobID)
+		jobKilled, err := queue.IsJobKilled(ctx, claimed.JobID)
 		if err != nil {
-			log.Printf("Got error in isJobKilled for %s: %v", claimed.JobID, err)
+			log.Printf("Got error in IsJobKilled for %s: %v", claimed.JobID, err)
 			return err
 		}
 
@@ -169,131 +101,79 @@ func ConsumerRunLoop(ctx context.Context, queue Queue, sleepUntilNotify func(sle
 	return nil
 }
 
-func updateTaskClaimed(ctx context.Context, q *DataStoreQueue, task_id string, workerID string) (*Task, error) {
-	now := getTimestampMillis()
-	event := TaskHistory{Timestamp: float64(now) / 1000.0,
-		Status:          STATUS_CLAIMED,
-		OwnedByWorkerID: workerID}
+func updateTaskCompleted(ctx context.Context, q task_queue.TaskQueue, taskID string, retcode string) (*task_queue.Task, error) {
+	log.Printf("updateTaskCompleted of task %v, retcode=%s", taskID, retcode)
 
-	mutate := func(task *Task) bool {
-		if task.Status != STATUS_PENDING {
-			log.Printf("Expected status to be pending but was '%s'\n", task.Status)
-			return false
-		}
-
-		task.History = append(task.History, &event)
-		task.Status = STATUS_CLAIMED
-		task.OwnedByWorkerID = workerID
-		task.LastUpdated = float64(now) / 1000.0
-
-		return true
+	now := control.GetTimestampMillis()
+	taskHistory := &task_queue.TaskHistory{
+		Timestamp: float64(now) / 1000.0,
+		Status:    task_queue.StatusComplete,
 	}
 
-	updatedTask, err := q.atomicUpdateTask(ctx, task_id, mutate)
-	if err != nil {
-		return nil, err
-	}
-
-	notifyTaskStatusChanged(updatedTask)
-
-	return updatedTask, nil
-}
-
-func updateTaskCompleted(ctx context.Context, q Queue, task_id string, retcode string) (*Task, error) {
-	log.Printf("updateTaskCompleted of task %v, retcode=%s", task_id, retcode)
-
-	now := getTimestampMillis()
-	taskHistory := &TaskHistory{Timestamp: float64(now) / 1000.0,
-		Status: STATUS_COMPLETE}
-
-	mutate := func(task *Task) bool {
-		if task.Status != STATUS_CLAIMED {
+	mutate := func(task *task_queue.Task) bool {
+		if task.Status != task_queue.StatusClaimed {
 			log.Printf("While attempting to mark task as complete, found task had status %v. Aborting", task.Status)
 			return false
 		}
 
 		task.History = append(task.History, taskHistory)
-		task.Status = STATUS_COMPLETE
+		task.Status = task_queue.StatusComplete
 		task.ExitCode = retcode
 		task.LastUpdated = float64(now) / 1000.0
 
 		return true
 	}
 
-	updatedTask, err := q.atomicUpdateTask(ctx, task_id, mutate)
-	if err != nil {
-		// I suppose this is not technically correct. Could be a simultaneous update of "success" or "failed" and "lost"
-		return nil, err
-	}
-
-	notifyTaskStatusChanged(updatedTask)
-
-	return updatedTask, nil
+	return q.AtomicUpdateTask(ctx, taskID, mutate)
 }
 
-func updateTaskFailed(ctx context.Context, q Queue, task_id string, failure string) (*Task, error) {
-	log.Printf("updateTaskFailed of task %v, failure=%s", task_id, failure)
+func updateTaskFailed(ctx context.Context, q task_queue.TaskQueue, taskID string, failure string) (*task_queue.Task, error) {
+	log.Printf("updateTaskFailed of task %v, failure=%s", taskID, failure)
 
-	now := getTimestampMillis()
-	taskHistory := &TaskHistory{Timestamp: float64(now) / 1000.0,
-		Status: STATUS_FAILED}
+	now := control.GetTimestampMillis()
+	taskHistory := &task_queue.TaskHistory{
+		Timestamp: float64(now) / 1000.0,
+		Status:    task_queue.StatusFailed,
+	}
 
-	mutate := func(task *Task) bool {
-		if task.Status != STATUS_CLAIMED {
-			log.Printf("While attempting to mark task as complete, found task had status %v. Aborting", task.Status)
+	mutate := func(task *task_queue.Task) bool {
+		if task.Status != task_queue.StatusClaimed {
+			log.Printf("While attempting to mark task as failed, found task had status %v. Aborting", task.Status)
 			return false
 		}
 
 		task.History = append(task.History, taskHistory)
-		task.Status = STATUS_FAILED
+		task.Status = task_queue.StatusFailed
 		task.FailureReason = failure
 		task.LastUpdated = float64(now) / 1000.0
 
 		return true
 	}
 
-	updatedTask, err := q.atomicUpdateTask(ctx, task_id, mutate)
-	if err != nil {
-		// I suppose this is not technically correct. Could be a simultaneous update of "success" or "failed" and "lost"
-		return nil, err
-	}
-
-	notifyTaskStatusChanged(updatedTask)
-
-	return updatedTask, nil
+	return q.AtomicUpdateTask(ctx, taskID, mutate)
 }
 
-func updateTaskKilled(ctx context.Context, q Queue, task_id string) (*Task, error) {
-	log.Printf("updateTaskKilled of task %v", task_id)
+func updateTaskKilled(ctx context.Context, q task_queue.TaskQueue, taskID string) (*task_queue.Task, error) {
+	log.Printf("updateTaskKilled of task %v", taskID)
 
-	now := getTimestampMillis()
-	taskHistory := &TaskHistory{Timestamp: float64(now) / 1000.0,
-		Status: STATUS_KILLED}
+	now := control.GetTimestampMillis()
+	taskHistory := &task_queue.TaskHistory{
+		Timestamp: float64(now) / 1000.0,
+		Status:    task_queue.StatusKilled,
+	}
 
-	mutate := func(task *Task) bool {
-		if task.Status != STATUS_CLAIMED {
+	mutate := func(task *task_queue.Task) bool {
+		if task.Status != task_queue.StatusClaimed {
 			log.Printf("While attempting to mark task as killed, found task had status %v. Aborting", task.Status)
 			return false
 		}
 
 		task.History = append(task.History, taskHistory)
-		task.Status = STATUS_KILLED
+		task.Status = task_queue.StatusKilled
 		task.LastUpdated = float64(now) / 1000.0
 
 		return true
 	}
 
-	updatedTask, err := q.atomicUpdateTask(ctx, task_id, mutate)
-	if err != nil {
-		// I suppose this is not technically correct. Could be a simultaneous update of "success" or "failed" and "lost"
-		return nil, err
-	}
-
-	notifyTaskStatusChanged(updatedTask)
-
-	return updatedTask, nil
-}
-
-func notifyTaskStatusChanged(task *Task) {
-	// notification := TaskStatusNotification{TaskID = task.TaskID, Status = task.Status, ExitCode = task.ExitCode, FailureReason = task.FailureReason, Version = task.Version}
+	return q.AtomicUpdateTask(ctx, taskID, mutate)
 }
