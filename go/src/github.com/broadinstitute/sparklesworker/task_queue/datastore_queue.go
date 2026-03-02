@@ -200,6 +200,27 @@ func (q *DataStoreQueue) IsJobKilled(ctx context.Context, jobID string) (bool, e
 	return job.Status == JobStatusKilled, nil
 }
 
+// AddTasks inserts tasks into Datastore in batches of 500 (the PutMulti limit).
+func (q *DataStoreQueue) AddTasks(ctx context.Context, tasks []*Task) error {
+	const batchSize = 500
+	for i := 0; i < len(tasks); i += batchSize {
+		end := i + batchSize
+		if end > len(tasks) {
+			end = len(tasks)
+		}
+		batch := tasks[i:end]
+		keys := make([]*datastore.Key, len(batch))
+		for j, task := range batch {
+			keys[j] = datastore.NameKey(TaskCollection, task.TaskID, nil)
+		}
+		if _, err := q.client.PutMulti(ctx, keys, batch); err != nil {
+			return err
+		}
+		log.Printf("Inserted tasks %d-%d", i, end-1)
+	}
+	return nil
+}
+
 // AtomicUpdateTask updates a task atomically using the provided callback
 func (q *DataStoreQueue) AtomicUpdateTask(ctx context.Context, taskID string, mutateTaskCallback func(task *Task) bool) (*Task, error) {
 	var task Task

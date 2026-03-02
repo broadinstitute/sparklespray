@@ -26,8 +26,8 @@ type ResultFile struct {
 }
 
 type ResourceUsage struct {
-	UserCPUTime        syscall.Timeval `json:"user_cpu_time"`
-	SystemCPUTime      syscall.Timeval `json:"system_cpu_time"`
+	UserCPUTime        float64 `json:"user_cpu_time"`
+	SystemCPUTime      float64 `json:"system_cpu_time"`
 	MaxMemorySize      int64           `json:"max_memory_size"`
 	SharedMemorySize   int64           `json:"shared_memory_size"`
 	UnsharedMemorySize int64           `json:"unshared_memory_size"`
@@ -68,6 +68,10 @@ func sumFileSizes(files Stringset) int64 {
 
 func toUnixFloat(t time.Time) float64 {
 	return float64(t.Unix()) + float64(t.Nanosecond())/1e9
+}
+
+func timevalToSeconds(tv syscall.Timeval) float64 {
+	return float64(tv.Sec) + float64(tv.Usec)/1e6
 }
 
 type ResultStruct struct {
@@ -654,8 +658,8 @@ func writeResultFile(ioc IOClient,
 		ReturnCode: retcode,
 		Files:      files,
 		Usage: &ResourceUsage{
-			UserCPUTime:        rusage.Utime,
-			SystemCPUTime:      rusage.Stime,
+			UserCPUTime:        timevalToSeconds(rusage.Utime),
+			SystemCPUTime:      timevalToSeconds(rusage.Stime),
 			MaxMemorySize:      rusage.Maxrss,
 			SharedMemorySize:   rusage.Isrss,
 			UnsharedMemorySize: rusage.Ixrss,

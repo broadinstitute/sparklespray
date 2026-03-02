@@ -1,6 +1,7 @@
 package consumer
 
 import (
+	"encoding/json"
 	"log"
 	"time"
 
@@ -52,7 +53,8 @@ func RunLoop(ctx context.Context, queue task_queue.TaskQueue, sleepUntilNotify f
 
 		lastClaim = time.Now()
 
-		log.Printf("Claimed task %s", claimed.TaskID)
+		taskJSON, _ := json.MarshalIndent(claimed, "", "  ")
+		log.Printf("Claimed task %s:\n%s", claimed.TaskID, taskJSON)
 		firstClaim = false
 
 		// Notify that task has started

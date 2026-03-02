@@ -94,4 +94,7 @@ type TaskQueue interface {
 	// AtomicUpdateTask updates a task atomically using the provided callback.
 	// The callback should return true if the update should proceed.
 	AtomicUpdateTask(ctx context.Context, taskID string, mutateTaskCallback func(task *Task) bool) (*Task, error)
+
+	// AddTasks inserts tasks into the queue.
+	AddTasks(ctx context.Context, tasks []*Task) error
 }

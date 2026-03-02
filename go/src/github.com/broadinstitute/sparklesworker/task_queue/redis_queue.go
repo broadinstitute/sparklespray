@@ -124,6 +124,23 @@ func (q *RedisQueue) IsJobKilled(ctx context.Context, jobID string) (bool, error
 	return status == JobStatusKilled, nil
 }
 
+// AddTasks inserts tasks into Redis using a pipeline.
+func (q *RedisQueue) AddTasks(ctx context.Context, tasks []*Task) error {
+	pipe := q.client.Pipeline()
+	for _, task := range tasks {
+		taskJSON, err := json.Marshal(task)
+		if err != nil {
+			return err
+		}
+		pipe.Set(ctx, q.taskKey(task.TaskID), taskJSON, 0)
+		if task.Status == StatusPending {
+			pipe.SAdd(ctx, q.pendingSetKey(), task.TaskID)
+		}
+	}
+	_, err := pipe.Exec(ctx)
+	return err
+}
+
 // AtomicUpdateTask updates a task atomically using Redis WATCH/MULTI/EXEC
 func (q *RedisQueue) AtomicUpdateTask(ctx context.Context, taskID string, mutateTaskCallback func(task *Task) bool) (*Task, error) {
 	taskKey := q.taskKey(taskID)
