@@ -123,9 +123,15 @@ def create_batch_job_from_job_spec(
         )
     ]
 
+    labels = {
+            "sparkles-job": normalize_label(self.sparkles_job),
+            "sparkles-cluster": self.sparkles_cluster,
+            # "sparkles-timestamp": self.sparkles_timestamp
+        }
     job = batch.Job(
         task_groups=task_groups,
         allocation_policy=batch.AllocationPolicy(
+            labels=labels,
             location=batch.AllocationPolicy.LocationPolicy(
                 allowed_locations=self.locations
             ),
@@ -153,11 +159,7 @@ def create_batch_job_from_job_spec(
             tags=self.network_tags,
         ),
         logs_policy=batch.LogsPolicy(destination="CLOUD_LOGGING"),
-        labels={
-            "sparkles-job": normalize_label(self.sparkles_job),
-            "sparkles-cluster": self.sparkles_cluster,
-            # "sparkles-timestamp": self.sparkles_timestamp
-        },
+        labels=labels,
     )
 
     return batch.CreateJobRequest(
