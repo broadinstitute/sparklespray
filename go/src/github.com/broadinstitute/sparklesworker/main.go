@@ -60,6 +60,7 @@ func Main() error {
 				cli.BoolFlag{Name: "localhost", Usage: "If set, does not try to look up instance name and IP from metadata service, but assumes localhost"},
 				cli.StringFlag{Name: "expectedVersion", Usage: "Expected worker version; exits with error if version does not match"},
 				cli.StringFlag{Name: "redisAddr", Usage: "Redis server address (e.g., localhost:6379) for control channel; if empty, Redis control channel is disabled"},
+				cli.StringFlag{Name: "aetherRoot", Usage: "Aether store root (gs://bucket/prefix or local path)"},
 			},
 			Action: consume},
 		cli.Command{
@@ -372,8 +373,10 @@ func consume(c *cli.Context) error {
 		MaxWaitForNewTasks: time.Duration(shutdownAfter) * time.Second, // how long to wait for a new task to arrive if the queue is empty
 		WorkerID:           workerID}
 
+	aetherCfg := consumer.AetherConfig{Root: c.String("aetherRoot")}
+
 	executor := func(taskId string, taskSpec *task_queue.TaskSpec) (string, error) {
-		return consumer.ExecuteTask(ioc, taskId, taskSpec, dir, cacheDir, tasksDir, mon)
+		return consumer.ExecuteTask(ctx, ioc, aetherCfg, taskId, taskSpec, dir, cacheDir, tasksDir, mon)
 	}
 
 	sleepUntilNotify := func(sleepTime time.Duration) {

@@ -4,18 +4,9 @@ import (
 	"context"
 )
 
-type TaskDownload struct {
-	IsCASKey    bool   `json:"is_cas_key"`
-	Executable  bool   `json:"executable"`
-	SymlinkSafe bool   `json:"symlink_safe"`
-	Dst         string `json:"dst"`
-	SrcURL      string `json:"src_url"`
-}
-
 type UploadSpec struct {
 	IncludePatterns []string `json:"include_patterns"`
 	ExcludePatterns []string `json:"exclude_patterns"`
-	DstURL          string   `json:"dst_url"`
 }
 
 type TaskSpec struct {
@@ -26,7 +17,7 @@ type TaskSpec struct {
 	PreExecScript      string            `json:"pre-exec-script,omitempty"`
 	Parameters         map[string]string `json:"parameters,omitempty"`
 	Uploads            *UploadSpec       `json:"uploads"`
-	Downloads          []*TaskDownload   `json:"downloads"`
+	AetherFSRoot       string            `json:"aether_fs_root"`
 	Command            string            `json:"command"`
 	CommandResultURL   string            `json:"command_result_url"`
 	StdoutURL          string            `json:"stdout_url"`
@@ -74,11 +65,11 @@ type Job struct {
 
 // Status constants
 const (
-	StatusClaimed = "claimed"
-	StatusPending = "pending"
-	StatusComplete = "complete"
-	StatusKilled  = "killed"
-	StatusFailed  = "failed"
+	StatusClaimed   = "claimed"
+	StatusPending   = "pending"
+	StatusComplete  = "complete"
+	StatusKilled    = "killed"
+	StatusFailed    = "failed"
 	JobStatusKilled = "killed"
 )
 

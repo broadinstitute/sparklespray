@@ -19,16 +19,12 @@ func TestTaskSaveLoadRoundTrip(t *testing.T) {
 				"key1": "value1",
 				"key2": "value2",
 			},
-			Downloads: []*TaskDownload{
-				{SrcURL: "gs://bucket/file.txt", Dst: "file.txt", IsCASKey: true, Executable: true},
-			},
 			Uploads: &UploadSpec{
-				DstURL:          "gs://bucket/output",
 				IncludePatterns: []string{"*.txt"},
 				ExcludePatterns: []string{"*.tmp"},
 			},
+			AetherFSRoot:     "gs://bucket/aether",
 			DockerImage:      "ubuntu:22.04",
-			StdoutURL:        "gs://bucket/stdout.txt",
 			CommandResultURL: "gs://bucket/result.json",
 		},
 		History: []*TaskHistory{
@@ -54,17 +50,10 @@ func TestTaskSaveLoadRoundTrip(t *testing.T) {
 	assert.Equal(t, original.TaskSpec.Command, loaded.TaskSpec.Command)
 	assert.Equal(t, original.TaskSpec.Parameters, loaded.TaskSpec.Parameters)
 	assert.Equal(t, original.TaskSpec.DockerImage, loaded.TaskSpec.DockerImage)
-	assert.Equal(t, original.TaskSpec.StdoutURL, loaded.TaskSpec.StdoutURL)
+	assert.Equal(t, original.TaskSpec.AetherFSRoot, loaded.TaskSpec.AetherFSRoot)
 	assert.Equal(t, original.TaskSpec.CommandResultURL, loaded.TaskSpec.CommandResultURL)
 
-	require.Len(t, loaded.TaskSpec.Downloads, 1)
-	assert.Equal(t, original.TaskSpec.Downloads[0].SrcURL, loaded.TaskSpec.Downloads[0].SrcURL)
-	assert.Equal(t, original.TaskSpec.Downloads[0].Dst, loaded.TaskSpec.Downloads[0].Dst)
-	assert.Equal(t, original.TaskSpec.Downloads[0].IsCASKey, loaded.TaskSpec.Downloads[0].IsCASKey)
-	assert.Equal(t, original.TaskSpec.Downloads[0].Executable, loaded.TaskSpec.Downloads[0].Executable)
-
 	require.NotNil(t, loaded.TaskSpec.Uploads)
-	assert.Equal(t, original.TaskSpec.Uploads.DstURL, loaded.TaskSpec.Uploads.DstURL)
 	assert.Equal(t, original.TaskSpec.Uploads.IncludePatterns, loaded.TaskSpec.Uploads.IncludePatterns)
 	assert.Equal(t, original.TaskSpec.Uploads.ExcludePatterns, loaded.TaskSpec.Uploads.ExcludePatterns)
 

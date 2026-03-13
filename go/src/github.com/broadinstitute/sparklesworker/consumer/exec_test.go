@@ -2,8 +2,6 @@ package consumer
 
 import (
 	"encoding/json"
-	"os"
-	"path/filepath"
 	"syscall"
 	"testing"
 	"time"
@@ -32,13 +30,6 @@ func (c *captureIOClient) IsExists(url string) (bool, error)             { retur
 func TestWriteResultFile(t *testing.T) {
 	workdir := t.TempDir()
 
-	outputFile := filepath.Join(workdir, "output.txt")
-	require.NoError(t, os.WriteFile(outputFile, []byte("hello"), 0644))
-
-	filesToUpload := map[string]string{
-		outputFile: "gs://bucket/output.txt",
-	}
-
 	startTime := time.Unix(1000, 0)
 	endTime := time.Unix(1010, 0)
 	dlStart := time.Unix(990, 0)
@@ -58,9 +49,10 @@ func TestWriteResultFile(t *testing.T) {
 	dlStats := &TransferStats{Bytes: 1024, FileCount: 2, StartTime: dlStart, EndTime: dlEnd}
 	ulStats := &TransferStats{Bytes: 512, FileCount: 1, StartTime: ulStart, EndTime: ulEnd}
 	parameters := map[string]string{"key": "value"}
+	manifestKey := "sha256:abc123"
 
 	ioc := newCaptureIOClient()
-	err := writeResultFile(ioc, "gs://bucket/result.json", "0", execResult, workdir, filesToUpload, parameters, dlStats, ulStats)
+	err := writeResultFile(ioc, "gs://bucket/result.json", "0", execResult, workdir, manifestKey, parameters, dlStats, ulStats)
 	require.NoError(t, err)
 
 	resultBytes, ok := ioc.uploadedBytes["gs://bucket/result.json"]
@@ -73,10 +65,7 @@ func TestWriteResultFile(t *testing.T) {
 	assert.Equal(t, []string{"/bin/sh", "-c", "echo hello"}, result.ExeArgs)
 	assert.Equal(t, "0", result.ReturnCode)
 	assert.Equal(t, parameters, result.Parameters)
-
-	require.Len(t, result.Files, 1)
-	assert.Equal(t, "output.txt", result.Files[0].Src)
-	assert.Equal(t, "gs://bucket/output.txt", result.Files[0].DstURL)
+	assert.Equal(t, manifestKey, result.ManifestKey)
 
 	require.NotNil(t, result.Usage)
 	assert.Equal(t, toUnixFloat(startTime), result.Usage.StartTime)
@@ -104,6 +93,7 @@ func TestWriteResultFile(t *testing.T) {
 	assert.Contains(t, raw, "exe_path")
 	assert.Contains(t, raw, "exe_args")
 	assert.Contains(t, raw, "return_code")
+	assert.Contains(t, raw, "manifest_key")
 	usage := raw["resource_usage"].(map[string]any)
 	assert.Contains(t, usage, "download_bytes")
 	assert.Contains(t, usage, "download_elapsed")
@@ -128,7 +118,7 @@ func TestWriteResultFileUsesExePathFromExecResult(t *testing.T) {
 
 	ioc := newCaptureIOClient()
 	err := writeResultFile(ioc, "gs://bucket/result.json", "1", execResult, workdir,
-		map[string]string{}, nil, &TransferStats{}, &TransferStats{})
+		"", nil, &TransferStats{}, &TransferStats{})
 	require.NoError(t, err)
 
 	var result ResultStruct
@@ -145,7 +135,7 @@ func TestWriteResultFileJsonFieldNames(t *testing.T) {
 
 	err := writeResultFile(ioc, "gs://bucket/result.json", "0",
 		&ExecResult{Rusage: &syscall.Rusage{}, StartTime: time.Now(), EndTime: time.Now()},
-		workdir, map[string]string{}, nil,
+		workdir, "", nil,
 		&TransferStats{}, &TransferStats{})
 	require.NoError(t, err)
 
@@ -153,7 +143,7 @@ func TestWriteResultFileJsonFieldNames(t *testing.T) {
 	var raw map[string]any
 	require.NoError(t, json.Unmarshal(ioc.uploadedBytes["gs://bucket/result.json"], &raw))
 
-	expectedTopLevel := []string{"exe_path", "exe_args", "return_code", "files", "resource_usage"}
+	expectedTopLevel := []string{"exe_path", "exe_args", "return_code", "resource_usage"}
 	for _, field := range expectedTopLevel {
 		assert.Contains(t, raw, field, "missing top-level field %q", field)
 	}

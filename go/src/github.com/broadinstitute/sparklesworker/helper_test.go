@@ -71,33 +71,21 @@ func TestResolveUploads(t *testing.T) {
 	err = os.Mkdir(workdir, 0700)
 	check(err)
 
-	// make a few files
-	downloadedFile := path.Join(workdir, "downloadedFile.txt")
-	err = ioutil.WriteFile(downloadedFile, make([]byte, 1), 0644)
+	file1 := path.Join(workdir, "file1.txt")
+	err = ioutil.WriteFile(file1, make([]byte, 1), 0644)
 	check(err)
 
-	// one where we pretend it was downloaded
-	downloaded := make(consumer.Stringset)
-	downloaded[downloadedFile] = true
-
-	// and one which is new
-	toUploadFile := path.Join(workdir, "needUpload.txt")
-	err = ioutil.WriteFile(toUploadFile, make([]byte, 1), 0644)
+	file2 := path.Join(workdir, "file2.txt")
+	err = ioutil.WriteFile(file2, make([]byte, 1), 0644)
 	check(err)
 
-	log.Printf("toUploadFile=%v\n", toUploadFile)
+	log.Printf("file1=%v file2=%v\n", file1, file2)
 
-	uploadSpec := &task_queue.UploadSpec{DstURL: "gs://fake/dest", IncludePatterns: []string{"*"}}
-	filesToUpload, err := consumer.ResolveUploads(workdir, uploadSpec, downloaded)
+	uploadSpec := &task_queue.UploadSpec{IncludePatterns: []string{"*"}}
+	filesToUpload, err := consumer.ResolveUploads(workdir, uploadSpec)
 	assert.Nil(t, err)
 
-	assert.Len(t, filesToUpload, 1)
-
-	ioc := NewMockIOClient()
-	consumer.UploadMapped(ioc, filesToUpload)
-
-	assert.Len(t, ioc.uploaded, 1)
-	assert.Equal(t, toUploadFile+" -> gs://fake/dest/needUpload.txt", ioc.uploaded[0])
+	assert.Len(t, filesToUpload, 2)
 	log.Printf("Testcommpla\n")
 }
 
@@ -146,7 +134,7 @@ func TestExecute(t *testing.T) {
 		Uploads:          &task_queue.UploadSpec{},
 	}
 
-	retcode, err := consumer.ExecuteTask(ioc, "test-task", spec, rootDir, cacheDir, tasksDir, nil)
+	retcode, err := consumer.ExecuteTask(ctx, ioc, consumer.AetherConfig{}, "test-task", spec, rootDir, cacheDir, tasksDir, nil)
 	assert.Nil(t, err)
 	assert.Equal(t, "0", retcode)
 }

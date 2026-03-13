@@ -1,6 +1,7 @@
 package consumer
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -15,37 +16,33 @@ import (
 
 	"cloud.google.com/go/logging"
 	"github.com/bmatcuk/doublestar"
+	aetherclient "github.com/pgm/aether/client"
 	"github.com/broadinstitute/sparklesworker/monitor"
 	"github.com/broadinstitute/sparklesworker/task_queue"
 	"github.com/broadinstitute/sparklesworker/watchdog"
 )
 
-type ResultFile struct {
-	Src    string `json:"src"`
-	DstURL string `json:"dst_url"`
-}
-
 type ResourceUsage struct {
 	UserCPUTime        float64 `json:"user_cpu_time"`
 	SystemCPUTime      float64 `json:"system_cpu_time"`
-	MaxMemorySize      int64           `json:"max_memory_size"`
-	SharedMemorySize   int64           `json:"shared_memory_size"`
-	UnsharedMemorySize int64           `json:"unshared_memory_size"`
-	BlockInputOps      int64           `json:"block_input_ops"`
-	BlockOutputOps     int64           `json:"block_output_ops"`
-	StartTime          float64         `json:"start_time"`
-	EndTime            float64         `json:"end_time"`
-	ElapsedTime        float64         `json:"elapsed_time"`
-	DownloadBytes      int64           `json:"download_bytes"`
-	DownloadFileCount  int             `json:"download_file_count"`
-	DownloadStartTime  float64         `json:"download_start_time"`
-	DownloadEndTime    float64         `json:"download_end_time"`
-	DownloadElapsed    float64         `json:"download_elapsed"`
-	UploadBytes        int64           `json:"upload_bytes"`
-	UploadFileCount    int             `json:"upload_file_count"`
-	UploadStartTime    float64         `json:"upload_start_time"`
-	UploadEndTime      float64         `json:"upload_end_time"`
-	UploadElapsed      float64         `json:"upload_elapsed"`
+	MaxMemorySize      int64   `json:"max_memory_size"`
+	SharedMemorySize   int64   `json:"shared_memory_size"`
+	UnsharedMemorySize int64   `json:"unshared_memory_size"`
+	BlockInputOps      int64   `json:"block_input_ops"`
+	BlockOutputOps     int64   `json:"block_output_ops"`
+	StartTime          float64 `json:"start_time"`
+	EndTime            float64 `json:"end_time"`
+	ElapsedTime        float64 `json:"elapsed_time"`
+	DownloadBytes      int64   `json:"download_bytes"`
+	DownloadFileCount  int     `json:"download_file_count"`
+	DownloadStartTime  float64 `json:"download_start_time"`
+	DownloadEndTime    float64 `json:"download_end_time"`
+	DownloadElapsed    float64 `json:"download_elapsed"`
+	UploadBytes        int64   `json:"upload_bytes"`
+	UploadFileCount    int     `json:"upload_file_count"`
+	UploadStartTime    float64 `json:"upload_start_time"`
+	UploadEndTime      float64 `json:"upload_end_time"`
+	UploadElapsed      float64 `json:"upload_elapsed"`
 }
 
 type TransferStats struct {
@@ -53,17 +50,6 @@ type TransferStats struct {
 	FileCount int
 	StartTime time.Time
 	EndTime   time.Time
-}
-
-func sumFileSizes(files Stringset) int64 {
-	var total int64
-	for f := range files {
-		fi, err := os.Stat(f)
-		if err == nil {
-			total += fi.Size()
-		}
-	}
-	return total
 }
 
 func toUnixFloat(t time.Time) float64 {
@@ -74,19 +60,19 @@ func timevalToSeconds(tv syscall.Timeval) float64 {
 	return float64(tv.Sec) + float64(tv.Usec)/1e6
 }
 
-type ResultStruct struct {
-	ExePath    string            `json:"exe_path"`
-	ExeArgs    []string          `json:"exe_args"`
-	Parameters map[string]string `json:"parameters,omitempty"`
-	ReturnCode string            `json:"return_code"`
-	Files      []*ResultFile     `json:"files"`
-	Usage      *ResourceUsage    `json:"resource_usage"`
+// AetherConfig holds configuration for the aether content-addressed store.
+type AetherConfig struct {
+	Root string // aether store root (gs://bucket/prefix or local path)
 }
 
-// The amount of time we're willing to wait for a file we uploaded to appear in cloud storage
-// Based on the docs, it sounds like it should be visible immediately, but adding some buffer
-// just in case we can't rely on that.
-const MaxUploadDelay = 30 * time.Second
+type ResultStruct struct {
+	ExePath     string            `json:"exe_path"`
+	ExeArgs     []string          `json:"exe_args"`
+	Parameters  map[string]string `json:"parameters,omitempty"`
+	ReturnCode  string            `json:"return_code"`
+	ManifestKey string            `json:"manifest_key,omitempty"`
+	Usage       *ResourceUsage    `json:"resource_usage"`
+}
 
 type Stringset map[string]bool
 
@@ -109,93 +95,6 @@ func copyFile(src, dst string) error {
 	}
 
 	return out.Close()
-}
-
-func downloadAll(ioc IOClient, workdir string, downloads []*task_queue.TaskDownload, cacheDir string) (error, Stringset) {
-	if !path.IsAbs(workdir) {
-		panic("bad workdir")
-	}
-	downloaded := make(Stringset)
-
-	for _, dl := range downloads {
-		srcURL := dl.SrcURL
-		destination := path.Join(workdir, dl.Dst)
-
-		if _, err := os.Stat(destination); err == nil {
-			log.Printf("Skipping download of %s -> %s because file already exists.", srcURL, destination)
-			continue
-		}
-
-		//parentDir := strings.ToLower(path.Base(path.Dir(srcURL)))
-		if dl.IsCASKey {
-			casKey := path.Base(srcURL)
-			if _, err := os.Stat(cacheDir); os.IsNotExist(err) {
-				err = os.MkdirAll(cacheDir, 0777)
-				if err != nil {
-					return fmt.Errorf("Could not create cacheDir %s: %s", cacheDir, err), downloaded
-				}
-			}
-
-			cacheDest := path.Join(cacheDir, casKey)
-
-			if _, err := os.Stat(cacheDest); os.IsNotExist(err) {
-				log.Printf("Downloading %s -> %s", srcURL, destination)
-				err = ioc.Download(srcURL, cacheDest)
-				if err != nil {
-					return err, downloaded
-				}
-			} else {
-				log.Printf("No download, %s already exists", cacheDest)
-			}
-
-			dstDir := path.Dir(destination)
-			if _, err := os.Stat(dstDir); os.IsNotExist(err) {
-				err = os.MkdirAll(dstDir, 0777)
-				if err != nil {
-					return fmt.Errorf("Could not create directory %s: %s", dstDir, err), downloaded
-				}
-			}
-
-			if _, err := os.Stat(destination); !os.IsNotExist(err) {
-				log.Printf("Warning: Removing existing file %s", destination)
-				err = os.Remove(destination)
-				if err != nil {
-					return fmt.Errorf("Could not remove existing file %s that is the destination of new DL: %v", destination, err), downloaded
-				}
-			}
-
-			if dl.SymlinkSafe {
-				log.Printf("Symlinking %s -> %s", cacheDest, destination)
-				err := os.Symlink(cacheDest, destination)
-				if err != nil {
-					panic(fmt.Sprintf("symlink %s -> %s failed: %s", cacheDest, destination, err))
-				}
-			} else {
-				log.Printf("copying %s -> %s", cacheDest, destination)
-				err := copyFile(cacheDest, destination)
-				if err != nil {
-					// this should not be possible
-					panic(fmt.Sprintf("copyFile %s -> %s failed: %s", cacheDest, destination, err))
-				}
-			}
-
-		} else {
-			log.Printf("Downloading %s -> %s", srcURL, destination)
-			err := ioc.Download(srcURL, destination)
-			if err != nil {
-				return err, downloaded
-			}
-		}
-		if dl.Executable {
-			err := os.Chmod(destination, 0777)
-			if err != nil {
-				return err, downloaded
-			}
-		}
-		downloaded[destination] = true
-	}
-
-	return nil, downloaded
 }
 
 // ExecResult holds the results of command execution
@@ -266,16 +165,6 @@ func execCommand(command string, rootdir string, workdir string, stdout *os.File
 	}, nil
 }
 
-type UploadMapping map[string]string
-
-func newUploadMapping() UploadMapping {
-	return make(map[string]string)
-}
-
-func addUpload(mapping UploadMapping, filename string, destURL string) {
-	mapping[filename] = destURL
-}
-
 func addFilesToStringSet(workdir string, pattern string, dest Stringset) error {
 	pathWithGlob := path.Join(workdir, pattern)
 	matches, err := doublestar.Glob(pathWithGlob)
@@ -305,31 +194,25 @@ func addFilesToStringSet(workdir string, pattern string, dest Stringset) error {
 	return nil
 }
 
-func ResolveUploads(workdir string, uploads *task_queue.UploadSpec, toExclude Stringset) (UploadMapping, error) {
+func ResolveUploads(workdir string, uploads *task_queue.UploadSpec) ([]string, error) {
 	included := make(Stringset)
+	excluded := make(Stringset)
 
 	for _, pattern := range uploads.IncludePatterns {
 		addFilesToStringSet(workdir, pattern, included)
 	}
 	for _, pattern := range uploads.ExcludePatterns {
-		addFilesToStringSet(workdir, pattern, toExclude)
+		addFilesToStringSet(workdir, pattern, excluded)
 	}
 
-	m := newUploadMapping()
+	var files []string
 	for match := range included {
-
-		if toExclude[match] {
+		if excluded[match] {
 			continue
 		}
-
-		relpath, err := filepath.Rel(workdir, match)
-		if err != nil {
-			return nil, err
-		}
-		dest := uploads.DstURL + "/" + relpath
-		addUpload(m, match, dest)
+		files = append(files, match)
 	}
-	return m, nil
+	return files, nil
 }
 
 func execLifecycleScript(label string, workdir string, script string) {
@@ -393,36 +276,6 @@ func startWatchingLog(loggingClient *logging.Client, taskID string, stdoutPath s
 	return shutdownChan, nil
 }
 
-func getModificationTimes(filenames Stringset) map[string]time.Time {
-	mtimes := make(map[string]time.Time)
-	for filename := range filenames {
-		fi, err := os.Stat(filename)
-		if err != nil {
-			log.Printf("Error trying to stat %s to record last modification time, skipping...", err)
-			continue
-		}
-		mtimes[filename] = fi.ModTime()
-	}
-
-	return mtimes
-}
-
-func getFilesWithMatchingMTimes(a map[string]time.Time, b map[string]time.Time) Stringset {
-	matching := make(Stringset)
-	for key, aTime := range a {
-		bTime, ok := b[key]
-		if !ok {
-			log.Printf("While checking if %s was updated, could not find the file. Skipping...", key)
-			continue
-		}
-
-		if aTime == bTime {
-			matching[key] = true
-		}
-	}
-	return matching
-}
-
 func prepareTaskDirectories(tasksDir string, cacheDir string) (workDir string, absCacheDir string, err error) {
 	mode := os.FileMode(0700)
 	err = os.MkdirAll(tasksDir, mode)
@@ -461,14 +314,12 @@ func prepareTaskDirectories(tasksDir string, cacheDir string) (workDir string, a
 }
 
 type DownloadTaskFilesResult struct {
-	Stdout       *os.File
-	StdoutPath   string
-	Downloaded   Stringset
-	InitialMTimes map[string]time.Time
-	DlStats      *TransferStats
+	Stdout     *os.File
+	StdoutPath string
+	DlStats    *TransferStats
 }
 
-func downloadTaskFiles(ioc IOClient, workDir string, cacheDir string, taskId string, taskSpec *task_queue.TaskSpec, mon *monitor.Monitor) (*DownloadTaskFilesResult, error) {
+func downloadTaskFiles(ctx context.Context, aetherCfg AetherConfig, workDir string, cacheDir string, taskId string, taskSpec *task_queue.TaskSpec, mon *monitor.Monitor) (*DownloadTaskFilesResult, error) {
 	stdoutPath := path.Join(workDir, "stdout.txt")
 	execLifecycleScript("PreDownloadScript", workDir, taskSpec.PreDownloadScript)
 
@@ -481,64 +332,69 @@ func downloadTaskFiles(ioc IOClient, workDir string, cacheDir string, taskId str
 		mon.StartWatchingLog(taskId, stdoutPath)
 	}
 
-	if len(taskSpec.Downloads) > 0 {
-		stdout.WriteString(fmt.Sprintf("sparkles: Downloading %d files...\n", len(taskSpec.Downloads)))
-	}
-
 	dlStart := time.Now()
-	err, downloaded := downloadAll(ioc, workDir, taskSpec.Downloads, cacheDir)
+	exportStats, err := aetherclient.Export(ctx, aetherclient.ExportOptions{
+		Root:        aetherCfg.Root,
+		ManifestRef: taskSpec.AetherFSRoot,
+		Dest:        workDir,
+		CacheDir:    cacheDir,
+	})
 	dlEnd := time.Now()
 	if err != nil {
 		return nil, err
 	}
-
-	if len(taskSpec.Downloads) > 0 {
-		stdout.WriteString(fmt.Sprintf("sparkles: download complete.\n"))
-	}
-
-	initialMTimes := getModificationTimes(downloaded)
+	log.Printf("Downloaded %d files (%d bytes) in %s", exportStats.FilesDownloaded, exportStats.BytesDownloaded, exportStats.Duration)
 
 	execLifecycleScript("PostDownloadScript", workDir, taskSpec.PostDownloadScript)
 
 	return &DownloadTaskFilesResult{
-		Stdout:        stdout,
-		StdoutPath:    stdoutPath,
-		Downloaded:    downloaded,
-		InitialMTimes: initialMTimes,
+		Stdout:     stdout,
+		StdoutPath: stdoutPath,
 		DlStats: &TransferStats{
-			Bytes:     sumFileSizes(downloaded),
-			FileCount: len(downloaded),
+			Bytes:     exportStats.BytesDownloaded,
+			FileCount: exportStats.FilesDownloaded,
 			StartTime: dlStart,
 			EndTime:   dlEnd,
 		},
 	}, nil
 }
 
-func uploadTaskResults(ioc IOClient, workDir string, stdoutPath string, taskSpec *task_queue.TaskSpec, downloaded Stringset, initialMTimes map[string]time.Time) (UploadMapping, *TransferStats, error) {
-	finalMTimes := getModificationTimes(downloaded)
-	downloadsToExclude := getFilesWithMatchingMTimes(initialMTimes, finalMTimes)
-
-	filesToUpload, err := ResolveUploads(workDir, taskSpec.Uploads, downloadsToExclude)
+func uploadTaskResults(ctx context.Context, aetherCfg AetherConfig, workDir string, stdoutPath string, taskSpec *task_queue.TaskSpec) (string, *TransferStats, error) {
+	filePaths, err := ResolveUploads(workDir, taskSpec.Uploads)
 	if err != nil {
-		return nil, nil, err
+		return "", nil, err
+	}
+	filePaths = append(filePaths, stdoutPath)
+
+	var fileInputs []aetherclient.FileInput
+	for _, absPath := range filePaths {
+		relPath, err := filepath.Rel(workDir, absPath)
+		if err != nil {
+			return "", nil, err
+		}
+		fileInputs = append(fileInputs, aetherclient.FileInput{Path: absPath, ManifestName: relPath})
 	}
 
-	addUpload(filesToUpload, stdoutPath, taskSpec.StdoutURL)
-
-	ulStats := &TransferStats{FileCount: len(filesToUpload), StartTime: time.Now()}
-	for src := range filesToUpload {
-		fi, err := os.Stat(src)
+	ulStats := &TransferStats{FileCount: len(fileInputs), StartTime: time.Now()}
+	for _, f := range fileInputs {
+		fi, err := os.Stat(f.Path)
 		if err == nil {
 			ulStats.Bytes += fi.Size()
 		}
 	}
 
-	if err = UploadMapped(ioc, filesToUpload); err != nil {
-		return nil, nil, err
-	}
+	mkfsStats, err := aetherclient.MakeFilesystem(ctx, aetherclient.MakeFilesystemOptions{
+		Root:  aetherCfg.Root,
+		Files: fileInputs,
+	})
 	ulStats.EndTime = time.Now()
+	if err != nil {
+		return "", nil, err
+	}
+	log.Printf("Uploaded %d files (%d bytes, %d skipped) in %s, manifest key: %s",
+		mkfsStats.FilesUploaded, mkfsStats.BytesUploaded, mkfsStats.FilesSkipped, mkfsStats.UploadDuration, mkfsStats.ManifestKey)
 
-	return filesToUpload, ulStats, nil
+	return mkfsStats.ManifestKey, ulStats, nil
 }
 
 func determineCwd(workDir string, taskSpec *task_queue.TaskSpec) string {
@@ -554,13 +410,13 @@ func determineCwd(workDir string, taskSpec *task_queue.TaskSpec) string {
 	return cwdDir
 }
 
-func ExecuteTask(ioc IOClient, taskId string, taskSpec *task_queue.TaskSpec, rootDir string, cacheDir string, tasksDir string, mon *monitor.Monitor) (string, error) {
+func ExecuteTask(ctx context.Context, ioc IOClient, aetherCfg AetherConfig, taskId string, taskSpec *task_queue.TaskSpec, rootDir string, cacheDir string, tasksDir string, mon *monitor.Monitor) (string, error) {
 	workDir, cacheDir, err := prepareTaskDirectories(tasksDir, cacheDir)
 	if err != nil {
 		return "", err
 	}
 
-	dl, err := downloadTaskFiles(ioc, workDir, cacheDir, taskId, taskSpec, mon)
+	dl, err := downloadTaskFiles(ctx, aetherCfg, workDir, cacheDir, taskId, taskSpec, mon)
 	if err != nil {
 		return "", err
 	}
@@ -576,12 +432,12 @@ func ExecuteTask(ioc IOClient, taskId string, taskSpec *task_queue.TaskSpec, roo
 
 	execLifecycleScript("PostExecScript", workDir, taskSpec.PostExecScript)
 
-	filesToUpload, ulStats, err := uploadTaskResults(ioc, workDir, dl.StdoutPath, taskSpec, dl.Downloaded, dl.InitialMTimes)
+	manifestKey, ulStats, err := uploadTaskResults(ctx, aetherCfg, workDir, dl.StdoutPath, taskSpec)
 	if err != nil {
 		return retcode, err
 	}
 
-	err = writeResultFile(ioc, taskSpec.CommandResultURL, retcode, execResult, workDir, filesToUpload, taskSpec.Parameters, dl.DlStats, ulStats)
+	err = writeResultFile(ioc, taskSpec.CommandResultURL, retcode, execResult, workDir, manifestKey, taskSpec.Parameters, dl.DlStats, ulStats)
 	if err != nil {
 		return retcode, err
 	}
@@ -589,74 +445,25 @@ func ExecuteTask(ioc IOClient, taskId string, taskSpec *task_queue.TaskSpec, roo
 	return retcode, nil
 }
 
-func UploadMapped(ioc IOClient, files map[string]string) error {
-	log.Printf("Uploading %d files", len(files))
-	for src, dst := range files {
-		err := ioc.Upload(src, dst)
-		if err != nil {
-			return err
-		}
-	}
-
-	uploadCompleteTime := time.Now()
-
-	for _, dst := range files {
-		warningPrinted := false
-		for {
-			exists, err := ioc.IsExists(dst)
-			if err != nil {
-				return err
-			}
-
-			if exists {
-				if warningPrinted {
-					log.Printf("File now exists: %s", dst)
-				}
-				break
-			}
-
-			if time.Now().Sub(uploadCompleteTime) > MaxUploadDelay {
-				return fmt.Errorf("Attempted to upload %s but file is missing", dst)
-			}
-
-			log.Printf("Uploaded file is missing: %s. Will check again shortly", dst)
-			time.Sleep(5)
-		}
-	}
-
-	log.Printf("Confirmed %d files in cloud storage", len(files))
-	return nil
-}
-
 func writeResultFile(ioc IOClient,
 	CommandResultURL string,
 	retcode string,
 	execResult *ExecResult,
 	workdir string,
-	filesToUpload map[string]string,
+	manifestKey string,
 	parameters map[string]string,
 	dlStats *TransferStats,
 	ulStats *TransferStats) error {
-
-	files := make([]*ResultFile, 0, 100)
-	for src, dstURL := range filesToUpload {
-		rel_src, err := filepath.Rel(workdir, src)
-		if err != nil {
-			log.Printf("Got error in relpath(%s, %s): %v", workdir, src, err)
-			return err
-		}
-		files = append(files, &ResultFile{Src: rel_src, DstURL: dstURL})
-	}
 
 	rusage := execResult.Rusage
 	elapsedTime := execResult.EndTime.Sub(execResult.StartTime).Seconds()
 
 	result := &ResultStruct{
-		ExePath:    execResult.ExePath,
-		ExeArgs:    execResult.ExeArgs,
-		Parameters: parameters,
-		ReturnCode: retcode,
-		Files:      files,
+		ExePath:     execResult.ExePath,
+		ExeArgs:     execResult.ExeArgs,
+		Parameters:  parameters,
+		ReturnCode:  retcode,
+		ManifestKey: manifestKey,
 		Usage: &ResourceUsage{
 			UserCPUTime:        timevalToSeconds(rusage.Utime),
 			SystemCPUTime:      timevalToSeconds(rusage.Stime),
@@ -687,4 +494,3 @@ func writeResultFile(ioc IOClient,
 
 	return ioc.UploadBytes(CommandResultURL, resultJson)
 }
-
