@@ -10,22 +10,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type captureIOClient struct {
-	uploadedBytes map[string][]byte
+func captureWriteResult() (func([]byte) error, *[]byte) {
+	var captured []byte
+	return func(data []byte) error {
+		captured = data
+		return nil
+	}, &captured
 }
-
-func newCaptureIOClient() *captureIOClient {
-	return &captureIOClient{uploadedBytes: make(map[string][]byte)}
-}
-
-func (c *captureIOClient) Upload(srcPath string, destURL string) error { return nil }
-func (c *captureIOClient) UploadBytes(destURL string, data []byte) error {
-	c.uploadedBytes[destURL] = data
-	return nil
-}
-func (c *captureIOClient) Download(srcURL string, destPath string) error { return nil }
-func (c *captureIOClient) DownloadAsBytes(srcURL string) ([]byte, error) { return nil, nil }
-func (c *captureIOClient) IsExists(url string) (bool, error)             { return true, nil }
 
 func TestWriteResultFile(t *testing.T) {
 	workdir := t.TempDir()
@@ -51,12 +42,12 @@ func TestWriteResultFile(t *testing.T) {
 	parameters := map[string]string{"key": "value"}
 	manifestKey := "sha256:abc123"
 
-	ioc := newCaptureIOClient()
-	err := writeResultFile(ioc, "gs://bucket/result.json", "0", execResult, workdir, manifestKey, parameters, dlStats, ulStats)
+	writeResult, captured := captureWriteResult()
+	err := writeResultFile(writeResult, "0", execResult, workdir, manifestKey, parameters, dlStats, ulStats)
 	require.NoError(t, err)
 
-	resultBytes, ok := ioc.uploadedBytes["gs://bucket/result.json"]
-	require.True(t, ok, "result file was not uploaded")
+	resultBytes := *captured
+	require.NotNil(t, resultBytes, "result file was not written")
 
 	var result ResultStruct
 	require.NoError(t, json.Unmarshal(resultBytes, &result))
@@ -116,13 +107,13 @@ func TestWriteResultFileUsesExePathFromExecResult(t *testing.T) {
 		ExeArgs:   []string{"docker", "run", "--rm", "ubuntu:22.04", "/bin/sh", "-c", "false"},
 	}
 
-	ioc := newCaptureIOClient()
-	err := writeResultFile(ioc, "gs://bucket/result.json", "1", execResult, workdir,
+	writeResult, captured := captureWriteResult()
+	err := writeResultFile(writeResult, "1", execResult, workdir,
 		"", nil, &TransferStats{}, &TransferStats{})
 	require.NoError(t, err)
 
 	var result ResultStruct
-	require.NoError(t, json.Unmarshal(ioc.uploadedBytes["gs://bucket/result.json"], &result))
+	require.NoError(t, json.Unmarshal(*captured, &result))
 
 	assert.Equal(t, "docker", result.ExePath)
 	assert.Equal(t, execResult.ExeArgs, result.ExeArgs)
@@ -131,9 +122,9 @@ func TestWriteResultFileUsesExePathFromExecResult(t *testing.T) {
 
 func TestWriteResultFileJsonFieldNames(t *testing.T) {
 	workdir := t.TempDir()
-	ioc := newCaptureIOClient()
 
-	err := writeResultFile(ioc, "gs://bucket/result.json", "0",
+	writeResult, captured := captureWriteResult()
+	err := writeResultFile(writeResult, "0",
 		&ExecResult{Rusage: &syscall.Rusage{}, StartTime: time.Now(), EndTime: time.Now()},
 		workdir, "", nil,
 		&TransferStats{}, &TransferStats{})
@@ -141,7 +132,7 @@ func TestWriteResultFileJsonFieldNames(t *testing.T) {
 
 	// Unmarshal into a raw map to check field names without relying on struct tags
 	var raw map[string]any
-	require.NoError(t, json.Unmarshal(ioc.uploadedBytes["gs://bucket/result.json"], &raw))
+	require.NoError(t, json.Unmarshal(*captured, &raw))
 
 	expectedTopLevel := []string{"exe_path", "exe_args", "return_code", "resource_usage"}
 	for _, field := range expectedTopLevel {

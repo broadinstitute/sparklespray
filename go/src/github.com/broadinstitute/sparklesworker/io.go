@@ -11,7 +11,6 @@ import (
 	"regexp"
 
 	"cloud.google.com/go/storage"
-	"github.com/broadinstitute/sparklesworker/consumer"
 	"github.com/broadinstitute/sparklesworker/watchdog"
 	"golang.org/x/net/context"
 	"google.golang.org/api/option"
@@ -22,7 +21,7 @@ type GCSIOClient struct {
 	client *storage.Client
 }
 
-func NewIOClient(ctx context.Context, httpClient *http.Client) (consumer.IOClient, error) {
+func NewIOClient(ctx context.Context, httpClient *http.Client) (*GCSIOClient, error) {
 	client, err := storage.NewClient(ctx, option.WithHTTPClient(httpClient))
 	if err != nil {
 		return nil, err

@@ -410,7 +410,7 @@ func determineCwd(workDir string, taskSpec *task_queue.TaskSpec) string {
 	return cwdDir
 }
 
-func ExecuteTask(ctx context.Context, ioc IOClient, aetherCfg AetherConfig, taskId string, taskSpec *task_queue.TaskSpec, rootDir string, cacheDir string, tasksDir string, mon *monitor.Monitor) (string, error) {
+func ExecuteTask(ctx context.Context, writeResult func([]byte) error, aetherCfg AetherConfig, taskId string, taskSpec *task_queue.TaskSpec, rootDir string, cacheDir string, tasksDir string, mon *monitor.Monitor) (string, error) {
 	workDir, cacheDir, err := prepareTaskDirectories(tasksDir, cacheDir)
 	if err != nil {
 		return "", err
@@ -437,7 +437,7 @@ func ExecuteTask(ctx context.Context, ioc IOClient, aetherCfg AetherConfig, task
 		return retcode, err
 	}
 
-	err = writeResultFile(ioc, taskSpec.CommandResultURL, retcode, execResult, workDir, manifestKey, taskSpec.Parameters, dl.DlStats, ulStats)
+	err = writeResultFile(writeResult, retcode, execResult, workDir, manifestKey, taskSpec.Parameters, dl.DlStats, ulStats)
 	if err != nil {
 		return retcode, err
 	}
@@ -445,8 +445,7 @@ func ExecuteTask(ctx context.Context, ioc IOClient, aetherCfg AetherConfig, task
 	return retcode, nil
 }
 
-func writeResultFile(ioc IOClient,
-	CommandResultURL string,
+func writeResultFile(writeResult func([]byte) error,
 	retcode string,
 	execResult *ExecResult,
 	workdir string,
@@ -492,5 +491,5 @@ func writeResultFile(ioc IOClient,
 		return err
 	}
 
-	return ioc.UploadBytes(CommandResultURL, resultJson)
+	return writeResult(resultJson)
 }

@@ -33,36 +33,6 @@ func check(err error) {
 	}
 }
 
-type MockIOClient struct {
-	uploaded   []string
-	downloaded []string
-}
-
-func NewMockIOClient() *MockIOClient {
-	return &MockIOClient{}
-}
-
-func (ioc *MockIOClient) Upload(src string, destURL string) error {
-	ioc.uploaded = append(ioc.uploaded, src+" -> "+destURL)
-	return nil
-}
-
-func (ioc *MockIOClient) UploadBytes(src string, data []byte) error {
-	return nil
-}
-
-func (ioc *MockIOClient) Download(srcUrl string, destPath string) error {
-	ioc.downloaded = append(ioc.downloaded, destPath+" <- "+srcUrl)
-	return nil
-}
-
-func (ioc *MockIOClient) DownloadAsBytes(srcUrl string) ([]byte, error) {
-	return make([]byte, 0), nil
-}
-
-func (ioc *MockIOClient) IsExists(url string) (bool, error) {
-	return true, nil
-}
 
 func TestResolveUploads(t *testing.T) {
 	tempDir, err := ioutil.TempDir("", "testTmp")
@@ -134,7 +104,10 @@ func TestExecute(t *testing.T) {
 		Uploads:          &task_queue.UploadSpec{},
 	}
 
-	retcode, err := consumer.ExecuteTask(ctx, ioc, consumer.AetherConfig{}, "test-task", spec, rootDir, cacheDir, tasksDir, nil)
+	writeResult := func(data []byte) error {
+		return ioc.UploadBytes(spec.CommandResultURL, data)
+	}
+	retcode, err := consumer.ExecuteTask(ctx, writeResult, consumer.AetherConfig{}, "test-task", spec, rootDir, cacheDir, tasksDir, nil)
 	assert.Nil(t, err)
 	assert.Equal(t, "0", retcode)
 }

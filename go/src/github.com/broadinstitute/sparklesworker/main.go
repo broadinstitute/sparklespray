@@ -14,6 +14,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"time"
 
 	"cloud.google.com/go/datastore"
@@ -81,6 +82,29 @@ func Main() error {
 				cli.StringFlag{Name: "dst", Usage: "Destination path for the copied executable"},
 			},
 			Action: copyexe},
+		cli.Command{
+			Name:  "exec",
+			Usage: "Execute a single task directly from the command line",
+			Flags: []cli.Flag{
+				cli.StringFlag{Name: "command", Usage: "Shell command to run (required)"},
+				cli.StringFlag{Name: "commandResultURL", Value: "results.json", Usage: "Local path to write result JSON"},
+				cli.StringFlag{Name: "aetherRoot", Usage: "Aether store root (gs://bucket/prefix or local path)"},
+				cli.StringFlag{Name: "aetherFSRoot", Usage: "Input aether manifest ref for downloads"},
+				cli.StringFlag{Name: "dir", Value: "./sparklesworker", Usage: "Base directory for worker data"},
+				cli.StringFlag{Name: "cacheDir", Usage: "Cache directory (defaults to dir/cache)"},
+				cli.StringFlag{Name: "tasksDir", Usage: "Tasks directory (defaults to dir/tasks)"},
+				cli.StringFlag{Name: "taskId", Value: "exec-task", Usage: "Task identifier"},
+				cli.StringFlag{Name: "workingDir", Usage: "Working subdirectory within task dir"},
+				cli.StringFlag{Name: "dockerImage", Usage: "Docker image for execution"},
+				cli.StringSliceFlag{Name: "includePattern", Usage: "Upload include glob pattern (repeatable)"},
+				cli.StringSliceFlag{Name: "excludePattern", Usage: "Upload exclude glob pattern (repeatable)"},
+				cli.StringSliceFlag{Name: "param", Usage: "Parameter as key=value (repeatable)"},
+				cli.StringFlag{Name: "preDownloadScript", Usage: "Script to run before download"},
+				cli.StringFlag{Name: "postDownloadScript", Usage: "Script to run after download"},
+				cli.StringFlag{Name: "preExecScript", Usage: "Script to run before exec"},
+				cli.StringFlag{Name: "postExecScript", Usage: "Script to run after exec"},
+			},
+			Action: execTask},
 		cli.Command{
 			Name:  "fetch",
 			Usage: "Download a file from Google Cloud Storage with MD5 verification",
@@ -283,6 +307,66 @@ func submit(c *cli.Context) error {
 	return nil
 }
 
+func execTask(c *cli.Context) error {
+	command := c.String("command")
+	if command == "" {
+		return fmt.Errorf("--command is required")
+	}
+
+	ctx := context.Background()
+
+	dir := c.String("dir")
+	cacheDir := c.String("cacheDir")
+	if cacheDir == "" {
+		cacheDir = path.Join(dir, "cache")
+	}
+	tasksDir := c.String("tasksDir")
+	if tasksDir == "" {
+		tasksDir = path.Join(dir, "tasks")
+	}
+
+	commandResultURL := c.String("commandResultURL")
+
+	params := map[string]string{}
+	for _, p := range c.StringSlice("param") {
+		parts := strings.SplitN(p, "=", 2)
+		if len(parts) == 2 {
+			params[parts[0]] = parts[1]
+		}
+	}
+
+	taskSpec := &task_queue.TaskSpec{
+		Command:            command,
+		AetherFSRoot:       c.String("aetherFSRoot"),
+		WorkingDir:         c.String("workingDir"),
+		DockerImage:        c.String("dockerImage"),
+		Parameters:         params,
+		Uploads: &task_queue.UploadSpec{
+			IncludePatterns: c.StringSlice("includePattern"),
+			ExcludePatterns: c.StringSlice("excludePattern"),
+		},
+		PreDownloadScript:  c.String("preDownloadScript"),
+		PostDownloadScript: c.String("postDownloadScript"),
+		PreExecScript:      c.String("preExecScript"),
+		PostExecScript:     c.String("postExecScript"),
+	}
+
+	writeResult := func(data []byte) error {
+		return os.WriteFile(commandResultURL, data, 0644)
+	}
+
+	aetherCfg := consumer.AetherConfig{Root: c.String("aetherRoot")}
+	taskId := c.String("taskId")
+
+	retcode, err := consumer.ExecuteTask(ctx, writeResult, aetherCfg, taskId, taskSpec, dir, cacheDir, tasksDir, nil)
+	if err != nil {
+		return fmt.Errorf("task failed: %w", err)
+	}
+	log.Printf("Task completed with exit code: %s", retcode)
+	log.Printf("Result written to: %s", commandResultURL)
+	return nil
+}
+
 func consume(c *cli.Context) error {
 	log.Printf("Starting consume")
 
@@ -376,7 +460,10 @@ func consume(c *cli.Context) error {
 	aetherCfg := consumer.AetherConfig{Root: c.String("aetherRoot")}
 
 	executor := func(taskId string, taskSpec *task_queue.TaskSpec) (string, error) {
-		return consumer.ExecuteTask(ctx, ioc, aetherCfg, taskId, taskSpec, dir, cacheDir, tasksDir, mon)
+		writeResult := func(data []byte) error {
+			return ioc.UploadBytes(taskSpec.CommandResultURL, data)
+		}
+		return consumer.ExecuteTask(ctx, writeResult, aetherCfg, taskId, taskSpec, dir, cacheDir, tasksDir, mon)
 	}
 
 	sleepUntilNotify := func(sleepTime time.Duration) {
