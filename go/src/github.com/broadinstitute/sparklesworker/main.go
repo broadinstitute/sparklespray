@@ -62,6 +62,9 @@ func Main() error {
 				cli.StringFlag{Name: "expectedVersion", Usage: "Expected worker version; exits with error if version does not match"},
 				cli.StringFlag{Name: "redisAddr", Usage: "Redis server address (e.g., localhost:6379) for control channel; if empty, Redis control channel is disabled"},
 				cli.StringFlag{Name: "aetherRoot", Usage: "Aether store root (gs://bucket/prefix or local path)"},
+				cli.Int64Flag{Name: "aetherMaxSizeToBundle", Value: 0, Usage: "Max file size in bytes eligible for bundling (0 = disable bundling)"},
+				cli.Int64Flag{Name: "aetherMaxBundleSize", Value: 0, Usage: "Target max bundle size in bytes"},
+				cli.IntFlag{Name: "aetherWorkers", Value: 1, Usage: "Parallel upload workers"},
 			},
 			Action: consume},
 		cli.Command{
@@ -90,6 +93,9 @@ func Main() error {
 				cli.StringFlag{Name: "commandResultURL", Value: "results.json", Usage: "Local path to write result JSON"},
 				cli.StringFlag{Name: "aetherRoot", Usage: "Aether store root (gs://bucket/prefix or local path)"},
 				cli.StringFlag{Name: "aetherFSRoot", Usage: "Input aether manifest ref for downloads"},
+				cli.Int64Flag{Name: "aetherMaxSizeToBundle", Value: 0, Usage: "Max file size in bytes eligible for bundling (0 = disable bundling)"},
+				cli.Int64Flag{Name: "aetherMaxBundleSize", Value: 0, Usage: "Target max bundle size in bytes"},
+				cli.IntFlag{Name: "aetherWorkers", Value: 1, Usage: "Parallel upload workers"},
 				cli.StringFlag{Name: "dir", Value: "./sparklesworker", Usage: "Base directory for worker data"},
 				cli.StringFlag{Name: "cacheDir", Usage: "Cache directory (defaults to dir/cache)"},
 				cli.StringFlag{Name: "tasksDir", Usage: "Tasks directory (defaults to dir/tasks)"},
@@ -360,7 +366,12 @@ func execTask(c *cli.Context) error {
 		return os.WriteFile(commandResultURL, data, 0644)
 	}
 
-	aetherCfg := consumer.AetherConfig{Root: c.String("aetherRoot")}
+	aetherCfg := consumer.AetherConfig{
+		Root:            c.String("aetherRoot"),
+		MaxSizeToBundle: c.Int64("aetherMaxSizeToBundle"),
+		MaxBundleSize:   c.Int64("aetherMaxBundleSize"),
+		Workers:         c.Int("aetherWorkers"),
+	}
 	taskId := c.String("taskId")
 
 	retcode, err := consumer.ExecuteTask(ctx, writeResult, aetherCfg, taskId, taskSpec, dir, cacheDir, tasksDir, nil)
@@ -462,7 +473,12 @@ func consume(c *cli.Context) error {
 		MaxWaitForNewTasks: time.Duration(shutdownAfter) * time.Second, // how long to wait for a new task to arrive if the queue is empty
 		WorkerID:           workerID}
 
-	aetherCfg := consumer.AetherConfig{Root: c.String("aetherRoot")}
+	aetherCfg := consumer.AetherConfig{
+		Root:            c.String("aetherRoot"),
+		MaxSizeToBundle: c.Int64("aetherMaxSizeToBundle"),
+		MaxBundleSize:   c.Int64("aetherMaxBundleSize"),
+		Workers:         c.Int("aetherWorkers"),
+	}
 
 	executor := func(taskId string, taskSpec *task_queue.TaskSpec) (string, error) {
 		writeResult := func(data []byte) error {

@@ -62,7 +62,10 @@ func timevalToSeconds(tv syscall.Timeval) float64 {
 
 // AetherConfig holds configuration for the aether content-addressed store.
 type AetherConfig struct {
-	Root string // aether store root (gs://bucket/prefix or local path)
+	Root            string // aether store root (gs://bucket/prefix or local path)
+	MaxSizeToBundle int64  // max file size eligible for bundling (0 = disable bundling)
+	MaxBundleSize   int64  // target max size per bundle
+	Workers         int    // parallel upload workers (0 = use aether default of 1)
 }
 
 type ResultStruct struct {
@@ -384,8 +387,11 @@ func uploadTaskResults(ctx context.Context, aetherCfg AetherConfig, workDir stri
 	}
 
 	mkfsStats, err := aetherclient.MakeFilesystem(ctx, aetherclient.MakeFilesystemOptions{
-		Root:  aetherCfg.Root,
-		Files: fileInputs,
+		Root:            aetherCfg.Root,
+		Files:           fileInputs,
+		MaxSizeToBundle: aetherCfg.MaxSizeToBundle,
+		MaxBundleSize:   aetherCfg.MaxBundleSize,
+		Workers:         aetherCfg.Workers,
 	})
 	ulStats.EndTime = time.Now()
 	if err != nil {
