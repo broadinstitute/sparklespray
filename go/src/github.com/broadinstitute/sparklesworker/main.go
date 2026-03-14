@@ -342,7 +342,12 @@ func execTask(c *cli.Context) error {
 		DockerImage:        c.String("dockerImage"),
 		Parameters:         params,
 		Uploads: &task_queue.UploadSpec{
-			IncludePatterns: c.StringSlice("includePattern"),
+			IncludePatterns: func() []string {
+				if p := c.StringSlice("includePattern"); len(p) > 0 {
+					return p
+				}
+				return []string{"**/*"}
+			}(),
 			ExcludePatterns: c.StringSlice("excludePattern"),
 		},
 		PreDownloadScript:  c.String("preDownloadScript"),
