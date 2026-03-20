@@ -30,94 +30,106 @@ import (
 
 const WorkerVersion = "5.8.2"
 
+var consumeCmd = cli.Command{
+	Name:  "consume",
+	Usage: "Consume and execute tasks from the queue",
+	Flags: []cli.Flag{
+		cli.StringFlag{Name: "projectId", Usage: "Google Cloud project ID"},
+		cli.StringFlag{Name: "dir", Value: "./sparklesworker", Usage: "Base directory for worker data (used as default for cacheDir and tasksDir)"},
+		cli.StringFlag{Name: "cacheDir", Usage: "Directory for caching downloaded files (defaults to dir/cache)"},
+		cli.StringFlag{Name: "cluster", Usage: "Cluster ID to consume tasks from"},
+		cli.StringFlag{Name: "tasksDir", Usage: "Directory for task working directories (defaults to dir/tasks)"},
+		cli.StringFlag{Name: "database", Usage: "Firestore Database ID"},
+		cli.IntFlag{Name: "timeout", Value: 5, Usage: "Watchdog timeout in minutes; process is killed after 2x this value if main loop doesn't check in"},
+		cli.IntFlag{Name: "shutdownAfter", Value: 0, Usage: "Seconds to wait for new tasks before shutting down (0 = wait indefinitely)"},
+		cli.IntFlag{Name: "ftShutdownAfter", Value: 30, Usage: "Shutdown delay in seconds for the first task in a batch job"},
+		cli.BoolFlag{Name: "localhost", Usage: "If set, does not try to look up instance name and IP from metadata service, but assumes localhost"},
+		cli.StringFlag{Name: "expectedVersion", Usage: "Expected worker version; exits with error if version does not match"},
+		cli.StringFlag{Name: "redisAddr", Usage: "Redis server address (e.g., localhost:6379) for control channel; if empty, Redis control channel is disabled"},
+		cli.StringFlag{Name: "aetherRoot", Usage: "Aether store root (gs://bucket/prefix or local path)"},
+		cli.Int64Flag{Name: "aetherMaxSizeToBundle", Value: 0, Usage: "Max file size in bytes eligible for bundling (0 = disable bundling)"},
+		cli.Int64Flag{Name: "aetherMaxBundleSize", Value: 0, Usage: "Target max bundle size in bytes"},
+		cli.IntFlag{Name: "aetherWorkers", Value: 1, Usage: "Parallel upload workers"},
+	},
+	Action: consume,
+}
+
+var submitCmd = cli.Command{
+	Name:  "submit",
+	Usage: "Submit tasks from a JSON file to the queue",
+	Flags: []cli.Flag{
+		cli.StringFlag{Name: "projectId", Usage: "Google Cloud project ID"},
+		cli.StringFlag{Name: "cluster", Usage: "Cluster ID to submit tasks to"},
+		cli.StringFlag{Name: "database", Usage: "Firestore Database ID"},
+		cli.StringFlag{Name: "redisAddr", Usage: "Redis server address (e.g., localhost:6379); if set, uses Redis instead of Datastore"},
+		cli.StringFlag{Name: "file", Usage: "Path to JSON file containing a list of Task objects"},
+	},
+	Action: submit,
+}
+
+var copyexeCmd = cli.Command{
+	Name:  "copyexe",
+	Usage: "Copy the worker executable to a destination path",
+	Flags: []cli.Flag{
+		cli.StringFlag{Name: "dst", Usage: "Destination path for the copied executable"},
+	},
+	Action: copyexe,
+}
+
+var execCmd = cli.Command{
+	Name:  "exec",
+	Usage: "Execute a single task directly from the command line",
+	Flags: []cli.Flag{
+		cli.StringFlag{Name: "command", Usage: "Shell command to run (required)"},
+		cli.StringFlag{Name: "commandResultURL", Value: "results.json", Usage: "Local path to write result JSON"},
+		cli.StringFlag{Name: "aetherRoot", Usage: "Aether store root (gs://bucket/prefix or local path)"},
+		cli.StringFlag{Name: "aetherFSRoot", Usage: "Input aether manifest ref for downloads"},
+		cli.Int64Flag{Name: "aetherMaxSizeToBundle", Value: 0, Usage: "Max file size in bytes eligible for bundling (0 = disable bundling)"},
+		cli.Int64Flag{Name: "aetherMaxBundleSize", Value: 0, Usage: "Target max bundle size in bytes"},
+		cli.IntFlag{Name: "aetherWorkers", Value: 1, Usage: "Parallel upload workers"},
+		cli.StringFlag{Name: "dir", Value: "./sparklesworker", Usage: "Base directory for worker data"},
+		cli.StringFlag{Name: "cacheDir", Usage: "Cache directory (defaults to dir/cache)"},
+		cli.StringFlag{Name: "tasksDir", Usage: "Tasks directory (defaults to dir/tasks)"},
+		cli.StringFlag{Name: "taskId", Value: "exec-task", Usage: "Task identifier"},
+		cli.StringFlag{Name: "workingDir", Usage: "Working subdirectory within task dir"},
+		cli.StringFlag{Name: "dockerImage", Usage: "Docker image for execution"},
+		cli.StringSliceFlag{Name: "includePattern", Usage: "Upload include glob pattern (repeatable)"},
+		cli.StringSliceFlag{Name: "excludePattern", Usage: "Upload exclude glob pattern (repeatable)"},
+		cli.StringSliceFlag{Name: "param", Usage: "Parameter as key=value (repeatable)"},
+		cli.StringFlag{Name: "preDownloadScript", Usage: "Script to run before download"},
+		cli.StringFlag{Name: "postDownloadScript", Usage: "Script to run after download"},
+		cli.StringFlag{Name: "preExecScript", Usage: "Script to run before exec"},
+		cli.StringFlag{Name: "postExecScript", Usage: "Script to run after exec"},
+	},
+	Action: execTask,
+}
+
+var fetchCmd = cli.Command{
+	Name:  "fetch",
+	Usage: "Download a file from Google Cloud Storage with MD5 verification",
+	Flags: []cli.Flag{
+		cli.StringFlag{Name: "expectMD5", Usage: "Expected MD5 hash (hex-encoded) of the downloaded file"},
+		cli.StringFlag{Name: "src", Usage: "Source GCS path (gs://bucket/object)"},
+		cli.StringFlag{Name: "dst", Usage: "Destination local file path"},
+	},
+	Action: fetch,
+}
+
 func Main() error {
 	app := cli.NewApp()
 	app.Name = "sparklesworker"
 	app.Version = WorkerVersion
 	app.Compiled = time.Now()
 	app.Authors = []cli.Author{
-		cli.Author{
-			Name:  "Philip Montgomery",
-			Email: "pmontgom@broadinstitute.org",
-		}}
-
+		{Name: "Philip Montgomery", Email: "pmontgom@broadinstitute.org"},
+	}
 	app.Commands = []cli.Command{
-		cli.Command{
-			Name:  "consume",
-			Usage: "Consume and execute tasks from the queue",
-			Flags: []cli.Flag{
-				cli.StringFlag{Name: "projectId", Usage: "Google Cloud project ID"},
-				cli.StringFlag{Name: "dir", Value: "./sparklesworker", Usage: "Base directory for worker data (used as default for cacheDir and tasksDir)"},
-				cli.StringFlag{Name: "cacheDir", Usage: "Directory for caching downloaded files (defaults to dir/cache)"},
-				cli.StringFlag{Name: "cluster", Usage: "Cluster ID to consume tasks from"},
-				cli.StringFlag{Name: "tasksDir", Usage: "Directory for task working directories (defaults to dir/tasks)"},
-				cli.StringFlag{Name: "database", Usage: "Firestore Database ID"},
-				cli.IntFlag{Name: "timeout", Value: 5, Usage: "Watchdog timeout in minutes; process is killed after 2x this value if main loop doesn't check in"},
-				cli.IntFlag{Name: "shutdownAfter", Value: 0, Usage: "Seconds to wait for new tasks before shutting down (0 = wait indefinitely)"},
-				cli.IntFlag{Name: "ftShutdownAfter", Value: 30, Usage: "Shutdown delay in seconds for the first task in a batch job"},
-				cli.BoolFlag{Name: "localhost", Usage: "If set, does not try to look up instance name and IP from metadata service, but assumes localhost"},
-				cli.StringFlag{Name: "expectedVersion", Usage: "Expected worker version; exits with error if version does not match"},
-				cli.StringFlag{Name: "redisAddr", Usage: "Redis server address (e.g., localhost:6379) for control channel; if empty, Redis control channel is disabled"},
-				cli.StringFlag{Name: "aetherRoot", Usage: "Aether store root (gs://bucket/prefix or local path)"},
-				cli.Int64Flag{Name: "aetherMaxSizeToBundle", Value: 0, Usage: "Max file size in bytes eligible for bundling (0 = disable bundling)"},
-				cli.Int64Flag{Name: "aetherMaxBundleSize", Value: 0, Usage: "Target max bundle size in bytes"},
-				cli.IntFlag{Name: "aetherWorkers", Value: 1, Usage: "Parallel upload workers"},
-			},
-			Action: consume},
-		cli.Command{
-			Name:  "submit",
-			Usage: "Submit tasks from a JSON file to the queue",
-			Flags: []cli.Flag{
-				cli.StringFlag{Name: "projectId", Usage: "Google Cloud project ID"},
-				cli.StringFlag{Name: "cluster", Usage: "Cluster ID to submit tasks to"},
-				cli.StringFlag{Name: "database", Usage: "Firestore Database ID"},
-				cli.StringFlag{Name: "redisAddr", Usage: "Redis server address (e.g., localhost:6379); if set, uses Redis instead of Datastore"},
-				cli.StringFlag{Name: "file", Usage: "Path to JSON file containing a list of Task objects"},
-			},
-			Action: submit},
-		cli.Command{
-			Name:  "copyexe",
-			Usage: "Copy the worker executable to a destination path",
-			Flags: []cli.Flag{
-				cli.StringFlag{Name: "dst", Usage: "Destination path for the copied executable"},
-			},
-			Action: copyexe},
-		cli.Command{
-			Name:  "exec",
-			Usage: "Execute a single task directly from the command line",
-			Flags: []cli.Flag{
-				cli.StringFlag{Name: "command", Usage: "Shell command to run (required)"},
-				cli.StringFlag{Name: "commandResultURL", Value: "results.json", Usage: "Local path to write result JSON"},
-				cli.StringFlag{Name: "aetherRoot", Usage: "Aether store root (gs://bucket/prefix or local path)"},
-				cli.StringFlag{Name: "aetherFSRoot", Usage: "Input aether manifest ref for downloads"},
-				cli.Int64Flag{Name: "aetherMaxSizeToBundle", Value: 0, Usage: "Max file size in bytes eligible for bundling (0 = disable bundling)"},
-				cli.Int64Flag{Name: "aetherMaxBundleSize", Value: 0, Usage: "Target max bundle size in bytes"},
-				cli.IntFlag{Name: "aetherWorkers", Value: 1, Usage: "Parallel upload workers"},
-				cli.StringFlag{Name: "dir", Value: "./sparklesworker", Usage: "Base directory for worker data"},
-				cli.StringFlag{Name: "cacheDir", Usage: "Cache directory (defaults to dir/cache)"},
-				cli.StringFlag{Name: "tasksDir", Usage: "Tasks directory (defaults to dir/tasks)"},
-				cli.StringFlag{Name: "taskId", Value: "exec-task", Usage: "Task identifier"},
-				cli.StringFlag{Name: "workingDir", Usage: "Working subdirectory within task dir"},
-				cli.StringFlag{Name: "dockerImage", Usage: "Docker image for execution"},
-				cli.StringSliceFlag{Name: "includePattern", Usage: "Upload include glob pattern (repeatable)"},
-				cli.StringSliceFlag{Name: "excludePattern", Usage: "Upload exclude glob pattern (repeatable)"},
-				cli.StringSliceFlag{Name: "param", Usage: "Parameter as key=value (repeatable)"},
-				cli.StringFlag{Name: "preDownloadScript", Usage: "Script to run before download"},
-				cli.StringFlag{Name: "postDownloadScript", Usage: "Script to run after download"},
-				cli.StringFlag{Name: "preExecScript", Usage: "Script to run before exec"},
-				cli.StringFlag{Name: "postExecScript", Usage: "Script to run after exec"},
-			},
-			Action: execTask},
-		cli.Command{
-			Name:  "fetch",
-			Usage: "Download a file from Google Cloud Storage with MD5 verification",
-			Flags: []cli.Flag{
-				cli.StringFlag{Name: "expectMD5", Usage: "Expected MD5 hash (hex-encoded) of the downloaded file"},
-				cli.StringFlag{Name: "src", Usage: "Source GCS path (gs://bucket/object)"},
-				cli.StringFlag{Name: "dst", Usage: "Destination local file path"},
-			},
-			Action: fetch}}
-
+		consumeCmd,
+		submitCmd,
+		copyexeCmd,
+		execCmd,
+		fetchCmd,
+	}
 	return app.Run(os.Args)
 }
 
