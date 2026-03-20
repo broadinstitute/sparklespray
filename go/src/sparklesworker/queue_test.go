@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"cloud.google.com/go/datastore"
+	"cloud.google.com/go/firestore"
 
 	"github.com/broadinstitute/sparklesworker/consumer"
 	"github.com/broadinstitute/sparklesworker/control"
@@ -29,12 +29,12 @@ func (t *MockTimeout) HasTimeoutExpired(timestamp time.Time) bool {
 
 func spawnExecuteTasks(t *testing.T, projectID string, jobID string, index int, ready *sync.WaitGroup, done *sync.WaitGroup, taskParamPerClient [][]string) {
 	ctx := context.Background()
-	client, err := datastore.NewClient(ctx, projectID)
+	client, err := firestore.NewClient(ctx, projectID)
 	assert.Nil(t, err)
 
 	workerID := fmt.Sprintf("thread-%d", index)
 	cluster := "c"
-	queue := task_queue.NewDataStoreQueue(client, cluster, workerID, 1*time.Second, 60*time.Second)
+	queue := task_queue.NewFirestoreQueue(client, cluster, workerID, 1*time.Second, 60*time.Second)
 
 	run := func() {
 		ready.Wait()
@@ -56,29 +56,35 @@ func spawnExecuteTasks(t *testing.T, projectID string, jobID string, index int, 
 	go run()
 }
 
-func deleteTasks(t *testing.T, ctx context.Context, client *datastore.Client, jobID string) {
-	q := datastore.NewQuery("Task").Filter("job_id =", jobID).Limit(100)
+func deleteTasks(t *testing.T, ctx context.Context, client *firestore.Client, jobID string) {
 	for {
-		var tasks []task_queue.Task
-		keys, err := client.GetAll(ctx, q, &tasks)
+		docs, err := client.Collection("Task").Where("job_id", "==", jobID).Limit(100).Documents(ctx).GetAll()
 		assert.Nil(t, err)
-		if len(keys) == 0 {
+		if len(docs) == 0 {
 			break
 		}
-		log.Printf("Deleting %d tasks...", len(keys))
-		err = client.DeleteMulti(ctx, keys)
+		log.Printf("Deleting %d tasks...", len(docs))
+		wb := client.Batch()
+		for _, doc := range docs {
+			wb.Delete(doc.Ref)
+		}
+		_, err = wb.Commit(ctx)
 		assert.Nil(t, err)
 	}
 }
 
-func submitTasks(t *testing.T, ctx context.Context, client *datastore.Client, tasks []*task_queue.Task) {
-	keys := make([]*datastore.Key, len(tasks))
-	for i, task := range tasks {
-		keys[i] = datastore.NameKey("Task", task.TaskID, nil)
-	}
-
+func submitTasks(t *testing.T, ctx context.Context, client *firestore.Client, tasks []*task_queue.Task) {
 	for i := 0; i < len(tasks); i += 500 {
-		_, err := client.PutMulti(ctx, keys[i:i+500], tasks[i:i+500])
+		end := i + 500
+		if end > len(tasks) {
+			end = len(tasks)
+		}
+		wb := client.Batch()
+		for _, task := range tasks[i:end] {
+			docRef := client.Collection("Task").Doc(task.TaskID)
+			wb.Set(docRef, task)
+		}
+		_, err := wb.Commit(ctx)
 		assert.Nil(t, err)
 		if err != nil {
 			panic(err.Error())
@@ -112,7 +118,7 @@ func runConcurrentClaims(t *testing.T, taskCount int, clientCount int) {
 	jobID := "testjobid"
 
 	ctx := context.Background()
-	client, err := datastore.NewClient(ctx, projectID)
+	client, err := firestore.NewClient(ctx, projectID)
 	assert.Nil(t, err)
 
 	// clear anything that may be left from old test

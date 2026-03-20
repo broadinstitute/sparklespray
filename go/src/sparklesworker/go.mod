@@ -3,7 +3,7 @@ module github.com/broadinstitute/sparklesworker
 go 1.25.1
 
 require (
-	cloud.google.com/go/datastore v1.22.0
+	cloud.google.com/go/firestore v1.21.0
 	cloud.google.com/go/logging v1.13.1
 	cloud.google.com/go/pubsub v1.50.1
 	cloud.google.com/go/storage v1.60.0
@@ -72,4 +72,4 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
-replace github.com/pgm/aether => ../../../../../../aether
+replace github.com/pgm/aether => ../../../../aether

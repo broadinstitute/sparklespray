@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"cloud.google.com/go/datastore"
+	"cloud.google.com/go/firestore"
 	"cloud.google.com/go/storage"
 	"github.com/broadinstitute/sparklesworker/consumer"
 	"github.com/broadinstitute/sparklesworker/control"
@@ -284,12 +284,12 @@ func submit(c *cli.Context) error {
 		defer redisClient.Close()
 		queue = task_queue.NewRedisQueue(redisClient, cluster, "", 0, 0)
 	} else {
-		log.Printf("Using Datastore backend (project=%s)", projectID)
-		client, err := datastore.NewClientWithDatabase(ctx, projectID, database)
+		log.Printf("Using Firestore backend (project=%s)", projectID)
+		client, err := firestore.NewClientWithDatabase(ctx, projectID, database)
 		if err != nil {
-			return fmt.Errorf("creating datastore client: %w", err)
+			return fmt.Errorf("creating firestore client: %w", err)
 		}
-		queue = task_queue.NewDataStoreQueue(client, cluster, "", 0, 0)
+		queue = task_queue.NewFirestoreQueue(client, cluster, "", 0, 0)
 	}
 
 	if err := queue.AddTasks(ctx, tasks); err != nil {
@@ -506,11 +506,11 @@ func consume(c *cli.Context) error {
 		redisQueue.WatchdogNotifier = watchdog.Notify
 		queue = redisQueue
 	} else {
-		log.Printf("Using Google Cloud backend (Pub/Sub + Datastore)")
+		log.Printf("Using Google Cloud backend (Pub/Sub + Firestore)")
 
-		client, err := datastore.NewClientWithDatabase(ctx, projectID, database)
+		client, err := firestore.NewClientWithDatabase(ctx, projectID, database)
 		if err != nil {
-			log.Printf("Creating datastore client failed: %v", err)
+			log.Printf("Creating firestore client failed: %v", err)
 			return err
 		}
 
@@ -527,9 +527,9 @@ func consume(c *cli.Context) error {
 			return err
 		}
 
-		dsQueue := task_queue.NewDataStoreQueue(client, cluster, workerID, options.InitialClaimRetry, options.ClaimTimeout)
-		dsQueue.WatchdogNotifier = watchdog.Notify
-		queue = dsQueue
+		fsQueue := task_queue.NewFirestoreQueue(client, cluster, workerID, options.InitialClaimRetry, options.ClaimTimeout)
+		fsQueue.WatchdogNotifier = watchdog.Notify
+		queue = fsQueue
 	}
 	defer cleanupControlChannel()
 
