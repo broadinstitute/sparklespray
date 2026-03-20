@@ -11,9 +11,9 @@ import (
 	"cloud.google.com/go/datastore"
 )
 
-const TaskCollection = "SparklesV6Task"
-const ClusterCollection = "SparklesV6Cluster"
-const JobCollection = "SparklesV6Job"
+const TaskCollection = "V7Task"
+const ClusterCollection = "V7Cluster"
+const JobCollection = "V7Job"
 
 const InitialClaimRetryDelay = 1000
 
