@@ -1,15 +1,12 @@
 package sparklesworker
 
 import (
-	"crypto/tls"
-	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log"
-	"net/http"
 	"os"
 	"path"
 	"path/filepath"
@@ -163,7 +160,6 @@ func copyexe(c *cli.Context) error {
 
 func fetch(c *cli.Context) error {
 	log.Printf("Starting fetch")
-	certs := initCerts()
 
 	expectMD5 := c.String("expectMD5")
 	src := c.String("src")
@@ -173,7 +169,7 @@ func fetch(c *cli.Context) error {
 
 	var err error
 
-	httpClient, err := clientWithCerts(ctx, certs, "https://www.googleapis.com/auth/compute.readonly")
+	httpClient, err := google.DefaultClient(ctx, "https://www.googleapis.com/auth/compute.readonly")
 	if err != nil {
 		log.Printf("Could not create default client: %v", err)
 		return err
@@ -257,15 +253,6 @@ func CopyToFile(src io.Reader, dstPath string, expectedMD5 string) error {
 	return nil
 }
 
-func initCerts() *x509.CertPool {
-	pool := x509.NewCertPool()
-	pool.AppendCertsFromPEM([]byte(pemCerts))
-	return pool
-}
-
-func clientWithCerts(ctx context.Context, certs *x509.CertPool, scope ...string) (*http.Client, error) {
-	return google.DefaultClient(ctx, scope...)
-}
 func submit(c *cli.Context) error {
 	ctx := context.Background()
 
@@ -342,11 +329,11 @@ func execTask(c *cli.Context) error {
 	}
 
 	taskSpec := &task_queue.TaskSpec{
-		Command:            command,
-		AetherFSRoot:       c.String("aetherFSRoot"),
-		WorkingDir:         c.String("workingDir"),
-		DockerImage:        c.String("dockerImage"),
-		Parameters:         params,
+		Command:      command,
+		AetherFSRoot: c.String("aetherFSRoot"),
+		WorkingDir:   c.String("workingDir"),
+		DockerImage:  c.String("dockerImage"),
+		Parameters:   params,
 		Uploads: &task_queue.UploadSpec{
 			IncludePatterns: func() []string {
 				if p := c.StringSlice("includePattern"); len(p) > 0 {
@@ -386,11 +373,6 @@ func execTask(c *cli.Context) error {
 func consume(c *cli.Context) error {
 	log.Printf("Starting consume")
 
-	certs := initCerts()
-	http.DefaultTransport = &http.Transport{
-		TLSClientConfig: &tls.Config{RootCAs: certs},
-	}
-
 	projectID := c.String("projectId")
 	dir := c.String("dir")
 	cacheDir := c.String("cacheDir")
@@ -425,7 +407,7 @@ func consume(c *cli.Context) error {
 	ctx := context.Background()
 
 	var err error
-	httpclient, err := clientWithCerts(ctx, certs, "https://www.googleapis.com/auth/compute.readonly")
+	httpclient, err := google.DefaultClient(ctx, "https://www.googleapis.com/auth/compute.readonly")
 	if err != nil {
 		log.Printf("Could not create default client: %v", err)
 		return err
