@@ -71,7 +71,6 @@ type ResultStruct struct {
 	ExeArgs     []string          `json:"exe_args"`
 	Parameters  map[string]string `json:"parameters,omitempty"`
 	ReturnCode  string            `json:"return_code"`
-	LogsKey     string            `json:"logs_key,omitempty"`
 	ManifestKey string            `json:"manifest_key,omitempty"`
 	Usage       *ResourceUsage    `json:"resource_usage"`
 }
@@ -214,6 +213,11 @@ func addFilesToStringSet(workdir string, pattern string, dest Stringset) error {
 }
 
 func ResolveUploads(workdir string, uploads *task_queue.UploadSpec) ([]string, error) {
+	workdir, err := filepath.Abs(workdir)
+	if err != nil {
+		return nil, err
+	}
+
 	included := make(Stringset)
 	excluded := make(Stringset)
 
@@ -337,7 +341,6 @@ func downloadTaskFiles(ctx context.Context, aetherCfg *AetherConfig, dirs *TaskP
 
 type UploadTaskResultsResult struct {
 	taskFilesManifestKey string
-	taskLogsManifestKey  string
 	uploadStats          *TransferStats
 }
 
@@ -351,7 +354,7 @@ func collectFileInputs(workDir string, uploadSpec *task_queue.UploadSpec) ([]aet
 	for _, absPath := range filePaths {
 		relPath, err := filepath.Rel(workDir, absPath)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("error in collectFileInputs: %s", err)
 		}
 		filesToUpload = append(filesToUpload, aetherclient.FileInput{Path: absPath, ManifestName: relPath})
 	}
@@ -359,14 +362,10 @@ func collectFileInputs(workDir string, uploadSpec *task_queue.UploadSpec) ([]aet
 	return filesToUpload, nil
 }
 
-func uploadTaskResults(ctx context.Context, aetherCfg *AetherConfig, logsDir string, workDir string,
+func uploadFilesPerSpec(ctx context.Context, aetherCfg *AetherConfig, dir string,
 	uploadSpec *task_queue.UploadSpec) (*UploadTaskResultsResult, error) {
-	filesToUpload, err := collectFileInputs(workDir, uploadSpec)
-	if err != nil {
-		return nil, err
-	}
-
-	logsToUpload, err := collectFileInputs(logsDir, &task_queue.UploadSpec{IncludePatterns: []string{"**/*"}})
+	log.Printf("calling collectFileInputs")
+	filesToUpload, err := collectFileInputs(dir, uploadSpec)
 	if err != nil {
 		return nil, err
 	}
@@ -380,23 +379,11 @@ func uploadTaskResults(ctx context.Context, aetherCfg *AetherConfig, logsDir str
 		}
 	}
 
-	for _, f := range logsToUpload {
-		fi, err := os.Stat(f.Path)
-		if err == nil {
-			ulStats.Bytes += fi.Size()
-		}
-	}
+	log.Printf("calling MakeFilesystem")
 
 	mkfsFilesStats, err := aetherclient.MakeFilesystem(ctx, aetherclient.MakeFilesystemOptions{
 		Root:            aetherCfg.Root,
 		Files:           filesToUpload,
-		MaxSizeToBundle: aetherCfg.MaxSizeToBundle,
-		MaxBundleSize:   aetherCfg.MaxBundleSize,
-		Workers:         aetherCfg.Workers,
-	})
-	mkfsLogsStats, err := aetherclient.MakeFilesystem(ctx, aetherclient.MakeFilesystemOptions{
-		Root:            aetherCfg.Root,
-		Files:           logsToUpload,
 		MaxSizeToBundle: aetherCfg.MaxSizeToBundle,
 		MaxBundleSize:   aetherCfg.MaxBundleSize,
 		Workers:         aetherCfg.Workers,
@@ -408,23 +395,23 @@ func uploadTaskResults(ctx context.Context, aetherCfg *AetherConfig, logsDir str
 	}
 
 	log.Printf("Uploaded %d files and logs from task (%d bytes, %d skipped) in %s, task files key: %s logs key: %s",
-		mkfsFilesStats.FilesUploaded+mkfsLogsStats.FilesUploaded,
-		mkfsFilesStats.BytesUploaded+mkfsLogsStats.BytesUploaded,
-		mkfsFilesStats.FilesSkipped+mkfsLogsStats.FilesSkipped,
-		mkfsFilesStats.UploadDuration+mkfsLogsStats.UploadDuration,
-		mkfsFilesStats.ManifestKey,
-		mkfsLogsStats.ManifestKey)
+		mkfsFilesStats.FilesUploaded,
+		mkfsFilesStats.BytesUploaded,
+		mkfsFilesStats.FilesSkipped,
+		mkfsFilesStats.UploadDuration,
+		mkfsFilesStats.ManifestKey)
 
 	return &UploadTaskResultsResult{
 		taskFilesManifestKey: mkfsFilesStats.ManifestKey,
-		taskLogsManifestKey:  mkfsLogsStats.ManifestKey,
 		uploadStats:          ulStats,
 	}, nil
 }
 
 type ExecuteTaskResult struct {
-	RetCode   string
-	TaskPaths *TaskPaths
+	RetCode    string
+	OutputsKey string
+	LogsKey    string
+	TaskPaths  *TaskPaths
 }
 
 type ExecuteLifecycle interface {
@@ -463,24 +450,28 @@ func ExecuteTask(ctx context.Context, aetherCfg *AetherConfig, taskId string, ta
 
 	execLifecycleScript("PostExecScript", dirs.workDir, taskSpec.PostExecScript)
 
-	uploadResult, err := uploadTaskResults(ctx, aetherCfg, dirs.logDir, dirs.workDir, taskSpec.Uploads)
+	uploadResult, err := uploadFilesPerSpec(ctx, aetherCfg, dirs.workDir, taskSpec.Uploads)
 	if err != nil {
 		return nil, err
 	}
 
-	err = writeResultFile(dirs.resultPath, retcode, execResult, dirs.workDir, uploadResult.taskFilesManifestKey, uploadResult.taskLogsManifestKey, taskSpec.Parameters, dlStats, uploadResult.uploadStats)
+	err = writeResultFile(dirs.resultPath, retcode, execResult, dirs.workDir, uploadResult.taskFilesManifestKey, taskSpec.Parameters, dlStats, uploadResult.uploadStats)
 	if err != nil {
 		return nil, err
 	}
 
-	return &ExecuteTaskResult{RetCode: retcode, TaskPaths: dirs}, nil
+	logsUpload, err := uploadFilesPerSpec(ctx, aetherCfg, dirs.logDir, &task_queue.UploadSpec{IncludePatterns: []string{"**/*"}})
+	if err != nil {
+		return nil, err
+	}
+
+	return &ExecuteTaskResult{RetCode: retcode, OutputsKey: "sha256:" + uploadResult.taskFilesManifestKey, LogsKey: "sha256:" + logsUpload.taskFilesManifestKey, TaskPaths: dirs}, nil
 }
 
 func writeResultFile(resultPath string,
 	retcode string,
 	execResult *ExecResult,
 	workdir string,
-	logsKey string,
 	manifestKey string,
 	parameters map[string]string,
 	dlStats *TransferStats,
@@ -494,7 +485,6 @@ func writeResultFile(resultPath string,
 		ExeArgs:     execResult.ExeArgs,
 		Parameters:  parameters,
 		ReturnCode:  retcode,
-		LogsKey:     logsKey,
 		ManifestKey: manifestKey,
 		Usage: &ResourceUsage{
 			UserCPUTime:        timevalToSeconds(rusage.Utime),

@@ -76,7 +76,7 @@ func RunLoop(ctx context.Context, queue task_queue.TaskQueue, sleepUntilNotify f
 					return updateErr
 				}
 			} else {
-				_, updateErr := updateTaskCompleted(ctx, queue, claimed.TaskID, execTaskResult.RetCode)
+				_, updateErr := updateTaskCompleted(ctx, queue, claimed.TaskID, execTaskResult.RetCode, execTaskResult.OutputsKey, execTaskResult.LogsKey)
 				if updateErr != nil {
 					log.Printf("Got error updating task %s is complete: %v", claimed.TaskID, updateErr)
 					return updateErr
@@ -96,8 +96,8 @@ func RunLoop(ctx context.Context, queue task_queue.TaskQueue, sleepUntilNotify f
 	return nil
 }
 
-func updateTaskCompleted(ctx context.Context, q task_queue.TaskQueue, taskID string, retcode string) (*task_queue.Task, error) {
-	log.Printf("updateTaskCompleted of task %v, retcode=%s", taskID, retcode)
+func updateTaskCompleted(ctx context.Context, q task_queue.TaskQueue, taskID string, retcode string, outputKey string, logsKey string) (*task_queue.Task, error) {
+	log.Printf("updateTaskCompleted of task %v, retcode=%s outputKey=%s logskey=%s", taskID, retcode, outputKey, logsKey)
 
 	now := control.GetTimestampMillis()
 	taskHistory := &task_queue.TaskHistory{
@@ -115,6 +115,8 @@ func updateTaskCompleted(ctx context.Context, q task_queue.TaskQueue, taskID str
 		task.Status = task_queue.StatusComplete
 		task.ExitCode = retcode
 		task.LastUpdated = float64(now) / 1000.0
+		task.OutputAetherFSRoot = outputKey
+		task.LogAetherFSRoot = logsKey
 
 		return true
 	}

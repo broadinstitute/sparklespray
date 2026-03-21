@@ -11,11 +11,11 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
-	"strings"
 	"time"
 
 	"cloud.google.com/go/firestore"
 	"cloud.google.com/go/storage"
+	"github.com/broadinstitute/sparklesworker/cmd/exec_task"
 	"github.com/broadinstitute/sparklesworker/consumer"
 	"github.com/broadinstitute/sparklesworker/task_queue"
 	"github.com/broadinstitute/sparklesworker/watchdog"
@@ -74,33 +74,6 @@ var copyexeCmd = cli.Command{
 	Action: copyexe,
 }
 
-var execCmd = cli.Command{
-	Name:  "exec",
-	Usage: "Execute a single task directly from the command line",
-	Flags: []cli.Flag{
-		cli.StringFlag{Name: "command", Usage: "Shell command to run (required)"},
-		cli.StringFlag{Name: "commandResultURL", Value: "results.json", Usage: "Local path to write result JSON"},
-		cli.StringFlag{Name: "aetherRoot", Usage: "Aether store root (gs://bucket/prefix or local path)"},
-		cli.StringFlag{Name: "aetherFSRoot", Usage: "Input aether manifest ref for downloads"},
-		cli.Int64Flag{Name: "aetherMaxSizeToBundle", Value: 0, Usage: "Max file size in bytes eligible for bundling (0 = disable bundling)"},
-		cli.Int64Flag{Name: "aetherMaxBundleSize", Value: 0, Usage: "Target max bundle size in bytes"},
-		cli.IntFlag{Name: "aetherWorkers", Value: 1, Usage: "Parallel upload workers"},
-		cli.StringFlag{Name: "dir", Value: "./sparklesworker", Usage: "Base directory for worker data"},
-		cli.StringFlag{Name: "cacheDir", Usage: "Cache directory (defaults to dir/cache)"},
-		cli.StringFlag{Name: "tasksDir", Usage: "Tasks directory (defaults to dir/tasks)"},
-		cli.StringFlag{Name: "taskId", Value: "exec-task", Usage: "Task identifier"},
-		cli.StringFlag{Name: "workingDir", Usage: "Working subdirectory within task dir"},
-		cli.StringFlag{Name: "dockerImage", Usage: "Docker image for execution"},
-		cli.StringSliceFlag{Name: "includePattern", Usage: "Upload include glob pattern (repeatable)"},
-		cli.StringSliceFlag{Name: "excludePattern", Usage: "Upload exclude glob pattern (repeatable)"},
-		cli.StringSliceFlag{Name: "param", Usage: "Parameter as key=value (repeatable)"},
-		cli.StringFlag{Name: "preDownloadScript", Usage: "Script to run before download"},
-		cli.StringFlag{Name: "postDownloadScript", Usage: "Script to run after download"},
-		cli.StringFlag{Name: "preExecScript", Usage: "Script to run before exec"},
-		cli.StringFlag{Name: "postExecScript", Usage: "Script to run after exec"},
-	},
-	Action: execTask,
-}
 
 var fetchCmd = cli.Command{
 	Name:  "fetch",
@@ -125,7 +98,7 @@ func Main() error {
 		consumeCmd,
 		submitCmd,
 		copyexeCmd,
-		execCmd,
+		exec_task.ExecCmd,
 		fetchCmd,
 	}
 	return app.Run(os.Args)
@@ -310,73 +283,6 @@ func submit(c *cli.Context) error {
 	return nil
 }
 
-func execTask(c *cli.Context) error {
-	command := c.String("command")
-	if command == "" {
-		return fmt.Errorf("--command is required")
-	}
-
-	commandArray := strings.Split(command, " ")
-
-	ctx := context.Background()
-
-	dir := c.String("dir")
-	cacheDir := c.String("cacheDir")
-	if cacheDir == "" {
-		cacheDir = path.Join(dir, "cache")
-	}
-	tasksDir := c.String("tasksDir")
-	if tasksDir == "" {
-		tasksDir = path.Join(dir, "tasks")
-	}
-
-	commandResultURL := c.String("commandResultURL")
-
-	params := map[string]string{}
-	for _, p := range c.StringSlice("param") {
-		parts := strings.SplitN(p, "=", 2)
-		if len(parts) == 2 {
-			params[parts[0]] = parts[1]
-		}
-	}
-
-	taskSpec := &task_queue.TaskSpec{
-		Command:      commandArray,
-		AetherFSRoot: c.String("aetherFSRoot"),
-		WorkingDir:   c.String("workingDir"),
-		DockerImage:  c.String("dockerImage"),
-		Parameters:   params,
-		Uploads: &task_queue.UploadSpec{
-			IncludePatterns: func() []string {
-				if p := c.StringSlice("includePattern"); len(p) > 0 {
-					return p
-				}
-				return []string{"**/*"}
-			}(),
-			ExcludePatterns: c.StringSlice("excludePattern"),
-		},
-		PreDownloadScript:  c.String("preDownloadScript"),
-		PostDownloadScript: c.String("postDownloadScript"),
-		PreExecScript:      c.String("preExecScript"),
-		PostExecScript:     c.String("postExecScript"),
-	}
-
-	aetherCfg := consumer.AetherConfig{
-		Root:            c.String("aetherRoot"),
-		MaxSizeToBundle: c.Int64("aetherMaxSizeToBundle"),
-		MaxBundleSize:   c.Int64("aetherMaxBundleSize"),
-		Workers:         c.Int("aetherWorkers"),
-	}
-	taskId := c.String("taskId")
-
-	retcode, err := consumer.ExecuteTask(ctx, &aetherCfg, taskId, taskSpec, dir, cacheDir, tasksDir, nil)
-	if err != nil {
-		return fmt.Errorf("task failed: %w", err)
-	}
-	log.Printf("Task completed with exit code: %s", retcode.RetCode)
-	log.Printf("Result written to: %s", commandResultURL)
-	return nil
-}
 
 func consume(c *cli.Context) error {
 	log.Printf("Starting consume")
