@@ -18,28 +18,26 @@ type TaskSpec struct {
 	Parameters         map[string]string `firestore:"parameters,omitempty" json:"parameters,omitempty"`
 	Uploads            *UploadSpec       `firestore:"uploads" json:"uploads"`
 	AetherFSRoot       string            `firestore:"aether_fs_root" json:"aether_fs_root"`
-	Command            string            `firestore:"command" json:"command"`
-	CommandResultURL   string            `firestore:"command_result_url" json:"command_result_url"`
-	StdoutURL          string            `firestore:"stdout_url" json:"stdout_url"`
+	Command            []string          `firestore:"command" json:"command"`
 	DockerImage        string            `firestore:"docker_image,omitempty" json:"docker_image,omitempty"`
 }
 
 // Task represents a task in the queue
 type Task struct {
-	TaskID          string         `firestore:"task_id" json:"task_id"`
-	TaskIndex       int64          `firestore:"task_index" json:"task_index"`
-	JobID           string         `firestore:"job_id" json:"job_id"`
-	Status          string         `firestore:"status" json:"status"`
-	OwnedByWorkerID string         `firestore:"owned_by_worker_id" json:"owned_by_worker_id"`
-	TaskSpec        *TaskSpec      `firestore:"task_spec" json:"task_spec"`
-	History         []*TaskHistory `firestore:"history" json:"history"`
-	FailureReason   string         `firestore:"failure_reason,omitempty" json:"failure_reason"`
-	Version         int32          `firestore:"version" json:"version"`
-	ExitCode        string         `firestore:"exit_code" json:"exit_code"`
-	Cluster         string         `firestore:"cluster" json:"cluster"`
-	MonitorAddress  string         `firestore:"monitor_address" json:"monitor_address"`
-	LogURL          string         `firestore:"log_url" json:"log_url"`
-	LastUpdated     float64        `firestore:"last_updated" json:"last_updated"`
+	TaskID             string         `firestore:"task_id" json:"task_id"`
+	TaskIndex          int64          `firestore:"task_index" json:"task_index"`
+	JobID              string         `firestore:"job_id" json:"job_id"`
+	Status             string         `firestore:"status" json:"status"`
+	OwnedByWorkerID    string         `firestore:"owned_by_worker_id" json:"owned_by_worker_id"`
+	TaskSpec           *TaskSpec      `firestore:"task_spec" json:"task_spec"`
+	History            []*TaskHistory `firestore:"history" json:"history"`
+	FailureReason      string         `firestore:"failure_reason,omitempty" json:"failure_reason"`
+	Version            int32          `firestore:"version" json:"version"`
+	ExitCode           string         `firestore:"exit_code" json:"exit_code"`
+	OutputAetherFSRoot string         `firestore:"output_aether_fs_root" json:"output_aether_fs_root"`
+	LogAetherFSRoot    string         `firestore:"log_aether_fs_root" json:"log_aether_fs_root"`
+	ClusterID          string         `firestore:"cluster_id" json:"cluster_id"`
+	LastUpdated        float64        `firestore:"last_updated" json:"last_updated"`
 }
 
 // TaskHistory represents a history entry for a task

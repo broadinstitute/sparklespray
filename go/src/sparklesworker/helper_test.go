@@ -4,14 +4,15 @@ import (
 	"context"
 	"io/ioutil"
 	"log"
-	"net/http"
 	"os"
 	"path"
 	"testing"
 
 	"github.com/broadinstitute/sparklesworker/consumer"
 	"github.com/broadinstitute/sparklesworker/task_queue"
+	aetherclient "github.com/pgm/aether/client"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 /*
@@ -25,14 +26,12 @@ gcp ops:
 	consumer.UploadMapped(...)
 	download files to different dir:
 	func downloadAll(workdir string, downloads []*consumer.TaskDownload) (error, consumer.Stringset) {
-
 */
 func check(err error) {
 	if err != nil {
 		panic(err.Error())
 	}
 }
-
 
 func TestResolveUploads(t *testing.T) {
 	tempDir, err := ioutil.TempDir("", "testTmp")
@@ -56,58 +55,37 @@ func TestResolveUploads(t *testing.T) {
 	assert.Nil(t, err)
 
 	assert.Len(t, filesToUpload, 2)
-	log.Printf("Testcommpla\n")
-}
-
-func TestIOClient(t *testing.T) {
-	// TODO: FIX
-	destURL := "gs://broad-achilles-kubeque/test/TestIOClient"
-
-	ctx := context.Background()
-	ioc, err := NewIOClient(ctx, http.DefaultClient)
-	assert.Nil(t, err)
-
-	sourceFile, _ := ioutil.TempFile("", "sample")
-	destFile := sourceFile.Name() + ".dl"
-	log.Printf("destFile=%v\n", destFile)
-	sourceContents := []byte("test")
-	assert.Nil(t, ioutil.WriteFile(sourceFile.Name(), sourceContents, 0700))
-
-	assert.Nil(t, ioc.Upload(sourceFile.Name(), destURL))
-	assert.Nil(t, ioc.Download(destURL, destFile))
-
-	destContents, _ := ioutil.ReadFile(destFile)
-
-	assert.Equal(t, destContents, sourceContents)
 }
 
 func TestExecute(t *testing.T) {
-	urlprefix := "gs://broad-achilles-kubeque/test/testExecute"
-
-	tmpdir, err := ioutil.TempDir("", "testTmp")
-	assert.Nil(t, err)
+	tmpdir, err := os.MkdirTemp("", "testTmp")
+	require.NoError(t, err)
 
 	tasksDir := path.Join(tmpdir, "tasks")
 	cacheDir := path.Join(tmpdir, "cache")
 	rootDir := tmpdir
 
 	ctx := context.Background()
-	ioc, err := NewIOClient(ctx, http.DefaultClient)
 	assert.Nil(t, err)
+
+	aetherConfig := &consumer.AetherConfig{Root: path.Join(tmpdir, "aether")}
+
+	mkfsResult, err := aetherclient.MakeFilesystem(ctx, aetherclient.MakeFilesystemOptions{
+		Root:            aetherConfig.Root,
+		Files:           []aetherclient.FileInput{},
+		MaxSizeToBundle: aetherConfig.MaxSizeToBundle,
+		MaxBundleSize:   aetherConfig.MaxBundleSize,
+		Workers:         aetherConfig.Workers,
+	})
+	require.NoError(t, err)
 
 	spec := &task_queue.TaskSpec{
-		WorkingDir:       ".",
-		PreExecScript:    "ls",
-		Command:          "bash -c 'echo hello'",
-		CommandResultURL: urlprefix + "result.json",
-		StdoutURL:        urlprefix + "stdout.txt",
-		Uploads:          &task_queue.UploadSpec{},
-	}
-
-	writeResult := func(data []byte) error {
-		return ioc.UploadBytes(spec.CommandResultURL, data)
-	}
-	retcode, err := consumer.ExecuteTask(ctx, writeResult, consumer.AetherConfig{}, "test-task", spec, rootDir, cacheDir, tasksDir, nil)
+		WorkingDir:    ".",
+		PreExecScript: "ls",
+		Command:       []string{"echo", "hello"},
+		Uploads:       &task_queue.UploadSpec{},
+		AetherFSRoot:  "sha256:" + mkfsResult.ManifestKey}
+	execResult, err := consumer.ExecuteTask(ctx, aetherConfig, "test-task", spec, rootDir, cacheDir, tasksDir, nil)
 	assert.Nil(t, err)
-	assert.Equal(t, "0", retcode)
+	assert.Equal(t, "0", execResult.RetCode)
 }

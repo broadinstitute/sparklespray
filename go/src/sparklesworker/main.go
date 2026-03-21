@@ -17,8 +17,6 @@ import (
 	"cloud.google.com/go/firestore"
 	"cloud.google.com/go/storage"
 	"github.com/broadinstitute/sparklesworker/consumer"
-	"github.com/broadinstitute/sparklesworker/control"
-	"github.com/broadinstitute/sparklesworker/monitor"
 	"github.com/broadinstitute/sparklesworker/task_queue"
 	"github.com/broadinstitute/sparklesworker/watchdog"
 	"github.com/redis/go-redis/v9"
@@ -318,6 +316,8 @@ func execTask(c *cli.Context) error {
 		return fmt.Errorf("--command is required")
 	}
 
+	commandArray := strings.Split(command, " ")
+
 	ctx := context.Background()
 
 	dir := c.String("dir")
@@ -341,7 +341,7 @@ func execTask(c *cli.Context) error {
 	}
 
 	taskSpec := &task_queue.TaskSpec{
-		Command:      command,
+		Command:      commandArray,
 		AetherFSRoot: c.String("aetherFSRoot"),
 		WorkingDir:   c.String("workingDir"),
 		DockerImage:  c.String("dockerImage"),
@@ -361,10 +361,6 @@ func execTask(c *cli.Context) error {
 		PostExecScript:     c.String("postExecScript"),
 	}
 
-	writeResult := func(data []byte) error {
-		return os.WriteFile(commandResultURL, data, 0644)
-	}
-
 	aetherCfg := consumer.AetherConfig{
 		Root:            c.String("aetherRoot"),
 		MaxSizeToBundle: c.Int64("aetherMaxSizeToBundle"),
@@ -373,11 +369,11 @@ func execTask(c *cli.Context) error {
 	}
 	taskId := c.String("taskId")
 
-	retcode, err := consumer.ExecuteTask(ctx, writeResult, aetherCfg, taskId, taskSpec, dir, cacheDir, tasksDir, nil)
+	retcode, err := consumer.ExecuteTask(ctx, &aetherCfg, taskId, taskSpec, dir, cacheDir, tasksDir, nil)
 	if err != nil {
 		return fmt.Errorf("task failed: %w", err)
 	}
-	log.Printf("Task completed with exit code: %s", retcode)
+	log.Printf("Task completed with exit code: %s", retcode.RetCode)
 	log.Printf("Result written to: %s", commandResultURL)
 	return nil
 }
@@ -419,17 +415,6 @@ func consume(c *cli.Context) error {
 	ctx := context.Background()
 
 	var err error
-	httpclient, err := google.DefaultClient(ctx, "https://www.googleapis.com/auth/compute.readonly")
-	if err != nil {
-		log.Printf("Could not create default client: %v", err)
-		return err
-	}
-
-	ioc, err := NewIOClient(ctx, httpclient)
-	if err != nil {
-		log.Printf("Creating io client failed: %v", err)
-		return err
-	}
 
 	isLocalRun := c.Bool("localhost")
 	log.Printf("isLocal = %v (cluster=%s)", isLocalRun, cluster)
@@ -458,8 +443,6 @@ func consume(c *cli.Context) error {
 		workerID = "localhost"
 	}
 
-	mon := monitor.New()
-
 	options := &consumer.Options{
 		ClaimTimeout:       30 * time.Second,                           // how long do we keep trying if we get an error claiming a task
 		InitialClaimRetry:  1 * time.Second,                            // if we get an error claiming, how long until we try again?
@@ -474,11 +457,10 @@ func consume(c *cli.Context) error {
 		Workers:         c.Int("aetherWorkers"),
 	}
 
-	executor := func(taskId string, taskSpec *task_queue.TaskSpec) (string, error) {
-		writeResult := func(data []byte) error {
-			return ioc.UploadBytes(taskSpec.CommandResultURL, data)
-		}
-		return consumer.ExecuteTask(ctx, writeResult, aetherCfg, taskId, taskSpec, dir, cacheDir, tasksDir, mon)
+	var executor consumer.Executor // func(taskId string, taskSpec *task_queue.TaskSpec) (*consumer.ExecuteTaskResult, error)
+	executor = func(taskId string, taskSpec *task_queue.TaskSpec) (*consumer.ExecuteTaskResult, error) {
+		result, err := consumer.ExecuteTask(ctx, &aetherCfg, taskId, taskSpec, dir, cacheDir, tasksDir, nil)
+		return result, err
 	}
 
 	sleepUntilNotify := func(sleepTime time.Duration) {
@@ -486,11 +468,7 @@ func consume(c *cli.Context) error {
 		time.Sleep(sleepTime)
 	}
 
-	// Create message handler for control channel
-	msgHandler := monitor.NewHandler(mon, workerID)
-
 	// Start control channel and queue - use Redis if configured, otherwise use Pub/Sub and Datastore
-	var notifier *control.Notifier
 	var cleanupControlChannel func()
 	var queue task_queue.TaskQueue
 
@@ -508,11 +486,11 @@ func consume(c *cli.Context) error {
 		}
 		defer redisClient.Close()
 
-		notifier, cleanupControlChannel, err = control.StartRedisChannel(ctx, redisClient, cluster, workerID, msgHandler.HandleMessage)
-		if err != nil {
-			log.Printf("Failed to start Redis control channel: %v", err)
-			return err
-		}
+		// notifier, cleanupControlChannel, err = control.StartRedisChannel(ctx, redisClient, cluster, workerID, msgHandler.HandleMessage)
+		// if err != nil {
+		// 	log.Printf("Failed to start Redis control channel: %v", err)
+		// 	return err
+		// }
 
 		redisQueue := task_queue.NewRedisQueue(redisClient, cluster, workerID, options.InitialClaimRetry, options.ClaimTimeout)
 		redisQueue.WatchdogNotifier = watchdog.Notify
@@ -533,11 +511,11 @@ func consume(c *cli.Context) error {
 		}
 		log.Printf("Got cluster config: incoming_topic=%s, response_topic=%s", clusterConfig.IncomingTopic, clusterConfig.ResponseTopic)
 
-		notifier, cleanupControlChannel, err = control.StartPubSubChannel(ctx, projectID, clusterConfig.IncomingTopic, clusterConfig.ResponseTopic, workerID, msgHandler.HandleMessage)
-		if err != nil {
-			log.Printf("Failed to start pub/sub subscriber: %v", err)
-			return err
-		}
+		// notifier, cleanupControlChannel, err = control.StartPubSubChannel(ctx, projectID, clusterConfig.IncomingTopic, clusterConfig.ResponseTopic, workerID, msgHandler.HandleMessage)
+		// if err != nil {
+		// 	log.Printf("Failed to start pub/sub subscriber: %v", err)
+		// 	return err
+		// }
 
 		fsQueue := task_queue.NewFirestoreQueue(client, cluster, workerID, options.InitialClaimRetry, options.ClaimTimeout)
 		fsQueue.WatchdogNotifier = watchdog.Notify
@@ -545,18 +523,11 @@ func consume(c *cli.Context) error {
 	}
 	defer cleanupControlChannel()
 
-	// Notify that worker has started
-	notifier.NotifyWorkerStarted()
-
-	err = consumer.RunLoop(ctx, queue, sleepUntilNotify, executor, options.SleepOnEmpty, options.MaxWaitForNewTasks, notifier)
+	err = consumer.RunLoop(ctx, queue, sleepUntilNotify, executor, options.SleepOnEmpty, options.MaxWaitForNewTasks)
 	if err != nil {
 		log.Printf("consumerRunLoop exited with: %v\n", err)
-		notifier.NotifyWorkerStopping()
 		return err
 	}
-
-	// Notify that worker is stopping
-	notifier.NotifyWorkerStopping()
 
 	return nil
 }

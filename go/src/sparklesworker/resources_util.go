@@ -1,4 +1,4 @@
-package monitor
+package sparklesworker
 
 import (
 	"fmt"
@@ -7,41 +7,10 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 )
 
 // PageSize is the system page size in bytes
 const PageSize = 4 * 1024
-
-// Monitor tracks log files for running tasks
-type Monitor struct {
-	mutex        sync.Mutex
-	LogPerTaskId map[string]string
-}
-
-// New creates a new Monitor
-func New() *Monitor {
-	return &Monitor{LogPerTaskId: make(map[string]string)}
-}
-
-// StartWatchingLog registers a log file for a task
-func (m *Monitor) StartWatchingLog(taskId string, stdoutPath string) {
-	log.Printf("StartWatchingLog(\"%s\", \"%s\")", taskId, stdoutPath)
-
-	m.mutex.Lock()
-	defer m.mutex.Unlock()
-
-	m.LogPerTaskId[taskId] = stdoutPath
-}
-
-// GetLogPath returns the log path for a task (thread-safe)
-func (m *Monitor) GetLogPath(taskId string) (string, bool) {
-	m.mutex.Lock()
-	defer m.mutex.Unlock()
-
-	path, ok := m.LogPerTaskId[taskId]
-	return path, ok
-}
 
 // MemoryUsage holds memory stats from /proc/*/statm
 type MemoryUsage struct {
@@ -236,4 +205,60 @@ func GetMemoryPressure() *MemoryPressure {
 		}
 	}
 	return pressure
+}
+
+// GetProcessStatusResponse for get_process_status responses
+type GetProcessStatusResponse struct {
+	ProcessCount         int32 `json:"process_count"`
+	TotalMemory          int64 `json:"total_memory"`
+	TotalData            int64 `json:"total_data"`
+	TotalShared          int64 `json:"total_shared"`
+	TotalResident        int64 `json:"total_resident"`
+	CpuUser              int64 `json:"cpu_user"`
+	CpuSystem            int64 `json:"cpu_system"`
+	CpuIdle              int64 `json:"cpu_idle"`
+	CpuIowait            int64 `json:"cpu_iowait"`
+	MemTotal             int64 `json:"mem_total"`
+	MemAvailable         int64 `json:"mem_available"`
+	MemFree              int64 `json:"mem_free"`
+	MemPressureSomeAvg10 int32 `json:"mem_pressure_some_avg10"`
+	MemPressureFullAvg10 int32 `json:"mem_pressure_full_avg10"`
+}
+
+func GetResourceUsage() (*GetProcessStatusResponse, error) {
+
+	mem, err := GetMemoryUsage()
+	if err != nil {
+		return nil, err
+	}
+
+	resp := &GetProcessStatusResponse{
+		TotalMemory:   mem.TotalSize * PageSize,
+		TotalData:     mem.TotalData * PageSize,
+		TotalShared:   mem.TotalShared * PageSize,
+		TotalResident: mem.TotalResident * PageSize,
+		ProcessCount:  int32(mem.ProcCount),
+	}
+
+	// Add CPU stats (best effort)
+	if cpu, err := GetCPUStats(); err == nil {
+		resp.CpuUser = cpu.User
+		resp.CpuSystem = cpu.System
+		resp.CpuIdle = cpu.Idle
+		resp.CpuIowait = cpu.Iowait
+	}
+
+	// Add system memory info (best effort)
+	if sysMem, err := GetSystemMemory(); err == nil {
+		resp.MemTotal = sysMem.Total
+		resp.MemAvailable = sysMem.Available
+		resp.MemFree = sysMem.Free
+	}
+
+	// Add memory pressure
+	pressure := GetMemoryPressure()
+	resp.MemPressureSomeAvg10 = pressure.SomeAvg10
+	resp.MemPressureFullAvg10 = pressure.FullAvg10
+
+	return resp, nil
 }

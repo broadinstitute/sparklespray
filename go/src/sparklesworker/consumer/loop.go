@@ -20,9 +20,11 @@ type Options struct {
 	LoggingClient      *logging.Client
 }
 
-type Executor func(taskId string, taskSpec *task_queue.TaskSpec) (string, error)
+type Executor func(taskId string, taskSpec *task_queue.TaskSpec) (*ExecuteTaskResult, error)
 
-func RunLoop(ctx context.Context, queue task_queue.TaskQueue, sleepUntilNotify func(sleepTime time.Duration), executor Executor, SleepOnEmpty time.Duration, MaxWaitForNewTasks time.Duration, notifier *control.Notifier) error {
+func RunLoop(ctx context.Context, queue task_queue.TaskQueue, sleepUntilNotify func(sleepTime time.Duration),
+	executor Executor, SleepOnEmpty time.Duration, MaxWaitForNewTasks time.Duration) error {
+
 	firstClaim := true
 	lastClaim := time.Now()
 	log.Printf("Starting ConsumerRunLoop, sleeping %v once queue drains", SleepOnEmpty)
@@ -57,9 +59,6 @@ func RunLoop(ctx context.Context, queue task_queue.TaskQueue, sleepUntilNotify f
 		log.Printf("Claimed task %s:\n%s", claimed.TaskID, taskJSON)
 		firstClaim = false
 
-		// Notify that task has started
-		notifier.NotifyTaskStarted(claimed.TaskID)
-
 		jobKilled, err := queue.IsJobKilled(ctx, claimed.JobID)
 		if err != nil {
 			log.Printf("Got error in IsJobKilled for %s: %v", claimed.JobID, err)
@@ -67,7 +66,7 @@ func RunLoop(ctx context.Context, queue task_queue.TaskQueue, sleepUntilNotify f
 		}
 
 		if !jobKilled {
-			retcode, err := executor(claimed.TaskID, claimed.TaskSpec)
+			execTaskResult, err := executor(claimed.TaskID, claimed.TaskSpec)
 			if err != nil {
 				log.Printf("Got error executing task %s: %v, marking task as failed", claimed.TaskID, err)
 
@@ -76,16 +75,12 @@ func RunLoop(ctx context.Context, queue task_queue.TaskQueue, sleepUntilNotify f
 					log.Printf("Got error updating task %s failed: %v", claimed.TaskID, updateErr)
 					return updateErr
 				}
-				// Notify task completed with error
-				notifier.NotifyTaskCompleted(claimed.TaskID, "", err.Error())
 			} else {
-				_, updateErr := updateTaskCompleted(ctx, queue, claimed.TaskID, retcode)
+				_, updateErr := updateTaskCompleted(ctx, queue, claimed.TaskID, execTaskResult.RetCode)
 				if updateErr != nil {
 					log.Printf("Got error updating task %s is complete: %v", claimed.TaskID, updateErr)
 					return updateErr
 				}
-				// Notify task completed successfully
-				notifier.NotifyTaskCompleted(claimed.TaskID, retcode, "")
 			}
 		} else {
 			_, err = updateTaskKilled(ctx, queue, claimed.TaskID)
@@ -93,8 +88,6 @@ func RunLoop(ctx context.Context, queue task_queue.TaskQueue, sleepUntilNotify f
 				log.Printf("Got error updating task %s was killed: %v", claimed.TaskID, err)
 				return err
 			}
-			// Notify task completed (killed)
-			notifier.NotifyTaskCompleted(claimed.TaskID, "", "killed")
 		}
 
 	}

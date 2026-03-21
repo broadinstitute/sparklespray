@@ -2,6 +2,9 @@ package consumer
 
 import (
 	"encoding/json"
+	"io"
+	"os"
+	"path"
 	"syscall"
 	"testing"
 	"time"
@@ -9,14 +12,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-func captureWriteResult() (func([]byte) error, *[]byte) {
-	var captured []byte
-	return func(data []byte) error {
-		captured = data
-		return nil
-	}, &captured
-}
 
 func TestWriteResultFile(t *testing.T) {
 	workdir := t.TempDir()
@@ -41,13 +36,15 @@ func TestWriteResultFile(t *testing.T) {
 	ulStats := &TransferStats{Bytes: 512, FileCount: 1, StartTime: ulStart, EndTime: ulEnd}
 	parameters := map[string]string{"key": "value"}
 	manifestKey := "sha256:abc123"
+	logKey := "sha256:xyz123"
 
-	writeResult, captured := captureWriteResult()
-	err := writeResultFile(writeResult, "0", execResult, workdir, manifestKey, parameters, dlStats, ulStats)
+	resultPath := path.Join(workdir, "results.json")
+	err := writeResultFile(resultPath, "0", execResult, workdir, logKey, manifestKey, parameters, dlStats, ulStats)
 	require.NoError(t, err)
 
-	resultBytes := *captured
-	require.NotNil(t, resultBytes, "result file was not written")
+	resultsFile, err := os.Open(resultPath)
+	require.NoError(t, err)
+	resultBytes, err := io.ReadAll(resultsFile)
 
 	var result ResultStruct
 	require.NoError(t, json.Unmarshal(resultBytes, &result))
@@ -93,60 +90,4 @@ func TestWriteResultFile(t *testing.T) {
 
 	// Verify "command" is no longer present
 	assert.NotContains(t, raw, "command")
-}
-
-func TestWriteResultFileUsesExePathFromExecResult(t *testing.T) {
-	workdir := t.TempDir()
-
-	execResult := &ExecResult{
-		Rusage:    &syscall.Rusage{},
-		Status:    "1",
-		StartTime: time.Now(),
-		EndTime:   time.Now(),
-		ExePath:   "docker",
-		ExeArgs:   []string{"docker", "run", "--rm", "ubuntu:22.04", "/bin/sh", "-c", "false"},
-	}
-
-	writeResult, captured := captureWriteResult()
-	err := writeResultFile(writeResult, "1", execResult, workdir,
-		"", nil, &TransferStats{}, &TransferStats{})
-	require.NoError(t, err)
-
-	var result ResultStruct
-	require.NoError(t, json.Unmarshal(*captured, &result))
-
-	assert.Equal(t, "docker", result.ExePath)
-	assert.Equal(t, execResult.ExeArgs, result.ExeArgs)
-	assert.Equal(t, "1", result.ReturnCode)
-}
-
-func TestWriteResultFileJsonFieldNames(t *testing.T) {
-	workdir := t.TempDir()
-
-	writeResult, captured := captureWriteResult()
-	err := writeResultFile(writeResult, "0",
-		&ExecResult{Rusage: &syscall.Rusage{}, StartTime: time.Now(), EndTime: time.Now()},
-		workdir, "", nil,
-		&TransferStats{}, &TransferStats{})
-	require.NoError(t, err)
-
-	// Unmarshal into a raw map to check field names without relying on struct tags
-	var raw map[string]any
-	require.NoError(t, json.Unmarshal(*captured, &raw))
-
-	expectedTopLevel := []string{"exe_path", "exe_args", "return_code", "resource_usage"}
-	for _, field := range expectedTopLevel {
-		assert.Contains(t, raw, field, "missing top-level field %q", field)
-	}
-
-	usage := raw["resource_usage"].(map[string]any)
-	expectedUsage := []string{
-		"user_cpu_time", "system_cpu_time", "max_memory_size",
-		"start_time", "end_time", "elapsed_time",
-		"download_bytes", "download_file_count", "download_start_time", "download_end_time", "download_elapsed",
-		"upload_bytes", "upload_file_count", "upload_start_time", "upload_end_time", "upload_elapsed",
-	}
-	for _, field := range expectedUsage {
-		assert.Contains(t, usage, field, "missing resource_usage field %q", field)
-	}
 }

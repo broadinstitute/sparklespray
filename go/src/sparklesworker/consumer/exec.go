@@ -14,12 +14,10 @@ import (
 	"syscall"
 	"time"
 
-	"cloud.google.com/go/logging"
 	"github.com/bmatcuk/doublestar"
-	aetherclient "github.com/pgm/aether/client"
-	"github.com/broadinstitute/sparklesworker/monitor"
 	"github.com/broadinstitute/sparklesworker/task_queue"
 	"github.com/broadinstitute/sparklesworker/watchdog"
+	aetherclient "github.com/pgm/aether/client"
 )
 
 type ResourceUsage struct {
@@ -73,6 +71,7 @@ type ResultStruct struct {
 	ExeArgs     []string          `json:"exe_args"`
 	Parameters  map[string]string `json:"parameters,omitempty"`
 	ReturnCode  string            `json:"return_code"`
+	LogsKey     string            `json:"logs_key,omitempty"`
 	ManifestKey string            `json:"manifest_key,omitempty"`
 	Usage       *ResourceUsage    `json:"resource_usage"`
 }
@@ -110,9 +109,11 @@ type ExecResult struct {
 	ExeArgs   []string
 }
 
-func execCommand(command string, rootdir string, workdir string, stdout *os.File, dockerImage string) (*ExecResult, error) {
+func execCommand(command []string, rootdir string, workdir string, stdout *os.File, dockerImage string) (*ExecResult, error) {
 	var exePath string
 	var args []string
+
+	joinedCommand := strings.Join(command, " ")
 
 	if dockerImage != "" {
 		exePath = "docker"
@@ -121,13 +122,26 @@ func execCommand(command string, rootdir string, workdir string, stdout *os.File
 			"-v", rootdir + ":" + rootdir,
 			"-w", workdir,
 			dockerImage,
-			"/bin/sh", "-c", command,
+			"/bin/sh", "-c", joinedCommand,
 		}
 	} else {
 		exePath = "/bin/sh"
-		args = []string{exePath, "-c", command}
+		args = []string{exePath, "-c", joinedCommand}
 	}
 
+	// log.Printf("About to execute: exePath=%s args=%v", exePath, args)
+	// for i, arg := range args {
+	// 	log.Printf("args[%d]=\"%s\"", i, arg)
+	// }
+	// log.Printf("stdout=%v", stdout)
+	// n, err3 := stdout.Write([]byte("test"))
+	// log.Printf("n=%d err=%v", n, err3)
+
+	// exePath = "/bin/echo"
+	// // args = []string{"/bin/sh", "-c", "'echo hello'"}
+	// args = []string{"/bin/echo", "helllo"}
+	// //	args = []string{"/usr/bin/true"}
+	// exePath = args[0]
 	attr := &os.ProcAttr{Dir: workdir, Env: nil, Files: []*os.File{nil, stdout, stdout}}
 
 	startTime := time.Now()
@@ -137,11 +151,12 @@ func execCommand(command string, rootdir string, workdir string, stdout *os.File
 	}
 
 	var procState *os.ProcessState
-	err = watchdog.NotifyUntilComplete(func() error {
-		var err2 error
-		procState, err2 = proc.Wait()
-		return err2
-	})
+	procState, _ = proc.Wait()
+	// err = watchdog.NotifyUntilComplete(func() error {
+	// 	var err2 error
+	// 	procState, err2 = proc.Wait()
+	// 	return err2
+	// })
 	endTime := time.Now()
 
 	if err != nil {
@@ -151,6 +166,7 @@ func execCommand(command string, rootdir string, workdir string, stdout *os.File
 
 	rusage := procState.SysUsage().(*syscall.Rusage)
 	status := procState.Sys().(syscall.WaitStatus)
+	log.Printf("status=%v", status)
 	var statusStr string
 	if status.Signaled() {
 		statusStr = fmt.Sprintf("signaled(%s)", status.Signal())
@@ -234,113 +250,74 @@ func execLifecycleScript(label string, workdir string, script string) {
 	}
 }
 
-// Perhaps should not be hardcoded, and could be determined at compile time somehow.
-
-func startWatchingLog(loggingClient *logging.Client, taskID string, stdoutPath string) (chan bool, error) {
-	log.Printf("Starting watch of logfile: %s", stdoutPath)
-
-	buffer := make([]byte, 50000)
-	shutdownChan := make(chan bool)
-	labels := make(map[string]string)
-	labels["sparkles-job-id"] = strings.Split(taskID, ".")[0]
-	labels["sparkles-task-id"] = taskID
-	logger := loggingClient.Logger(taskID, logging.CommonLabels(labels))
-
-	stdout, err := os.Open(stdoutPath)
-	if err != nil {
-		log.Printf("Could not open %s for reading: %v", stdoutPath, err)
-		return shutdownChan, err
-	}
-
-	poll := func() {
-		watching := true
-		for watching {
-			n, err := stdout.Read(buffer)
-			if err != nil && err != io.EOF {
-				log.Printf("Got error reading %s: %v", stdoutPath, err)
-				break
-			}
-
-			if n > 0 {
-				logger.Log(logging.Entry{Payload: string(buffer[0:n])})
-				//				continue
-			}
-
-			select {
-			case <-shutdownChan:
-				watching = false
-			case <-time.After(time.Second):
-			}
-		}
-		stdout.Close()
-	}
-
-	go poll()
-	return shutdownChan, nil
+type TaskPaths struct {
+	rootDir    string
+	logDir     string
+	cacheDir   string
+	workDir    string
+	cwdDir     string
+	stdoutPath string
+	resultPath string
 }
 
-func prepareTaskDirectories(tasksDir string, cacheDir string) (workDir string, absCacheDir string, err error) {
+func prepareTaskDirectories(rootDir string, tasksDir string, cacheDir string, taskWorkingDir string) (*TaskPaths, error) {
 	mode := os.FileMode(0700)
-	err = os.MkdirAll(tasksDir, mode)
+	err := os.MkdirAll(tasksDir, mode)
 	if err != nil {
-		return "", "", err
+		return nil, err
 	}
 
 	taskDir, err := os.MkdirTemp(tasksDir, "task-")
 	if err != nil {
-		return "", "", err
+		return nil, err
 	}
 
 	logDir := path.Join(taskDir, "log")
 	err = os.Mkdir(logDir, mode)
 	if err != nil {
-		return "", "", err
+		return nil, err
 	}
 
-	workDir = path.Join(taskDir, "work")
+	workDir := path.Join(taskDir, "work")
 	err = os.Mkdir(workDir, mode)
-	if err != nil {
-		return "", "", err
-	}
-
-	workDir, err = filepath.Abs(workDir)
-	if err != nil {
-		return "", "", err
-	}
-
-	absCacheDir, err = filepath.Abs(cacheDir)
-	if err != nil {
-		return "", "", err
-	}
-
-	return workDir, absCacheDir, nil
-}
-
-type DownloadTaskFilesResult struct {
-	Stdout     *os.File
-	StdoutPath string
-	DlStats    *TransferStats
-}
-
-func downloadTaskFiles(ctx context.Context, aetherCfg AetherConfig, workDir string, cacheDir string, taskId string, taskSpec *task_queue.TaskSpec, mon *monitor.Monitor) (*DownloadTaskFilesResult, error) {
-	stdoutPath := path.Join(workDir, "stdout.txt")
-	execLifecycleScript("PreDownloadScript", workDir, taskSpec.PreDownloadScript)
-
-	stdout, err := os.OpenFile(stdoutPath, os.O_WRONLY|os.O_CREATE, 0766)
 	if err != nil {
 		return nil, err
 	}
 
-	if mon != nil {
-		mon.StartWatchingLog(taskId, stdoutPath)
+	workDir, err = filepath.Abs(workDir)
+	if err != nil {
+		return nil, err
 	}
+
+	cacheDir, err = filepath.Abs(cacheDir)
+	if err != nil {
+		return nil, err
+	}
+
+	if taskWorkingDir == "" {
+		taskWorkingDir = "."
+	}
+	if path.IsAbs(taskWorkingDir) {
+		return nil, fmt.Errorf("Only relative paths allowed for working dir in task spec, but was \"%s\"", taskWorkingDir)
+	}
+
+	return &TaskPaths{rootDir: rootDir, logDir: logDir,
+		cacheDir:   cacheDir,
+		workDir:    workDir,
+		cwdDir:     path.Join(workDir, taskWorkingDir),
+		stdoutPath: path.Join(logDir, "stdout.txt"),
+		resultPath: path.Join(logDir, "result.json")}, nil
+}
+
+func downloadTaskFiles(ctx context.Context, aetherCfg *AetherConfig, dirs *TaskPaths, taskId string, taskSpec *task_queue.TaskSpec, lifecycle ExecuteLifecycle) (*TransferStats, error) {
+	execLifecycleScript("PreDownloadScript", dirs.workDir, taskSpec.PreDownloadScript)
 
 	dlStart := time.Now()
 	exportStats, err := aetherclient.Export(ctx, aetherclient.ExportOptions{
 		Root:        aetherCfg.Root,
 		ManifestRef: taskSpec.AetherFSRoot,
-		Dest:        workDir,
-		CacheDir:    cacheDir,
+		Dest:        dirs.workDir,
+		CacheDir:    dirs.cacheDir,
 	})
 	dlEnd := time.Now()
 	if err != nil {
@@ -348,113 +325,162 @@ func downloadTaskFiles(ctx context.Context, aetherCfg AetherConfig, workDir stri
 	}
 	log.Printf("Downloaded %d files (%d bytes) in %s", exportStats.FilesDownloaded, exportStats.BytesDownloaded, exportStats.Duration)
 
-	execLifecycleScript("PostDownloadScript", workDir, taskSpec.PostDownloadScript)
+	execLifecycleScript("PostDownloadScript", dirs.workDir, taskSpec.PostDownloadScript)
 
-	return &DownloadTaskFilesResult{
-		Stdout:     stdout,
-		StdoutPath: stdoutPath,
-		DlStats: &TransferStats{
-			Bytes:     exportStats.BytesDownloaded,
-			FileCount: exportStats.FilesDownloaded,
-			StartTime: dlStart,
-			EndTime:   dlEnd,
-		},
+	return &TransferStats{
+		Bytes:     exportStats.BytesDownloaded,
+		FileCount: exportStats.FilesDownloaded,
+		StartTime: dlStart,
+		EndTime:   dlEnd,
 	}, nil
 }
 
-func uploadTaskResults(ctx context.Context, aetherCfg AetherConfig, workDir string, stdoutPath string, taskSpec *task_queue.TaskSpec) (string, *TransferStats, error) {
-	filePaths, err := ResolveUploads(workDir, taskSpec.Uploads)
-	if err != nil {
-		return "", nil, err
-	}
-	filePaths = append(filePaths, stdoutPath)
+type UploadTaskResultsResult struct {
+	taskFilesManifestKey string
+	taskLogsManifestKey  string
+	uploadStats          *TransferStats
+}
 
-	var fileInputs []aetherclient.FileInput
+func collectFileInputs(workDir string, uploadSpec *task_queue.UploadSpec) ([]aetherclient.FileInput, error) {
+	filePaths, err := ResolveUploads(workDir, uploadSpec)
+	if err != nil {
+		return nil, err
+	}
+
+	var filesToUpload []aetherclient.FileInput
 	for _, absPath := range filePaths {
 		relPath, err := filepath.Rel(workDir, absPath)
 		if err != nil {
-			return "", nil, err
+			return nil, err
 		}
-		fileInputs = append(fileInputs, aetherclient.FileInput{Path: absPath, ManifestName: relPath})
+		filesToUpload = append(filesToUpload, aetherclient.FileInput{Path: absPath, ManifestName: relPath})
 	}
 
-	ulStats := &TransferStats{FileCount: len(fileInputs), StartTime: time.Now()}
-	for _, f := range fileInputs {
+	return filesToUpload, nil
+}
+
+func uploadTaskResults(ctx context.Context, aetherCfg *AetherConfig, logsDir string, workDir string,
+	uploadSpec *task_queue.UploadSpec) (*UploadTaskResultsResult, error) {
+	filesToUpload, err := collectFileInputs(workDir, uploadSpec)
+	if err != nil {
+		return nil, err
+	}
+
+	logsToUpload, err := collectFileInputs(logsDir, &task_queue.UploadSpec{IncludePatterns: []string{"**/*"}})
+	if err != nil {
+		return nil, err
+	}
+
+	ulStats := &TransferStats{FileCount: len(filesToUpload), StartTime: time.Now()}
+
+	for _, f := range filesToUpload {
 		fi, err := os.Stat(f.Path)
 		if err == nil {
 			ulStats.Bytes += fi.Size()
 		}
 	}
 
-	mkfsStats, err := aetherclient.MakeFilesystem(ctx, aetherclient.MakeFilesystemOptions{
+	for _, f := range logsToUpload {
+		fi, err := os.Stat(f.Path)
+		if err == nil {
+			ulStats.Bytes += fi.Size()
+		}
+	}
+
+	mkfsFilesStats, err := aetherclient.MakeFilesystem(ctx, aetherclient.MakeFilesystemOptions{
 		Root:            aetherCfg.Root,
-		Files:           fileInputs,
+		Files:           filesToUpload,
 		MaxSizeToBundle: aetherCfg.MaxSizeToBundle,
 		MaxBundleSize:   aetherCfg.MaxBundleSize,
 		Workers:         aetherCfg.Workers,
 	})
+	mkfsLogsStats, err := aetherclient.MakeFilesystem(ctx, aetherclient.MakeFilesystemOptions{
+		Root:            aetherCfg.Root,
+		Files:           logsToUpload,
+		MaxSizeToBundle: aetherCfg.MaxSizeToBundle,
+		MaxBundleSize:   aetherCfg.MaxBundleSize,
+		Workers:         aetherCfg.Workers,
+	})
+
 	ulStats.EndTime = time.Now()
 	if err != nil {
-		return "", nil, err
+		return nil, err
 	}
-	log.Printf("Uploaded %d files (%d bytes, %d skipped) in %s, manifest key: %s",
-		mkfsStats.FilesUploaded, mkfsStats.BytesUploaded, mkfsStats.FilesSkipped, mkfsStats.UploadDuration, mkfsStats.ManifestKey)
 
-	return mkfsStats.ManifestKey, ulStats, nil
+	log.Printf("Uploaded %d files and logs from task (%d bytes, %d skipped) in %s, task files key: %s logs key: %s",
+		mkfsFilesStats.FilesUploaded+mkfsLogsStats.FilesUploaded,
+		mkfsFilesStats.BytesUploaded+mkfsLogsStats.BytesUploaded,
+		mkfsFilesStats.FilesSkipped+mkfsLogsStats.FilesSkipped,
+		mkfsFilesStats.UploadDuration+mkfsLogsStats.UploadDuration,
+		mkfsFilesStats.ManifestKey,
+		mkfsLogsStats.ManifestKey)
+
+	return &UploadTaskResultsResult{
+		taskFilesManifestKey: mkfsFilesStats.ManifestKey,
+		taskLogsManifestKey:  mkfsLogsStats.ManifestKey,
+		uploadStats:          ulStats,
+	}, nil
 }
 
-func determineCwd(workDir string, taskSpec *task_queue.TaskSpec) string {
-	commandWorkingDir := taskSpec.WorkingDir
-	if commandWorkingDir == "" {
-		commandWorkingDir = "."
-	}
-	if path.IsAbs(commandWorkingDir) {
-		panic("bad commandWorkingDir")
-	}
-
-	cwdDir := path.Join(workDir, commandWorkingDir)
-	return cwdDir
+type ExecuteTaskResult struct {
+	RetCode   string
+	TaskPaths *TaskPaths
 }
 
-func ExecuteTask(ctx context.Context, writeResult func([]byte) error, aetherCfg AetherConfig, taskId string, taskSpec *task_queue.TaskSpec, rootDir string, cacheDir string, tasksDir string, mon *monitor.Monitor) (string, error) {
-	workDir, cacheDir, err := prepareTaskDirectories(tasksDir, cacheDir)
+type ExecuteLifecycle interface {
+	Started(stdoutPath string)
+	Finished()
+}
+
+func ExecuteTask(ctx context.Context, aetherCfg *AetherConfig, taskId string, taskSpec *task_queue.TaskSpec, rootDir string, cacheDir string, tasksDir string, lifecycle ExecuteLifecycle) (*ExecuteTaskResult, error) {
+	dirs, err := prepareTaskDirectories(rootDir, tasksDir, cacheDir, taskSpec.WorkingDir)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
-	dl, err := downloadTaskFiles(ctx, aetherCfg, workDir, cacheDir, taskId, taskSpec, mon)
+	stdout, err := os.OpenFile(dirs.stdoutPath, os.O_WRONLY|os.O_CREATE, 0766)
 	if err != nil {
-		return "", err
+		return nil, err
+	}
+	defer stdout.Close()
+
+	if lifecycle != nil {
+		lifecycle.Started(dirs.stdoutPath)
+		defer lifecycle.Finished()
 	}
 
-	cwdDir := determineCwd(workDir, taskSpec)
-
-	log.Printf("Executing (working dir: %s, output written to: %s): %s", cwdDir, dl.StdoutPath, taskSpec.Command)
-	execResult, err := execCommand(taskSpec.Command, rootDir, cwdDir, dl.Stdout, taskSpec.DockerImage)
+	dlStats, err := downloadTaskFiles(ctx, aetherCfg, dirs, taskId, taskSpec, lifecycle)
 	if err != nil {
-		return "", err
+		return nil, err
+	}
+
+	log.Printf("Executing (working dir: %s, output written to: %s): %s", dirs.cwdDir, dirs.stdoutPath, taskSpec.Command)
+	execResult, err := execCommand(taskSpec.Command, rootDir, dirs.cwdDir, stdout, taskSpec.DockerImage)
+	if err != nil {
+		return nil, err
 	}
 	retcode := execResult.Status
 
-	execLifecycleScript("PostExecScript", workDir, taskSpec.PostExecScript)
+	execLifecycleScript("PostExecScript", dirs.workDir, taskSpec.PostExecScript)
 
-	manifestKey, ulStats, err := uploadTaskResults(ctx, aetherCfg, workDir, dl.StdoutPath, taskSpec)
+	uploadResult, err := uploadTaskResults(ctx, aetherCfg, dirs.logDir, dirs.workDir, taskSpec.Uploads)
 	if err != nil {
-		return retcode, err
+		return nil, err
 	}
 
-	err = writeResultFile(writeResult, retcode, execResult, workDir, manifestKey, taskSpec.Parameters, dl.DlStats, ulStats)
+	err = writeResultFile(dirs.resultPath, retcode, execResult, dirs.workDir, uploadResult.taskFilesManifestKey, uploadResult.taskLogsManifestKey, taskSpec.Parameters, dlStats, uploadResult.uploadStats)
 	if err != nil {
-		return retcode, err
+		return nil, err
 	}
 
-	return retcode, nil
+	return &ExecuteTaskResult{RetCode: retcode, TaskPaths: dirs}, nil
 }
 
-func writeResultFile(writeResult func([]byte) error,
+func writeResultFile(resultPath string,
 	retcode string,
 	execResult *ExecResult,
 	workdir string,
+	logsKey string,
 	manifestKey string,
 	parameters map[string]string,
 	dlStats *TransferStats,
@@ -468,6 +494,7 @@ func writeResultFile(writeResult func([]byte) error,
 		ExeArgs:     execResult.ExeArgs,
 		Parameters:  parameters,
 		ReturnCode:  retcode,
+		LogsKey:     logsKey,
 		ManifestKey: manifestKey,
 		Usage: &ResourceUsage{
 			UserCPUTime:        timevalToSeconds(rusage.Utime),
@@ -497,5 +524,16 @@ func writeResultFile(writeResult func([]byte) error,
 		return err
 	}
 
-	return writeResult(resultJson)
+	resultFd, err := os.Create(resultPath)
+	if err != nil {
+		return err
+	}
+	defer resultFd.Close()
+
+	_, err = resultFd.Write(resultJson)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
