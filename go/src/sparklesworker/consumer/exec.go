@@ -394,7 +394,7 @@ func uploadFilesPerSpec(ctx context.Context, aetherCfg *AetherConfig, dir string
 		return nil, err
 	}
 
-	log.Printf("Uploaded %d files and logs from task (%d bytes, %d skipped) in %s, task files key: %s logs key: %s",
+	log.Printf("Uploaded %d files and logs from task (%d bytes, %d skipped) in %s, task files key: %s",
 		mkfsFilesStats.FilesUploaded,
 		mkfsFilesStats.BytesUploaded,
 		mkfsFilesStats.FilesSkipped,

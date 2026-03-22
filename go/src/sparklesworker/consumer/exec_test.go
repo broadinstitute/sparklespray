@@ -36,10 +36,9 @@ func TestWriteResultFile(t *testing.T) {
 	ulStats := &TransferStats{Bytes: 512, FileCount: 1, StartTime: ulStart, EndTime: ulEnd}
 	parameters := map[string]string{"key": "value"}
 	manifestKey := "sha256:abc123"
-	logKey := "sha256:xyz123"
 
 	resultPath := path.Join(workdir, "results.json")
-	err := writeResultFile(resultPath, "0", execResult, workdir, logKey, manifestKey, parameters, dlStats, ulStats)
+	err := writeResultFile(resultPath, "0", execResult, workdir, manifestKey, parameters, dlStats, ulStats)
 	require.NoError(t, err)
 
 	resultsFile, err := os.Open(resultPath)
