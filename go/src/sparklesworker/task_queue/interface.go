@@ -50,15 +50,14 @@ type TaskHistory struct {
 
 // Job represents a job containing multiple tasks
 type Job struct {
-	JobID                  int      `firestore:"job_id"`
-	Tasks                  []string `firestore:"tasks"`
-	KubeJobSpec            string   `firestore:"kube_job_spec"`
-	Metadata               string   `firestore:"metadata"`
-	Cluster                string   `firestore:"cluster"`
-	Status                 string   `firestore:"status"`
-	SubmitTime             float64  `firestore:"submit_time"`
-	MaxPreemptableAttempts int32    `firestore:"max_preemptable_attempts"`
-	TargetNodeCount        int32    `firestore:"target_node_count"`
+	JobID                  int     `firestore:"job_id"`
+	TaskCount              int     `firestore:"task_count"`
+	Metadata               string  `firestore:"metadata"`
+	ClusterID              string  `firestore:"cluster_id"`
+	Status                 string  `firestore:"status"`
+	SubmitTime             float64 `firestore:"submit_time"`
+	MaxPreemptableAttempts int32   `firestore:"max_preemptable_attempts"`
+	TargetNodeCount        int32   `firestore:"target_node_count"`
 }
 
 // Status constants

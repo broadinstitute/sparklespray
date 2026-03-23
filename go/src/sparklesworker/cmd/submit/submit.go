@@ -6,19 +6,62 @@ import (
 	"log"
 	"os"
 
+	"context"
+
 	"cloud.google.com/go/firestore"
 	"github.com/broadinstitute/sparklesworker/task_queue"
 	"github.com/redis/go-redis/v9"
 	"github.com/urfave/cli"
-	"golang.org/x/net/context"
 )
+
+type JobVolumeMountSpec struct {
+	VolumeType string
+	MountPath  string
+	SizeInGB   int
+}
+
+type FileToStage struct {
+	LocalPath string
+	Name      string
+}
+
+// cluster runtime requirements
+type ClusterSpec struct {
+	machineType string
+
+	bootVolumeInGB int
+	bootVolumeType string
+	volumeMounts   []*JobVolumeMountSpec
+
+	// needed by the autoscaler
+	MaxPreemptableAttempts int32
+	TargetNodeCount        int32
+}
+
+type JobSpec struct {
+	// Name of job. Must follow google's ID conventions.
+	Name string
+
+	// either clusterSpec or clusterID must be provided
+	ClusterSpec *ClusterSpec
+	ClusterID   string
+
+	// per task properties
+	DockerImage string
+	Command     string
+
+	// information required for submitting
+	FilesToStage []*FileToStage
+
+	// used to determine pubsub topics
+	TopicPrefix string
+}
 
 var SubmitCmd = cli.Command{
 	Name:  "submit",
 	Usage: "Submit tasks from a JSON file to the queue",
 	Flags: []cli.Flag{
-		cli.StringFlag{Name: "projectId", Usage: "Google Cloud project ID"},
-		cli.StringFlag{Name: "cluster", Usage: "Cluster ID to submit tasks to"},
+		cli.StringFlag{Name: "projectID", Usage: "Google Cloud project ID"},
 		cli.StringFlag{Name: "database", Usage: "Firestore Database ID"},
 		cli.StringFlag{Name: "redisAddr", Usage: "Redis server address (e.g., localhost:6379); if set, uses Redis instead of Datastore"},
 		cli.StringFlag{Name: "file", Usage: "Path to JSON file containing a list of Task objects"},
@@ -26,11 +69,14 @@ var SubmitCmd = cli.Command{
 	Action: submit,
 }
 
+func makeTask(jobSpec *JobSpec) (*task_queue.Task, error) {
+	panic("unimplemented")
+}
+
 func submit(c *cli.Context) error {
 	ctx := context.Background()
 
 	filePath := c.String("file")
-	cluster := c.String("cluster")
 	projectID := c.String("projectId")
 	database := c.String("database")
 	redisAddr := c.String("redisAddr")
@@ -40,12 +86,20 @@ func submit(c *cli.Context) error {
 		return fmt.Errorf("reading file %s: %w", filePath, err)
 	}
 
-	var tasks []*task_queue.Task
-	if err := json.Unmarshal(data, &tasks); err != nil {
-		return fmt.Errorf("parsing tasks from %s: %w", filePath, err)
+	var jobSpec JobSpec
+	if err := json.Unmarshal(data, &jobSpec); err != nil {
+		return fmt.Errorf("parsing job from %s: %w", filePath, err)
 	}
 
-	log.Printf("Submitting %d tasks to cluster %s", len(tasks), cluster)
+	var clusterID string
+	if jobSpec.ClusterID == "" {
+		// clusterID = hash(jobSpec.ClusterSpec)
+		panic("unimplemented")
+	} else {
+		clusterID = jobSpec.ClusterID
+	}
+
+	task, err := makeTask(&jobSpec)
 
 	var queue task_queue.TaskQueue
 	if redisAddr != "" {
@@ -55,20 +109,20 @@ func submit(c *cli.Context) error {
 			return fmt.Errorf("connecting to Redis at %s: %w", redisAddr, err)
 		}
 		defer redisClient.Close()
-		queue = task_queue.NewRedisQueue(redisClient, cluster, "", 0, 0)
+		queue = task_queue.NewRedisQueue(redisClient, clusterID, "", 0, 0)
 	} else {
 		log.Printf("Using Firestore backend (project=%s)", projectID)
 		client, err := firestore.NewClientWithDatabase(ctx, projectID, database)
 		if err != nil {
 			return fmt.Errorf("creating firestore client: %w", err)
 		}
-		queue = task_queue.NewFirestoreQueue(client, cluster, "", 0, 0)
+		queue = task_queue.NewFirestoreQueue(client, clusterID, "", 0, 0)
 	}
 
-	if err := queue.AddTasks(ctx, tasks); err != nil {
+	if err := queue.AddTasks(ctx, []*task_queue.Task{task}); err != nil {
 		return fmt.Errorf("adding tasks: %w", err)
 	}
 
-	log.Printf("Successfully submitted %d tasks", len(tasks))
+	log.Printf("Successfully submitted task")
 	return nil
 }
