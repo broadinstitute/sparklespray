@@ -124,9 +124,10 @@ func (q *RedisQueue) IsJobKilled(ctx context.Context, jobID string) (bool, error
 	return status == JobStatusKilled, nil
 }
 
-// AddTasks inserts tasks into Redis using a pipeline.
-func (q *RedisQueue) AddTasks(ctx context.Context, tasks []*Task) error {
+// AddJob inserts a job and its tasks into Redis.
+func (q *RedisQueue) AddJob(ctx context.Context, job *Job, tasks []*Task) error {
 	pipe := q.client.Pipeline()
+	pipe.HSet(ctx, q.jobKey(job.Name), "status", job.Status)
 	for _, task := range tasks {
 		taskJSON, err := json.Marshal(task)
 		if err != nil {

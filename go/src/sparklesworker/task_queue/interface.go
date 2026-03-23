@@ -50,14 +50,12 @@ type TaskHistory struct {
 
 // Job represents a job containing multiple tasks
 type Job struct {
-	JobID                  int     `firestore:"job_id"`
-	TaskCount              int     `firestore:"task_count"`
-	Metadata               string  `firestore:"metadata"`
-	ClusterID              string  `firestore:"cluster_id"`
-	Status                 string  `firestore:"status"`
-	SubmitTime             float64 `firestore:"submit_time"`
-	MaxPreemptableAttempts int32   `firestore:"max_preemptable_attempts"`
-	TargetNodeCount        int32   `firestore:"target_node_count"`
+	Name       string  `firestore:"name"`
+	TaskCount  int     `firestore:"task_count"`
+	Metadata   string  `firestore:"metadata"`
+	ClusterID  string  `firestore:"cluster_id"`
+	Status     string  `firestore:"status"`
+	SubmitTime float64 `firestore:"submit_time"`
 }
 
 // Status constants
@@ -83,6 +81,6 @@ type TaskQueue interface {
 	// The callback should return true if the update should proceed.
 	AtomicUpdateTask(ctx context.Context, taskID string, mutateTaskCallback func(task *Task) bool) (*Task, error)
 
-	// AddTasks inserts tasks into the queue.
-	AddTasks(ctx context.Context, tasks []*Task) error
+	// AddJob inserts a job and its tasks into the queue.
+	AddJob(ctx context.Context, job *Job, tasks []*Task) error
 }

@@ -3,6 +3,7 @@ package task_queue
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"math/rand"
 	"time"
@@ -159,8 +160,14 @@ func (q *FirestoreQueue) IsJobKilled(ctx context.Context, jobID string) (bool, e
 	return job.Status == JobStatusKilled, nil
 }
 
-// AddTasks inserts tasks into Firestore in batches of 500 (the WriteBatch limit).
-func (q *FirestoreQueue) AddTasks(ctx context.Context, tasks []*Task) error {
+// AddJob inserts a job and its tasks into Firestore.
+// Tasks are inserted in batches of 500 (the WriteBatch limit).
+func (q *FirestoreQueue) AddJob(ctx context.Context, job *Job, tasks []*Task) error {
+	jobRef := q.client.Collection(JobCollection).Doc(job.Name)
+	if _, err := jobRef.Set(ctx, job); err != nil {
+		return fmt.Errorf("storing job: %w", err)
+	}
+
 	const batchSize = 500
 	for i := 0; i < len(tasks); i += batchSize {
 		end := i + batchSize

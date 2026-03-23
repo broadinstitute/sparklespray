@@ -1,12 +1,13 @@
 package submit
 
 import (
+	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"log"
 	"os"
-
-	"context"
+	"time"
 
 	"cloud.google.com/go/firestore"
 	"github.com/broadinstitute/sparklesworker/task_queue"
@@ -69,8 +70,52 @@ var SubmitCmd = cli.Command{
 	Action: submit,
 }
 
-func makeTask(jobSpec *JobSpec) (*task_queue.Task, error) {
-	panic("unimplemented")
+// clusterIDFromSpec derives a deterministic cluster ID by hashing the ClusterSpec JSON.
+func clusterIDFromSpec(spec *ClusterSpec) (string, error) {
+	data, err := json.Marshal(spec)
+	if err != nil {
+		return "", fmt.Errorf("marshaling cluster spec: %w", err)
+	}
+	sum := sha256.Sum256(data)
+	return fmt.Sprintf("%x", sum[:8]), nil
+}
+
+func makeTask(jobSpec *JobSpec) (*task_queue.Job, *task_queue.Task, error) {
+	clusterID := jobSpec.ClusterID
+	if clusterID == "" {
+		if jobSpec.ClusterSpec == nil {
+			return nil, nil, fmt.Errorf("either ClusterID or ClusterSpec must be provided")
+		}
+		var err error
+		clusterID, err = clusterIDFromSpec(jobSpec.ClusterSpec)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+
+	job := &task_queue.Job{
+		Name:       jobSpec.Name,
+		ClusterID:  clusterID,
+		Status:     task_queue.StatusPending,
+		SubmitTime: float64(time.Now().UnixMilli()) / 1000.0,
+		TaskCount:  1,
+	}
+
+	taskSpec := &task_queue.TaskSpec{
+		Command:     []string{"/bin/sh", "-c", jobSpec.Command},
+		DockerImage: jobSpec.DockerImage,
+	}
+
+	task := &task_queue.Task{
+		TaskID:    jobSpec.Name + ".1",
+		TaskIndex: 0,
+		JobID:     jobSpec.Name,
+		ClusterID: clusterID,
+		Status:    task_queue.StatusPending,
+		TaskSpec:  taskSpec,
+	}
+
+	return job, task, nil
 }
 
 func submit(c *cli.Context) error {
@@ -91,15 +136,12 @@ func submit(c *cli.Context) error {
 		return fmt.Errorf("parsing job from %s: %w", filePath, err)
 	}
 
-	var clusterID string
-	if jobSpec.ClusterID == "" {
-		// clusterID = hash(jobSpec.ClusterSpec)
-		panic("unimplemented")
-	} else {
-		clusterID = jobSpec.ClusterID
+	job, task, err := makeTask(&jobSpec)
+	if err != nil {
+		return fmt.Errorf("building job: %w", err)
 	}
 
-	task, err := makeTask(&jobSpec)
+	log.Printf("Submitting job %s to cluster %s", job.Name, job.ClusterID)
 
 	var queue task_queue.TaskQueue
 	if redisAddr != "" {
@@ -109,20 +151,20 @@ func submit(c *cli.Context) error {
 			return fmt.Errorf("connecting to Redis at %s: %w", redisAddr, err)
 		}
 		defer redisClient.Close()
-		queue = task_queue.NewRedisQueue(redisClient, clusterID, "", 0, 0)
+		queue = task_queue.NewRedisQueue(redisClient, job.ClusterID, "", 0, 0)
 	} else {
 		log.Printf("Using Firestore backend (project=%s)", projectID)
 		client, err := firestore.NewClientWithDatabase(ctx, projectID, database)
 		if err != nil {
 			return fmt.Errorf("creating firestore client: %w", err)
 		}
-		queue = task_queue.NewFirestoreQueue(client, clusterID, "", 0, 0)
+		queue = task_queue.NewFirestoreQueue(client, job.ClusterID, "", 0, 0)
 	}
 
-	if err := queue.AddTasks(ctx, []*task_queue.Task{task}); err != nil {
-		return fmt.Errorf("adding tasks: %w", err)
+	if err := queue.AddJob(ctx, job, []*task_queue.Task{task}); err != nil {
+		return fmt.Errorf("adding job: %w", err)
 	}
 
-	log.Printf("Successfully submitted task")
+	log.Printf("Successfully submitted job %s", job.Name)
 	return nil
 }
