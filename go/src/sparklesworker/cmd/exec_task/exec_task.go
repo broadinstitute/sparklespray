@@ -162,11 +162,7 @@ func execTask(c *cli.Context) error {
 		channel = ext_channel.NewPubSubChannel(projectId)
 	}
 
-	logStreamCtx, logStreamCancel := context.WithCancel(context.Background())
-	go channel.Subscribe(logStreamCtx, topicName, func(message []byte) {
-		log.Printf("Message: %s", string(message))
-	})
-	defer logStreamCancel()
+	defer ext_channel.StartLogStream(ctx, channel, topicName)()
 
 	lifeCycle := NewMonitor(ctx, channel, topicName, 1*time.Second)
 

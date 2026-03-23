@@ -7,9 +7,12 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path"
 	"time"
 
 	"cloud.google.com/go/firestore"
+	"github.com/broadinstitute/sparklesworker/consumer"
+	"github.com/broadinstitute/sparklesworker/ext_channel"
 	"github.com/broadinstitute/sparklesworker/task_queue"
 	"github.com/redis/go-redis/v9"
 	"github.com/urfave/cli"
@@ -60,12 +63,20 @@ type JobSpec struct {
 
 var SubmitCmd = cli.Command{
 	Name:  "submit",
-	Usage: "Submit tasks from a JSON file to the queue",
+	Usage: "Submit a job and execute it locally until complete",
 	Flags: []cli.Flag{
 		cli.StringFlag{Name: "projectID", Usage: "Google Cloud project ID"},
 		cli.StringFlag{Name: "database", Usage: "Firestore Database ID"},
 		cli.StringFlag{Name: "redisAddr", Usage: "Redis server address (e.g., localhost:6379); if set, uses Redis instead of Datastore"},
-		cli.StringFlag{Name: "file", Usage: "Path to JSON file containing a list of Task objects"},
+		cli.StringFlag{Name: "file", Usage: "Path to JSON file containing a JobSpec"},
+		cli.StringFlag{Name: "dir", Value: "./sparklesworker", Usage: "Base directory for worker data"},
+		cli.StringFlag{Name: "cacheDir", Usage: "Cache directory (defaults to dir/cache)"},
+		cli.StringFlag{Name: "tasksDir", Usage: "Tasks directory (defaults to dir/tasks)"},
+		cli.StringFlag{Name: "aetherRoot", Usage: "Aether store root (gs://bucket/prefix or local path)"},
+		cli.Int64Flag{Name: "aetherMaxSizeToBundle", Value: 0, Usage: "Max file size in bytes eligible for bundling (0 = disable bundling)"},
+		cli.Int64Flag{Name: "aetherMaxBundleSize", Value: 0, Usage: "Target max bundle size in bytes"},
+		cli.IntFlag{Name: "aetherWorkers", Value: 1, Usage: "Parallel upload workers"},
+		cli.StringFlag{Name: "topicPrefix", Value: "sparkles", Usage: "Prefix for the log topic name (topic will be <topicPrefix>-log)"},
 	},
 	Action: submit,
 }
@@ -125,6 +136,23 @@ func submit(c *cli.Context) error {
 	projectID := c.String("projectId")
 	database := c.String("database")
 	redisAddr := c.String("redisAddr")
+	dir := c.String("dir")
+	cacheDir := c.String("cacheDir")
+	if cacheDir == "" {
+		cacheDir = path.Join(dir, "cache")
+	}
+	tasksDir := c.String("tasksDir")
+	if tasksDir == "" {
+		tasksDir = path.Join(dir, "tasks")
+	}
+	topicName := c.String("topicPrefix") + "-log"
+
+	aetherCfg := consumer.AetherConfig{
+		Root:            c.String("aetherRoot"),
+		MaxSizeToBundle: c.Int64("aetherMaxSizeToBundle"),
+		MaxBundleSize:   c.Int64("aetherMaxBundleSize"),
+		Workers:         c.Int("aetherWorkers"),
+	}
 
 	data, err := os.ReadFile(filePath)
 	if err != nil {
@@ -143,6 +171,7 @@ func submit(c *cli.Context) error {
 
 	log.Printf("Submitting job %s to cluster %s", job.Name, job.ClusterID)
 
+	var channel ext_channel.ExtChannel
 	var queue task_queue.TaskQueue
 	if redisAddr != "" {
 		log.Printf("Using Redis backend at %s", redisAddr)
@@ -151,6 +180,7 @@ func submit(c *cli.Context) error {
 			return fmt.Errorf("connecting to Redis at %s: %w", redisAddr, err)
 		}
 		defer redisClient.Close()
+		channel = ext_channel.NewRedisChannel(redisClient)
 		queue = task_queue.NewRedisQueue(redisClient, job.ClusterID, "", 0, 0)
 	} else {
 		log.Printf("Using Firestore backend (project=%s)", projectID)
@@ -158,13 +188,28 @@ func submit(c *cli.Context) error {
 		if err != nil {
 			return fmt.Errorf("creating firestore client: %w", err)
 		}
+		channel = ext_channel.NewPubSubChannel(projectID)
 		queue = task_queue.NewFirestoreQueue(client, job.ClusterID, "", 0, 0)
 	}
 
 	if err := queue.AddJob(ctx, job, []*task_queue.Task{task}); err != nil {
 		return fmt.Errorf("adding job: %w", err)
 	}
-
 	log.Printf("Successfully submitted job %s", job.Name)
-	return nil
+
+	defer ext_channel.StartLogStream(ctx, channel, topicName)()
+
+	executor := func(taskId string, taskSpec *task_queue.TaskSpec) (*consumer.ExecuteTaskResult, error) {
+		return consumer.ExecuteTask(ctx, &aetherCfg, taskId, taskSpec, dir, cacheDir, tasksDir, nil)
+	}
+	sleepUntilNotify := func(sleepTime time.Duration) {
+		time.Sleep(sleepTime)
+	}
+
+	runLoopErr := make(chan error, 1)
+	go func() {
+		runLoopErr <- consumer.RunLoop(ctx, queue, sleepUntilNotify, executor, 1*time.Second, 10*time.Second)
+	}()
+
+	return <-runLoopErr
 }
