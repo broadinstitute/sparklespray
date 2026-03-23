@@ -124,6 +124,19 @@ func (q *RedisQueue) IsJobKilled(ctx context.Context, jobID string) (bool, error
 	return status == JobStatusKilled, nil
 }
 
+// GetTask retrieves a task by ID from Redis.
+func (q *RedisQueue) GetTask(ctx context.Context, taskID string) (*Task, error) {
+	taskJSON, err := q.client.Get(ctx, q.taskKey(taskID)).Result()
+	if err != nil {
+		return nil, fmt.Errorf("getting task %s: %w", taskID, err)
+	}
+	var task Task
+	if err := json.Unmarshal([]byte(taskJSON), &task); err != nil {
+		return nil, fmt.Errorf("decoding task %s: %w", taskID, err)
+	}
+	return &task, nil
+}
+
 // AddJob inserts a job and its tasks into Redis.
 func (q *RedisQueue) AddJob(ctx context.Context, job *Job, tasks []*Task) error {
 	pipe := q.client.Pipeline()

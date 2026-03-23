@@ -199,17 +199,32 @@ func submit(c *cli.Context) error {
 
 	defer ext_channel.StartLogStream(ctx, channel, topicName)()
 
-	executor := func(taskId string, taskSpec *task_queue.TaskSpec) (*consumer.ExecuteTaskResult, error) {
-		return consumer.ExecuteTask(ctx, &aetherCfg, taskId, taskSpec, dir, cacheDir, tasksDir, nil)
-	}
-	sleepUntilNotify := func(sleepTime time.Duration) {
-		time.Sleep(sleepTime)
+	if job.ClusterID == "local" {
+		executor := func(taskId string, taskSpec *task_queue.TaskSpec) (*consumer.ExecuteTaskResult, error) {
+			return consumer.ExecuteTask(ctx, &aetherCfg, taskId, taskSpec, dir, cacheDir, tasksDir, nil)
+		}
+		sleepUntilNotify := func(sleepTime time.Duration) {
+			time.Sleep(sleepTime)
+		}
+
+		err = consumer.RunLoop(ctx, queue, sleepUntilNotify, executor, 1*time.Second, 10*time.Second)
+		if err != nil {
+			return fmt.Errorf("RunLoop failed: %s", err)
+		}
 	}
 
-	runLoopErr := make(chan error, 1)
-	go func() {
-		runLoopErr <- consumer.RunLoop(ctx, queue, sleepUntilNotify, executor, 1*time.Second, 10*time.Second)
-	}()
+	for {
+		t, err := queue.GetTask(ctx, task.TaskID)
+		if err != nil {
+			return fmt.Errorf("polling task %s: %w", task.TaskID, err)
+		}
+		if t.Status != task_queue.StatusPending && t.Status != task_queue.StatusClaimed {
+			log.Printf("Task %s finished with status %s", task.TaskID, t.Status)
+			break
+		}
+		log.Printf("Task %s status: %s — waiting...", task.TaskID, t.Status)
+		time.Sleep(1 * time.Second)
+	}
 
-	return <-runLoopErr
+	return nil
 }

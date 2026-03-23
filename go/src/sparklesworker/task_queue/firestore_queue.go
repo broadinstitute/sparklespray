@@ -160,6 +160,19 @@ func (q *FirestoreQueue) IsJobKilled(ctx context.Context, jobID string) (bool, e
 	return job.Status == JobStatusKilled, nil
 }
 
+// GetTask retrieves a task by ID from Firestore.
+func (q *FirestoreQueue) GetTask(ctx context.Context, taskID string) (*Task, error) {
+	docSnap, err := q.client.Collection(TaskCollection).Doc(taskID).Get(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("getting task %s: %w", taskID, err)
+	}
+	var task Task
+	if err := docSnap.DataTo(&task); err != nil {
+		return nil, fmt.Errorf("decoding task %s: %w", taskID, err)
+	}
+	return &task, nil
+}
+
 // AddJob inserts a job and its tasks into Firestore.
 // Tasks are inserted in batches of 500 (the WriteBatch limit).
 func (q *FirestoreQueue) AddJob(ctx context.Context, job *Job, tasks []*Task) error {
