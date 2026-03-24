@@ -10,13 +10,14 @@ import (
 	"path"
 	"time"
 
+	"context"
+
 	"cloud.google.com/go/firestore"
 	"github.com/broadinstitute/sparklesworker/consumer"
 	"github.com/broadinstitute/sparklesworker/task_queue"
 	"github.com/broadinstitute/sparklesworker/watchdog"
 	"github.com/redis/go-redis/v9"
 	"github.com/urfave/cli"
-	"golang.org/x/net/context"
 )
 
 // WorkerVersion is set by the main package before running commands.
