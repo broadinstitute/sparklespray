@@ -9,6 +9,7 @@ import (
 	batch "cloud.google.com/go/batch/apiv1"
 	"cloud.google.com/go/firestore"
 	compute "cloud.google.com/go/compute/apiv1"
+	"github.com/redis/go-redis/v9"
 	"github.com/urfave/cli"
 )
 
@@ -21,6 +22,7 @@ var AutoscalerCmd = cli.Command{
 		cli.StringFlag{Name: "project", Usage: "Google Cloud project ID"},
 		cli.StringFlag{Name: "cluster", Usage: "Cluster ID to monitor"},
 		cli.DurationFlag{Name: "poll-interval", Usage: "Delay between poll cycles", Value: 5 * time.Second},
+		cli.StringFlag{Name: "redis", Usage: "Redis address for local testing (e.g. localhost:6379); uses GCP Batch API when not set"},
 	},
 	Action: run,
 }
@@ -49,44 +51,66 @@ func run(c *cli.Context) error {
 	project := c.String("project")
 	cluster := c.String("cluster")
 	pollInterval := c.Duration("poll-interval")
+	redisAddr := c.String("redis")
 
 	fmt.Printf("sparkles-monitor\n")
 	fmt.Printf("  project: %s\n", project)
 	fmt.Printf("  cluster: %s\n", cluster)
 	fmt.Printf("  poll-interval: %s\n", pollInterval)
 
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-	firestoreClient, err := firestore.NewClient(ctx, project)
-	if err != nil {
-		return fmt.Errorf("creating firestore client: %w", err)
-	}
-	defer firestoreClient.Close()
+	var gshim CloudMethodsForPoll
+	var sshim SparklesMethodsForPoll
 
-	instancesClient, err := compute.NewInstancesRESTClient(ctx)
-	if err != nil {
-		return fmt.Errorf("creating compute client: %w", err)
-	}
-	defer instancesClient.Close()
+	if redisAddr != "" {
+		fmt.Printf("  mode: redis (%s)\n", redisAddr)
+		redisClient := redis.NewClient(&redis.Options{Addr: redisAddr})
+		defer redisClient.Close()
 
-	batchClient, err := batch.NewClient(ctx)
-	if err != nil {
-		return fmt.Errorf("creating batch client: %w", err)
-	}
-	defer batchClient.Close()
+		StartMockBatchAPI(ctx, redisClient, pollInterval)
 
-	gshim := &GCPMethodsForPoll{
-		projectID:       project,
-		ctx:             ctx,
-		instancesClient: instancesClient,
-		batchClient:     batchClient,
+		gshim = NewRedisMethodsForPoll(ctx, redisClient)
+		sshim = NewRedisSparklesMethodsForPoll(ctx, redisClient)
+	} else {
+		fmt.Printf("  mode: GCP\n")
+
+		firestoreClient, err := firestore.NewClient(ctx, project)
+		if err != nil {
+			return fmt.Errorf("creating firestore client: %w", err)
+		}
+		defer firestoreClient.Close()
+
+		instancesClient, err := compute.NewInstancesRESTClient(ctx)
+		if err != nil {
+			return fmt.Errorf("creating compute client: %w", err)
+		}
+		defer instancesClient.Close()
+
+		batchClient, err := batch.NewClient(ctx)
+		if err != nil {
+			return fmt.Errorf("creating batch client: %w", err)
+		}
+		defer batchClient.Close()
+
+		gshim = &GCPMethodsForPoll{
+			projectID:       project,
+			ctx:             ctx,
+			instancesClient: instancesClient,
+			batchClient:     batchClient,
+		}
+		sshim = &FirestoreSparklesMethodsForPoll{client: firestoreClient, ctx: ctx}
 	}
-	sshim := &FirestoreSparklesMethodsForPoll{client: firestoreClient, ctx: ctx}
 
 	for {
 		if err := Poll(cluster, gshim, sshim); err != nil {
 			fmt.Fprintf(os.Stderr, "poll error: %v\n", err)
 		}
-		time.Sleep(pollInterval)
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-time.After(pollInterval):
+		}
 	}
 }

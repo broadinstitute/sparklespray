@@ -10,11 +10,13 @@ import (
 
 // redisBatchJob is the JSON-serialized form of a batch job stored in Redis.
 type redisBatchJob struct {
-	ID            string        `json:"id"`
-	State         BatchJobState `json:"state"`
-	ClusterID     string        `json:"cluster_id"`
-	Region        string        `json:"region"`
-	InstanceCount int           `json:"instance_count"`
+	ID                string        `json:"id"`
+	State             BatchJobState `json:"state"`
+	ClusterID         string        `json:"cluster_id"`
+	Region            string        `json:"region"`
+	InstanceCount     int           `json:"instance_count"`
+	WorkerCommandArgs []string      `json:"worker_command_args"`
+	WorkerDockerImage string        `json:"worker_docker_image"`
 }
 
 // RedisMethodsForPoll is a Redis-backed implementation of CloudMethodsForPoll
@@ -49,13 +51,15 @@ func (r *RedisMethodsForPoll) listRunningInstances(zones []string, clusterID str
 
 func (r *RedisMethodsForPoll) submitBatchJobs(cluster Cluster, clusterID string, requests []*BatchJobsToSubmit) error {
 	for i, req := range requests {
+
 		job := &redisBatchJob{
-			ID:            fmt.Sprintf("%s-%d", clusterID, r.nextID(clusterID)),
-			State:         Pending,
-			ClusterID:     clusterID,
-			Region:        cluster.Region,
-			InstanceCount: req.instanceCount,
-		}
+			ID:                fmt.Sprintf("%s-%d", clusterID, r.nextID(clusterID)),
+			State:             Pending,
+			ClusterID:         clusterID,
+			Region:            cluster.Region,
+			InstanceCount:     req.instanceCount,
+			WorkerCommandArgs: cluster.WorkerCommandArgs,
+			WorkerDockerImage: cluster.WorkerDockerImage}
 
 		data, err := json.Marshal(job)
 		if err != nil {
