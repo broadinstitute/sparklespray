@@ -152,9 +152,11 @@ func consume(c *cli.Context) error {
 		Workers:         c.Int("aetherWorkers"),
 	}
 
+	var taskCache task_queue.TaskCache
+
 	var executor consumer.Executor
-	executor = func(taskId string, taskSpec *task_queue.TaskSpec) (*consumer.ExecuteTaskResult, error) {
-		result, err := consumer.ExecuteTask(ctx, &aetherCfg, taskId, taskSpec, dir, cacheDir, tasksDir, nil)
+	executor = func(taskId string, taskSpec *task_queue.TaskSpec, expiry time.Time) (*consumer.ExecuteTaskResult, error) {
+		result, err := consumer.ExecuteTask(ctx, &aetherCfg, taskId, taskSpec, dir, cacheDir, tasksDir, nil, taskCache, expiry)
 		return result, err
 	}
 
@@ -202,6 +204,7 @@ func consume(c *cli.Context) error {
 		fsQueue := task_queue.NewFirestoreQueue(client, cluster, workerID, options.InitialClaimRetry, options.ClaimTimeout)
 		fsQueue.WatchdogNotifier = watchdog.Notify
 		queue = fsQueue
+		taskCache = task_queue.NewFirestoreTaskCache(client)
 	}
 	defer cleanupControlChannel()
 

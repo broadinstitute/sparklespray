@@ -2,6 +2,7 @@ package consumer
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -408,10 +409,20 @@ func uploadFilesPerSpec(ctx context.Context, aetherCfg *AetherConfig, dir string
 }
 
 type ExecuteTaskResult struct {
-	RetCode    string
-	OutputsKey string
-	LogsKey    string
-	TaskPaths  *TaskPaths
+	RetCode                   string
+	OutputsKey                string
+	LogsKey                   string
+	TaskPaths                 *TaskPaths
+	UsedCacheResultFromTaskID string
+}
+
+func computeCacheKey(taskSpec *task_queue.TaskSpec) (string, error) {
+	data, err := json.Marshal([]interface{}{taskSpec.Command, taskSpec.DockerImage, taskSpec.AetherFSRoot})
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(data)
+	return fmt.Sprintf("%x", sum[:]), nil
 }
 
 type ExecuteLifecycle interface {
@@ -419,7 +430,25 @@ type ExecuteLifecycle interface {
 	Finished()
 }
 
-func ExecuteTask(ctx context.Context, aetherCfg *AetherConfig, taskId string, taskSpec *task_queue.TaskSpec, rootDir string, cacheDir string, tasksDir string, lifecycle ExecuteLifecycle) (*ExecuteTaskResult, error) {
+func ExecuteTask(ctx context.Context, aetherCfg *AetherConfig, taskId string, taskSpec *task_queue.TaskSpec, rootDir string, cacheDir string, tasksDir string, lifecycle ExecuteLifecycle, taskCache task_queue.TaskCache, expiry time.Time) (*ExecuteTaskResult, error) {
+	if taskCache != nil {
+		cacheKey, err := computeCacheKey(taskSpec)
+		if err == nil {
+			entry, err := taskCache.GetCachedEntry(ctx, cacheKey)
+			if err != nil {
+				log.Printf("cache lookup failed (ignoring): %v", err)
+			} else if entry != nil && time.Now().Before(entry.Expiry) {
+				log.Printf("cache hit for task %s (originally computed by task %s)", taskId, entry.TaskID)
+				return &ExecuteTaskResult{
+					RetCode:                   "0",
+					OutputsKey:                entry.OutputAetherFSRoot,
+					LogsKey:                   entry.LogAetherFSRoot,
+					UsedCacheResultFromTaskID: entry.TaskID,
+				}, nil
+			}
+		}
+	}
+
 	dirs, err := prepareTaskDirectories(rootDir, tasksDir, cacheDir, taskSpec.WorkingDir)
 	if err != nil {
 		return nil, err
@@ -465,7 +494,25 @@ func ExecuteTask(ctx context.Context, aetherCfg *AetherConfig, taskId string, ta
 		return nil, err
 	}
 
-	return &ExecuteTaskResult{RetCode: retcode, OutputsKey: "sha256:" + uploadResult.taskFilesManifestKey, LogsKey: "sha256:" + logsUpload.taskFilesManifestKey, TaskPaths: dirs}, nil
+	outputsKey := "sha256:" + uploadResult.taskFilesManifestKey
+	logsKey := "sha256:" + logsUpload.taskFilesManifestKey
+
+	if taskCache != nil && retcode == "0" {
+		if cacheKey, err := computeCacheKey(taskSpec); err == nil {
+			entry := &task_queue.CachedTaskEntry{
+				ID:                 cacheKey,
+				TaskID:             taskId,
+				OutputAetherFSRoot: outputsKey,
+				LogAetherFSRoot:    logsKey,
+				Expiry:             expiry,
+			}
+			if err := taskCache.SetCachedEntry(ctx, entry); err != nil {
+				log.Printf("failed to store cache entry (ignoring): %v", err)
+			}
+		}
+	}
+
+	return &ExecuteTaskResult{RetCode: retcode, OutputsKey: outputsKey, LogsKey: logsKey, TaskPaths: dirs}, nil
 }
 
 func writeResultFile(resultPath string,

@@ -40,7 +40,7 @@ func spawnExecuteTasks(t *testing.T, projectID string, jobID string, index int, 
 
 	run := func() {
 		ready.Wait()
-		executor := func(taskID string, taskSpec *task_queue.TaskSpec) (*consumer.ExecuteTaskResult, error) {
+		executor := func(taskID string, taskSpec *task_queue.TaskSpec, expiry time.Time) (*consumer.ExecuteTaskResult, error) {
 			// remember we executed this task
 			taskParamPerClient[index] = append(taskParamPerClient[index], taskSpec.Command)
 			log.Printf("client %d executed %s\n", index, taskSpec.Command)

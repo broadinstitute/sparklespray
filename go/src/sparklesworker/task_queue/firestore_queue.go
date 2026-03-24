@@ -9,11 +9,14 @@ import (
 	"time"
 
 	"cloud.google.com/go/firestore"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 const TaskCollection = "V7Task"
 const ClusterCollection = "V7Cluster"
 const JobCollection = "V7Job"
+const CachedTaskEntryCollection = "V7CachedTaskEntry"
 
 const InitialClaimRetryDelay = 1000
 
@@ -241,4 +244,33 @@ func (q *FirestoreQueue) AtomicUpdateTask(ctx context.Context, taskID string, mu
 	}
 
 	return &task, nil
+}
+
+// FirestoreTaskCache implements TaskCache using Google Cloud Firestore.
+type FirestoreTaskCache struct {
+	client *firestore.Client
+}
+
+func NewFirestoreTaskCache(client *firestore.Client) *FirestoreTaskCache {
+	return &FirestoreTaskCache{client: client}
+}
+
+func (c *FirestoreTaskCache) GetCachedEntry(ctx context.Context, cacheKey string) (*CachedTaskEntry, error) {
+	docSnap, err := c.client.Collection(CachedTaskEntryCollection).Doc(cacheKey).Get(ctx)
+	if status.Code(err) == codes.NotFound {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("getting cached entry %s: %w", cacheKey, err)
+	}
+	var entry CachedTaskEntry
+	if err := docSnap.DataTo(&entry); err != nil {
+		return nil, fmt.Errorf("decoding cached entry %s: %w", cacheKey, err)
+	}
+	return &entry, nil
+}
+
+func (c *FirestoreTaskCache) SetCachedEntry(ctx context.Context, entry *CachedTaskEntry) error {
+	_, err := c.client.Collection(CachedTaskEntryCollection).Doc(entry.ID).Set(ctx, entry)
+	return err
 }

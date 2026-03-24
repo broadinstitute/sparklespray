@@ -210,8 +210,8 @@ func submit(c *cli.Context) error {
 	defer ext_channel.StartLogStream(ctx, channel, topicName)()
 
 	if job.ClusterID == "local" {
-		executor := func(taskId string, taskSpec *task_queue.TaskSpec) (*consumer.ExecuteTaskResult, error) {
-			return consumer.ExecuteTask(ctx, &aetherCfg, taskId, taskSpec, dir, cacheDir, tasksDir, nil)
+		executor := func(taskId string, taskSpec *task_queue.TaskSpec, expiry time.Time) (*consumer.ExecuteTaskResult, error) {
+			return consumer.ExecuteTask(ctx, &aetherCfg, taskId, taskSpec, dir, cacheDir, tasksDir, nil, nil, expiry)
 		}
 		sleepUntilNotify := func(sleepTime time.Duration) {
 			time.Sleep(sleepTime)

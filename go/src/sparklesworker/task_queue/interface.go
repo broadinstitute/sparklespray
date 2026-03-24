@@ -38,9 +38,10 @@ type Task struct {
 	ExitCode           string         `firestore:"exit_code" json:"exit_code"`
 	OutputAetherFSRoot string         `firestore:"output_aether_fs_root" json:"output_aether_fs_root"`
 	LogAetherFSRoot    string         `firestore:"log_aether_fs_root" json:"log_aether_fs_root"`
-	ClusterID          string         `firestore:"cluster_id" json:"cluster_id"`
-	LastUpdated        float64        `firestore:"last_updated" json:"last_updated"`
-	Expiry             time.Time      `firestore:"expiry" json:"expiry"`
+	ClusterID                string         `firestore:"cluster_id" json:"cluster_id"`
+	LastUpdated              float64        `firestore:"last_updated" json:"last_updated"`
+	Expiry                   time.Time      `firestore:"expiry" json:"expiry"`
+	UsedCacheResultFromTaskID string        `firestore:"used_cache_result_from_task_id,omitempty" json:"used_cache_result_from_task_id,omitempty"`
 }
 
 // TaskHistory represents a history entry for a task
@@ -60,6 +61,22 @@ type Job struct {
 	Status     string    `firestore:"status"`
 	SubmitTime float64   `firestore:"submit_time"`
 	Expiry     time.Time `firestore:"expiry" json:"expiry"`
+}
+
+// CachedTaskEntry stores the output of a completed task keyed by its inputs,
+// allowing future identical tasks to skip re-execution.
+type CachedTaskEntry struct {
+	ID                 string    `firestore:"id" json:"id"`
+	TaskID             string    `firestore:"task_id" json:"task_id"`
+	OutputAetherFSRoot string    `firestore:"output_aether_fs_root" json:"output_aether_fs_root"`
+	LogAetherFSRoot    string    `firestore:"log_aether_fs_root" json:"log_aether_fs_root"`
+	Expiry             time.Time `firestore:"expiry" json:"expiry"`
+}
+
+// TaskCache is the interface for storing and retrieving cached task results.
+type TaskCache interface {
+	GetCachedEntry(ctx context.Context, cacheKey string) (*CachedTaskEntry, error)
+	SetCachedEntry(ctx context.Context, entry *CachedTaskEntry) error
 }
 
 // Status constants

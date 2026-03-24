@@ -20,7 +20,7 @@ type Options struct {
 	LoggingClient      *logging.Client
 }
 
-type Executor func(taskId string, taskSpec *task_queue.TaskSpec) (*ExecuteTaskResult, error)
+type Executor func(taskId string, taskSpec *task_queue.TaskSpec, expiry time.Time) (*ExecuteTaskResult, error)
 
 func RunLoop(ctx context.Context, queue task_queue.TaskQueue, sleepUntilNotify func(sleepTime time.Duration),
 	executor Executor, SleepOnEmpty time.Duration, MaxWaitForNewTasks time.Duration) error {
@@ -66,7 +66,7 @@ func RunLoop(ctx context.Context, queue task_queue.TaskQueue, sleepUntilNotify f
 		}
 
 		if !jobKilled {
-			execTaskResult, err := executor(claimed.TaskID, claimed.TaskSpec)
+			execTaskResult, err := executor(claimed.TaskID, claimed.TaskSpec, claimed.Expiry)
 			if err != nil {
 				log.Printf("Got error executing task %s: %v, marking task as failed", claimed.TaskID, err)
 
@@ -76,7 +76,7 @@ func RunLoop(ctx context.Context, queue task_queue.TaskQueue, sleepUntilNotify f
 					return updateErr
 				}
 			} else {
-				_, updateErr := updateTaskCompleted(ctx, queue, claimed.TaskID, execTaskResult.RetCode, execTaskResult.OutputsKey, execTaskResult.LogsKey)
+				_, updateErr := updateTaskCompleted(ctx, queue, claimed.TaskID, execTaskResult.RetCode, execTaskResult.OutputsKey, execTaskResult.LogsKey, execTaskResult.UsedCacheResultFromTaskID)
 				if updateErr != nil {
 					log.Printf("Got error updating task %s is complete: %v", claimed.TaskID, updateErr)
 					return updateErr
@@ -96,7 +96,7 @@ func RunLoop(ctx context.Context, queue task_queue.TaskQueue, sleepUntilNotify f
 	return nil
 }
 
-func updateTaskCompleted(ctx context.Context, q task_queue.TaskQueue, taskID string, retcode string, outputKey string, logsKey string) (*task_queue.Task, error) {
+func updateTaskCompleted(ctx context.Context, q task_queue.TaskQueue, taskID string, retcode string, outputKey string, logsKey string, usedCacheResultFromTaskID string) (*task_queue.Task, error) {
 	log.Printf("updateTaskCompleted of task %v, retcode=%s outputKey=%s logskey=%s", taskID, retcode, outputKey, logsKey)
 
 	now := control.GetTimestampMillis()
@@ -117,6 +117,7 @@ func updateTaskCompleted(ctx context.Context, q task_queue.TaskQueue, taskID str
 		task.LastUpdated = float64(now) / 1000.0
 		task.OutputAetherFSRoot = outputKey
 		task.LogAetherFSRoot = logsKey
+		task.UsedCacheResultFromTaskID = usedCacheResultFromTaskID
 
 		return true
 	}

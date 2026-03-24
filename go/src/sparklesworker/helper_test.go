@@ -7,6 +7,7 @@ import (
 	"os"
 	"path"
 	"testing"
+	"time"
 
 	"github.com/broadinstitute/sparklesworker/consumer"
 	"github.com/broadinstitute/sparklesworker/task_queue"
@@ -85,7 +86,7 @@ func TestExecute(t *testing.T) {
 		Command:       []string{"echo", "hello"},
 		Uploads:       &task_queue.UploadSpec{},
 		AetherFSRoot:  "sha256:" + mkfsResult.ManifestKey}
-	execResult, err := consumer.ExecuteTask(ctx, aetherConfig, "test-task", spec, rootDir, cacheDir, tasksDir, nil)
+	execResult, err := consumer.ExecuteTask(ctx, aetherConfig, "test-task", spec, rootDir, cacheDir, tasksDir, nil, nil, time.Time{})
 	assert.Nil(t, err)
 	assert.Equal(t, "0", execResult.RetCode)
 }
