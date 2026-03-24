@@ -1,4 +1,4 @@
-package sparklesworker
+package autoscaler
 
 // messages from Batch API
 type BatchAPITaskStateChanged struct {

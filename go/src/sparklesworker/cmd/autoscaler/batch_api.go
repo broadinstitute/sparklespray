@@ -1,4 +1,4 @@
-package sparklesworker
+package autoscaler
 
 import (
 	"context"
@@ -143,8 +143,8 @@ func createBatchJob(ctx context.Context, client *batch.Client, project, location
 				TaskCount:        int64(workerCount),
 				TaskCountPerNode: 1,
 				TaskSpec: &batchpb.TaskSpec{
-					Runnables: runnables,
-					Volumes:   volumes,
+					Runnables:     runnables,
+					Volumes:       volumes,
 					MaxRetryCount: int32(maxRetryCount),
 				},
 			},

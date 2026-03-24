@@ -1,8 +1,10 @@
-package monitor
+package autoscaler
 
 import (
 	"errors"
 	"testing"
+
+	"github.com/broadinstitute/sparklesworker/task_queue"
 )
 
 // ---- determineBatchJobsToCreate ----
@@ -142,41 +144,43 @@ func TestDetermineNodesToCreate(t *testing.T) {
 // ---- findOrphanedTasks ----
 
 func TestFindOrphanedTasks(t *testing.T) {
-	task := func(id, owner string) *Task { return &Task{id: id, ownedBy: owner} }
+	task := func(id, owner string) *task_queue.Task {
+		return &task_queue.Task{TaskID: id, OwnedByWorkerID: owner}
+	}
 
 	tests := []struct {
 		name             string
-		claimed          []*Task
+		claimed          []*task_queue.Task
 		runningInstances []string
 		wantIDs          []string
 	}{
 		{
 			name:             "all tasks have running owners",
-			claimed:          []*Task{task("t1", "i1"), task("t2", "i2")},
+			claimed:          []*task_queue.Task{task("t1", "i1"), task("t2", "i2")},
 			runningInstances: []string{"i1", "i2"},
 			wantIDs:          nil,
 		},
 		{
 			name:             "all tasks have gone owners",
-			claimed:          []*Task{task("t1", "i1"), task("t2", "i2")},
+			claimed:          []*task_queue.Task{task("t1", "i1"), task("t2", "i2")},
 			runningInstances: []string{},
 			wantIDs:          []string{"t1", "t2"},
 		},
 		{
 			name:             "mixed one running one gone",
-			claimed:          []*Task{task("t1", "i1"), task("t2", "i2")},
+			claimed:          []*task_queue.Task{task("t1", "i1"), task("t2", "i2")},
 			runningInstances: []string{"i1"},
 			wantIDs:          []string{"t2"},
 		},
 		{
 			name:             "empty claimed tasks",
-			claimed:          []*Task{},
+			claimed:          []*task_queue.Task{},
 			runningInstances: []string{"i1"},
 			wantIDs:          nil,
 		},
 		{
 			name:             "empty running instances all orphaned",
-			claimed:          []*Task{task("t1", "i1")},
+			claimed:          []*task_queue.Task{task("t1", "i1")},
 			runningInstances: []string{},
 			wantIDs:          []string{"t1"},
 		},
@@ -189,8 +193,8 @@ func TestFindOrphanedTasks(t *testing.T) {
 				t.Fatalf("expected %d orphans, got %d", len(tt.wantIDs), len(got))
 			}
 			for i, wantID := range tt.wantIDs {
-				if got[i].id != wantID {
-					t.Errorf("orphan[%d]: want id %q, got %q", i, wantID, got[i].id)
+				if got[i].TaskID != wantID {
+					t.Errorf("orphan[%d]: want id %q, got %q", i, wantID, got[i].TaskID)
 				}
 			}
 		})
@@ -230,7 +234,7 @@ func TestCalcSetDiff(t *testing.T) {
 
 // ---- checkClusterHealth ----
 
-func makeCloud(listBatchJobsFn func(string) ([]*BatchJob, error)) *mockCloud {
+func makeCloud(listBatchJobsFn func(region, clusterID string) ([]*BatchJob, error)) *mockCloud {
 	return &mockCloud{
 		listBatchJobsFn: listBatchJobsFn,
 	}
@@ -239,13 +243,13 @@ func makeCloud(listBatchJobsFn func(string) ([]*BatchJob, error)) *mockCloud {
 func TestCheckClusterHealth(t *testing.T) {
 	t.Run("pending=0 returns empty result without calling listBatchJobs", func(t *testing.T) {
 		listCalled := false
-		cloud := makeCloud(func(clusterID string) ([]*BatchJob, error) {
+		cloud := makeCloud(func(_, clusterID string) ([]*BatchJob, error) {
 			listCalled = true
 			return nil, nil
 		})
 		sparkles := &mockSparkles{pendingTaskCount: 0}
 
-		result, err := checkClusterHealth(cloud, sparkles, "cluster1", nil, 0)
+		result, err := checkClusterHealth(cloud, sparkles, "cluster1", "us-central1", nil, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -258,19 +262,19 @@ func TestCheckClusterHealth(t *testing.T) {
 	})
 
 	t.Run("job count mismatch returns error", func(t *testing.T) {
-		cloud := makeCloud(func(clusterID string) ([]*BatchJob, error) {
+		cloud := makeCloud(func(_, clusterID string) ([]*BatchJob, error) {
 			return []*BatchJob{{ID: "j1", State: Running}}, nil
 		})
 		sparkles := &mockSparkles{pendingTaskCount: 1}
 
-		_, err := checkClusterHealth(cloud, sparkles, "cluster1", nil, 2)
+		_, err := checkClusterHealth(cloud, sparkles, "cluster1", "us-central1", nil, 2)
 		if err == nil {
 			t.Fatal("expected error for job count mismatch")
 		}
 	})
 
 	t.Run("newly completed job with 0 tasks is suspicious", func(t *testing.T) {
-		cloud := makeCloud(func(clusterID string) ([]*BatchJob, error) {
+		cloud := makeCloud(func(_, clusterID string) ([]*BatchJob, error) {
 			return []*BatchJob{{ID: "j1", State: Complete}}, nil
 		})
 		sparkles := &mockSparkles{
@@ -278,7 +282,7 @@ func TestCheckClusterHealth(t *testing.T) {
 			tasksCompletedBy: map[string]int{"j1": 0},
 		}
 
-		result, err := checkClusterHealth(cloud, sparkles, "cluster1", nil, 1)
+		result, err := checkClusterHealth(cloud, sparkles, "cluster1", "us-central1", nil, 1)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -288,7 +292,7 @@ func TestCheckClusterHealth(t *testing.T) {
 	})
 
 	t.Run("newly completed job with >0 tasks is not suspicious", func(t *testing.T) {
-		cloud := makeCloud(func(clusterID string) ([]*BatchJob, error) {
+		cloud := makeCloud(func(_, clusterID string) ([]*BatchJob, error) {
 			return []*BatchJob{{ID: "j1", State: Complete}}, nil
 		})
 		sparkles := &mockSparkles{
@@ -296,7 +300,7 @@ func TestCheckClusterHealth(t *testing.T) {
 			tasksCompletedBy: map[string]int{"j1": 5},
 		}
 
-		result, err := checkClusterHealth(cloud, sparkles, "cluster1", nil, 1)
+		result, err := checkClusterHealth(cloud, sparkles, "cluster1", "us-central1", nil, 1)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -306,7 +310,7 @@ func TestCheckClusterHealth(t *testing.T) {
 	})
 
 	t.Run("previously seen completed job not re-evaluated", func(t *testing.T) {
-		cloud := makeCloud(func(clusterID string) ([]*BatchJob, error) {
+		cloud := makeCloud(func(_, clusterID string) ([]*BatchJob, error) {
 			return []*BatchJob{{ID: "j1", State: Complete}}, nil
 		})
 		sparkles := &mockSparkles{
@@ -314,7 +318,7 @@ func TestCheckClusterHealth(t *testing.T) {
 			tasksCompletedBy: map[string]int{"j1": 0},
 		}
 
-		result, err := checkClusterHealth(cloud, sparkles, "cluster1", []string{"j1"}, 1)
+		result, err := checkClusterHealth(cloud, sparkles, "cluster1", "us-central1", []string{"j1"}, 1)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -327,7 +331,7 @@ func TestCheckClusterHealth(t *testing.T) {
 	})
 
 	t.Run("multiple completions mixed suspicious and clean", func(t *testing.T) {
-		cloud := makeCloud(func(clusterID string) ([]*BatchJob, error) {
+		cloud := makeCloud(func(_, clusterID string) ([]*BatchJob, error) {
 			return []*BatchJob{
 				{ID: "j1", State: Complete},
 				{ID: "j2", State: Failed},
@@ -342,7 +346,7 @@ func TestCheckClusterHealth(t *testing.T) {
 			},
 		}
 
-		result, err := checkClusterHealth(cloud, sparkles, "cluster1", nil, 3)
+		result, err := checkClusterHealth(cloud, sparkles, "cluster1", "us-central1", nil, 3)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -362,16 +366,13 @@ func defaultCloud() *mockCloud {
 		listRunningInstancesFn: func(zones []string, clusterID string) ([]string, error) {
 			return []string{}, nil
 		},
-		countRequestedInstancesFn: func(region string, clusterID string) (int, error) {
-			return 0, nil
-		},
-		listBatchJobsFn: func(clusterID string) ([]*BatchJob, error) {
+		listBatchJobsFn: func(region, clusterID string) ([]*BatchJob, error) {
 			return []*BatchJob{}, nil
 		},
-		submitBatchJobsFn: func(requests []*BatchJobsToSubmit) error {
+		submitBatchJobsFn: func(cluster Cluster, clusterID string, requests []*BatchJobsToSubmit) error {
 			return nil
 		},
-		deleteAllBatchJobsFn: func(clusterID string) error {
+		deleteAllBatchJobsFn: func(region, clusterID string) error {
 			return nil
 		},
 	}
@@ -380,13 +381,13 @@ func defaultCloud() *mockCloud {
 func defaultSparkles() *mockSparkles {
 	return &mockSparkles{
 		clusterConfig: Cluster{
-			maxInstanceCount:       10,
-			maxPreemptableAttempts: 5,
-			maxSuspiciousFailures:  3,
+			MaxInstanceCount:       10,
+			MaxPreemptableAttempts: 5,
+			MaxSuspiciousFailures:  3,
 		},
 		pendingTaskCount:     0,
 		nonCompleteTaskCount: 0,
-		claimedTasks:         []*Task{},
+		claimedTasks:         []*task_queue.Task{},
 		tasksCompletedBy:     map[string]int{},
 	}
 }
@@ -395,7 +396,7 @@ func TestPoll(t *testing.T) {
 	t.Run("happy path tasks pending nodes launched state updated", func(t *testing.T) {
 		cloud := defaultCloud()
 		var launched []*BatchJobsToSubmit
-		cloud.submitBatchJobsFn = func(requests []*BatchJobsToSubmit) error {
+		cloud.submitBatchJobsFn = func(_ Cluster, _ string, requests []*BatchJobsToSubmit) error {
 			launched = requests
 			return nil
 		}
@@ -436,9 +437,9 @@ func TestPoll(t *testing.T) {
 		}
 
 		sparkles := defaultSparkles()
-		sparkles.claimedTasks = []*Task{
-			{id: "t1", ownedBy: "i-gone"},
-			{id: "t2", ownedBy: "i-running"},
+		sparkles.claimedTasks = []*task_queue.Task{
+			{TaskID: "t1", OwnedByWorkerID: "i-gone"},
+			{TaskID: "t2", OwnedByWorkerID: "i-running"},
 		}
 
 		err := Poll("cluster1", cloud, sparkles)
@@ -448,19 +449,19 @@ func TestPoll(t *testing.T) {
 		if len(sparkles.markTasksPendingCalled) != 1 {
 			t.Fatalf("expected 1 task marked pending, got %d", len(sparkles.markTasksPendingCalled))
 		}
-		if sparkles.markTasksPendingCalled[0].id != "t1" {
-			t.Errorf("expected task t1 to be orphaned, got %s", sparkles.markTasksPendingCalled[0].id)
+		if sparkles.markTasksPendingCalled[0].TaskID != "t1" {
+			t.Errorf("expected task t1 to be orphaned, got %s", sparkles.markTasksPendingCalled[0].TaskID)
 		}
 	})
 
 	t.Run("health check triggers shutdown on too many suspicious failures", func(t *testing.T) {
 		cloud := defaultCloud()
 		deleteAllCalled := false
-		cloud.deleteAllBatchJobsFn = func(clusterID string) error {
+		cloud.deleteAllBatchJobsFn = func(region, clusterID string) error {
 			deleteAllCalled = true
 			return nil
 		}
-		cloud.listBatchJobsFn = func(clusterID string) ([]*BatchJob, error) {
+		cloud.listBatchJobsFn = func(region, clusterID string) ([]*BatchJob, error) {
 			return []*BatchJob{
 				{ID: "j1", State: Complete},
 				{ID: "j2", State: Complete},
@@ -473,9 +474,9 @@ func TestPoll(t *testing.T) {
 		sparkles.pendingTaskCount = 1
 		// All jobs completed without doing any work
 		sparkles.tasksCompletedBy = map[string]int{"j1": 0, "j2": 0, "j3": 0, "j4": 0}
-		sparkles.clusterConfig.maxSuspiciousFailures = 3
+		sparkles.clusterConfig.MaxSuspiciousFailures = 3
 		// batchJobRequests=4 so expectedJobCount matches
-		sparkles.clusterConfig.monitorState = `{"batchJobRequests":4}`
+		sparkles.clusterConfig.MonitorState = `{"batchJobRequests":4}`
 
 		err := Poll("cluster1", cloud, sparkles)
 		if err == nil {
@@ -489,7 +490,7 @@ func TestPoll(t *testing.T) {
 	t.Run("no work to do submitBatchJobs not called", func(t *testing.T) {
 		cloud := defaultCloud()
 		launchCalled := false
-		cloud.submitBatchJobsFn = func(requests []*BatchJobsToSubmit) error {
+		cloud.submitBatchJobsFn = func(_ Cluster, _ string, requests []*BatchJobsToSubmit) error {
 			if len(requests) > 0 {
 				launchCalled = true
 			}

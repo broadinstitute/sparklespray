@@ -1,4 +1,4 @@
-package monitor
+package autoscaler
 
 import (
 	"encoding/json"
@@ -9,57 +9,57 @@ import (
 // fields describe the cluster's identity and never change after creation.
 // Mutable fields are updated by the monitor or manually by the user.
 type Cluster struct {
-	// uuID uniquely identifies this cluster and is used as a label value when
+	// UUID uniquely identifies this cluster and is used as a label value when
 	// querying GCP resources (e.g. Compute instances, Batch jobs) that belong
 	// to this cluster.
-	uuID string
+	UUID string `firestore:"uuid"`
 
-	// machineType is the GCE machine type used when launching worker nodes.
-	machineType string
+	// MachineType is the GCE machine type used when launching worker nodes.
+	MachineType string `firestore:"machine_type"`
 
-	// workerDockerImage is the container image run on each worker node.
-	workerDockerImage string
+	// WorkerDockerImage is the container image run on each worker node.
+	WorkerDockerImage string `firestore:"worker_docker_image"`
 
-	// workerCommandArgs are the arguments passed to the worker container on startup.
-	workerCommandArgs []string
+	// WorkerCommandArgs are the arguments passed to the worker container on startup.
+	WorkerCommandArgs []string `firestore:"worker_command_args"`
 
-	// pubSubInTopic is the Pub/Sub topic the monitor publishes control messages to.
-	pubSubInTopic string
+	// PubSubInTopic is the Pub/Sub topic the monitor publishes control messages to.
+	PubSubInTopic string `firestore:"pub_sub_in_topic"`
 
-	// pubSubOutTopic is the Pub/Sub topic workers publish status messages to.
-	pubSubOutTopic string
+	// PubSubOutTopic is the Pub/Sub topic workers publish status messages to.
+	PubSubOutTopic string `firestore:"pub_sub_out_topic"`
 
-	// region is the GCP region where Batch jobs are submitted (e.g. "us-central1").
+	// Region is the GCP region where Batch jobs are submitted (e.g. "us-central1").
 	// Used to construct the Batch API parent path.
-	region string
+	Region string `firestore:"region"`
 
-	// zones is the list of GCE zones within the region to query for running
+	// Zones is the list of GCE zones within the region to query for running
 	// instances. Passed to listRunningInstances on each poll.
-	zones []string
+	Zones []string `firestore:"zones"`
 
-	// maxPreemptableAttempts is the total number of preemptable node-attempts
+	// MaxPreemptableAttempts is the total number of preemptable node-attempts
 	// allowed per job run. Resets when the queue drains to zero.
-	maxPreemptableAttempts int
+	MaxPreemptableAttempts int `firestore:"max_preemptable_attempts"`
 
-	// maxInstanceCount caps the number of nodes the monitor will request,
+	// MaxInstanceCount caps the number of nodes the monitor will request,
 	// regardless of queue depth.
-	maxInstanceCount int
+	MaxInstanceCount int `firestore:"max_instance_count"`
 
-	// usedPreemptableAttempts tracks how many preemptable nodes have been
-	// requested in the current job run, counted against maxPreemptableAttempts.
-	usedPreemptableAttempts int
+	// UsedPreemptableAttempts tracks how many preemptable nodes have been
+	// requested in the current job run, counted against MaxPreemptableAttempts.
+	UsedPreemptableAttempts int `firestore:"used_preemptable_attempts"`
 
-	// maxSuspiciousFailures is the threshold for how many batch jobs may complete
+	// MaxSuspiciousFailures is the threshold for how many batch jobs may complete
 	// without doing any work before the monitor halts node creation and alerts.
-	maxSuspiciousFailures int
+	MaxSuspiciousFailures int `firestore:"max_suspicious_failures"`
 
-	// monitorState is a JSON-encoded blob persisted between polls. Decoded into
+	// MonitorState is a JSON-encoded blob persisted between polls. Decoded into
 	// MonitorState at the start of each poll and re-encoded at the end.
-	monitorState string
+	MonitorState string `firestore:"monitor_state"`
 }
 
 // MonitorState is the per-cluster state the monitor persists between polls,
-// stored as JSON in Cluster.monitorState.
+// stored as JSON in Cluster.MonitorState.
 type MonitorState struct {
 	// batchJobRequests is the cumulative count of node-launch requests made
 	// for this cluster. Used as the expectedJobCount when querying Batch jobs
@@ -73,28 +73,28 @@ type MonitorState struct {
 
 	// suspiciouslyFailedToRun is the running count of Batch jobs that completed
 	// without executing any Sparkles tasks. Compared against
-	// Cluster.maxSuspiciousFailures to decide whether to halt the cluster.
+	// Cluster.MaxSuspiciousFailures to decide whether to halt the cluster.
 	suspiciouslyFailedToRun int
 }
 
 // monitorStateJSON is the exported-field mirror of MonitorState used for JSON
 // serialization, since encoding/json cannot marshal unexported fields.
 type monitorStateJSON struct {
-	BatchJobRequests      int      `json:"batchJobRequests"`
+	BatchJobRequests        int      `json:"batchJobRequests"`
 	CompletedJobIds         []string `json:"completedJobIds"`
 	SuspiciouslyFailedToRun int      `json:"suspiciouslyFailedToRun"`
 }
 
 func (c *Cluster) getMonitorState() (*MonitorState, error) {
-	if c.monitorState == "" {
+	if c.MonitorState == "" {
 		return &MonitorState{}, nil
 	}
 	var wire monitorStateJSON
-	if err := json.Unmarshal([]byte(c.monitorState), &wire); err != nil {
+	if err := json.Unmarshal([]byte(c.MonitorState), &wire); err != nil {
 		return nil, fmt.Errorf("unmarshaling monitor state: %w", err)
 	}
 	return &MonitorState{
-		batchJobRequests:      wire.BatchJobRequests,
+		batchJobRequests:        wire.BatchJobRequests,
 		completedJobIds:         wire.CompletedJobIds,
 		suspiciouslyFailedToRun: wire.SuspiciouslyFailedToRun,
 	}, nil
@@ -110,17 +110,11 @@ const (
 	Complete BatchJobState = 4
 )
 
-// Task is a unit of work in the Sparkles queue. ownedBy is set to the worker
-// ID that has claimed the task, and is always non-empty for claimed tasks.
-type Task struct {
-	id      string
-	ownedBy string
-}
-
 // BatchJob is a summary of a GCP Batch job associated with a cluster.
 type BatchJob struct {
-	ID    string
-	State BatchJobState
+	ID                 string
+	State              BatchJobState
+	RequestedInstances int
 }
 
 // BatchJobsToSubmit describes a batch of nodes to launch with uniform properties.

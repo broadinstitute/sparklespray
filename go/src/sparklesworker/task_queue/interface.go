@@ -30,6 +30,7 @@ type Task struct {
 	JobID              string         `firestore:"job_id" json:"job_id"`
 	Status             string         `firestore:"status" json:"status"`
 	OwnedByWorkerID    string         `firestore:"owned_by_worker_id" json:"owned_by_worker_id"`
+	OwnedByBatchJobID  string         `firestore:"owned_by_batch_job_id" json:"owned_by_batch_job_id"`
 	TaskSpec           *TaskSpec      `firestore:"task_spec" json:"task_spec"`
 	History            []*TaskHistory `firestore:"history" json:"history"`
 	FailureReason      string         `firestore:"failure_reason,omitempty" json:"failure_reason"`

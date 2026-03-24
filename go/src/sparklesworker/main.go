@@ -4,6 +4,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/broadinstitute/sparklesworker/cmd/autoscaler"
 	"github.com/broadinstitute/sparklesworker/cmd/consume"
 	"github.com/broadinstitute/sparklesworker/cmd/copyexe"
 	"github.com/broadinstitute/sparklesworker/cmd/exec_task"
@@ -30,6 +31,7 @@ func Main() error {
 		copyexe.CopyexeCmd,
 		exec_task.ExecCmd,
 		fetch.FetchCmd,
+		autoscaler.AutoscalerCmd,
 	}
 	return app.Run(os.Args)
 }

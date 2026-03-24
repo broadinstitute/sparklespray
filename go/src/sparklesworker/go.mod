@@ -3,11 +3,14 @@ module github.com/broadinstitute/sparklesworker
 go 1.25.1
 
 require (
+	cloud.google.com/go/batch v1.14.0
+	cloud.google.com/go/compute v1.54.0
 	cloud.google.com/go/firestore v1.21.0
 	cloud.google.com/go/logging v1.13.1
 	cloud.google.com/go/pubsub v1.50.1
 	cloud.google.com/go/storage v1.60.0
 	github.com/bmatcuk/doublestar v1.1.1
+	github.com/gogo/protobuf v1.3.2
 	github.com/pgm/aether v0.0.0
 	github.com/redis/go-redis/v9 v9.18.0
 	github.com/stretchr/testify v1.11.1
