@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // PageSize is the system page size in bytes
@@ -207,34 +208,16 @@ func GetMemoryPressure() *MemoryPressure {
 	return pressure
 }
 
-// GetProcessStatusResponse for get_process_status responses
-type GetProcessStatusResponse struct {
-	Type                 string `json:"type"`
-	ProcessCount         int32  `json:"process_count"`
-	TotalMemory          int64 `json:"total_memory"`
-	TotalData            int64 `json:"total_data"`
-	TotalShared          int64 `json:"total_shared"`
-	TotalResident        int64 `json:"total_resident"`
-	CpuUser              int64 `json:"cpu_user"`
-	CpuSystem            int64 `json:"cpu_system"`
-	CpuIdle              int64 `json:"cpu_idle"`
-	CpuIowait            int64 `json:"cpu_iowait"`
-	MemTotal             int64 `json:"mem_total"`
-	MemAvailable         int64 `json:"mem_available"`
-	MemFree              int64 `json:"mem_free"`
-	MemPressureSomeAvg10 int32 `json:"mem_pressure_some_avg10"`
-	MemPressureFullAvg10 int32 `json:"mem_pressure_full_avg10"`
-}
-
-func GetResourceUsage() (*GetProcessStatusResponse, error) {
+func GetResourceUsage() (*ResourceUsage, error) {
 
 	mem, err := GetMemoryUsage()
 	if err != nil {
 		return nil, err
 	}
 
-	resp := &GetProcessStatusResponse{
+	resp := &ResourceUsage{
 		Type:          "process_status",
+		Timestamp:     time.Now(),
 		TotalMemory:   mem.TotalSize * PageSize,
 		TotalData:     mem.TotalData * PageSize,
 		TotalShared:   mem.TotalShared * PageSize,

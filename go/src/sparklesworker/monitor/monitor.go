@@ -12,14 +12,14 @@ import (
 )
 
 type Monitor struct {
-	ctx                 context.Context
-	cancel              context.CancelFunc
-	channel             ext_channel.ExtChannel
-	topicName           string
-	pollSleep           time.Duration
-	resourcePollFreq    time.Duration
-	stdoutFile          *os.File
-	done                chan struct{}
+	ctx              context.Context
+	cancel           context.CancelFunc
+	channel          ext_channel.ExtChannel
+	topicName        string
+	pollSleep        time.Duration
+	resourcePollFreq time.Duration
+	stdoutFile       *os.File
+	done             chan struct{}
 }
 
 func NewMonitor(ctx context.Context, channel ext_channel.ExtChannel, topicName string, pollSleep time.Duration, resourcePollFreqSecs int) *Monitor {
@@ -42,7 +42,7 @@ func (m *Monitor) publish(v any) error {
 	return m.channel.Publish(m.ctx, m.topicName, data)
 }
 
-func (m *Monitor) poll() error {
+func (m *Monitor) pollStdout() error {
 	buf := make([]byte, 100*1024)
 	n, err := m.stdoutFile.Read(buf)
 	if err != nil && err != io.EOF {
@@ -50,10 +50,7 @@ func (m *Monitor) poll() error {
 		return err
 	}
 	if n > 0 {
-		msg := struct {
-			Type    string `json:"type"`
-			Content []byte `json:"content"`
-		}{Type: "stdout", Content: buf[:n]}
+		msg := StdoutUpdate{Type: "stdout", Content: buf[:n], Timestamp: time.Now()}
 		if pubErr := m.publish(msg); pubErr != nil {
 			log.Printf("Monitor.poll: publish error: %v", pubErr)
 			return pubErr
@@ -87,7 +84,7 @@ func (m *Monitor) Started(stdoutPath string) {
 
 		lastResourcePoll := time.Now()
 		for {
-			if err := m.poll(); err != nil {
+			if err := m.pollStdout(); err != nil {
 				return
 			}
 			if time.Since(lastResourcePoll) >= m.resourcePollFreq {
@@ -110,7 +107,7 @@ func (m *Monitor) Finished() {
 	}
 	if m.stdoutFile != nil {
 		// do one final poll to get the last bytes written before the process stopped
-		m.poll()
+		m.pollStdout()
 		m.stdoutFile.Close()
 		m.stdoutFile = nil
 	}
