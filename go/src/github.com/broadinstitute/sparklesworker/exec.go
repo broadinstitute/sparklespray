@@ -503,6 +503,11 @@ func executeTask(ioc IOClient, taskId string, taskSpec *TaskSpec, cacheDir strin
 		return retcode, err
 	}
 
+	log.Printf("Removing task directory: %s", taskDir)
+	if removeErr := os.RemoveAll(taskDir); removeErr != nil {
+		log.Printf("Warning: failed to remove task directory %s: %v", taskDir, removeErr)
+	}
+
 	return retcode, nil
 }
 
