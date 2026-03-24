@@ -2,7 +2,7 @@
 
 ## Overview
 
-`monitor` is a polling service that manages a fleet of GCP VM clusters. A single monitor process manages **multiple `Cluster` instances**, polling each on a fixed interval (e.g. every 30 seconds). Its responsibilities are:
+`autoscaler` is a polling service that manages a fleet of GCP VM clusters. A single monitor process manages **multiple `Cluster` instances**, polling each on a fixed interval (e.g. every 30 seconds). Its responsibilities are:
 
 1. **Scaling** — resize each cluster to match current queue depth
 2. **Orphan detection** — identify tasks whose owning node has disappeared

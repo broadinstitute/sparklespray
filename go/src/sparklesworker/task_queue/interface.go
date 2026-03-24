@@ -2,6 +2,7 @@ package task_queue
 
 import (
 	"context"
+	"time"
 )
 
 type UploadSpec struct {
@@ -38,6 +39,7 @@ type Task struct {
 	LogAetherFSRoot    string         `firestore:"log_aether_fs_root" json:"log_aether_fs_root"`
 	ClusterID          string         `firestore:"cluster_id" json:"cluster_id"`
 	LastUpdated        float64        `firestore:"last_updated" json:"last_updated"`
+	Expiry             time.Time      `firestore:"expiry" json:"expiry"`
 }
 
 // TaskHistory represents a history entry for a task
@@ -50,12 +52,13 @@ type TaskHistory struct {
 
 // Job represents a job containing multiple tasks
 type Job struct {
-	Name       string  `firestore:"name"`
-	TaskCount  int     `firestore:"task_count"`
-	Metadata   string  `firestore:"metadata"`
-	ClusterID  string  `firestore:"cluster_id"`
-	Status     string  `firestore:"status"`
-	SubmitTime float64 `firestore:"submit_time"`
+	Name       string    `firestore:"name"`
+	TaskCount  int       `firestore:"task_count"`
+	Metadata   string    `firestore:"metadata"`
+	ClusterID  string    `firestore:"cluster_id"`
+	Status     string    `firestore:"status"`
+	SubmitTime float64   `firestore:"submit_time"`
+	Expiry     time.Time `firestore:"expiry" json:"expiry"`
 }
 
 // Status constants

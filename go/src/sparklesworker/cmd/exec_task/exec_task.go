@@ -3,9 +3,7 @@ package exec_task
 import (
 	"context"
 	"fmt"
-	"io"
 	"log"
-	"os"
 	"path"
 	"path/filepath"
 	"strings"
@@ -13,6 +11,7 @@ import (
 
 	"github.com/broadinstitute/sparklesworker/consumer"
 	"github.com/broadinstitute/sparklesworker/ext_channel"
+	"github.com/broadinstitute/sparklesworker/monitor"
 	"github.com/broadinstitute/sparklesworker/task_queue"
 	aetherclient "github.com/pgm/aether/client"
 	"github.com/redis/go-redis/v9"
@@ -44,6 +43,7 @@ var ExecCmd = cli.Command{
 		cli.StringFlag{Name: "postDownloadScript", Usage: "Script to run after download"},
 		cli.StringFlag{Name: "preExecScript", Usage: "Script to run before exec"},
 		cli.StringFlag{Name: "postExecScript", Usage: "Script to run after exec"},
+		cli.StringFlag{Name: "expiry", Value: "24h", Usage: "Duration until job/task/filesystem data expires (e.g. 24h, 7d)"},
 		cli.StringFlag{Name: "topicPrefix", Value: "sparkles", Usage: "Prefix for the log topic name (topic will be <topicPrefix>-log)"},
 		cli.StringFlag{Name: "redisAddr", Usage: "Redis address for log channel (e.g. localhost:6379); if empty, uses Google Cloud Pub/Sub"},
 		cli.StringFlag{Name: "projectId", Usage: "Google Cloud project ID (used for Pub/Sub log channel when redisAddr is not set)"},
@@ -58,6 +58,11 @@ func execTask(c *cli.Context) error {
 	}
 
 	commandArray := strings.Split(command, " ")
+
+	expiryDuration, err := time.ParseDuration(c.String("expiry"))
+	if err != nil {
+		return fmt.Errorf("invalid --expiry value: %w", err)
+	}
 
 	ctx := context.Background()
 
@@ -109,6 +114,7 @@ func execTask(c *cli.Context) error {
 			MaxSizeToBundle: aetherCfg.MaxSizeToBundle,
 			MaxBundleSize:   aetherCfg.MaxBundleSize,
 			Workers:         aetherCfg.Workers,
+			Expiry:          expiryDuration,
 		})
 		if err != nil {
 			return fmt.Errorf("staging files from %s: %w", stageDir, err)
@@ -164,7 +170,7 @@ func execTask(c *cli.Context) error {
 
 	defer ext_channel.StartLogStream(ctx, channel, topicName)()
 
-	lifeCycle := NewMonitor(ctx, channel, topicName, 1*time.Second)
+	lifeCycle := monitor.NewMonitor(ctx, channel, topicName, 1*time.Second, 5)
 
 	result, err := consumer.ExecuteTask(ctx, &aetherCfg, taskId, taskSpec, dir, cacheDir, tasksDir, lifeCycle)
 	if err != nil {
@@ -174,80 +180,4 @@ func execTask(c *cli.Context) error {
 	log.Printf("task files: sha256:%s logs: sha256: %s", result.OutputsKey, result.LogsKey)
 
 	return nil
-}
-
-type Monitor struct {
-	ctx        context.Context
-	cancel     context.CancelFunc
-	channel    ext_channel.ExtChannel
-	topicName  string
-	pollSleep  time.Duration
-	stdoutFile *os.File
-	done       chan struct{}
-}
-
-func NewMonitor(ctx context.Context, channel ext_channel.ExtChannel, topicName string, pollSleep time.Duration) *Monitor {
-	ctx, cancel := context.WithCancel(ctx)
-	return &Monitor{
-		ctx:       ctx,
-		cancel:    cancel,
-		channel:   channel,
-		topicName: topicName,
-		pollSleep: pollSleep,
-	}
-}
-
-func (m *Monitor) poll() error {
-	buf := make([]byte, 100*1024)
-	n, err := m.stdoutFile.Read(buf)
-	if err != nil && err != io.EOF {
-		log.Printf("Monitor.poll: read error: %v", err)
-		return err
-	}
-	if n > 0 {
-		if pubErr := m.channel.Publish(m.ctx, m.topicName, buf[:n]); pubErr != nil {
-			log.Printf("Monitor.poll: publish error: %v", pubErr)
-			return pubErr
-		}
-	}
-	return nil
-}
-
-func (m *Monitor) Started(stdoutPath string) {
-	m.done = make(chan struct{})
-	go func() {
-		defer close(m.done)
-
-		f, err := os.Open(stdoutPath)
-		if err != nil {
-			log.Printf("Monitor.Started: failed to open %s: %v", stdoutPath, err)
-			return
-		}
-		m.stdoutFile = f
-
-		for {
-			err := m.poll()
-			if err != nil {
-				return
-			}
-			select {
-			case <-m.ctx.Done():
-				return
-			case <-time.After(m.pollSleep):
-			}
-		}
-	}()
-}
-
-func (m *Monitor) Finished() {
-	m.cancel()
-	if m.done != nil {
-		<-m.done
-	}
-	if m.stdoutFile != nil {
-		// do one final poll to get the last bytes written before the process stopped
-		m.poll()
-		m.stdoutFile.Close()
-		m.stdoutFile = nil
-	}
 }

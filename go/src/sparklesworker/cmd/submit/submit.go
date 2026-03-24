@@ -76,6 +76,7 @@ var SubmitCmd = cli.Command{
 		cli.Int64Flag{Name: "aetherMaxSizeToBundle", Value: 0, Usage: "Max file size in bytes eligible for bundling (0 = disable bundling)"},
 		cli.Int64Flag{Name: "aetherMaxBundleSize", Value: 0, Usage: "Target max bundle size in bytes"},
 		cli.IntFlag{Name: "aetherWorkers", Value: 1, Usage: "Parallel upload workers"},
+		cli.StringFlag{Name: "expiry", Value: "24h", Usage: "Duration until job/task data expires (e.g. 24h, 7d)"},
 		cli.StringFlag{Name: "topicPrefix", Value: "sparkles", Usage: "Prefix for the log topic name (topic will be <topicPrefix>-log)"},
 	},
 	Action: submit,
@@ -91,7 +92,7 @@ func clusterIDFromSpec(spec *ClusterSpec) (string, error) {
 	return fmt.Sprintf("%x", sum[:8]), nil
 }
 
-func makeTask(jobSpec *JobSpec) (*task_queue.Job, *task_queue.Task, error) {
+func makeTask(jobSpec *JobSpec, expiry time.Duration) (*task_queue.Job, *task_queue.Task, error) {
 	clusterID := jobSpec.ClusterID
 	if clusterID == "" {
 		if jobSpec.ClusterSpec == nil {
@@ -104,12 +105,15 @@ func makeTask(jobSpec *JobSpec) (*task_queue.Job, *task_queue.Task, error) {
 		}
 	}
 
+	expiryTime := time.Now().Add(expiry)
+
 	job := &task_queue.Job{
 		Name:       jobSpec.Name,
 		ClusterID:  clusterID,
 		Status:     task_queue.StatusPending,
 		SubmitTime: float64(time.Now().UnixMilli()) / 1000.0,
 		TaskCount:  1,
+		Expiry:     expiryTime,
 	}
 
 	taskSpec := &task_queue.TaskSpec{
@@ -124,6 +128,7 @@ func makeTask(jobSpec *JobSpec) (*task_queue.Job, *task_queue.Task, error) {
 		ClusterID: clusterID,
 		Status:    task_queue.StatusPending,
 		TaskSpec:  taskSpec,
+		Expiry:    expiryTime,
 	}
 
 	return job, task, nil
@@ -164,7 +169,12 @@ func submit(c *cli.Context) error {
 		return fmt.Errorf("parsing job from %s: %w", filePath, err)
 	}
 
-	job, task, err := makeTask(&jobSpec)
+	expiryDuration, err := time.ParseDuration(c.String("expiry"))
+	if err != nil {
+		return fmt.Errorf("invalid --expiry value: %w", err)
+	}
+
+	job, task, err := makeTask(&jobSpec, expiryDuration)
 	if err != nil {
 		return fmt.Errorf("building job: %w", err)
 	}
