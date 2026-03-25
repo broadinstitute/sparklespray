@@ -1,4 +1,4 @@
-package autoscaler
+package gcp
 
 import (
 	"context"

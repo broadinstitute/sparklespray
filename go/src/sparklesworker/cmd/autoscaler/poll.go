@@ -4,73 +4,74 @@ import (
 	"fmt"
 	"log"
 
+	"github.com/broadinstitute/sparklesworker/backend"
 	"github.com/broadinstitute/sparklesworker/task_queue"
 )
 
-func Poll(clusterID string, gshim CloudMethodsForPoll, sshim SparklesMethodsForPoll) error {
-	clusterConfig, err := sshim.getClusterConfig(clusterID)
+func Poll(clusterID string, gshim backend.CloudMethodsForPoll, sshim backend.SparklesMethodsForPoll) error {
+	clusterConfig, err := sshim.GetClusterConfig(clusterID)
 	if err != nil {
 		return fmt.Errorf("Failed fetching cluster config: %s", err)
 	}
 
-	lastState, err := clusterConfig.getMonitorState()
+	lastState, err := clusterConfig.GetMonitorState()
 	if err != nil {
 		return fmt.Errorf("Failed retreiving monitor state: %s", err)
 	}
 
 	// phase 0: check for failing batch jobs that are a sign that the cluster configuration is in a broken state
-	badStateResult, err := checkClusterHealth(gshim, sshim, clusterID, clusterConfig.Region, lastState.completedJobIds, lastState.batchJobRequests)
+	badStateResult, err := checkClusterHealth(gshim, sshim, clusterID, clusterConfig.Region, lastState.CompletedJobIds, lastState.BatchJobRequests)
 	if err != nil {
 		return fmt.Errorf("Failed while checking for bad state: %s", err)
 	}
 
 	// update last state with the additional new completions
 	for _, completedJobID := range badStateResult.newlyCompletedJobIDs {
-		lastState.completedJobIds = append(lastState.completedJobIds, completedJobID)
+		lastState.CompletedJobIds = append(lastState.CompletedJobIds, completedJobID)
 	}
 
 	// update the count of suspicious failures and decide whether there's a problem or not
-	lastState.suspiciouslyFailedToRun = badStateResult.suspiciouslyFailedToRun + lastState.suspiciouslyFailedToRun
-	if lastState.suspiciouslyFailedToRun > clusterConfig.MaxSuspiciousFailures {
+	lastState.SuspiciouslyFailedToRun = badStateResult.suspiciouslyFailedToRun + lastState.SuspiciouslyFailedToRun
+	if lastState.SuspiciouslyFailedToRun > clusterConfig.MaxSuspiciousFailures {
 		// something wrong is going on. Shut everything down.
-		msg := fmt.Sprintf("Found %d nodes had shut down without doing any work. (max allowed: %d) Shut down entire cluster in to avoid infinitely starting broken nodes.", lastState.suspiciouslyFailedToRun, clusterConfig.MaxSuspiciousFailures)
+		msg := fmt.Sprintf("Found %d nodes had shut down without doing any work. (max allowed: %d) Shut down entire cluster in to avoid infinitely starting broken nodes.", lastState.SuspiciouslyFailedToRun, clusterConfig.MaxSuspiciousFailures)
 		log.Print(msg)
-		gshim.deleteAllBatchJobs(clusterConfig.Region, clusterID)
+		gshim.DeleteAllBatchJobs(clusterConfig.Region, clusterID)
 		return fmt.Errorf("%s", msg)
 	}
 
 	// phase 1: Identify orphaned tasks
 
-	claimedTasks, err := sshim.getClaimedTasks(clusterID)
+	claimedTasks, err := sshim.GetClaimedTasks(clusterID)
 	if err != nil {
 		return fmt.Errorf("Could not quey claimed tasks: %s", err)
 	}
 
-	runningInstances, err := gshim.listRunningInstances(clusterConfig.Zones, clusterID)
+	runningInstances, err := gshim.ListRunningInstances(clusterConfig.Zones, clusterID)
 	if err != nil {
 		return fmt.Errorf("Failed to query running instances: %s", err)
 	}
 	orphaned := findOrphanedTasks(claimedTasks, runningInstances)
 
-	err = sshim.markTasksPending(orphaned)
+	err = sshim.MarkTasksPending(orphaned)
 	if err != nil {
 		return fmt.Errorf("Could not mark orphaned tasks as pending: %s", err)
 	}
 
 	// phase 2: Resize cluster as needed
 
-	nonCompleteTaskCount, err := sshim.getNonCompleteTaskCount(clusterID)
+	nonCompleteTaskCount, err := sshim.GetNonCompleteTaskCount(clusterID)
 	if err != nil {
 		return fmt.Errorf("Could not query noncomplete tasks: %s", err)
 	}
 
-	activeBatchJobs, err := gshim.listBatchJobs(clusterConfig.Region, clusterID)
+	activeBatchJobs, err := gshim.ListBatchJobs(clusterConfig.Region, clusterID)
 	if err != nil {
 		return fmt.Errorf("Could not query current requested instances: %s", err)
 	}
 	currentRequestedInstanceCount := 0
 	for _, job := range activeBatchJobs {
-		if job.State == Pending || job.State == Running {
+		if job.State == backend.Pending || job.State == backend.Running {
 			currentRequestedInstanceCount += job.RequestedInstances
 		}
 	}
@@ -83,14 +84,14 @@ func Poll(clusterID string, gshim CloudMethodsForPoll, sshim SparklesMethodsForP
 		currentRequestedInstanceCount,
 	)
 
-	err = gshim.submitBatchJobs(clusterConfig, clusterID, newBatchJobs)
+	err = gshim.SubmitBatchJobs(clusterConfig, clusterID, newBatchJobs)
 	if err != nil {
 		return fmt.Errorf("Could not create nodes: %s", err)
 	}
 
-	lastState.batchJobRequests += len(newBatchJobs)
+	lastState.BatchJobRequests += len(newBatchJobs)
 
-	err = sshim.updateClusterMonitorState(clusterID, lastState)
+	err = sshim.UpdateClusterMonitorState(clusterID, lastState)
 	if err != nil {
 		return fmt.Errorf("failed to update monitor state: %s", err)
 	}
@@ -104,7 +105,7 @@ func determineBatchJobsToCreate(
 	maxPreemptableAttempts int,
 	usedPreemptableAttempts int,
 	currentRequestedInstanceCount int,
-) []*BatchJobsToSubmit {
+) []*backend.BatchJobsToSubmit {
 
 	targetCount := min(maxInstanceCount, nonCompleteTaskCount)
 	batchJobsToRequest := targetCount - currentRequestedInstanceCount
@@ -119,7 +120,7 @@ func determineBatchJobsToCreate(
 		remainingPreemptableAttempts = maxPreemptableAttempts
 	}
 
-	var requests []*BatchJobsToSubmit
+	var requests []*backend.BatchJobsToSubmit
 
 	// Cold start: create one lingering node first
 	if currentRequestedInstanceCount == 0 {
@@ -127,10 +128,10 @@ func determineBatchJobsToCreate(
 		if isPreemptable {
 			remainingPreemptableAttempts--
 		}
-		requests = append(requests, &BatchJobsToSubmit{
-			instanceCount: 1,
-			isPreemptable: isPreemptable,
-			shouldLinger:  true,
+		requests = append(requests, &backend.BatchJobsToSubmit{
+			InstanceCount: 1,
+			IsPreemptable: isPreemptable,
+			ShouldLinger:  true,
 		})
 		batchJobsToRequest--
 	}
@@ -138,20 +139,20 @@ func determineBatchJobsToCreate(
 	// Fill remaining slots with preemptable nodes while budget allows
 	if remainingPreemptableAttempts > 0 && batchJobsToRequest > 0 {
 		instanceCount := min(remainingPreemptableAttempts, batchJobsToRequest)
-		requests = append(requests, &BatchJobsToSubmit{
-			instanceCount: instanceCount,
-			isPreemptable: true,
-			shouldLinger:  false,
+		requests = append(requests, &backend.BatchJobsToSubmit{
+			InstanceCount: instanceCount,
+			IsPreemptable: true,
+			ShouldLinger:  false,
 		})
 		batchJobsToRequest -= instanceCount
 	}
 
 	// Any remaining slots are non-preemptable
 	if batchJobsToRequest > 0 {
-		requests = append(requests, &BatchJobsToSubmit{
-			instanceCount: batchJobsToRequest,
-			isPreemptable: false,
-			shouldLinger:  false,
+		requests = append(requests, &backend.BatchJobsToSubmit{
+			InstanceCount: batchJobsToRequest,
+			IsPreemptable: false,
+			ShouldLinger:  false,
 		})
 	}
 
@@ -178,12 +179,12 @@ type HealthCheckResult struct {
 	newlyCompletedJobIDs    []string
 }
 
-func checkClusterHealth(gshim CloudMethodsForPoll, sshim SparklesMethodsForPoll, clusterID string, region string, previouslyCompletedJobIDs []string, expectedJobCount int) (*HealthCheckResult, error) {
+func checkClusterHealth(gshim backend.CloudMethodsForPoll, sshim backend.SparklesMethodsForPoll, clusterID string, region string, previouslyCompletedJobIDs []string, expectedJobCount int) (*HealthCheckResult, error) {
 	// the heuristic we're using is: a bad job is one where it started and stopped without doing anything. That's a sign
 	// that if we turn on another one, the same thing might happen.
 	// but first, rule out the trivial case which isn't a problem: there's no work left to do
 
-	pendingTaskCount, err := sshim.getPendingTaskCount(clusterID)
+	pendingTaskCount, err := sshim.GetPendingTaskCount(clusterID)
 	if err != nil {
 		return nil, fmt.Errorf("Could not quey pending task count: %s", err)
 	}
@@ -194,7 +195,7 @@ func checkClusterHealth(gshim CloudMethodsForPoll, sshim SparklesMethodsForPoll,
 	}
 
 	// now what jobs have completed
-	jobs, err := gshim.listBatchJobs(region, clusterID)
+	jobs, err := gshim.ListBatchJobs(region, clusterID)
 	if err != nil {
 		return nil, fmt.Errorf("Could not quey completed batch jobs: %s", err)
 	}
@@ -208,7 +209,7 @@ func checkClusterHealth(gshim CloudMethodsForPoll, sshim SparklesMethodsForPoll,
 	// subset to just the completed jobs
 	completedJobIDs := make([]string, 0, len(jobs))
 	for _, job := range jobs {
-		if job.State == Failed || job.State == Complete {
+		if job.State == backend.Failed || job.State == backend.Complete {
 			completedJobIDs = append(completedJobIDs, job.ID)
 		}
 	}
@@ -219,7 +220,7 @@ func checkClusterHealth(gshim CloudMethodsForPoll, sshim SparklesMethodsForPoll,
 	// for each check: did we successfully complete any jobs before shutting down?
 	suspiciouslyFailedToRun := 0
 	for _, newlyCompletedJobID := range newlyCompletedJobIDs {
-		count := sshim.getTasksCompletedBy(newlyCompletedJobID)
+		count := sshim.GetTasksCompletedBy(newlyCompletedJobID)
 		if count == 0 {
 			suspiciouslyFailedToRun += 1
 		}

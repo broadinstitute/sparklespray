@@ -1,22 +1,23 @@
-package autoscaler
+package redis
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
 
+	"github.com/broadinstitute/sparklesworker/backend"
 	"github.com/redis/go-redis/v9"
 )
 
 // redisBatchJob is the JSON-serialized form of a batch job stored in Redis.
 type redisBatchJob struct {
-	ID                string        `json:"id"`
-	State             BatchJobState `json:"state"`
-	ClusterID         string        `json:"cluster_id"`
-	Region            string        `json:"region"`
-	InstanceCount     int           `json:"instance_count"`
-	WorkerCommandArgs []string      `json:"worker_command_args"`
-	WorkerDockerImage string        `json:"worker_docker_image"`
+	ID                string                `json:"id"`
+	State             backend.BatchJobState `json:"state"`
+	ClusterID         string                `json:"cluster_id"`
+	Region            string                `json:"region"`
+	InstanceCount     int                   `json:"instance_count"`
+	WorkerCommandArgs []string              `json:"worker_command_args"`
+	WorkerDockerImage string                `json:"worker_docker_image"`
 }
 
 // RedisMethodsForPoll is a Redis-backed implementation of CloudMethodsForPoll
@@ -43,21 +44,21 @@ func (r *RedisMethodsForPoll) clusterJobsKey(clusterID string) string {
 	return "batch_jobs:" + clusterID
 }
 
-// listRunningInstances returns an empty list — no real GCE instances exist in
+// ListRunningInstances returns an empty list — no real GCE instances exist in
 // local testing, so all claimed tasks will appear orphaned.
-func (r *RedisMethodsForPoll) listRunningInstances(zones []string, clusterID string) ([]string, error) {
+func (r *RedisMethodsForPoll) ListRunningInstances(zones []string, clusterID string) ([]string, error) {
 	return nil, nil
 }
 
-func (r *RedisMethodsForPoll) submitBatchJobs(cluster Cluster, clusterID string, requests []*BatchJobsToSubmit) error {
+func (r *RedisMethodsForPoll) SubmitBatchJobs(cluster *backend.Cluster, clusterID string, requests []*backend.BatchJobsToSubmit) error {
 	for i, req := range requests {
 
 		job := &redisBatchJob{
 			ID:                fmt.Sprintf("%s-%d", clusterID, r.nextID(clusterID)),
-			State:             Pending,
+			State:             backend.Pending,
 			ClusterID:         clusterID,
 			Region:            cluster.Region,
-			InstanceCount:     req.instanceCount,
+			InstanceCount:     req.InstanceCount,
 			WorkerCommandArgs: cluster.WorkerCommandArgs,
 			WorkerDockerImage: cluster.WorkerDockerImage}
 
@@ -82,13 +83,13 @@ func (r *RedisMethodsForPoll) nextID(clusterID string) int64 {
 	return n
 }
 
-func (r *RedisMethodsForPoll) listBatchJobs(region, clusterID string) ([]*BatchJob, error) {
+func (r *RedisMethodsForPoll) ListBatchJobs(region, clusterID string) ([]*backend.BatchJob, error) {
 	ids, err := r.client.SMembers(r.ctx, r.clusterJobsKey(clusterID)).Result()
 	if err != nil {
 		return nil, fmt.Errorf("listing job IDs for cluster %s: %w", clusterID, err)
 	}
 
-	var jobs []*BatchJob
+	var jobs []*backend.BatchJob
 	for _, id := range ids {
 		data, err := r.client.Get(r.ctx, r.jobKey(id)).Bytes()
 		if err != nil {
@@ -101,12 +102,12 @@ func (r *RedisMethodsForPoll) listBatchJobs(region, clusterID string) ([]*BatchJ
 		if job.Region != region {
 			continue
 		}
-		jobs = append(jobs, &BatchJob{ID: job.ID, State: job.State, RequestedInstances: job.InstanceCount})
+		jobs = append(jobs, &backend.BatchJob{ID: job.ID, State: job.State, RequestedInstances: job.InstanceCount})
 	}
 	return jobs, nil
 }
 
-func (r *RedisMethodsForPoll) deleteAllBatchJobs(region, clusterID string) error {
+func (r *RedisMethodsForPoll) DeleteAllBatchJobs(region, clusterID string) error {
 	ids, err := r.client.SMembers(r.ctx, r.clusterJobsKey(clusterID)).Result()
 	if err != nil {
 		return fmt.Errorf("listing job IDs for cluster %s: %w", clusterID, err)

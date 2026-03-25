@@ -1,4 +1,4 @@
-package autoscaler
+package gcp
 
 import (
 	"context"
@@ -7,44 +7,35 @@ import (
 	"log"
 
 	"cloud.google.com/go/firestore"
+	"github.com/broadinstitute/sparklesworker/backend"
 	"github.com/broadinstitute/sparklesworker/task_queue"
 )
 
 const clusterCollection = "Cluster"
 const taskCollection = task_queue.TaskCollection
 
-type SparklesMethodsForPoll interface {
-	updateClusterMonitorState(clusterID string, state *MonitorState) error
-	getNonCompleteTaskCount(clusterID string) (int, error)
-	getClaimedTasks(clusterID string) ([]*task_queue.Task, error)
-	markTasksPending(tasks []*task_queue.Task) error
-	getClusterConfig(clusterID string) (Cluster, error)
-	getPendingTaskCount(clusterID string) (int, error)
-	getTasksCompletedBy(batchJobID string) int
-}
-
 type FirestoreSparklesMethodsForPoll struct {
 	client *firestore.Client
 	ctx    context.Context
 }
 
-func (s *FirestoreSparklesMethodsForPoll) getClusterConfig(clusterID string) (Cluster, error) {
+func (s *FirestoreSparklesMethodsForPoll) GetClusterConfig(clusterID string) (*backend.Cluster, error) {
 	docSnap, err := s.client.Collection(clusterCollection).Doc(clusterID).Get(s.ctx)
 	if err != nil {
-		return Cluster{}, fmt.Errorf("getting cluster %s: %w", clusterID, err)
+		return nil, fmt.Errorf("getting cluster %s: %w", clusterID, err)
 	}
-	var cluster Cluster
+	var cluster backend.Cluster
 	if err := docSnap.DataTo(&cluster); err != nil {
-		return Cluster{}, fmt.Errorf("decoding cluster %s: %w", clusterID, err)
+		return nil, fmt.Errorf("decoding cluster %s: %w", clusterID, err)
 	}
-	return cluster, nil
+	return &cluster, nil
 }
 
-func (s *FirestoreSparklesMethodsForPoll) updateClusterMonitorState(clusterID string, state *MonitorState) error {
-	wire := monitorStateJSON{
-		BatchJobRequests:        state.batchJobRequests,
-		CompletedJobIds:         state.completedJobIds,
-		SuspiciouslyFailedToRun: state.suspiciouslyFailedToRun,
+func (s *FirestoreSparklesMethodsForPoll) UpdateClusterMonitorState(clusterID string, state *backend.MonitorState) error {
+	wire := backend.MonitorStateJSON{
+		BatchJobRequests:        state.BatchJobRequests,
+		CompletedJobIds:         state.CompletedJobIds,
+		SuspiciouslyFailedToRun: state.SuspiciouslyFailedToRun,
 	}
 	data, err := json.Marshal(wire)
 	if err != nil {
@@ -56,7 +47,7 @@ func (s *FirestoreSparklesMethodsForPoll) updateClusterMonitorState(clusterID st
 	return err
 }
 
-func (s *FirestoreSparklesMethodsForPoll) getClaimedTasks(clusterID string) ([]*task_queue.Task, error) {
+func (s *FirestoreSparklesMethodsForPoll) GetClaimedTasks(clusterID string) ([]*task_queue.Task, error) {
 	docs, err := s.client.Collection(taskCollection).
 		Where("cluster_id", "==", clusterID).
 		Where("status", "==", task_queue.StatusClaimed).
@@ -76,7 +67,7 @@ func (s *FirestoreSparklesMethodsForPoll) getClaimedTasks(clusterID string) ([]*
 	return tasks, nil
 }
 
-func (s *FirestoreSparklesMethodsForPoll) markTasksPending(tasks []*task_queue.Task) error {
+func (s *FirestoreSparklesMethodsForPoll) MarkTasksPending(tasks []*task_queue.Task) error {
 	const batchSize = 500
 	for i := 0; i < len(tasks); i += batchSize {
 		end := i + batchSize
@@ -98,7 +89,7 @@ func (s *FirestoreSparklesMethodsForPoll) markTasksPending(tasks []*task_queue.T
 	return nil
 }
 
-func (s *FirestoreSparklesMethodsForPoll) getPendingTaskCount(clusterID string) (int, error) {
+func (s *FirestoreSparklesMethodsForPoll) GetPendingTaskCount(clusterID string) (int, error) {
 	docs, err := s.client.Collection(taskCollection).
 		Where("cluster_id", "==", clusterID).
 		Where("status", "==", task_queue.StatusPending).
@@ -109,7 +100,7 @@ func (s *FirestoreSparklesMethodsForPoll) getPendingTaskCount(clusterID string) 
 	return len(docs), nil
 }
 
-func (s *FirestoreSparklesMethodsForPoll) getNonCompleteTaskCount(clusterID string) (int, error) {
+func (s *FirestoreSparklesMethodsForPoll) GetNonCompleteTaskCount(clusterID string) (int, error) {
 	docs, err := s.client.Collection(taskCollection).
 		Where("cluster_id", "==", clusterID).
 		Where("status", "not-in", []string{task_queue.StatusComplete, task_queue.StatusFailed, task_queue.StatusKilled}).
@@ -120,7 +111,7 @@ func (s *FirestoreSparklesMethodsForPoll) getNonCompleteTaskCount(clusterID stri
 	return len(docs), nil
 }
 
-func (s *FirestoreSparklesMethodsForPoll) getTasksCompletedBy(batchJobID string) int {
+func (s *FirestoreSparklesMethodsForPoll) GetTasksCompletedBy(batchJobID string) int {
 	docs, err := s.client.Collection(taskCollection).
 		Where("owned_by_batch_job_id", "==", batchJobID).
 		Where("status", "==", task_queue.StatusComplete).

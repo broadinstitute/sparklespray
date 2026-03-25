@@ -4,6 +4,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/broadinstitute/sparklesworker/backend"
 	"github.com/broadinstitute/sparklesworker/task_queue"
 )
 
@@ -19,7 +20,7 @@ func TestDetermineNodesToCreate(t *testing.T) {
 		currentRequestedInstanceCount int
 		// expected fields on result
 		wantNil      bool
-		wantRequests []BatchJobsToSubmit
+		wantRequests []backend.BatchJobsToSubmit
 	}
 
 	tests := []tc{
@@ -36,9 +37,9 @@ func TestDetermineNodesToCreate(t *testing.T) {
 			maxPreemptableAttempts:        5,
 			usedPreemptableAttempts:       0,
 			currentRequestedInstanceCount: 0,
-			wantRequests: []BatchJobsToSubmit{
-				{instanceCount: 1, isPreemptable: true, shouldLinger: true},
-				{instanceCount: 2, isPreemptable: true, shouldLinger: false},
+			wantRequests: []backend.BatchJobsToSubmit{
+				{InstanceCount: 1, IsPreemptable: true, ShouldLinger: true},
+				{InstanceCount: 2, IsPreemptable: true, ShouldLinger: false},
 			},
 		},
 		{
@@ -48,9 +49,9 @@ func TestDetermineNodesToCreate(t *testing.T) {
 			maxPreemptableAttempts:        5,
 			usedPreemptableAttempts:       5,
 			currentRequestedInstanceCount: 0,
-			wantRequests: []BatchJobsToSubmit{
-				{instanceCount: 1, isPreemptable: true, shouldLinger: true},
-				{instanceCount: 2, isPreemptable: true, shouldLinger: false},
+			wantRequests: []backend.BatchJobsToSubmit{
+				{InstanceCount: 1, IsPreemptable: true, ShouldLinger: true},
+				{InstanceCount: 2, IsPreemptable: true, ShouldLinger: false},
 			},
 		},
 		{
@@ -60,9 +61,9 @@ func TestDetermineNodesToCreate(t *testing.T) {
 			maxPreemptableAttempts:        0,
 			usedPreemptableAttempts:       0,
 			currentRequestedInstanceCount: 0,
-			wantRequests: []BatchJobsToSubmit{
-				{instanceCount: 1, isPreemptable: false, shouldLinger: true},
-				{instanceCount: 2, isPreemptable: false, shouldLinger: false},
+			wantRequests: []backend.BatchJobsToSubmit{
+				{InstanceCount: 1, IsPreemptable: false, ShouldLinger: true},
+				{InstanceCount: 2, IsPreemptable: false, ShouldLinger: false},
 			},
 		},
 		{
@@ -72,9 +73,9 @@ func TestDetermineNodesToCreate(t *testing.T) {
 			maxPreemptableAttempts:        1,
 			usedPreemptableAttempts:       0,
 			currentRequestedInstanceCount: 0,
-			wantRequests: []BatchJobsToSubmit{
-				{instanceCount: 1, isPreemptable: true, shouldLinger: true},
-				{instanceCount: 2, isPreemptable: false, shouldLinger: false},
+			wantRequests: []backend.BatchJobsToSubmit{
+				{InstanceCount: 1, IsPreemptable: true, ShouldLinger: true},
+				{InstanceCount: 2, IsPreemptable: false, ShouldLinger: false},
 			},
 		},
 		{
@@ -93,8 +94,8 @@ func TestDetermineNodesToCreate(t *testing.T) {
 			maxPreemptableAttempts:        10,
 			usedPreemptableAttempts:       2,
 			currentRequestedInstanceCount: 2,
-			wantRequests: []BatchJobsToSubmit{
-				{instanceCount: 3, isPreemptable: true, shouldLinger: false},
+			wantRequests: []backend.BatchJobsToSubmit{
+				{InstanceCount: 3, IsPreemptable: true, ShouldLinger: false},
 			},
 		},
 		{
@@ -104,9 +105,9 @@ func TestDetermineNodesToCreate(t *testing.T) {
 			maxPreemptableAttempts:        10,
 			usedPreemptableAttempts:       0,
 			currentRequestedInstanceCount: 0,
-			wantRequests: []BatchJobsToSubmit{
-				{instanceCount: 1, isPreemptable: true, shouldLinger: true},
-				{instanceCount: 1, isPreemptable: true, shouldLinger: false},
+			wantRequests: []backend.BatchJobsToSubmit{
+				{InstanceCount: 1, IsPreemptable: true, ShouldLinger: true},
+				{InstanceCount: 1, IsPreemptable: true, ShouldLinger: false},
 			},
 		},
 	}
@@ -133,7 +134,7 @@ func TestDetermineNodesToCreate(t *testing.T) {
 			}
 			for i, want := range tt.wantRequests {
 				g := got[i]
-				if g.instanceCount != want.instanceCount || g.isPreemptable != want.isPreemptable || g.shouldLinger != want.shouldLinger {
+				if g.InstanceCount != want.InstanceCount || g.IsPreemptable != want.IsPreemptable || g.ShouldLinger != want.ShouldLinger {
 					t.Errorf("request[%d]: want %+v, got %+v", i, want, *g)
 				}
 			}
@@ -234,7 +235,7 @@ func TestCalcSetDiff(t *testing.T) {
 
 // ---- checkClusterHealth ----
 
-func makeCloud(listBatchJobsFn func(region, clusterID string) ([]*BatchJob, error)) *mockCloud {
+func makeCloud(listBatchJobsFn func(region, clusterID string) ([]*backend.BatchJob, error)) *mockCloud {
 	return &mockCloud{
 		listBatchJobsFn: listBatchJobsFn,
 	}
@@ -243,7 +244,7 @@ func makeCloud(listBatchJobsFn func(region, clusterID string) ([]*BatchJob, erro
 func TestCheckClusterHealth(t *testing.T) {
 	t.Run("pending=0 returns empty result without calling listBatchJobs", func(t *testing.T) {
 		listCalled := false
-		cloud := makeCloud(func(_, clusterID string) ([]*BatchJob, error) {
+		cloud := makeCloud(func(_, clusterID string) ([]*backend.BatchJob, error) {
 			listCalled = true
 			return nil, nil
 		})
@@ -262,8 +263,8 @@ func TestCheckClusterHealth(t *testing.T) {
 	})
 
 	t.Run("job count mismatch returns error", func(t *testing.T) {
-		cloud := makeCloud(func(_, clusterID string) ([]*BatchJob, error) {
-			return []*BatchJob{{ID: "j1", State: Running}}, nil
+		cloud := makeCloud(func(_, clusterID string) ([]*backend.BatchJob, error) {
+			return []*backend.BatchJob{{ID: "j1", State: backend.Failed}}, nil
 		})
 		sparkles := &mockSparkles{pendingTaskCount: 1}
 
@@ -274,8 +275,8 @@ func TestCheckClusterHealth(t *testing.T) {
 	})
 
 	t.Run("newly completed job with 0 tasks is suspicious", func(t *testing.T) {
-		cloud := makeCloud(func(_, clusterID string) ([]*BatchJob, error) {
-			return []*BatchJob{{ID: "j1", State: Complete}}, nil
+		cloud := makeCloud(func(_, clusterID string) ([]*backend.BatchJob, error) {
+			return []*backend.BatchJob{{ID: "j1", State: backend.Complete}}, nil
 		})
 		sparkles := &mockSparkles{
 			pendingTaskCount: 1,
@@ -292,8 +293,8 @@ func TestCheckClusterHealth(t *testing.T) {
 	})
 
 	t.Run("newly completed job with >0 tasks is not suspicious", func(t *testing.T) {
-		cloud := makeCloud(func(_, clusterID string) ([]*BatchJob, error) {
-			return []*BatchJob{{ID: "j1", State: Complete}}, nil
+		cloud := makeCloud(func(_, clusterID string) ([]*backend.BatchJob, error) {
+			return []*backend.BatchJob{{ID: "j1", State: backend.Complete}}, nil
 		})
 		sparkles := &mockSparkles{
 			pendingTaskCount: 1,
@@ -310,8 +311,8 @@ func TestCheckClusterHealth(t *testing.T) {
 	})
 
 	t.Run("previously seen completed job not re-evaluated", func(t *testing.T) {
-		cloud := makeCloud(func(_, clusterID string) ([]*BatchJob, error) {
-			return []*BatchJob{{ID: "j1", State: Complete}}, nil
+		cloud := makeCloud(func(_, clusterID string) ([]*backend.BatchJob, error) {
+			return []*backend.BatchJob{{ID: "j1", State: backend.Complete}}, nil
 		})
 		sparkles := &mockSparkles{
 			pendingTaskCount: 1,
@@ -331,11 +332,11 @@ func TestCheckClusterHealth(t *testing.T) {
 	})
 
 	t.Run("multiple completions mixed suspicious and clean", func(t *testing.T) {
-		cloud := makeCloud(func(_, clusterID string) ([]*BatchJob, error) {
-			return []*BatchJob{
-				{ID: "j1", State: Complete},
-				{ID: "j2", State: Failed},
-				{ID: "j3", State: Running},
+		cloud := makeCloud(func(_, clusterID string) ([]*backend.BatchJob, error) {
+			return []*backend.BatchJob{
+				{ID: "j1", State: backend.Complete},
+				{ID: "j2", State: backend.Failed},
+				{ID: "j3", State: backend.Failed},
 			}, nil
 		})
 		sparkles := &mockSparkles{
@@ -366,10 +367,10 @@ func defaultCloud() *mockCloud {
 		listRunningInstancesFn: func(zones []string, clusterID string) ([]string, error) {
 			return []string{}, nil
 		},
-		listBatchJobsFn: func(region, clusterID string) ([]*BatchJob, error) {
-			return []*BatchJob{}, nil
+		listBatchJobsFn: func(region, clusterID string) ([]*backend.BatchJob, error) {
+			return []*backend.BatchJob{}, nil
 		},
-		submitBatchJobsFn: func(cluster Cluster, clusterID string, requests []*BatchJobsToSubmit) error {
+		submitBatchJobsFn: func(cluster backend.Cluster, clusterID string, requests []*backend.BatchJobsToSubmit) error {
 			return nil
 		},
 		deleteAllBatchJobsFn: func(region, clusterID string) error {
@@ -380,7 +381,7 @@ func defaultCloud() *mockCloud {
 
 func defaultSparkles() *mockSparkles {
 	return &mockSparkles{
-		clusterConfig: Cluster{
+		clusterConfig: backend.Cluster{
 			MaxInstanceCount:       10,
 			MaxPreemptableAttempts: 5,
 			MaxSuspiciousFailures:  3,
@@ -395,8 +396,8 @@ func defaultSparkles() *mockSparkles {
 func TestPoll(t *testing.T) {
 	t.Run("happy path tasks pending nodes launched state updated", func(t *testing.T) {
 		cloud := defaultCloud()
-		var launched []*BatchJobsToSubmit
-		cloud.submitBatchJobsFn = func(_ Cluster, _ string, requests []*BatchJobsToSubmit) error {
+		var launched []*backend.BatchJobsToSubmit
+		cloud.submitBatchJobsFn = func(_ backend.Cluster, _ string, requests []*backend.BatchJobsToSubmit) error {
 			launched = requests
 			return nil
 		}
@@ -461,12 +462,12 @@ func TestPoll(t *testing.T) {
 			deleteAllCalled = true
 			return nil
 		}
-		cloud.listBatchJobsFn = func(region, clusterID string) ([]*BatchJob, error) {
-			return []*BatchJob{
-				{ID: "j1", State: Complete},
-				{ID: "j2", State: Complete},
-				{ID: "j3", State: Complete},
-				{ID: "j4", State: Complete},
+		cloud.listBatchJobsFn = func(region, clusterID string) ([]*backend.BatchJob, error) {
+			return []*backend.BatchJob{
+				{ID: "j1", State: backend.Complete},
+				{ID: "j2", State: backend.Complete},
+				{ID: "j3", State: backend.Complete},
+				{ID: "j4", State: backend.Complete},
 			}, nil
 		}
 
@@ -490,7 +491,7 @@ func TestPoll(t *testing.T) {
 	t.Run("no work to do submitBatchJobs not called", func(t *testing.T) {
 		cloud := defaultCloud()
 		launchCalled := false
-		cloud.submitBatchJobsFn = func(_ Cluster, _ string, requests []*BatchJobsToSubmit) error {
+		cloud.submitBatchJobsFn = func(_ backend.Cluster, _ string, requests []*backend.BatchJobsToSubmit) error {
 			if len(requests) > 0 {
 				launchCalled = true
 			}

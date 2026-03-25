@@ -10,11 +10,12 @@ import (
 	"path"
 	"time"
 
-	"cloud.google.com/go/firestore"
+	"github.com/broadinstitute/sparklesworker/backend"
+	gcp_backend "github.com/broadinstitute/sparklesworker/backend/gcp"
+	redis_backend "github.com/broadinstitute/sparklesworker/backend/redis"
 	"github.com/broadinstitute/sparklesworker/consumer"
 	"github.com/broadinstitute/sparklesworker/ext_channel"
 	"github.com/broadinstitute/sparklesworker/task_queue"
-	"github.com/redis/go-redis/v9"
 	"github.com/urfave/cli"
 )
 
@@ -46,7 +47,7 @@ type JobSpec struct {
 	// Name of job. Must follow google's ID conventions.
 	Name string
 
-	// either clusterSpec or clusterID must be provided
+	// either clusterSpec or clusterID must be provided but not both
 	ClusterSpec *ClusterSpec
 	ClusterID   string
 
@@ -103,6 +104,7 @@ func makeTask(jobSpec *JobSpec, expiry time.Duration) (*task_queue.Job, *task_qu
 		if err != nil {
 			return nil, nil, err
 		}
+		panic("Actually using cluster spec is not implemented")
 	}
 
 	expiryTime := time.Now().Add(expiry)
@@ -181,26 +183,21 @@ func submit(c *cli.Context) error {
 
 	log.Printf("Submitting job %s to cluster %s", job.Name, job.ClusterID)
 
-	var channel ext_channel.ExtChannel
-	var queue task_queue.TaskQueue
+	var extServices *backend.ExternalServices
 	if redisAddr != "" {
 		log.Printf("Using Redis backend at %s", redisAddr)
-		redisClient := redis.NewClient(&redis.Options{Addr: redisAddr})
-		if err := redisClient.Ping(ctx).Err(); err != nil {
-			return fmt.Errorf("connecting to Redis at %s: %w", redisAddr, err)
-		}
-		defer redisClient.Close()
-		channel = ext_channel.NewRedisChannel(redisClient)
-		queue = task_queue.NewRedisQueue(redisClient, job.ClusterID, "", 0, 0)
-	} else {
-		log.Printf("Using Firestore backend (project=%s)", projectID)
-		client, err := firestore.NewClientWithDatabase(ctx, projectID, database)
+		pollInterval := 1 * time.Second
+		extServices, err = redis_backend.CreateMockServices(ctx, redisAddr, job.ClusterID, pollInterval)
 		if err != nil {
-			return fmt.Errorf("creating firestore client: %w", err)
+			return fmt.Errorf("Creating redis backed services failed: %s", err)
 		}
-		channel = ext_channel.NewPubSubChannel(projectID)
-		queue = task_queue.NewFirestoreQueue(client, job.ClusterID, "", 0, 0)
+	} else {
+		extServices, err = gcp_backend.CreateGCPServices(ctx, projectID, database, job.ClusterID)
 	}
+
+	queue := extServices.Queue
+	channel := extServices.Channel
+	defer extServices.Close()
 
 	if err := queue.AddJob(ctx, job, []*task_queue.Task{task}); err != nil {
 		return fmt.Errorf("adding job: %w", err)

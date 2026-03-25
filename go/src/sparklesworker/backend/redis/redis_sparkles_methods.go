@@ -1,4 +1,4 @@
-package autoscaler
+package redis
 
 import (
 	"context"
@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 
+	"github.com/broadinstitute/sparklesworker/backend"
 	"github.com/broadinstitute/sparklesworker/task_queue"
 	"github.com/redis/go-redis/v9"
 )
@@ -39,27 +40,27 @@ func (r *RedisSparklesMethodsForPoll) clusterTasksKey(clusterID string) string {
 	return "tasks:" + clusterID
 }
 
-func (r *RedisSparklesMethodsForPoll) getClusterConfig(clusterID string) (Cluster, error) {
+func (r *RedisSparklesMethodsForPoll) GetClusterConfig(clusterID string) (*backend.Cluster, error) {
 	data, err := r.client.Get(r.ctx, r.clusterKey(clusterID)).Bytes()
 	if err != nil {
-		return Cluster{}, fmt.Errorf("getting cluster %s: %w", clusterID, err)
+		return nil, fmt.Errorf("getting cluster %s: %w", clusterID, err)
 	}
-	var cluster Cluster
+	var cluster backend.Cluster
 	if err := json.Unmarshal(data, &cluster); err != nil {
-		return Cluster{}, fmt.Errorf("decoding cluster %s: %w", clusterID, err)
+		return nil, fmt.Errorf("decoding cluster %s: %w", clusterID, err)
 	}
-	return cluster, nil
+	return &cluster, nil
 }
 
-func (r *RedisSparklesMethodsForPoll) updateClusterMonitorState(clusterID string, state *MonitorState) error {
-	cluster, err := r.getClusterConfig(clusterID)
+func (r *RedisSparklesMethodsForPoll) UpdateClusterMonitorState(clusterID string, state *backend.MonitorState) error {
+	cluster, err := r.GetClusterConfig(clusterID)
 	if err != nil {
 		return err
 	}
-	wire := monitorStateJSON{
-		BatchJobRequests:        state.batchJobRequests,
-		CompletedJobIds:         state.completedJobIds,
-		SuspiciouslyFailedToRun: state.suspiciouslyFailedToRun,
+	wire := backend.MonitorStateJSON{
+		BatchJobRequests:        state.BatchJobRequests,
+		CompletedJobIds:         state.CompletedJobIds,
+		SuspiciouslyFailedToRun: state.SuspiciouslyFailedToRun,
 	}
 	stateData, err := json.Marshal(wire)
 	if err != nil {
@@ -73,13 +74,13 @@ func (r *RedisSparklesMethodsForPoll) updateClusterMonitorState(clusterID string
 	return r.client.Set(r.ctx, r.clusterKey(clusterID), clusterData, 0).Err()
 }
 
-func (r *RedisSparklesMethodsForPoll) getClaimedTasks(clusterID string) ([]*task_queue.Task, error) {
+func (r *RedisSparklesMethodsForPoll) GetClaimedTasks(clusterID string) ([]*task_queue.Task, error) {
 	return r.scanTasksWithFilter(clusterID, func(t *task_queue.Task) bool {
 		return t.Status == task_queue.StatusClaimed
 	})
 }
 
-func (r *RedisSparklesMethodsForPoll) markTasksPending(tasks []*task_queue.Task) error {
+func (r *RedisSparklesMethodsForPoll) MarkTasksPending(tasks []*task_queue.Task) error {
 	for _, task := range tasks {
 		data, err := r.client.Get(r.ctx, r.taskKey(task.TaskID)).Bytes()
 		if err != nil {
@@ -102,7 +103,7 @@ func (r *RedisSparklesMethodsForPoll) markTasksPending(tasks []*task_queue.Task)
 	return nil
 }
 
-func (r *RedisSparklesMethodsForPoll) getPendingTaskCount(clusterID string) (int, error) {
+func (r *RedisSparklesMethodsForPoll) GetPendingTaskCount(clusterID string) (int, error) {
 	tasks, err := r.scanTasksWithFilter(clusterID, func(t *task_queue.Task) bool {
 		return t.Status == task_queue.StatusPending
 	})
@@ -112,7 +113,7 @@ func (r *RedisSparklesMethodsForPoll) getPendingTaskCount(clusterID string) (int
 	return len(tasks), nil
 }
 
-func (r *RedisSparklesMethodsForPoll) getNonCompleteTaskCount(clusterID string) (int, error) {
+func (r *RedisSparklesMethodsForPoll) GetNonCompleteTaskCount(clusterID string) (int, error) {
 	tasks, err := r.scanTasksWithFilter(clusterID, func(t *task_queue.Task) bool {
 		s := t.Status
 		return s != task_queue.StatusComplete && s != task_queue.StatusFailed && s != task_queue.StatusKilled
@@ -123,7 +124,7 @@ func (r *RedisSparklesMethodsForPoll) getNonCompleteTaskCount(clusterID string) 
 	return len(tasks), nil
 }
 
-func (r *RedisSparklesMethodsForPoll) getTasksCompletedBy(batchJobID string) int {
+func (r *RedisSparklesMethodsForPoll) GetTasksCompletedBy(batchJobID string) int {
 	// Scan all task:* keys since we don't have a per-job index.
 	count := 0
 	var cursor uint64

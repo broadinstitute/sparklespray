@@ -1,4 +1,4 @@
-package autoscaler
+package redis
 
 import (
 	"context"
@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"time"
 
+	"github.com/broadinstitute/sparklesworker/backend"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -47,7 +48,7 @@ func mockBatchAPIPoll(ctx context.Context, client *redis.Client) error {
 			if err := json.Unmarshal(data, &job); err != nil {
 				continue
 			}
-			if job.State == Pending {
+			if job.State == backend.Pending {
 				if err := mockStartJob(ctx, client, &job); err != nil {
 					log.Printf("mock batch API: failed to start job %s: %v", job.ID, err)
 				}
@@ -67,7 +68,7 @@ func mockStartJob(ctx context.Context, client *redis.Client, job *redisBatchJob)
 		return fmt.Errorf("job %s: WorkerCommandArgs is empty", job.ID)
 	}
 
-	job.State = Running
+	job.State = backend.Running
 	if err := mockWriteJob(ctx, client, job); err != nil {
 		return fmt.Errorf("marking job %s running: %w", job.ID, err)
 	}
@@ -116,9 +117,9 @@ func mockWatchJobInstances(ctx context.Context, client *redis.Client, jobID stri
 	}
 
 	if anyFailed {
-		job.State = Failed
+		job.State = backend.Failed
 	} else {
-		job.State = Complete
+		job.State = backend.Complete
 	}
 
 	if err := mockWriteJob(writeCtx, client, &job); err != nil {

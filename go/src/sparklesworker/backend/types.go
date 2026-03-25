@@ -1,4 +1,4 @@
-package autoscaler
+package backend
 
 import (
 	"encoding/json"
@@ -64,39 +64,39 @@ type MonitorState struct {
 	// batchJobRequests is the cumulative count of node-launch requests made
 	// for this cluster. Used as the expectedJobCount when querying Batch jobs
 	// to detect API propagation delays.
-	batchJobRequests int
+	BatchJobRequests int
 
 	// completedJobIds is the set of Batch job IDs that have already been
 	// inspected after completion. Used to identify newly completed jobs on each
 	// poll so each job is only evaluated once.
-	completedJobIds []string
+	CompletedJobIds []string
 
 	// suspiciouslyFailedToRun is the running count of Batch jobs that completed
 	// without executing any Sparkles tasks. Compared against
 	// Cluster.MaxSuspiciousFailures to decide whether to halt the cluster.
-	suspiciouslyFailedToRun int
+	SuspiciouslyFailedToRun int
 }
 
 // monitorStateJSON is the exported-field mirror of MonitorState used for JSON
 // serialization, since encoding/json cannot marshal unexported fields.
-type monitorStateJSON struct {
+type MonitorStateJSON struct {
 	BatchJobRequests        int      `json:"batchJobRequests"`
 	CompletedJobIds         []string `json:"completedJobIds"`
 	SuspiciouslyFailedToRun int      `json:"suspiciouslyFailedToRun"`
 }
 
-func (c *Cluster) getMonitorState() (*MonitorState, error) {
+func (c *Cluster) GetMonitorState() (*MonitorState, error) {
 	if c.MonitorState == "" {
 		return &MonitorState{}, nil
 	}
-	var wire monitorStateJSON
+	var wire MonitorStateJSON
 	if err := json.Unmarshal([]byte(c.MonitorState), &wire); err != nil {
 		return nil, fmt.Errorf("unmarshaling monitor state: %w", err)
 	}
 	return &MonitorState{
-		batchJobRequests:        wire.BatchJobRequests,
-		completedJobIds:         wire.CompletedJobIds,
-		suspiciouslyFailedToRun: wire.SuspiciouslyFailedToRun,
+		BatchJobRequests:        wire.BatchJobRequests,
+		CompletedJobIds:         wire.CompletedJobIds,
+		SuspiciouslyFailedToRun: wire.SuspiciouslyFailedToRun,
 	}, nil
 }
 
@@ -121,14 +121,14 @@ type BatchJob struct {
 // A single value with instanceCount > 1 maps to one GCP Batch job submission.
 type BatchJobsToSubmit struct {
 	// instanceCount is the number of nodes to launch in this request.
-	instanceCount int
+	InstanceCount int
 
 	// isPreemptable indicates whether to request preemptable (Spot) VMs,
 	// which are cheaper but may be reclaimed by GCP at any time.
-	isPreemptable bool
+	IsPreemptable bool
 
 	// shouldLinger indicates this is the cluster's lingering node — the first
 	// node created on a cold start, which uses a longer idle timeout to avoid
 	// a full cold-start cycle if new tasks arrive shortly after the queue drains.
-	shouldLinger bool
+	ShouldLinger bool
 }

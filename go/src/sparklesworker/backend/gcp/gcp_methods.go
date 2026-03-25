@@ -1,4 +1,4 @@
-package autoscaler
+package gcp
 
 import (
 	"context"
@@ -8,16 +8,10 @@ import (
 	"cloud.google.com/go/batch/apiv1/batchpb"
 	compute "cloud.google.com/go/compute/apiv1"
 	"cloud.google.com/go/compute/apiv1/computepb"
+	"github.com/broadinstitute/sparklesworker/backend"
 	"github.com/gogo/protobuf/proto"
 	"google.golang.org/api/iterator"
 )
-
-type CloudMethodsForPoll interface {
-	listRunningInstances(zones []string, clusterID string) ([]string, error)
-	listBatchJobs(region, clusterID string) ([]*BatchJob, error)
-	submitBatchJobs(cluster Cluster, clusterID string, requests []*BatchJobsToSubmit) error
-	deleteAllBatchJobs(region, clusterID string) error
-}
 
 type GCPMethodsForPoll struct {
 	projectID       string
@@ -26,7 +20,7 @@ type GCPMethodsForPoll struct {
 	batchClient     *batch.Client
 }
 
-func (g *GCPMethodsForPoll) listRunningInstances(zones []string, clusterID string) ([]string, error) {
+func (g *GCPMethodsForPoll) ListRunningInstances(zones []string, clusterID string) ([]string, error) {
 	var instanceNames []string
 
 	filter := proto.String(fmt.Sprintf(`labels.sparkles-cluster-uuid = "%s"`, clusterID))
@@ -54,13 +48,13 @@ func (g *GCPMethodsForPoll) listRunningInstances(zones []string, clusterID strin
 	return instanceNames, nil
 }
 
-func (g *GCPMethodsForPoll) listBatchJobs(region, clusterID string) ([]*BatchJob, error) {
+func (g *GCPMethodsForPoll) ListBatchJobs(region, clusterID string) ([]*backend.BatchJob, error) {
 	req := &batchpb.ListJobsRequest{
 		Parent: fmt.Sprintf("projects/%s/locations/%s", g.projectID, region),
 		Filter: fmt.Sprintf(`labels.sparkles-cluster = "%s"`, clusterID),
 	}
 
-	var jobs []*BatchJob
+	var jobs []*backend.BatchJob
 	it := g.batchClient.ListJobs(g.ctx, req)
 	for {
 		job, err := it.Next()
@@ -74,26 +68,26 @@ func (g *GCPMethodsForPoll) listBatchJobs(region, clusterID string) ([]*BatchJob
 		for _, tg := range job.GetTaskGroups() {
 			instanceCount += int(tg.GetTaskCount())
 		}
-		jobs = append(jobs, &BatchJob{ID: job.GetName(), State: batchStateToBatchJobState(job), RequestedInstances: instanceCount})
+		jobs = append(jobs, &backend.BatchJob{ID: job.GetName(), State: batchStateToBatchJobState(job), RequestedInstances: instanceCount})
 	}
 	return jobs, nil
 }
 
-func batchStateToBatchJobState(job *batchpb.Job) BatchJobState {
+func batchStateToBatchJobState(job *batchpb.Job) backend.BatchJobState {
 	switch job.GetStatus().GetState() {
 	case batchpb.JobStatus_QUEUED, batchpb.JobStatus_SCHEDULED:
-		return Pending
+		return backend.Pending
 	case batchpb.JobStatus_RUNNING:
-		return Running
+		return backend.Running
 	case batchpb.JobStatus_SUCCEEDED:
-		return Complete
+		return backend.Complete
 	default:
-		return Failed
+		return backend.Failed
 	}
 }
 
-func (g *GCPMethodsForPoll) deleteAllBatchJobs(region, clusterID string) error {
-	jobs, err := g.listBatchJobs(region, clusterID)
+func (g *GCPMethodsForPoll) DeleteAllBatchJobs(region, clusterID string) error {
+	jobs, err := g.ListBatchJobs(region, clusterID)
 	if err != nil {
 		return err
 	}
@@ -109,21 +103,21 @@ func (g *GCPMethodsForPoll) deleteAllBatchJobs(region, clusterID string) error {
 	return nil
 }
 
-func (g *GCPMethodsForPoll) submitBatchJobs(cluster Cluster, clusterID string, requests []*BatchJobsToSubmit) error {
+func (g *GCPMethodsForPoll) SubmitBatchJobs(cluster *backend.Cluster, clusterID string, requests []*backend.BatchJobsToSubmit) error {
 	for _, req := range requests {
 		commandArgs := cluster.WorkerCommandArgs
-		if req.shouldLinger {
+		if req.ShouldLinger {
 			// the lingering worker will stick around for 15 minutes
 			commandArgs = append(commandArgs, "--shutdownAfter", "900")
 		}
 		jobSpec := &JobSpec{
 			Runnables:       []Runnable{{Image: cluster.WorkerDockerImage, Command: commandArgs}},
 			MachineType:     cluster.MachineType,
-			Preemptible:     req.isPreemptable,
+			Preemptible:     req.IsPreemptable,
 			Locations:       zonesAsLocations(cluster.Zones),
 			SparklesCluster: clusterID,
 		}
-		_, err := createBatchJob(g.ctx, g.batchClient, g.projectID, cluster.Region, jobSpec, req.instanceCount, 0, clusterID)
+		_, err := createBatchJob(g.ctx, g.batchClient, g.projectID, cluster.Region, jobSpec, req.InstanceCount, 0, clusterID)
 		if err != nil {
 			return fmt.Errorf("submitting batch job: %w", err)
 		}
@@ -138,4 +132,3 @@ func zonesAsLocations(zones []string) []string {
 	}
 	return locs
 }
-

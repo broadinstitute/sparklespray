@@ -5,23 +5,23 @@ import "github.com/broadinstitute/sparklesworker/task_queue"
 type mockCloud struct {
 	listRunningInstancesFn func(zones []string, clusterID string) ([]string, error)
 	listBatchJobsFn        func(region, clusterID string) ([]*BatchJob, error)
-	submitBatchJobsFn         func(cluster Cluster, clusterID string, requests []*BatchJobsToSubmit) error
-	deleteAllBatchJobsFn      func(region, clusterID string) error
+	submitBatchJobsFn      func(cluster Cluster, clusterID string, requests []*BatchJobsToSubmit) error
+	deleteAllBatchJobsFn   func(region, clusterID string) error
 }
 
-func (m *mockCloud) listRunningInstances(zones []string, clusterID string) ([]string, error) {
+func (m *mockCloud) ListRunningInstances(zones []string, clusterID string) ([]string, error) {
 	return m.listRunningInstancesFn(zones, clusterID)
 }
 
-func (m *mockCloud) listBatchJobs(region, clusterID string) ([]*BatchJob, error) {
+func (m *mockCloud) ListBatchJobs(region, clusterID string) ([]*BatchJob, error) {
 	return m.listBatchJobsFn(region, clusterID)
 }
 
-func (m *mockCloud) submitBatchJobs(cluster Cluster, clusterID string, requests []*BatchJobsToSubmit) error {
+func (m *mockCloud) SubmitBatchJobs(cluster Cluster, clusterID string, requests []*BatchJobsToSubmit) error {
 	return m.submitBatchJobsFn(cluster, clusterID, requests)
 }
 
-func (m *mockCloud) deleteAllBatchJobs(region, clusterID string) error {
+func (m *mockCloud) DeleteAllBatchJobs(region, clusterID string) error {
 	return m.deleteAllBatchJobsFn(region, clusterID)
 }
 
