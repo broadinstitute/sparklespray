@@ -10,6 +10,8 @@ import (
 	"path"
 	"time"
 
+	aetherclient "github.com/pgm/aether/client"
+
 	"github.com/broadinstitute/sparklesworker/backend"
 	gcp_backend "github.com/broadinstitute/sparklesworker/backend/gcp"
 	redis_backend "github.com/broadinstitute/sparklesworker/backend/redis"
@@ -93,7 +95,7 @@ func clusterIDFromSpec(spec *ClusterSpec) (string, error) {
 	return fmt.Sprintf("%x", sum[:8]), nil
 }
 
-func makeTask(jobSpec *JobSpec, expiry time.Duration) (*task_queue.Job, *task_queue.Task, error) {
+func makeTask(jobSpec *JobSpec, expiry time.Duration, rootID string) (*task_queue.Job, *task_queue.Task, error) {
 	clusterID := jobSpec.ClusterID
 	if clusterID == "" {
 		if jobSpec.ClusterSpec == nil {
@@ -119,8 +121,9 @@ func makeTask(jobSpec *JobSpec, expiry time.Duration) (*task_queue.Job, *task_qu
 	}
 
 	taskSpec := &task_queue.TaskSpec{
-		Command:     []string{"/bin/sh", "-c", jobSpec.Command},
-		DockerImage: jobSpec.DockerImage,
+		Command:      []string{"/bin/sh", "-c", jobSpec.Command},
+		DockerImage:  jobSpec.DockerImage,
+		AetherFSRoot: rootID,
 	}
 
 	task := &task_queue.Task{
@@ -176,7 +179,25 @@ func submit(c *cli.Context) error {
 		return fmt.Errorf("invalid --expiry value: %w", err)
 	}
 
-	job, task, err := makeTask(&jobSpec, expiryDuration)
+	var files []aetherclient.FileInput
+	for _, f := range jobSpec.FilesToStage {
+		files = append(files, aetherclient.FileInput{Path: f.LocalPath, ManifestName: f.Name})
+	}
+	mkfsStats, err := aetherclient.MakeFilesystem(ctx, aetherclient.MakeFilesystemOptions{
+		Root:            aetherCfg.Root,
+		Files:           files,
+		MaxSizeToBundle: aetherCfg.MaxSizeToBundle,
+		MaxBundleSize:   aetherCfg.MaxBundleSize,
+		Workers:         aetherCfg.Workers,
+		Expiry:          expiryDuration,
+	})
+	if err != nil {
+		return fmt.Errorf("staging files: %w", err)
+	}
+	rootID := "sha256:" + mkfsStats.ManifestKey
+	log.Printf("Staged %d files, manifest key: %s", mkfsStats.FilesUploaded, rootID)
+
+	job, task, err := makeTask(&jobSpec, expiryDuration, rootID)
 	if err != nil {
 		return fmt.Errorf("building job: %w", err)
 	}
