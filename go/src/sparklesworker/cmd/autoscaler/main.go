@@ -20,6 +20,7 @@ var AutoscalerCmd = cli.Command{
 		cli.StringFlag{Name: "cluster", Usage: "Cluster ID to monitor"},
 		cli.DurationFlag{Name: "poll-interval", Usage: "Delay between poll cycles", Value: 5 * time.Second},
 		cli.StringFlag{Name: "redis", Usage: "Redis address for local testing (e.g. localhost:6379); uses GCP Batch API when not set"},
+		cli.StringFlag{Name: "database", Usage: "Firestore database ID (defaults to the project's default database)", Value: "(default)"},
 	},
 	Action: run,
 }
@@ -29,6 +30,7 @@ func run(c *cli.Context) error {
 	clusterID := c.String("cluster")
 	pollInterval := c.Duration("poll-interval")
 	redisAddr := c.String("redis")
+	database := c.String("database")
 
 	fmt.Printf("sparkles-monitor\n")
 	fmt.Printf("  project: %s\n", projectID)

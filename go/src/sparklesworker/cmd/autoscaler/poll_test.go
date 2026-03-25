@@ -370,7 +370,7 @@ func defaultCloud() *mockCloud {
 		listBatchJobsFn: func(region, clusterID string) ([]*backend.BatchJob, error) {
 			return []*backend.BatchJob{}, nil
 		},
-		submitBatchJobsFn: func(cluster backend.Cluster, clusterID string, requests []*backend.BatchJobsToSubmit) error {
+		submitBatchJobsFn: func(cluster *backend.Cluster, clusterID string, requests []*backend.BatchJobsToSubmit) error {
 			return nil
 		},
 		deleteAllBatchJobsFn: func(region, clusterID string) error {
@@ -381,7 +381,7 @@ func defaultCloud() *mockCloud {
 
 func defaultSparkles() *mockSparkles {
 	return &mockSparkles{
-		clusterConfig: backend.Cluster{
+		clusterConfig: &backend.Cluster{
 			MaxInstanceCount:       10,
 			MaxPreemptableAttempts: 5,
 			MaxSuspiciousFailures:  3,
@@ -397,7 +397,7 @@ func TestPoll(t *testing.T) {
 	t.Run("happy path tasks pending nodes launched state updated", func(t *testing.T) {
 		cloud := defaultCloud()
 		var launched []*backend.BatchJobsToSubmit
-		cloud.submitBatchJobsFn = func(_ backend.Cluster, _ string, requests []*backend.BatchJobsToSubmit) error {
+		cloud.submitBatchJobsFn = func(_ *backend.Cluster, _ string, requests []*backend.BatchJobsToSubmit) error {
 			launched = requests
 			return nil
 		}
@@ -415,7 +415,7 @@ func TestPoll(t *testing.T) {
 		if sparkles.savedState == nil {
 			t.Error("expected updateClusterMonitorState to be called")
 		}
-		if sparkles.savedState.batchJobRequests == 0 {
+		if sparkles.savedState.BatchJobRequests == 0 {
 			t.Error("expected batchJobRequests to be incremented")
 		}
 	})
@@ -491,7 +491,7 @@ func TestPoll(t *testing.T) {
 	t.Run("no work to do submitBatchJobs not called", func(t *testing.T) {
 		cloud := defaultCloud()
 		launchCalled := false
-		cloud.submitBatchJobsFn = func(_ backend.Cluster, _ string, requests []*backend.BatchJobsToSubmit) error {
+		cloud.submitBatchJobsFn = func(_ *backend.Cluster, _ string, requests []*backend.BatchJobsToSubmit) error {
 			if len(requests) > 0 {
 				launchCalled = true
 			}
@@ -524,8 +524,8 @@ func TestPoll(t *testing.T) {
 			t.Fatal("expected state to be saved")
 		}
 		// We launched nodes, so batchJobRequests should reflect that
-		if sparkles.savedState.batchJobRequests <= 0 {
-			t.Errorf("expected batchJobRequests > 0, got %d", sparkles.savedState.batchJobRequests)
+		if sparkles.savedState.BatchJobRequests <= 0 {
+			t.Errorf("expected batchJobRequests > 0, got %d", sparkles.savedState.BatchJobRequests)
 		}
 	})
 }

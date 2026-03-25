@@ -1,11 +1,14 @@
 package autoscaler
 
-import "github.com/broadinstitute/sparklesworker/task_queue"
+import (
+	"github.com/broadinstitute/sparklesworker/backend"
+	"github.com/broadinstitute/sparklesworker/task_queue"
+)
 
 type mockCloud struct {
 	listRunningInstancesFn func(zones []string, clusterID string) ([]string, error)
-	listBatchJobsFn        func(region, clusterID string) ([]*BatchJob, error)
-	submitBatchJobsFn      func(cluster Cluster, clusterID string, requests []*BatchJobsToSubmit) error
+	listBatchJobsFn        func(region, clusterID string) ([]*backend.BatchJob, error)
+	submitBatchJobsFn      func(cluster *backend.Cluster, clusterID string, requests []*backend.BatchJobsToSubmit) error
 	deleteAllBatchJobsFn   func(region, clusterID string) error
 }
 
@@ -13,11 +16,11 @@ func (m *mockCloud) ListRunningInstances(zones []string, clusterID string) ([]st
 	return m.listRunningInstancesFn(zones, clusterID)
 }
 
-func (m *mockCloud) ListBatchJobs(region, clusterID string) ([]*BatchJob, error) {
+func (m *mockCloud) ListBatchJobs(region, clusterID string) ([]*backend.BatchJob, error) {
 	return m.listBatchJobsFn(region, clusterID)
 }
 
-func (m *mockCloud) SubmitBatchJobs(cluster Cluster, clusterID string, requests []*BatchJobsToSubmit) error {
+func (m *mockCloud) SubmitBatchJobs(cluster *backend.Cluster, clusterID string, requests []*backend.BatchJobsToSubmit) error {
 	return m.submitBatchJobsFn(cluster, clusterID, requests)
 }
 
@@ -26,7 +29,7 @@ func (m *mockCloud) DeleteAllBatchJobs(region, clusterID string) error {
 }
 
 type mockSparkles struct {
-	clusterConfig        Cluster
+	clusterConfig        *backend.Cluster
 	getClusterConfigErr  error
 	pendingTaskCount     int
 	nonCompleteTaskCount int
@@ -34,37 +37,37 @@ type mockSparkles struct {
 	tasksCompletedBy     map[string]int
 
 	// captured calls
-	savedState             *MonitorState
+	savedState             *backend.MonitorState
 	markTasksPendingCalled []*task_queue.Task
-	submitBatchJobsCalled  []*BatchJobsToSubmit
+	submitBatchJobsCalled  []*backend.BatchJobsToSubmit
 }
 
-func (m *mockSparkles) updateClusterMonitorState(clusterID string, state *MonitorState) error {
+func (m *mockSparkles) UpdateClusterMonitorState(clusterID string, state *backend.MonitorState) error {
 	m.savedState = state
 	return nil
 }
 
-func (m *mockSparkles) getNonCompleteTaskCount(clusterID string) (int, error) {
+func (m *mockSparkles) GetNonCompleteTaskCount(clusterID string) (int, error) {
 	return m.nonCompleteTaskCount, nil
 }
 
-func (m *mockSparkles) getClaimedTasks(clusterID string) ([]*task_queue.Task, error) {
+func (m *mockSparkles) GetClaimedTasks(clusterID string) ([]*task_queue.Task, error) {
 	return m.claimedTasks, nil
 }
 
-func (m *mockSparkles) markTasksPending(tasks []*task_queue.Task) error {
+func (m *mockSparkles) MarkTasksPending(tasks []*task_queue.Task) error {
 	m.markTasksPendingCalled = append(m.markTasksPendingCalled, tasks...)
 	return nil
 }
 
-func (m *mockSparkles) getClusterConfig(clusterID string) (Cluster, error) {
+func (m *mockSparkles) GetClusterConfig(clusterID string) (*backend.Cluster, error) {
 	return m.clusterConfig, m.getClusterConfigErr
 }
 
-func (m *mockSparkles) getPendingTaskCount(clusterID string) (int, error) {
+func (m *mockSparkles) GetPendingTaskCount(clusterID string) (int, error) {
 	return m.pendingTaskCount, nil
 }
 
-func (m *mockSparkles) getTasksCompletedBy(batchJobID string) int {
+func (m *mockSparkles) GetTasksCompletedBy(batchJobID string) int {
 	return m.tasksCompletedBy[batchJobID]
 }
