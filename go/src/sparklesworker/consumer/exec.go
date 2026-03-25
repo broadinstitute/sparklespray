@@ -222,6 +222,10 @@ func ResolveUploads(workdir string, uploads *task_queue.UploadSpec) ([]string, e
 	included := make(Stringset)
 	excluded := make(Stringset)
 
+	if uploads == nil {
+		uploads = &task_queue.UploadSpec{IncludePatterns: []string{"**/*"}}
+	}
+
 	for _, pattern := range uploads.IncludePatterns {
 		addFilesToStringSet(workdir, pattern, included)
 	}
@@ -346,9 +350,14 @@ type UploadTaskResultsResult struct {
 }
 
 func collectFileInputs(workDir string, uploadSpec *task_queue.UploadSpec) ([]aetherclient.FileInput, error) {
+	workDir, err := filepath.Abs(workDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to compute abs path of workdir in collectFileInputs: %s", err)
+	}
+
 	filePaths, err := ResolveUploads(workDir, uploadSpec)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("Could not resolve uploads in collectFileInputs: %s", err)
 	}
 
 	var filesToUpload []aetherclient.FileInput
