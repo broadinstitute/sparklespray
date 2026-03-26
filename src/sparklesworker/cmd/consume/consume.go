@@ -166,7 +166,6 @@ func consume(c *cli.Context) error {
 		time.Sleep(sleepTime)
 	}
 
-	var cleanupControlChannel func()
 	var queue task_queue.TaskQueue
 
 	redisAddr := c.String("redisAddr")
@@ -207,7 +206,6 @@ func consume(c *cli.Context) error {
 		queue = fsQueue
 		taskCache = task_queue.NewFirestoreTaskCache(client)
 	}
-	defer cleanupControlChannel()
 
 	err = consumer.RunLoop(ctx, queue, sleepUntilNotify, executor, options.SleepOnEmpty, options.MaxWaitForNewTasks)
 	if err != nil {
