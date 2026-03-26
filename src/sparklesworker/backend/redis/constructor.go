@@ -10,13 +10,12 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-func CreateMockServices(ctx context.Context, redisAddr string, clusterID string, pollInterval time.Duration) (*backend.ExternalServices, error) {
+func CreateMockServices(ctx context.Context, redisAddr string, pollInterval time.Duration) (*backend.ExternalServices, error) {
 	redisClient := redis.NewClient(&redis.Options{Addr: redisAddr})
 	if err := redisClient.Ping(ctx).Err(); err != nil {
 		return nil, fmt.Errorf("connecting to Redis at %s: %w", redisAddr, err)
 	}
 	channel := NewRedisChannel(redisClient)
-	queue := task_queue.NewRedisQueue(redisClient, clusterID, "", 0, 0)
 	taskCache := task_queue.NewRedisTaskCache(redisClient)
 
 	StartMockBatchAPI(ctx, redisClient, pollInterval)
@@ -24,6 +23,12 @@ func CreateMockServices(ctx context.Context, redisAddr string, clusterID string,
 	gshim := NewRedisMethodsForPoll(ctx, redisClient)
 	sshim := NewRedisSparklesMethodsForPoll(ctx, redisClient)
 
-	return &backend.ExternalServices{Channel: channel, Queue: queue, TaskCache: taskCache, Close: func() { redisClient.Close() },
-		Gshim: gshim, Sshim: sshim}, nil
+	return &backend.ExternalServices{
+		Channel:   channel,
+		NewQueue:  func(clusterID string) task_queue.TaskQueue { return task_queue.NewRedisQueue(redisClient, clusterID, "", 0, 0) },
+		TaskCache: taskCache,
+		Close:     func() { redisClient.Close() },
+		Gshim:     gshim,
+		Sshim:     sshim,
+	}, nil
 }

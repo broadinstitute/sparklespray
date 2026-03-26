@@ -71,3 +71,7 @@ func (m *mockSparkles) GetPendingTaskCount(clusterID string) (int, error) {
 func (m *mockSparkles) GetTasksCompletedBy(batchJobID string) int {
 	return m.tasksCompletedBy[batchJobID]
 }
+
+func (m *mockSparkles) GetActiveClusterIDs() ([]string, error) {
+	return nil, nil
+}

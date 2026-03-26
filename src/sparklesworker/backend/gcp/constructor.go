@@ -12,14 +12,13 @@ import (
 	"github.com/broadinstitute/sparklesworker/task_queue"
 )
 
-func CreateGCPServices(ctx context.Context, projectID string, database string, clusterID string) (*backend.ExternalServices, error) {
+func CreateGCPServices(ctx context.Context, projectID string, database string) (*backend.ExternalServices, error) {
 	log.Printf("Using Firestore backend (project=%s)", projectID)
 	firestoreClient, err := firestore.NewClientWithDatabase(ctx, projectID, database)
 	if err != nil {
 		return nil, fmt.Errorf("creating firestore client: %w", err)
 	}
 	channel := NewPubSubChannel(projectID)
-	queue := task_queue.NewFirestoreQueue(firestoreClient, clusterID, "", 0, 0)
 	instancesClient, err := compute.NewInstancesRESTClient(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("creating compute client: %w", err)
@@ -41,8 +40,11 @@ func CreateGCPServices(ctx context.Context, projectID string, database string, c
 
 	sshim := &FirestoreSparklesMethodsForPoll{client: firestoreClient, ctx: ctx}
 
-	return &backend.ExternalServices{Channel: channel, Queue: queue, Close: func() {
-		firestoreClient.Close()
-	},
-		Gshim: gshim, Sshim: sshim}, nil
+	return &backend.ExternalServices{
+		Channel:  channel,
+		NewQueue: func(clusterID string) task_queue.TaskQueue { return task_queue.NewFirestoreQueue(firestoreClient, clusterID, "", 0, 0) },
+		Close:    func() { firestoreClient.Close() },
+		Gshim:    gshim,
+		Sshim:    sshim,
+	}, nil
 }

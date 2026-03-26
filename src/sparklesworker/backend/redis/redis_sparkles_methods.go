@@ -124,6 +124,39 @@ func (r *RedisSparklesMethodsForPoll) GetNonCompleteTaskCount(clusterID string) 
 	return len(tasks), nil
 }
 
+func (r *RedisSparklesMethodsForPoll) GetActiveClusterIDs() ([]string, error) {
+	var cursor uint64
+	seen := make(map[string]struct{})
+	for {
+		keys, next, err := r.client.Scan(r.ctx, cursor, "task:*", 100).Result()
+		if err != nil {
+			return nil, fmt.Errorf("scanning tasks: %w", err)
+		}
+		for _, key := range keys {
+			data, err := r.client.Get(r.ctx, key).Bytes()
+			if err != nil {
+				continue
+			}
+			var t task_queue.Task
+			if err := json.Unmarshal(data, &t); err != nil {
+				continue
+			}
+			if t.Status == task_queue.StatusClaimed || t.Status == task_queue.StatusPending {
+				seen[t.ClusterID] = struct{}{}
+			}
+		}
+		cursor = next
+		if cursor == 0 {
+			break
+		}
+	}
+	ids := make([]string, 0, len(seen))
+	for id := range seen {
+		ids = append(ids, id)
+	}
+	return ids, nil
+}
+
 func (r *RedisSparklesMethodsForPoll) GetTasksCompletedBy(batchJobID string) int {
 	// Scan all task:* keys since we don't have a per-job index.
 	count := 0

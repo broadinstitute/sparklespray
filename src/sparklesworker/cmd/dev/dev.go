@@ -190,16 +190,16 @@ func ExecuteSubmit(req *DevSubmitRequest) (*task_queue.Task, error) {
 	var extServices *backend.ExternalServices
 	if req.RedisAddr != "" {
 		log.Printf("Using Redis backend at %s", req.RedisAddr)
-		extServices, err = redis_backend.CreateMockServices(ctx, req.RedisAddr, job.ClusterID, 1*time.Second)
+		extServices, err = redis_backend.CreateMockServices(ctx, req.RedisAddr, 1*time.Second)
 	} else {
-		extServices, err = gcp_backend.CreateGCPServices(ctx, req.ProjectID, req.Database, job.ClusterID)
+		extServices, err = gcp_backend.CreateGCPServices(ctx, req.ProjectID, req.Database)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("creating backend services: %w", err)
 	}
 	defer extServices.Close()
 
-	queue := extServices.Queue
+	queue := extServices.NewQueue(job.ClusterID)
 	channel := extServices.Channel
 	taskCache := extServices.TaskCache
 

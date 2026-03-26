@@ -21,11 +21,12 @@ type SparklesMethodsForPoll interface {
 	GetClusterConfig(clusterID string) (*Cluster, error)
 	GetPendingTaskCount(clusterID string) (int, error)
 	GetTasksCompletedBy(batchJobID string) int
+	GetActiveClusterIDs() ([]string, error)
 }
 
 type ExternalServices struct {
 	Channel   ExtChannel
-	Queue     task_queue.TaskQueue
+	NewQueue  func(clusterID string) task_queue.TaskQueue
 	TaskCache task_queue.TaskCache
 	Close     func()
 	Gshim     CloudMethodsForPoll

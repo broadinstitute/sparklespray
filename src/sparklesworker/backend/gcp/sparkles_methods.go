@@ -111,6 +111,28 @@ func (s *FirestoreSparklesMethodsForPoll) GetNonCompleteTaskCount(clusterID stri
 	return len(docs), nil
 }
 
+func (s *FirestoreSparklesMethodsForPoll) GetActiveClusterIDs() ([]string, error) {
+	docs, err := s.client.Collection(taskCollection).
+		Where("status", "in", []string{task_queue.StatusClaimed, task_queue.StatusPending}).
+		Documents(s.ctx).GetAll()
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[string]struct{})
+	for _, doc := range docs {
+		var t task_queue.Task
+		if err := doc.DataTo(&t); err != nil {
+			return nil, err
+		}
+		seen[t.ClusterID] = struct{}{}
+	}
+	ids := make([]string, 0, len(seen))
+	for id := range seen {
+		ids = append(ids, id)
+	}
+	return ids, nil
+}
+
 func (s *FirestoreSparklesMethodsForPoll) GetTasksCompletedBy(batchJobID string) int {
 	docs, err := s.client.Collection(taskCollection).
 		Where("owned_by_batch_job_id", "==", batchJobID).

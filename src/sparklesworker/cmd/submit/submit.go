@@ -207,15 +207,15 @@ func submit(c *cli.Context) error {
 	if redisAddr != "" {
 		log.Printf("Using Redis backend at %s", redisAddr)
 		pollInterval := 1 * time.Second
-		extServices, err = redis_backend.CreateMockServices(ctx, redisAddr, job.ClusterID, pollInterval)
+		extServices, err = redis_backend.CreateMockServices(ctx, redisAddr, pollInterval)
 		if err != nil {
 			return fmt.Errorf("Creating redis backed services failed: %s", err)
 		}
 	} else {
-		extServices, err = gcp_backend.CreateGCPServices(ctx, projectID, database, job.ClusterID)
+		extServices, err = gcp_backend.CreateGCPServices(ctx, projectID, database)
 	}
 
-	queue := extServices.Queue
+	queue := extServices.NewQueue(job.ClusterID)
 	channel := extServices.Channel
 	defer extServices.Close()
 
