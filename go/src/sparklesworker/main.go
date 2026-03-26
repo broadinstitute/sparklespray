@@ -6,10 +6,8 @@ import (
 
 	"github.com/broadinstitute/sparklesworker/cmd/autoscaler"
 	"github.com/broadinstitute/sparklesworker/cmd/consume"
-	"github.com/broadinstitute/sparklesworker/cmd/copyexe"
 	"github.com/broadinstitute/sparklesworker/cmd/dev"
 	"github.com/broadinstitute/sparklesworker/cmd/exec_task"
-	"github.com/broadinstitute/sparklesworker/cmd/fetch"
 	"github.com/broadinstitute/sparklesworker/cmd/submit"
 	"github.com/urfave/cli"
 )
@@ -29,9 +27,7 @@ func Main() error {
 	app.Commands = []cli.Command{
 		consume.ConsumeCmd,
 		submit.SubmitCmd,
-		copyexe.CopyexeCmd,
 		exec_task.ExecCmd,
-		fetch.FetchCmd,
 		autoscaler.AutoscalerCmd,
 		dev.DevCmd,
 	}

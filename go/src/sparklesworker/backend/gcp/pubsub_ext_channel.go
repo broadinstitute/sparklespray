@@ -1,4 +1,4 @@
-package ext_channel
+package gcp
 
 import (
 	"context"

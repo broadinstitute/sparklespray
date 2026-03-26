@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/broadinstitute/sparklesworker/backend"
-	"github.com/broadinstitute/sparklesworker/ext_channel"
 	"github.com/broadinstitute/sparklesworker/task_queue"
 	"github.com/redis/go-redis/v9"
 )
@@ -16,7 +15,7 @@ func CreateMockServices(ctx context.Context, redisAddr string, clusterID string,
 	if err := redisClient.Ping(ctx).Err(); err != nil {
 		return nil, fmt.Errorf("connecting to Redis at %s: %w", redisAddr, err)
 	}
-	channel := ext_channel.NewRedisChannel(redisClient)
+	channel := NewRedisChannel(redisClient)
 	queue := task_queue.NewRedisQueue(redisClient, clusterID, "", 0, 0)
 	taskCache := task_queue.NewRedisTaskCache(redisClient)
 

@@ -15,7 +15,6 @@ import (
 	gcp_backend "github.com/broadinstitute/sparklesworker/backend/gcp"
 	redis_backend "github.com/broadinstitute/sparklesworker/backend/redis"
 	"github.com/broadinstitute/sparklesworker/consumer"
-	"github.com/broadinstitute/sparklesworker/ext_channel"
 	"github.com/broadinstitute/sparklesworker/task_queue"
 	"github.com/urfave/cli"
 )
@@ -204,7 +203,7 @@ func ExecuteSubmit(req *DevSubmitRequest) (*task_queue.Task, error) {
 	log.Printf("Successfully submitted job %s", job.Name)
 
 	topicName := req.TopicPrefix + "-log"
-	defer ext_channel.StartLogStream(ctx, channel, topicName)()
+	defer backend.StartLogStream(ctx, channel, topicName)()
 
 	// If running locally, drive the consumer loop ourselves.
 	if job.ClusterID == "local" {

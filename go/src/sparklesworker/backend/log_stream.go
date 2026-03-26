@@ -1,4 +1,4 @@
-package ext_channel
+package backend
 
 import (
 	"context"
@@ -9,8 +9,10 @@ import (
 // message. It returns a cancel function that stops the stream.
 func StartLogStream(ctx context.Context, channel ExtChannel, topicName string) context.CancelFunc {
 	streamCtx, cancel := context.WithCancel(ctx)
-	go channel.Subscribe(streamCtx, topicName, func(message []byte) {
-		log.Printf("Message: %s", string(message))
-	})
+	if channel != nil {
+		go channel.Subscribe(streamCtx, topicName, func(message []byte) {
+			log.Printf("Message: %s", string(message))
+		})
+	}
 	return cancel
 }

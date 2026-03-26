@@ -8,13 +8,13 @@ import (
 	"os"
 	"time"
 
-	"github.com/broadinstitute/sparklesworker/ext_channel"
+	"github.com/broadinstitute/sparklesworker/backend"
 )
 
 type Monitor struct {
 	ctx              context.Context
 	cancel           context.CancelFunc
-	channel          ext_channel.ExtChannel
+	channel          backend.ExtChannel
 	topicName        string
 	pollSleep        time.Duration
 	resourcePollFreq time.Duration
@@ -22,7 +22,7 @@ type Monitor struct {
 	done             chan struct{}
 }
 
-func NewMonitor(ctx context.Context, channel ext_channel.ExtChannel, topicName string, pollSleep time.Duration, resourcePollFreqSecs int) *Monitor {
+func NewMonitor(ctx context.Context, channel backend.ExtChannel, topicName string, pollSleep time.Duration, resourcePollFreqSecs int) *Monitor {
 	ctx, cancel := context.WithCancel(ctx)
 	return &Monitor{
 		ctx:              ctx,

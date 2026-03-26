@@ -9,7 +9,6 @@ import (
 	compute "cloud.google.com/go/compute/apiv1"
 	"cloud.google.com/go/firestore"
 	"github.com/broadinstitute/sparklesworker/backend"
-	"github.com/broadinstitute/sparklesworker/ext_channel"
 	"github.com/broadinstitute/sparklesworker/task_queue"
 )
 
@@ -19,7 +18,7 @@ func CreateGCPServices(ctx context.Context, projectID string, database string, c
 	if err != nil {
 		return nil, fmt.Errorf("creating firestore client: %w", err)
 	}
-	channel := ext_channel.NewPubSubChannel(projectID)
+	channel := NewPubSubChannel(projectID)
 	queue := task_queue.NewFirestoreQueue(firestoreClient, clusterID, "", 0, 0)
 	instancesClient, err := compute.NewInstancesRESTClient(ctx)
 	if err != nil {

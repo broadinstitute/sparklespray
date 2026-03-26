@@ -1,4 +1,4 @@
-package ext_channel
+package backend
 
 import "context"
 

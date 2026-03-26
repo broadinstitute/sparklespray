@@ -9,8 +9,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/broadinstitute/sparklesworker/backend"
+	gcp_backend "github.com/broadinstitute/sparklesworker/backend/gcp"
+	redis_backend "github.com/broadinstitute/sparklesworker/backend/redis"
 	"github.com/broadinstitute/sparklesworker/consumer"
-	"github.com/broadinstitute/sparklesworker/ext_channel"
 	"github.com/broadinstitute/sparklesworker/monitor"
 	"github.com/broadinstitute/sparklesworker/task_queue"
 	aetherclient "github.com/pgm/aether/client"
@@ -160,15 +162,15 @@ func execTask(c *cli.Context) error {
 	if (redisAddr == "") == (projectId == "") {
 		return fmt.Errorf("exactly one of --redisAddr or --projectId is required")
 	}
-	var channel ext_channel.ExtChannel
+	var channel backend.ExtChannel
 	if redisAddr != "" {
 		redisClient := redis.NewClient(&redis.Options{Addr: redisAddr})
-		channel = ext_channel.NewRedisChannel(redisClient)
+		channel = redis_backend.NewRedisChannel(redisClient)
 	} else {
-		channel = ext_channel.NewPubSubChannel(projectId)
+		channel = gcp_backend.NewPubSubChannel(projectId)
 	}
 
-	defer ext_channel.StartLogStream(ctx, channel, topicName)()
+	defer backend.StartLogStream(ctx, channel, topicName)()
 
 	lifeCycle := monitor.NewMonitor(ctx, channel, topicName, 1*time.Second, 5)
 
