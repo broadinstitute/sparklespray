@@ -344,10 +344,11 @@ func TestCheckClusterHealth(t *testing.T) {
 			tasksCompletedBy: map[string]int{
 				"j1": 0, // suspicious
 				"j2": 3, // clean
+				"j3": 1, // clean
 			},
 		}
 
-		result, err := checkClusterHealth(cloud, sparkles, "cluster1", "us-central1", nil, 3)
+		result, err := checkClusterHealth(cloud, sparkles, "cluster1", "us-central1", []string{"j3"}, 3)
 		if err != nil {
 			t.Fatal(err)
 		}

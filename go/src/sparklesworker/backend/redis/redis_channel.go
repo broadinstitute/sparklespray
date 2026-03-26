@@ -1,4 +1,4 @@
-package control
+package redis
 
 import (
 	"context"
@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 
+	"github.com/broadinstitute/sparklesworker/backend"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -39,7 +40,7 @@ func NewRedisChannel(client *redis.Client, config RedisConfig) (*RedisChannel, e
 }
 
 // Listen starts receiving messages and calls the handler for each one
-func (c *RedisChannel) Listen(ctx context.Context, handler MessageHandler) error {
+func (c *RedisChannel) Listen(ctx context.Context, handler backend.MessageHandler) error {
 	log.Printf("Starting Redis control channel listener on channel %s", c.incomingChannel)
 
 	pubsub := c.client.Subscribe(ctx, c.incomingChannel)
@@ -66,9 +67,9 @@ func (c *RedisChannel) Listen(ctx context.Context, handler MessageHandler) error
 	}
 }
 
-func (c *RedisChannel) handleMessage(ctx context.Context, msg *redis.Message, handler MessageHandler) {
+func (c *RedisChannel) handleMessage(ctx context.Context, msg *redis.Message, handler backend.MessageHandler) {
 	// Parse the incoming message
-	var incomingMsg IncomingMessage
+	var incomingMsg backend.IncomingMessage
 	if err := json.Unmarshal([]byte(msg.Payload), &incomingMsg); err != nil {
 		log.Printf("Failed to unmarshal Redis message: %v", err)
 		return
@@ -77,7 +78,7 @@ func (c *RedisChannel) handleMessage(ctx context.Context, msg *redis.Message, ha
 	log.Printf("Received control message type=%s request_id=%s", incomingMsg.Type, incomingMsg.RequestID)
 
 	// Convert to Message
-	controlMsg := &Message{
+	controlMsg := &backend.Message{
 		Type:      incomingMsg.Type,
 		RequestID: incomingMsg.RequestID,
 		Payload:   incomingMsg.Payload,
@@ -88,7 +89,7 @@ func (c *RedisChannel) handleMessage(ctx context.Context, msg *redis.Message, ha
 
 	// Send response if needed
 	if shouldRespond && response != nil {
-		outResp := OutgoingResponse{
+		outResp := backend.OutgoingResponse{
 			Type:      response.Type,
 			RequestID: response.RequestID,
 			Payload:   response.Payload,
@@ -114,7 +115,7 @@ func (c *RedisChannel) Notify(ctx context.Context, event interface{}) error {
 	}
 
 	// Extract event type if available
-	if e, ok := event.(WorkerStatusEvent); ok {
+	if e, ok := event.(backend.WorkerStatusEvent); ok {
 		envelope["event_type"] = e.Type
 	}
 
@@ -137,7 +138,7 @@ func (c *RedisChannel) Close() error {
 	return nil
 }
 
-func (c *RedisChannel) sendResponse(ctx context.Context, response *OutgoingResponse) error {
+func (c *RedisChannel) sendResponse(ctx context.Context, response *backend.OutgoingResponse) error {
 	// Wrap response with worker_id
 	envelope := map[string]interface{}{
 		"worker_id": c.workerID,

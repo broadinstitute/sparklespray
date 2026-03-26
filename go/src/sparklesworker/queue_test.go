@@ -12,8 +12,8 @@ import (
 
 	"cloud.google.com/go/firestore"
 
+	"github.com/broadinstitute/sparklesworker/backend"
 	"github.com/broadinstitute/sparklesworker/consumer"
-	"github.com/broadinstitute/sparklesworker/control"
 	"github.com/broadinstitute/sparklesworker/task_queue"
 	"github.com/stretchr/testify/assert"
 )
@@ -104,7 +104,7 @@ func newTask(jobID string, index int) *task_queue.Task {
 		TaskSpec:  &task_queue.TaskSpec{Command: []string{fmt.Sprintf("param-%d", index)}},
 		History: []*task_queue.TaskHistory{
 			{
-				Timestamp: float64(control.GetTimestampMillis()) / 1000.0,
+				Timestamp: float64(backend.GetTimestampMillis()) / 1000.0,
 				Status:    task_queue.StatusPending,
 			},
 		},

@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/logging"
-	"github.com/broadinstitute/sparklesworker/control"
+	"github.com/broadinstitute/sparklesworker/backend"
 	"github.com/broadinstitute/sparklesworker/task_queue"
 	"golang.org/x/net/context"
 )
@@ -99,7 +99,7 @@ func RunLoop(ctx context.Context, queue task_queue.TaskQueue, sleepUntilNotify f
 func updateTaskCompleted(ctx context.Context, q task_queue.TaskQueue, taskID string, retcode string, outputKey string, logsKey string, usedCacheResultFromTaskID string) (*task_queue.Task, error) {
 	log.Printf("updateTaskCompleted of task %v, retcode=%s outputKey=%s logskey=%s", taskID, retcode, outputKey, logsKey)
 
-	now := control.GetTimestampMillis()
+	now := backend.GetTimestampMillis()
 	taskHistory := &task_queue.TaskHistory{
 		Timestamp: float64(now) / 1000.0,
 		Status:    task_queue.StatusComplete,
@@ -128,7 +128,7 @@ func updateTaskCompleted(ctx context.Context, q task_queue.TaskQueue, taskID str
 func updateTaskFailed(ctx context.Context, q task_queue.TaskQueue, taskID string, failure string) (*task_queue.Task, error) {
 	log.Printf("updateTaskFailed of task %v, failure=%s", taskID, failure)
 
-	now := control.GetTimestampMillis()
+	now := backend.GetTimestampMillis()
 	taskHistory := &task_queue.TaskHistory{
 		Timestamp: float64(now) / 1000.0,
 		Status:    task_queue.StatusFailed,
@@ -154,7 +154,7 @@ func updateTaskFailed(ctx context.Context, q task_queue.TaskQueue, taskID string
 func updateTaskKilled(ctx context.Context, q task_queue.TaskQueue, taskID string) (*task_queue.Task, error) {
 	log.Printf("updateTaskKilled of task %v", taskID)
 
-	now := control.GetTimestampMillis()
+	now := backend.GetTimestampMillis()
 	taskHistory := &task_queue.TaskHistory{
 		Timestamp: float64(now) / 1000.0,
 		Status:    task_queue.StatusKilled,

@@ -83,7 +83,7 @@ func TestExecute(t *testing.T) {
 	spec := &task_queue.TaskSpec{
 		WorkingDir:    ".",
 		PreExecScript: "ls",
-		Command:       []string{"echo", "hello"},
+		Command:       []string{"/bin/sh", "-c", "echo hello"},
 		Uploads:       &task_queue.UploadSpec{},
 		AetherFSRoot:  "sha256:" + mkfsResult.ManifestKey}
 	execResult, err := consumer.ExecuteTask(ctx, aetherConfig, "test-task", spec, rootDir, cacheDir, tasksDir, nil, nil, time.Time{})

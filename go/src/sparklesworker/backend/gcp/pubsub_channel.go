@@ -1,4 +1,4 @@
-package control
+package gcp
 
 import (
 	"context"
@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/pubsub"
+	"github.com/broadinstitute/sparklesworker/backend"
 )
 
 // PubSubChannel implements Channel using Google Cloud Pub/Sub
@@ -73,12 +74,12 @@ func NewPubSubChannel(ctx context.Context, config PubSubConfig) (*PubSubChannel,
 }
 
 // Listen starts receiving messages and calls the handler for each one
-func (c *PubSubChannel) Listen(ctx context.Context, handler MessageHandler) error {
+func (c *PubSubChannel) Listen(ctx context.Context, handler backend.MessageHandler) error {
 	log.Printf("Starting pub/sub control channel listener on subscription %s", c.subName)
 
 	return c.subscription.Receive(ctx, func(ctx context.Context, msg *pubsub.Message) {
 		// Parse the incoming message
-		var incomingMsg IncomingMessage
+		var incomingMsg backend.IncomingMessage
 		if err := json.Unmarshal(msg.Data, &incomingMsg); err != nil {
 			log.Printf("Failed to unmarshal pub/sub message: %v", err)
 			msg.Ack()
@@ -88,7 +89,7 @@ func (c *PubSubChannel) Listen(ctx context.Context, handler MessageHandler) erro
 		log.Printf("Received control message type=%s request_id=%s", incomingMsg.Type, incomingMsg.RequestID)
 
 		// Convert to Message
-		controlMsg := &Message{
+		controlMsg := &backend.Message{
 			Type:      incomingMsg.Type,
 			RequestID: incomingMsg.RequestID,
 			Payload:   incomingMsg.Payload,
@@ -99,7 +100,7 @@ func (c *PubSubChannel) Listen(ctx context.Context, handler MessageHandler) erro
 
 		// Send response if needed
 		if shouldRespond && response != nil {
-			outResp := OutgoingResponse{
+			outResp := backend.OutgoingResponse{
 				Type:      response.Type,
 				RequestID: response.RequestID,
 				Payload:   response.Payload,
@@ -123,7 +124,7 @@ func (c *PubSubChannel) Notify(ctx context.Context, event interface{}) error {
 
 	// Extract event type if available
 	eventType := ""
-	if e, ok := event.(WorkerStatusEvent); ok {
+	if e, ok := event.(backend.WorkerStatusEvent); ok {
 		eventType = e.Type
 	}
 
@@ -157,7 +158,7 @@ func (c *PubSubChannel) Close() error {
 	return c.client.Close()
 }
 
-func (c *PubSubChannel) sendResponse(ctx context.Context, response *OutgoingResponse) error {
+func (c *PubSubChannel) sendResponse(ctx context.Context, response *backend.OutgoingResponse) error {
 	data, err := json.Marshal(response)
 	if err != nil {
 		return fmt.Errorf("failed to marshal response: %w", err)

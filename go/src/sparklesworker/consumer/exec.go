@@ -126,6 +126,12 @@ func execCommand(command []string, rootdir string, workdir string, stdout *os.Fi
 		args = command
 	}
 
+	var err error
+	exePath, err = exec.LookPath(exePath)
+	if err != nil {
+		return nil, fmt.Errorf("resolving executable %q: %w", exePath, err)
+	}
+
 	attr := &os.ProcAttr{Dir: workdir, Env: nil, Files: []*os.File{nil, stdout, stdout}}
 
 	startTime := time.Now()
