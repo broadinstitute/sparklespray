@@ -7,6 +7,7 @@ import (
 	"github.com/broadinstitute/sparklesworker/cmd/autoscaler"
 	"github.com/broadinstitute/sparklesworker/cmd/consume"
 	"github.com/broadinstitute/sparklesworker/cmd/copyexe"
+	"github.com/broadinstitute/sparklesworker/cmd/dev"
 	"github.com/broadinstitute/sparklesworker/cmd/exec_task"
 	"github.com/broadinstitute/sparklesworker/cmd/fetch"
 	"github.com/broadinstitute/sparklesworker/cmd/submit"
@@ -32,6 +33,7 @@ func Main() error {
 		exec_task.ExecCmd,
 		fetch.FetchCmd,
 		autoscaler.AutoscalerCmd,
+		dev.DevCmd,
 	}
 	return app.Run(os.Args)
 }

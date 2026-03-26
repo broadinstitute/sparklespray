@@ -11,7 +11,6 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
-	"strings"
 	"syscall"
 	"time"
 
@@ -113,8 +112,6 @@ func execCommand(command []string, rootdir string, workdir string, stdout *os.Fi
 	var exePath string
 	var args []string
 
-	joinedCommand := strings.Join(command, " ")
-
 	if dockerImage != "" {
 		exePath = "docker"
 		args = []string{
@@ -122,26 +119,13 @@ func execCommand(command []string, rootdir string, workdir string, stdout *os.Fi
 			"-v", rootdir + ":" + rootdir,
 			"-w", workdir,
 			dockerImage,
-			"/bin/sh", "-c", joinedCommand,
 		}
+		args = append(args, command...)
 	} else {
-		exePath = "/bin/sh"
-		args = []string{exePath, "-c", joinedCommand}
+		exePath = command[0]
+		args = command
 	}
 
-	// log.Printf("About to execute: exePath=%s args=%v", exePath, args)
-	// for i, arg := range args {
-	// 	log.Printf("args[%d]=\"%s\"", i, arg)
-	// }
-	// log.Printf("stdout=%v", stdout)
-	// n, err3 := stdout.Write([]byte("test"))
-	// log.Printf("n=%d err=%v", n, err3)
-
-	// exePath = "/bin/echo"
-	// // args = []string{"/bin/sh", "-c", "'echo hello'"}
-	// args = []string{"/bin/echo", "helllo"}
-	// //	args = []string{"/usr/bin/true"}
-	// exePath = args[0]
 	attr := &os.ProcAttr{Dir: workdir, Env: nil, Files: []*os.File{nil, stdout, stdout}}
 
 	startTime := time.Now()
@@ -166,7 +150,7 @@ func execCommand(command []string, rootdir string, workdir string, stdout *os.Fi
 
 	rusage := procState.SysUsage().(*syscall.Rusage)
 	status := procState.Sys().(syscall.WaitStatus)
-	log.Printf("status=%v", status)
+
 	var statusStr string
 	if status.Signaled() {
 		statusStr = fmt.Sprintf("signaled(%s)", status.Signal())
@@ -190,7 +174,6 @@ func addFilesToStringSet(workdir string, pattern string, dest Stringset) error {
 	if err != nil {
 		return err
 	}
-	log.Printf("pathWithGlob=%v, matches=%v\n", pathWithGlob, matches)
 
 	for _, match := range matches {
 		// skip any directories that match
@@ -374,7 +357,6 @@ func collectFileInputs(workDir string, uploadSpec *task_queue.UploadSpec) ([]aet
 
 func uploadFilesPerSpec(ctx context.Context, aetherCfg *AetherConfig, dir string,
 	uploadSpec *task_queue.UploadSpec) (*UploadTaskResultsResult, error) {
-	log.Printf("calling collectFileInputs")
 	filesToUpload, err := collectFileInputs(dir, uploadSpec)
 	if err != nil {
 		return nil, err
@@ -388,8 +370,6 @@ func uploadFilesPerSpec(ctx context.Context, aetherCfg *AetherConfig, dir string
 			ulStats.Bytes += fi.Size()
 		}
 	}
-
-	log.Printf("calling MakeFilesystem")
 
 	mkfsFilesStats, err := aetherclient.MakeFilesystem(ctx, aetherclient.MakeFilesystemOptions{
 		Root:            aetherCfg.Root,
