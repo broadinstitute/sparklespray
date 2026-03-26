@@ -93,10 +93,11 @@ func devSubmit(c *cli.Context) error {
 		return fmt.Errorf("parsing params file: %w", err)
 	}
 
-	return ExecuteSubmit(&req)
+	_, err = ExecuteSubmit(&req)
+	return err
 }
 
-func ExecuteSubmit(req *DevSubmitRequest) error {
+func ExecuteSubmit(req *DevSubmitRequest) (*task_queue.Task, error) {
 	// Apply defaults.
 	if req.Dir == "" {
 		req.Dir = "./sparklesworker"
@@ -119,7 +120,7 @@ func ExecuteSubmit(req *DevSubmitRequest) error {
 
 	expiryDuration, err := time.ParseDuration(req.Expiry)
 	if err != nil {
-		return fmt.Errorf("invalid expiry %q: %w", req.Expiry, err)
+		return nil, fmt.Errorf("invalid expiry %q: %w", req.Expiry, err)
 	}
 
 	ctx := context.Background()
@@ -145,7 +146,7 @@ func ExecuteSubmit(req *DevSubmitRequest) error {
 		Expiry:          expiryDuration,
 	})
 	if err != nil {
-		return fmt.Errorf("staging files: %w", err)
+		return nil, fmt.Errorf("staging files: %w", err)
 	}
 	rootID := "sha256:" + mkfsStats.ManifestKey
 	log.Printf("Staged %d files, manifest key: %s", mkfsStats.FilesUploaded, rootID)
@@ -189,15 +190,16 @@ func ExecuteSubmit(req *DevSubmitRequest) error {
 		extServices, err = gcp_backend.CreateGCPServices(ctx, req.ProjectID, req.Database, job.ClusterID)
 	}
 	if err != nil {
-		return fmt.Errorf("creating backend services: %w", err)
+		return nil, fmt.Errorf("creating backend services: %w", err)
 	}
 	defer extServices.Close()
 
 	queue := extServices.Queue
 	channel := extServices.Channel
+	taskCache := extServices.TaskCache
 
 	if err := queue.AddJob(ctx, job, []*task_queue.Task{task}); err != nil {
-		return fmt.Errorf("adding job: %w", err)
+		return nil, fmt.Errorf("adding job: %w", err)
 	}
 	log.Printf("Successfully submitted job %s", job.Name)
 
@@ -207,11 +209,11 @@ func ExecuteSubmit(req *DevSubmitRequest) error {
 	// If running locally, drive the consumer loop ourselves.
 	if job.ClusterID == "local" {
 		executor := func(taskId string, taskSpec *task_queue.TaskSpec, expiry time.Time) (*consumer.ExecuteTaskResult, error) {
-			return consumer.ExecuteTask(ctx, &aetherCfg, taskId, taskSpec, req.Dir, req.CacheDir, req.TasksDir, nil, nil, expiry)
+			return consumer.ExecuteTask(ctx, &aetherCfg, taskId, taskSpec, req.Dir, req.CacheDir, req.TasksDir, nil, taskCache, expiry)
 		}
 		sleepUntilNotify := func(d time.Duration) { time.Sleep(d) }
 		if err := consumer.RunLoop(ctx, queue, sleepUntilNotify, executor, 1*time.Second, 10*time.Second); err != nil {
-			return fmt.Errorf("RunLoop failed: %w", err)
+			return nil, fmt.Errorf("RunLoop failed: %w", err)
 		}
 	}
 
@@ -220,7 +222,7 @@ func ExecuteSubmit(req *DevSubmitRequest) error {
 	for {
 		t, err := queue.GetTask(ctx, task.TaskID)
 		if err != nil {
-			return fmt.Errorf("polling task %s: %w", task.TaskID, err)
+			return nil, fmt.Errorf("polling task %s: %w", task.TaskID, err)
 		}
 		if t.Status != task_queue.StatusPending && t.Status != task_queue.StatusClaimed {
 			log.Printf("Task %s finished with status %s", task.TaskID, t.Status)
@@ -233,7 +235,7 @@ func ExecuteSubmit(req *DevSubmitRequest) error {
 
 	if req.ExportOutputTo != "" {
 		if finalTask.OutputAetherFSRoot == "" {
-			return fmt.Errorf("task completed but OutputAetherFSRoot is empty; cannot export")
+			return nil, fmt.Errorf("task completed but OutputAetherFSRoot is empty; cannot export")
 		}
 		exportStats, err := aetherclient.Export(ctx, aetherclient.ExportOptions{
 			Root:        aetherCfg.Root,
@@ -243,14 +245,14 @@ func ExecuteSubmit(req *DevSubmitRequest) error {
 			CacheDir:    req.CacheDir,
 		})
 		if err != nil {
-			return fmt.Errorf("exporting output filesystem to %s: %w", req.ExportOutputTo, err)
+			return nil, fmt.Errorf("exporting output filesystem to %s: %w", req.ExportOutputTo, err)
 		}
 		log.Printf("Exported %d files (%d bytes) to %s", exportStats.FilesDownloaded, exportStats.BytesDownloaded, req.ExportOutputTo)
 	}
 
 	if req.ExportLogTo != "" {
 		if finalTask.LogAetherFSRoot == "" {
-			return fmt.Errorf("task completed but LogAetherFSRoot is empty; cannot export")
+			return nil, fmt.Errorf("task completed but LogAetherFSRoot is empty; cannot export")
 		}
 		exportStats, err := aetherclient.Export(ctx, aetherclient.ExportOptions{
 			Root:        aetherCfg.Root,
@@ -260,10 +262,10 @@ func ExecuteSubmit(req *DevSubmitRequest) error {
 			CacheDir:    req.CacheDir,
 		})
 		if err != nil {
-			return fmt.Errorf("exporting log filesystem to %s: %w", req.ExportLogTo, err)
+			return nil, fmt.Errorf("exporting log filesystem to %s: %w", req.ExportLogTo, err)
 		}
 		log.Printf("Exported %d files (%d bytes) to %s", exportStats.FilesDownloaded, exportStats.BytesDownloaded, req.ExportLogTo)
 	}
 
-	return nil
+	return finalTask, nil
 }

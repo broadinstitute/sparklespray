@@ -155,6 +155,46 @@ func (q *RedisQueue) AddJob(ctx context.Context, job *Job, tasks []*Task) error 
 	return err
 }
 
+// RedisTaskCache implements TaskCache using Redis.
+type RedisTaskCache struct {
+	client *redis.Client
+}
+
+func NewRedisTaskCache(client *redis.Client) *RedisTaskCache {
+	return &RedisTaskCache{client: client}
+}
+
+func (c *RedisTaskCache) cacheKey(key string) string {
+	return fmt.Sprintf("cache:%s", key)
+}
+
+func (c *RedisTaskCache) GetCachedEntry(ctx context.Context, cacheKey string) (*CachedTaskEntry, error) {
+	data, err := c.client.Get(ctx, c.cacheKey(cacheKey)).Bytes()
+	if err == redis.Nil {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("getting cache entry %s: %w", cacheKey, err)
+	}
+	var entry CachedTaskEntry
+	if err := json.Unmarshal(data, &entry); err != nil {
+		return nil, fmt.Errorf("decoding cache entry %s: %w", cacheKey, err)
+	}
+	return &entry, nil
+}
+
+func (c *RedisTaskCache) SetCachedEntry(ctx context.Context, entry *CachedTaskEntry) error {
+	data, err := json.Marshal(entry)
+	if err != nil {
+		return fmt.Errorf("encoding cache entry: %w", err)
+	}
+	ttl := time.Until(entry.Expiry)
+	if ttl <= 0 {
+		ttl = 0 // no expiry
+	}
+	return c.client.Set(ctx, c.cacheKey(entry.ID), data, ttl).Err()
+}
+
 // AtomicUpdateTask updates a task atomically using Redis WATCH/MULTI/EXEC
 func (q *RedisQueue) AtomicUpdateTask(ctx context.Context, taskID string, mutateTaskCallback func(task *Task) bool) (*Task, error) {
 	taskKey := q.taskKey(taskID)

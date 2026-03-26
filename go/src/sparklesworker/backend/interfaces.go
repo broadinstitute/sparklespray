@@ -23,9 +23,10 @@ type SparklesMethodsForPoll interface {
 }
 
 type ExternalServices struct {
-	Channel ext_channel.ExtChannel
-	Queue   task_queue.TaskQueue
-	Close   func()
-	Gshim   CloudMethodsForPoll
-	Sshim   SparklesMethodsForPoll
+	Channel   ext_channel.ExtChannel
+	Queue     task_queue.TaskQueue
+	TaskCache task_queue.TaskCache
+	Close     func()
+	Gshim     CloudMethodsForPoll
+	Sshim     SparklesMethodsForPoll
 }

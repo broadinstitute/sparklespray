@@ -18,12 +18,13 @@ func CreateMockServices(ctx context.Context, redisAddr string, clusterID string,
 	}
 	channel := ext_channel.NewRedisChannel(redisClient)
 	queue := task_queue.NewRedisQueue(redisClient, clusterID, "", 0, 0)
+	taskCache := task_queue.NewRedisTaskCache(redisClient)
 
 	StartMockBatchAPI(ctx, redisClient, pollInterval)
 
 	gshim := NewRedisMethodsForPoll(ctx, redisClient)
 	sshim := NewRedisSparklesMethodsForPoll(ctx, redisClient)
 
-	return &backend.ExternalServices{Channel: channel, Queue: queue, Close: func() { redisClient.Close() },
+	return &backend.ExternalServices{Channel: channel, Queue: queue, TaskCache: taskCache, Close: func() { redisClient.Close() },
 		Gshim: gshim, Sshim: sshim}, nil
 }
