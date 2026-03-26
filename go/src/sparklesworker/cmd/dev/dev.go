@@ -45,6 +45,9 @@ type DevSubmitRequest struct {
 	// Duration string accepted by time.ParseDuration, e.g. "24h".  Defaults to "24h".
 	Expiry      string `json:"expiry"`
 	TopicPrefix string `json:"topicPrefix"`
+	// How long RunLoop waits for new tasks after the queue drains before exiting.
+	// Also used as the first-poll retry delay. Defaults to 10s.
+	RunLoopMaxWait time.Duration `json:"runLoopMaxWait"`
 
 	// --- job spec ---
 	Name         string        `json:"name"`
@@ -115,6 +118,9 @@ func ExecuteSubmit(req *DevSubmitRequest) (*task_queue.Task, error) {
 	}
 	if req.AetherWorkers == 0 {
 		req.AetherWorkers = 1
+	}
+	if req.RunLoopMaxWait == 0 {
+		req.RunLoopMaxWait = 10 * time.Second
 	}
 
 	expiryDuration, err := time.ParseDuration(req.Expiry)
@@ -211,7 +217,7 @@ func ExecuteSubmit(req *DevSubmitRequest) (*task_queue.Task, error) {
 			return consumer.ExecuteTask(ctx, &aetherCfg, taskId, taskSpec, req.Dir, req.CacheDir, req.TasksDir, nil, taskCache, expiry)
 		}
 		sleepUntilNotify := func(d time.Duration) { time.Sleep(d) }
-		if err := consumer.RunLoop(ctx, queue, sleepUntilNotify, executor, 1*time.Second, 10*time.Second); err != nil {
+		if err := consumer.RunLoop(ctx, queue, sleepUntilNotify, executor, 1*time.Second, req.RunLoopMaxWait); err != nil {
 			return nil, fmt.Errorf("RunLoop failed: %w", err)
 		}
 	}

@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/stretchr/testify/require"
@@ -17,11 +18,12 @@ func TestDevSubmitHappyPath(t *testing.T) {
 	aetherRoot := filepath.Join(tmp, "aether")
 
 	baseReq := DevSubmitRequest{
-		RedisAddr:   mr.Addr(),
-		AetherRoot:  aetherRoot,
-		Dir:         filepath.Join(tmp, "worker"),
-		ClusterID:   "local",
-		Command:     "echo hello",
+		RedisAddr:      mr.Addr(),
+		AetherRoot:     aetherRoot,
+		Dir:            filepath.Join(tmp, "worker"),
+		ClusterID:      "local",
+		Command:        "echo hello",
+		RunLoopMaxWait: 100 * time.Millisecond,
 	}
 
 	// --- First submission ---

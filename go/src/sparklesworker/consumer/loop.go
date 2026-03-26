@@ -38,7 +38,7 @@ func RunLoop(ctx context.Context, queue task_queue.TaskQueue, sleepUntilNotify f
 			if firstClaim {
 				firstClaim = false
 				log.Printf("Special case: first poll returned no results. May be due to newly created tasks are not yet visible. Waiting a few seconds and trying again")
-				sleepUntilNotify(time.Second * 10)
+				sleepUntilNotify(MaxWaitForNewTasks)
 				continue
 			}
 
