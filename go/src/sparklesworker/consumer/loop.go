@@ -5,10 +5,11 @@ import (
 	"log"
 	"time"
 
+	"context"
+
 	"cloud.google.com/go/logging"
 	"github.com/broadinstitute/sparklesworker/backend"
 	"github.com/broadinstitute/sparklesworker/task_queue"
-	"golang.org/x/net/context"
 )
 
 type Options struct {
@@ -42,7 +43,8 @@ func RunLoop(ctx context.Context, queue task_queue.TaskQueue, sleepUntilNotify f
 				continue
 			}
 
-			sleepUntilNotify(SleepOnEmpty)
+			nextSleep := min(SleepOnEmpty, MaxWaitForNewTasks)
+			sleepUntilNotify(nextSleep)
 
 			if time.Since(lastClaim) > MaxWaitForNewTasks {
 				// if we've had more than SleepOnEmpty time elapse since the last time we got something from the queue, it's time to
