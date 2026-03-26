@@ -1,0 +1,7 @@
+{
+  "Name": "test-job-1",
+  "ClusterID": "local",
+  "Command": "echo 'hello from sparklespray' && date",
+  "TopicPrefix": "sparkles",
+  "FilesToStage": [{ "LocalPath": "test-script", "Name": "test-script" }]
+}
