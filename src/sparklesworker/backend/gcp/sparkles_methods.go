@@ -31,6 +31,11 @@ func (s *FirestoreSparklesMethodsForPoll) GetClusterConfig(clusterID string) (*b
 	return &cluster, nil
 }
 
+func (s *FirestoreSparklesMethodsForPoll) SetClusterConfig(clusterID string, cluster backend.Cluster) error {
+	_, err := s.client.Collection(clusterCollection).Doc(clusterID).Set(s.ctx, cluster)
+	return err
+}
+
 func (s *FirestoreSparklesMethodsForPoll) UpdateClusterMonitorState(clusterID string, state *backend.MonitorState) error {
 	wire := backend.MonitorStateJSON{
 		BatchJobRequests:        state.BatchJobRequests,

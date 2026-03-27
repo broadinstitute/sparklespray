@@ -75,3 +75,7 @@ func (m *mockSparkles) GetTasksCompletedBy(batchJobID string) int {
 func (m *mockSparkles) GetActiveClusterIDs() ([]string, error) {
 	return nil, nil
 }
+
+func (m *mockSparkles) SetClusterConfig(clusterID string, cluster backend.Cluster) error {
+	return nil
+}

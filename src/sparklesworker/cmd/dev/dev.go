@@ -2,6 +2,8 @@ package dev
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -18,6 +20,40 @@ import (
 	"github.com/broadinstitute/sparklesworker/task_queue"
 	"github.com/urfave/cli"
 )
+
+type DevClusterConfig struct {
+	// MachineType is the GCE machine type used when launching worker nodes.
+	MachineType string
+
+	// WorkerDockerImage is the container image run on each worker node.
+	WorkerDockerImage string
+
+	// PubSubInTopic is the Pub/Sub topic the monitor publishes control messages to.
+	PubSubInTopic string
+
+	// PubSubOutTopic is the Pub/Sub topic workers publish status messages to.
+	PubSubOutTopic string
+
+	// Region is the GCP region where Batch jobs are submitted (e.g. "us-central1").
+	// Used to construct the Batch API parent path.
+	Region string
+
+	// MaxPreemptableAttempts is the total number of preemptable node-attempts
+	// allowed per job run. Resets when the queue drains to zero.
+	MaxPreemptableAttempts int
+
+	// MaxInstanceCount caps the number of nodes the monitor will request,
+	// regardless of queue depth.
+	MaxInstanceCount int
+
+	// MaxSuspiciousFailures is the threshold for how many batch jobs may complete
+	// without doing any work before the monitor halts node creation and alerts.
+	MaxSuspiciousFailures int
+
+	BootDisk        backend.Disk             `json:"boot_disk"`
+	Disks           []backend.Disk           `json:"disks"`
+	GCSBucketMounts []backend.GCSBucketMount `json:"gcs_bucket_mounts"`
+}
 
 // DevSubmitRequest encodes all parameters needed to submit and run a job.
 // Unlike the top-level submit command, every parameter lives in this JSON
@@ -50,11 +86,12 @@ type DevSubmitRequest struct {
 	RunLoopMaxWait time.Duration `json:"runLoopMaxWait"`
 
 	// --- job spec ---
-	Name         string        `json:"name"`
-	ClusterID    string        `json:"clusterID"`
-	DockerImage  string        `json:"dockerImage"`
-	Command      string        `json:"command"`
-	FilesToStage []fileToStage `json:"filesToStage"`
+	Name         string            `json:"name"`
+	ClusterID    string            `json:"clusterID"`
+	Cluster      *DevClusterConfig `json:"cluster"`
+	DockerImage  string            `json:"dockerImage"`
+	Command      string            `json:"command"`
+	FilesToStage []fileToStage     `json:"filesToStage"`
 
 	// If non-empty, export OutputAetherFSRoot from the completed task to this local directory.
 	ExportOutputTo string `json:"exportOutputTo"`
@@ -121,6 +158,21 @@ func ExecuteSubmit(req *DevSubmitRequest) (*task_queue.Task, error) {
 	}
 	if req.RunLoopMaxWait == 0 {
 		req.RunLoopMaxWait = 10 * time.Second
+	}
+
+	if req.ClusterID == "" && req.Cluster == nil {
+		return nil, fmt.Errorf("either clusterID or cluster must be set in the params file")
+	}
+	if req.ClusterID != "" && req.Cluster != nil {
+		return nil, fmt.Errorf("only one of clusterID or cluster may be set, not both")
+	}
+	if req.Cluster != nil {
+		clusterJSON, err := json.Marshal(req.Cluster)
+		if err != nil {
+			return nil, fmt.Errorf("serializing cluster config: %w", err)
+		}
+		sum := sha256.Sum256(clusterJSON)
+		req.ClusterID = "c-" + hex.EncodeToString(sum[:])[:16]
 	}
 
 	expiryDuration, err := time.ParseDuration(req.Expiry)
@@ -199,9 +251,30 @@ func ExecuteSubmit(req *DevSubmitRequest) (*task_queue.Task, error) {
 
 	log.Printf("Submitting job %s to cluster %s", job.Name, job.ClusterID)
 
-	_, err = extServices.Sshim.GetClusterConfig(job.ClusterID)
-	if err != nil {
-		return nil, fmt.Errorf("Attempted to submit job to cluster %s but got error fetching its config: %w", job.ClusterID, err)
+	if req.Cluster != nil {
+		cluster := backend.Cluster{
+			MachineType:            req.Cluster.MachineType,
+			WorkerDockerImage:      req.Cluster.WorkerDockerImage,
+			PubSubInTopic:          req.Cluster.PubSubInTopic,
+			PubSubOutTopic:         req.Cluster.PubSubOutTopic,
+			Region:                 req.Cluster.Region,
+			MaxPreemptableAttempts: req.Cluster.MaxPreemptableAttempts,
+			MaxInstanceCount:       req.Cluster.MaxInstanceCount,
+			MaxSuspiciousFailures:  req.Cluster.MaxSuspiciousFailures,
+			BootDisk:               req.Cluster.BootDisk,
+			Disks:                  req.Cluster.Disks,
+			GCSBucketMounts:        req.Cluster.GCSBucketMounts,
+		}
+		if err := extServices.Sshim.SetClusterConfig(req.ClusterID, cluster); err != nil {
+			return nil, fmt.Errorf("storing cluster config: %w", err)
+		}
+	}
+
+	if job.ClusterID != "local" {
+		_, err = extServices.Sshim.GetClusterConfig(job.ClusterID)
+		if err != nil {
+			return nil, fmt.Errorf("Attempted to submit job to cluster %s but got error fetching its config: %w", job.ClusterID, err)
+		}
 	}
 
 	queue := extServices.NewQueue(job.ClusterID)

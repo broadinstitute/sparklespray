@@ -19,6 +19,7 @@ type SparklesMethodsForPoll interface {
 	GetClaimedTasks(clusterID string) ([]*task_queue.Task, error)
 	MarkTasksPending(tasks []*task_queue.Task) error
 	GetClusterConfig(clusterID string) (*Cluster, error)
+	SetClusterConfig(clusterID string, cluster Cluster) error
 	GetPendingTaskCount(clusterID string) (int, error)
 	GetTasksCompletedBy(batchJobID string) int
 	GetActiveClusterIDs() ([]string, error)
@@ -43,4 +44,17 @@ type ExtChannel interface {
 
 	// Publish sends message to topicName.
 	Publish(ctx context.Context, topicName string, message []byte) error
+}
+
+type Disk struct {
+	Name      string `json:"name"`
+	SizeGB    int64  `json:"size_gb"`
+	Type      string `json:"type"`
+	MountPath string `json:"mount_path"`
+}
+
+type GCSBucketMount struct {
+	Path         string   `json:"path"`
+	RemotePath   string   `json:"remote_path"`
+	MountOptions []string `json:"mount_options"`
 }

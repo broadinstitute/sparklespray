@@ -52,6 +52,14 @@ func (r *RedisSparklesMethodsForPoll) GetClusterConfig(clusterID string) (*backe
 	return &cluster, nil
 }
 
+func (r *RedisSparklesMethodsForPoll) SetClusterConfig(clusterID string, cluster backend.Cluster) error {
+	data, err := json.Marshal(cluster)
+	if err != nil {
+		return fmt.Errorf("encoding cluster %s: %w", clusterID, err)
+	}
+	return r.client.Set(r.ctx, r.clusterKey(clusterID), data, 0).Err()
+}
+
 func (r *RedisSparklesMethodsForPoll) UpdateClusterMonitorState(clusterID string, state *backend.MonitorState) error {
 	cluster, err := r.GetClusterConfig(clusterID)
 	if err != nil {

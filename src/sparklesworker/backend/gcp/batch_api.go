@@ -8,6 +8,7 @@ import (
 
 	batch "cloud.google.com/go/batch/apiv1"
 	"cloud.google.com/go/batch/apiv1/batchpb"
+	"github.com/broadinstitute/sparklesworker/backend"
 )
 
 type Runnable struct {
@@ -15,34 +16,21 @@ type Runnable struct {
 	Command []string `json:"command"`
 }
 
-type Disk struct {
-	Name      string `json:"name"`
-	SizeGB    int64  `json:"size_gb"`
-	Type      string `json:"type"`
-	MountPath string `json:"mount_path"`
-}
-
-type GCSBucketMount struct {
-	Path         string   `json:"path"`
-	RemotePath   string   `json:"remote_path"`
-	MountOptions []string `json:"mount_options"`
-}
-
 type JobSpec struct {
-	TaskCount           string           `json:"task_count"`
-	Runnables           []Runnable       `json:"runnables"`
-	MachineType         string           `json:"machine_type"`
-	Preemptible         bool             `json:"preemptible"`
-	Locations           []string         `json:"locations"`
-	NetworkTags         []string         `json:"network_tags"`
-	SparklesJob         string           `json:"sparkles_job"`
-	SparklesCluster     string           `json:"sparkles_cluster"`
-	SparklesTimestamp   string           `json:"sparkles_timestamp"`
-	BootDisk            Disk             `json:"boot_disk"`
-	Disks               []Disk           `json:"disks"`
-	ServiceAccountEmail string           `json:"service_account_email"`
-	Scopes              []string         `json:"scopes"`
-	GCSBucketMounts     []GCSBucketMount `json:"gcs_bucket_mounts"`
+	TaskCount           string                   `json:"task_count"`
+	Runnables           []Runnable               `json:"runnables"`
+	MachineType         string                   `json:"machine_type"`
+	Preemptible         bool                     `json:"preemptible"`
+	Locations           []string                 `json:"locations"`
+	NetworkTags         []string                 `json:"network_tags"`
+	SparklesJob         string                   `json:"sparkles_job"`
+	SparklesCluster     string                   `json:"sparkles_cluster"`
+	SparklesTimestamp   string                   `json:"sparkles_timestamp"`
+	BootDisk            backend.Disk             `json:"boot_disk"`
+	Disks               []backend.Disk           `json:"disks"`
+	ServiceAccountEmail string                   `json:"service_account_email"`
+	Scopes              []string                 `json:"scopes"`
+	GCSBucketMounts     []backend.GCSBucketMount `json:"gcs_bucket_mounts"`
 }
 
 var nonAlphanumRe = regexp.MustCompile(`[^a-z0-9]+`)
