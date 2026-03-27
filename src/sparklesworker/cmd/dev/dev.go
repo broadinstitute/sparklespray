@@ -184,8 +184,6 @@ func ExecuteSubmit(req *DevSubmitRequest) (*task_queue.Task, error) {
 		Expiry:    expiryTime,
 	}
 
-	log.Printf("Submitting job %s to cluster %s", job.Name, job.ClusterID)
-
 	// Connect to the chosen backend.
 	var extServices *backend.ExternalServices
 	if req.RedisAddr != "" {
@@ -198,6 +196,13 @@ func ExecuteSubmit(req *DevSubmitRequest) (*task_queue.Task, error) {
 		return nil, fmt.Errorf("creating backend services: %w", err)
 	}
 	defer extServices.Close()
+
+	log.Printf("Submitting job %s to cluster %s", job.Name, job.ClusterID)
+
+	_, err = extServices.Sshim.GetClusterConfig(job.ClusterID)
+	if err != nil {
+		return nil, fmt.Errorf("Attempted to submit job to cluster %s but got error fetching its config: %w", job.ClusterID, err)
+	}
 
 	queue := extServices.NewQueue(job.ClusterID)
 	channel := extServices.Channel

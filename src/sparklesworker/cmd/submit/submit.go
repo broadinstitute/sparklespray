@@ -201,8 +201,6 @@ func submit(c *cli.Context) error {
 		return fmt.Errorf("building job: %w", err)
 	}
 
-	log.Printf("Submitting job %s to cluster %s", job.Name, job.ClusterID)
-
 	var extServices *backend.ExternalServices
 	if redisAddr != "" {
 		log.Printf("Using Redis backend at %s", redisAddr)
@@ -213,6 +211,13 @@ func submit(c *cli.Context) error {
 		}
 	} else {
 		extServices, err = gcp_backend.CreateGCPServices(ctx, projectID, database)
+	}
+
+	log.Printf("Submitting job %s to cluster %s", job.Name, job.ClusterID)
+
+	_, err = extServices.Sshim.GetClusterConfig(job.ClusterID)
+	if err != nil {
+		return fmt.Errorf("Attempted to submit job to cluster %s but got error fetching its config: %w", job.ClusterID, err)
 	}
 
 	queue := extServices.NewQueue(job.ClusterID)

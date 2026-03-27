@@ -3,7 +3,6 @@ package autoscaler
 import (
 	"context"
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/broadinstitute/sparklesworker/backend"
@@ -75,7 +74,7 @@ func run(c *cli.Context) error {
 
 		for _, clusterID := range clusterIDs {
 			if err := Poll(clusterID, extServices.Gshim, extServices.Sshim); err != nil {
-				fmt.Fprintf(os.Stderr, "poll error: %v\n", err)
+				return fmt.Errorf("poll (clusterID=%s) error: %v\n", clusterID, err)
 			}
 		}
 
