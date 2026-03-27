@@ -73,7 +73,7 @@ func run(c *cli.Context) error {
 		}
 
 		for _, clusterID := range clusterIDs {
-			if err := Poll(clusterID, extServices.Gshim, extServices.Sshim); err != nil {
+			if err := Poll(clusterID, extServices.Gshim, extServices.Sshim, extServices.SparklesWorkerArgs); err != nil {
 				return fmt.Errorf("poll (clusterID=%s) error: %v\n", clusterID, err)
 			}
 		}

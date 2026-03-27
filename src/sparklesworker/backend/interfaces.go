@@ -7,9 +7,9 @@ import (
 )
 
 type CloudMethodsForPoll interface {
-	ListRunningInstances(zones []string, clusterID string) ([]string, error)
+	ListRunningInstances(clusterID string, region string) ([]string, error)
 	ListBatchJobs(region, clusterID string) ([]*BatchJob, error)
-	SubmitBatchJobs(cluster *Cluster, clusterID string, requests []*BatchJobsToSubmit) error
+	SubmitBatchJobs(baseArgs []string, cluster *Cluster, clusterID string, requests []*BatchJobsToSubmit) error
 	DeleteAllBatchJobs(region, clusterID string) error
 }
 
@@ -26,12 +26,13 @@ type SparklesMethodsForPoll interface {
 }
 
 type ExternalServices struct {
-	Channel   ExtChannel
-	NewQueue  func(clusterID string) task_queue.TaskQueue
-	TaskCache task_queue.TaskCache
-	Close     func()
-	Gshim     CloudMethodsForPoll
-	Sshim     SparklesMethodsForPoll
+	Channel            ExtChannel
+	NewQueue           func(clusterID string) task_queue.TaskQueue
+	TaskCache          task_queue.TaskCache
+	Close              func()
+	Gshim              CloudMethodsForPoll
+	Sshim              SparklesMethodsForPoll
+	SparklesWorkerArgs []string
 }
 
 // ExtChannel is an abstract publish/subscribe mechanism. Implementations

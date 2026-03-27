@@ -24,11 +24,16 @@ func CreateMockServices(ctx context.Context, redisAddr string, pollInterval time
 	sshim := NewRedisSparklesMethodsForPoll(ctx, redisClient)
 
 	return &backend.ExternalServices{
-		Channel:   channel,
-		NewQueue:  func(clusterID string) task_queue.TaskQueue { return task_queue.NewRedisQueue(redisClient, clusterID, "", 0, 0) },
+		Channel: channel,
+		NewQueue: func(clusterID string) task_queue.TaskQueue {
+			return task_queue.NewRedisQueue(redisClient, clusterID, "", 0, 0)
+		},
 		TaskCache: taskCache,
 		Close:     func() { redisClient.Close() },
 		Gshim:     gshim,
 		Sshim:     sshim,
+		SparklesWorkerArgs: []string{
+			"--localhost",
+			"--redisAddr", redisAddr},
 	}, nil
 }

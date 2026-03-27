@@ -41,10 +41,15 @@ func CreateGCPServices(ctx context.Context, projectID string, database string) (
 	sshim := &FirestoreSparklesMethodsForPoll{client: firestoreClient, ctx: ctx}
 
 	return &backend.ExternalServices{
-		Channel:  channel,
-		NewQueue: func(clusterID string) task_queue.TaskQueue { return task_queue.NewFirestoreQueue(firestoreClient, clusterID, "", 0, 0) },
-		Close:    func() { firestoreClient.Close() },
-		Gshim:    gshim,
-		Sshim:    sshim,
-	}, nil
+		Channel: channel,
+		NewQueue: func(clusterID string) task_queue.TaskQueue {
+			return task_queue.NewFirestoreQueue(firestoreClient, clusterID, "", 0, 0)
+		},
+		Close: func() { firestoreClient.Close() },
+		Gshim: gshim,
+		Sshim: sshim,
+		SparklesWorkerArgs: []string{
+			"--projectId", projectID,
+			"--database", database}}, nil
+
 }

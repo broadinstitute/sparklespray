@@ -16,8 +16,8 @@ type redisBatchJob struct {
 	ClusterID         string                `json:"cluster_id"`
 	Region            string                `json:"region"`
 	InstanceCount     int                   `json:"instance_count"`
-	WorkerCommandArgs []string              `json:"worker_command_args"`
 	WorkerDockerImage string                `json:"worker_docker_image"`
+	WorkerCommandArgs []string              `json:"worker_command_args"`
 }
 
 // RedisMethodsForPoll is a Redis-backed implementation of CloudMethodsForPoll
@@ -45,12 +45,12 @@ func (r *RedisMethodsForPoll) clusterJobsKey(clusterID string) string {
 }
 
 // ListRunningInstances returns an empty list — no real GCE instances exist in
-// local testing, so all claimed tasks will appear orphaned.
-func (r *RedisMethodsForPoll) ListRunningInstances(zones []string, clusterID string) ([]string, error) {
+// local testing, so all claimed tasks will appear orphaned. Need to explictly deal with that in autosizer.
+func (r *RedisMethodsForPoll) ListRunningInstances(clusterID string, region string) ([]string, error) {
 	return nil, nil
 }
 
-func (r *RedisMethodsForPoll) SubmitBatchJobs(cluster *backend.Cluster, clusterID string, requests []*backend.BatchJobsToSubmit) error {
+func (r *RedisMethodsForPoll) SubmitBatchJobs(baseArgs []string, cluster *backend.Cluster, clusterID string, requests []*backend.BatchJobsToSubmit) error {
 	for i, req := range requests {
 
 		job := &redisBatchJob{
@@ -59,8 +59,9 @@ func (r *RedisMethodsForPoll) SubmitBatchJobs(cluster *backend.Cluster, clusterI
 			ClusterID:         clusterID,
 			Region:            cluster.Region,
 			InstanceCount:     req.InstanceCount,
-			WorkerCommandArgs: cluster.WorkerCommandArgs,
-			WorkerDockerImage: cluster.WorkerDockerImage}
+			WorkerDockerImage: cluster.WorkerDockerImage,
+			WorkerCommandArgs: backend.CreateWorkerCommand(clusterID, req.ShouldLinger, baseArgs, cluster.AetherConfig),
+		}
 
 		data, err := json.Marshal(job)
 		if err != nil {

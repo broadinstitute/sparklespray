@@ -8,7 +8,7 @@ import (
 	"github.com/broadinstitute/sparklesworker/task_queue"
 )
 
-func Poll(clusterID string, gshim backend.CloudMethodsForPoll, sshim backend.SparklesMethodsForPoll) error {
+func Poll(clusterID string, gshim backend.CloudMethodsForPoll, sshim backend.SparklesMethodsForPoll, baseArgs []string) error {
 	clusterConfig, err := sshim.GetClusterConfig(clusterID)
 	if err != nil {
 		return fmt.Errorf("Failed fetching cluster config: %s", err)
@@ -47,7 +47,7 @@ func Poll(clusterID string, gshim backend.CloudMethodsForPoll, sshim backend.Spa
 		return fmt.Errorf("Could not quey claimed tasks: %s", err)
 	}
 
-	runningInstances, err := gshim.ListRunningInstances(clusterConfig.Zones, clusterID)
+	runningInstances, err := gshim.ListRunningInstances(clusterID, clusterConfig.Region)
 	if err != nil {
 		return fmt.Errorf("Failed to query running instances: %s", err)
 	}
@@ -84,7 +84,7 @@ func Poll(clusterID string, gshim backend.CloudMethodsForPoll, sshim backend.Spa
 		currentRequestedInstanceCount,
 	)
 
-	err = gshim.SubmitBatchJobs(clusterConfig, clusterID, newBatchJobs)
+	err = gshim.SubmitBatchJobs(baseArgs, clusterConfig, clusterID, newBatchJobs)
 	if err != nil {
 		return fmt.Errorf("Could not create nodes: %s", err)
 	}

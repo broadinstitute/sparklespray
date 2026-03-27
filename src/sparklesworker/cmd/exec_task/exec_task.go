@@ -84,7 +84,7 @@ func execTask(c *cli.Context) error {
 		return fmt.Errorf("exactly one of --aetherFSRoot or --stageDir is required")
 	}
 
-	aetherCfg := consumer.AetherConfig{
+	aetherCfg := backend.AetherConfig{
 		Root:            c.String("aetherRoot"),
 		MaxSizeToBundle: c.Int64("aetherMaxSizeToBundle"),
 		MaxBundleSize:   c.Int64("aetherMaxBundleSize"),

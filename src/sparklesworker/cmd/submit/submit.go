@@ -156,7 +156,7 @@ func submit(c *cli.Context) error {
 	}
 	topicName := c.String("topicPrefix") + "-log"
 
-	aetherCfg := consumer.AetherConfig{
+	aetherCfg := backend.AetherConfig{
 		Root:            c.String("aetherRoot"),
 		MaxSizeToBundle: c.Int64("aetherMaxSizeToBundle"),
 		MaxBundleSize:   c.Int64("aetherMaxBundleSize"),

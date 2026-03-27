@@ -8,8 +8,8 @@ import (
 	"cloud.google.com/go/batch/apiv1/batchpb"
 	compute "cloud.google.com/go/compute/apiv1"
 	"cloud.google.com/go/compute/apiv1/computepb"
+	"github.com/alicebob/miniredis/v2/proto"
 	"github.com/broadinstitute/sparklesworker/backend"
-	"github.com/gogo/protobuf/proto"
 	"google.golang.org/api/iterator"
 )
 
@@ -17,10 +17,20 @@ type GCPMethodsForPoll struct {
 	projectID       string
 	ctx             context.Context
 	instancesClient *compute.InstancesClient
+	zoneClient      *compute.ZoneOperationsClient
 	batchClient     *batch.Client
 }
 
-func (g *GCPMethodsForPoll) ListRunningInstances(zones []string, clusterID string) ([]string, error) {
+func (g *GCPMethodsForPoll) getZonesForRegion(region string) ([]string, error) {
+	panic("unimp")
+}
+
+func (g *GCPMethodsForPoll) ListRunningInstances(clusterID string, region string) ([]string, error) {
+	zones, err := g.getZonesForRegion(region)
+	if err != nil {
+		return nil, fmt.Errorf("listing zones in region %s: %w", region, err)
+	}
+
 	var instanceNames []string
 
 	filter := proto.String(fmt.Sprintf(`labels.sparkles-cluster-uuid = "%s"`, clusterID))
@@ -29,7 +39,7 @@ func (g *GCPMethodsForPoll) ListRunningInstances(zones []string, clusterID strin
 		req := &computepb.ListInstancesRequest{
 			Project: g.projectID,
 			Zone:    zone,
-			Filter:  filter,
+			Filter:  &filter,
 		}
 
 		it := g.instancesClient.List(g.ctx, req)
@@ -103,18 +113,14 @@ func (g *GCPMethodsForPoll) DeleteAllBatchJobs(region, clusterID string) error {
 	return nil
 }
 
-func (g *GCPMethodsForPoll) SubmitBatchJobs(cluster *backend.Cluster, clusterID string, requests []*backend.BatchJobsToSubmit) error {
+func (g *GCPMethodsForPoll) SubmitBatchJobs(baseArgs []string, cluster *backend.Cluster, clusterID string, requests []*backend.BatchJobsToSubmit) error {
 	for _, req := range requests {
-		commandArgs := cluster.WorkerCommandArgs
-		if req.ShouldLinger {
-			// the lingering worker will stick around for 15 minutes
-			commandArgs = append(commandArgs, "--shutdownAfter", "900")
-		}
+		commandArgs := backend.CreateWorkerCommand(clusterID, req.ShouldLinger, baseArgs, cluster.AetherConfig)
 		jobSpec := &JobSpec{
 			Runnables:       []Runnable{{Image: cluster.WorkerDockerImage, Command: commandArgs}},
 			MachineType:     cluster.MachineType,
 			Preemptible:     req.IsPreemptable,
-			Locations:       zonesAsLocations(cluster.Zones),
+			Locations:       zonesAsLocations([]string{cluster.Region}),
 			SparklesCluster: clusterID,
 		}
 		_, err := createBatchJob(g.ctx, g.batchClient, g.projectID, cluster.Region, jobSpec, req.InstanceCount, 0, clusterID)

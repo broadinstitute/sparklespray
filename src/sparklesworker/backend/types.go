@@ -22,9 +22,6 @@ type Cluster struct {
 	// WorkerDockerImage is the container image run on each worker node.
 	WorkerDockerImage string `firestore:"worker_docker_image" json:"worker_docker_image"`
 
-	// WorkerCommandArgs are the arguments passed to the worker container on startup.
-	WorkerCommandArgs []string `firestore:"worker_command_args" json:"worker_command_args"`
-
 	// PubSubInTopic is the Pub/Sub topic the monitor publishes control messages to.
 	PubSubInTopic string `firestore:"pub_sub_in_topic" json:"pub_sub_in_topic"`
 
@@ -34,10 +31,6 @@ type Cluster struct {
 	// Region is the GCP region where Batch jobs are submitted (e.g. "us-central1").
 	// Used to construct the Batch API parent path.
 	Region string `firestore:"region" json:"region"`
-
-	// Zones is the list of GCE zones within the region to query for running
-	// instances. Passed to listRunningInstances on each poll.
-	Zones []string `firestore:"zones" json:"zones"`
 
 	// MaxPreemptableAttempts is the total number of preemptable node-attempts
 	// allowed per job run. Resets when the queue drains to zero.
@@ -62,6 +55,8 @@ type Cluster struct {
 	BootDisk        Disk             `firestore:"boot_disk" json:"boot_disk"`
 	Disks           []Disk           `firestore:"disks" json:"disks"`
 	GCSBucketMounts []GCSBucketMount `firestore:"gcs_bucket_mounts" json:"gcs_bucket_mounts"`
+
+	AetherConfig *AetherConfig `firestore:"aether_config" json:"aether_config"`
 }
 
 // MonitorState is the per-cluster state the monitor persists between polls,
@@ -208,4 +203,12 @@ type WorkerStatusEvent struct {
 // GetTimestampMillis returns current time in milliseconds
 func GetTimestampMillis() int64 {
 	return int64(time.Now().UnixNano()) / int64(time.Millisecond)
+}
+
+// AetherConfig holds configuration for the aether content-addressed store.
+type AetherConfig struct {
+	Root            string // aether store root (gs://bucket/prefix or local path)
+	MaxSizeToBundle int64  // max file size eligible for bundling (0 = disable bundling)
+	MaxBundleSize   int64  // target max size per bundle
+	Workers         int    // parallel upload workers (0 = use aether default of 1)
 }

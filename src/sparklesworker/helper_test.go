@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/broadinstitute/sparklesworker/backend"
 	"github.com/broadinstitute/sparklesworker/consumer"
 	"github.com/broadinstitute/sparklesworker/task_queue"
 	aetherclient "github.com/pgm/aether/client"
@@ -69,7 +70,7 @@ func TestExecute(t *testing.T) {
 	ctx := context.Background()
 	assert.Nil(t, err)
 
-	aetherConfig := &consumer.AetherConfig{Root: path.Join(tmpdir, "aether")}
+	aetherConfig := &backend.AetherConfig{Root: path.Join(tmpdir, "aether")}
 
 	mkfsResult, err := aetherclient.MakeFilesystem(ctx, aetherclient.MakeFilesystemOptions{
 		Root:            aetherConfig.Root,

@@ -13,6 +13,7 @@ import (
 	"context"
 
 	"cloud.google.com/go/firestore"
+	"github.com/broadinstitute/sparklesworker/backend"
 	"github.com/broadinstitute/sparklesworker/consumer"
 	"github.com/broadinstitute/sparklesworker/task_queue"
 	"github.com/broadinstitute/sparklesworker/watchdog"
@@ -146,7 +147,7 @@ func consume(c *cli.Context) error {
 		MaxWaitForNewTasks: time.Duration(shutdownAfter) * time.Second,
 		WorkerID:           workerID}
 
-	aetherCfg := consumer.AetherConfig{
+	aetherCfg := backend.AetherConfig{
 		Root:            c.String("aetherRoot"),
 		MaxSizeToBundle: c.Int64("aetherMaxSizeToBundle"),
 		MaxBundleSize:   c.Int64("aetherMaxBundleSize"),

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/bmatcuk/doublestar"
+	"github.com/broadinstitute/sparklesworker/backend"
 	"github.com/broadinstitute/sparklesworker/task_queue"
 	"github.com/broadinstitute/sparklesworker/watchdog"
 	aetherclient "github.com/pgm/aether/client"
@@ -56,14 +57,6 @@ func toUnixFloat(t time.Time) float64 {
 
 func timevalToSeconds(tv syscall.Timeval) float64 {
 	return float64(tv.Sec) + float64(tv.Usec)/1e6
-}
-
-// AetherConfig holds configuration for the aether content-addressed store.
-type AetherConfig struct {
-	Root            string // aether store root (gs://bucket/prefix or local path)
-	MaxSizeToBundle int64  // max file size eligible for bundling (0 = disable bundling)
-	MaxBundleSize   int64  // target max size per bundle
-	Workers         int    // parallel upload workers (0 = use aether default of 1)
 }
 
 type ResultStruct struct {
@@ -307,7 +300,7 @@ func prepareTaskDirectories(rootDir string, tasksDir string, cacheDir string, ta
 		resultPath: path.Join(logDir, "result.json")}, nil
 }
 
-func downloadTaskFiles(ctx context.Context, aetherCfg *AetherConfig, dirs *TaskPaths, taskId string, taskSpec *task_queue.TaskSpec, lifecycle ExecuteLifecycle) (*TransferStats, error) {
+func downloadTaskFiles(ctx context.Context, aetherCfg *backend.AetherConfig, dirs *TaskPaths, taskId string, taskSpec *task_queue.TaskSpec, lifecycle ExecuteLifecycle) (*TransferStats, error) {
 	execLifecycleScript("PreDownloadScript", dirs.workDir, taskSpec.PreDownloadScript)
 
 	dlStart := time.Now()
@@ -361,7 +354,7 @@ func collectFileInputs(workDir string, uploadSpec *task_queue.UploadSpec) ([]aet
 	return filesToUpload, nil
 }
 
-func uploadFilesPerSpec(ctx context.Context, aetherCfg *AetherConfig, dir string,
+func uploadFilesPerSpec(ctx context.Context, aetherCfg *backend.AetherConfig, dir string,
 	uploadSpec *task_queue.UploadSpec) (*UploadTaskResultsResult, error) {
 	filesToUpload, err := collectFileInputs(dir, uploadSpec)
 	if err != nil {
@@ -425,7 +418,7 @@ type ExecuteLifecycle interface {
 	Finished()
 }
 
-func ExecuteTask(ctx context.Context, aetherCfg *AetherConfig, taskId string, taskSpec *task_queue.TaskSpec, rootDir string, cacheDir string, tasksDir string, lifecycle ExecuteLifecycle, taskCache task_queue.TaskCache, expiry time.Time) (*ExecuteTaskResult, error) {
+func ExecuteTask(ctx context.Context, aetherCfg *backend.AetherConfig, taskId string, taskSpec *task_queue.TaskSpec, rootDir string, cacheDir string, tasksDir string, lifecycle ExecuteLifecycle, taskCache task_queue.TaskCache, expiry time.Time) (*ExecuteTaskResult, error) {
 	if taskCache != nil {
 		cacheKey, err := computeCacheKey(taskSpec)
 		if err == nil {

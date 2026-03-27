@@ -11,6 +11,7 @@ import (
 	"path"
 	"time"
 
+	"github.com/google/uuid"
 	aetherclient "github.com/pgm/aether/client"
 
 	"github.com/broadinstitute/sparklesworker/backend"
@@ -183,7 +184,7 @@ func ExecuteSubmit(req *DevSubmitRequest) (*task_queue.Task, error) {
 	ctx := context.Background()
 
 	// Stage files via Aether.
-	aetherCfg := consumer.AetherConfig{
+	aetherCfg := backend.AetherConfig{
 		Root:            req.AetherRoot,
 		MaxSizeToBundle: req.AetherMaxSizeToBundle,
 		MaxBundleSize:   req.AetherMaxBundleSize,
@@ -253,6 +254,7 @@ func ExecuteSubmit(req *DevSubmitRequest) (*task_queue.Task, error) {
 
 	if req.Cluster != nil {
 		cluster := backend.Cluster{
+			UUID:                   uuid.New().String(),
 			MachineType:            req.Cluster.MachineType,
 			WorkerDockerImage:      req.Cluster.WorkerDockerImage,
 			PubSubInTopic:          req.Cluster.PubSubInTopic,

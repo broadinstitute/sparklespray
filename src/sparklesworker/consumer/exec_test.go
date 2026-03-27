@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/broadinstitute/sparklesworker/backend"
 	"github.com/broadinstitute/sparklesworker/task_queue"
 	aetherclient "github.com/pgm/aether/client"
 	"github.com/stretchr/testify/assert"
@@ -247,7 +248,7 @@ func TestExecuteTask_BasicRun(t *testing.T) {
 		AetherFSRoot: emptyAetherRoot(t, aetherDir),
 		Uploads:      &task_queue.UploadSpec{},
 	}
-	cfg := &AetherConfig{Root: aetherDir}
+	cfg := &backend.AetherConfig{Root: aetherDir}
 
 	result, err := ExecuteTask(ctx, cfg, "task-1", spec, tmp,
 		filepath.Join(tmp, "cache"), filepath.Join(tmp, "tasks"), nil, nil, time.Time{})
@@ -277,7 +278,7 @@ func TestExecuteTask_NonZeroExitCode(t *testing.T) {
 		AetherFSRoot: emptyAetherRoot(t, aetherDir),
 		Uploads:      &task_queue.UploadSpec{},
 	}
-	result, err := ExecuteTask(ctx, &AetherConfig{Root: aetherDir}, "task-fail", spec, tmp,
+	result, err := ExecuteTask(ctx, &backend.AetherConfig{Root: aetherDir}, "task-fail", spec, tmp,
 		filepath.Join(tmp, "cache"), filepath.Join(tmp, "tasks"), nil, nil, time.Time{})
 	require.NoError(t, err)
 	assert.Equal(t, "7", result.RetCode)
@@ -294,7 +295,7 @@ func TestExecuteTask_UploadsOutputFiles(t *testing.T) {
 		AetherFSRoot: emptyAetherRoot(t, aetherDir),
 		Uploads:      &task_queue.UploadSpec{IncludePatterns: []string{"*.txt"}},
 	}
-	result, err := ExecuteTask(ctx, &AetherConfig{Root: aetherDir}, "task-upload", spec, tmp,
+	result, err := ExecuteTask(ctx, &backend.AetherConfig{Root: aetherDir}, "task-upload", spec, tmp,
 		filepath.Join(tmp, "cache"), filepath.Join(tmp, "tasks"), nil, nil, time.Time{})
 	require.NoError(t, err)
 	assert.Equal(t, "0", result.RetCode)
@@ -321,7 +322,7 @@ func TestExecuteTask_CacheMissThenHit(t *testing.T) {
 		AetherFSRoot: emptyAetherRoot(t, aetherDir),
 		Uploads:      &task_queue.UploadSpec{},
 	}
-	cfg := &AetherConfig{Root: aetherDir}
+	cfg := &backend.AetherConfig{Root: aetherDir}
 
 	// First call — cache miss, task executes.
 	r1, err := ExecuteTask(ctx, cfg, "task-a", spec, tmp,
@@ -351,7 +352,7 @@ func TestExecuteTask_CacheNotStoredOnFailure(t *testing.T) {
 		AetherFSRoot: emptyAetherRoot(t, aetherDir),
 		Uploads:      &task_queue.UploadSpec{},
 	}
-	cfg := &AetherConfig{Root: aetherDir}
+	cfg := &backend.AetherConfig{Root: aetherDir}
 
 	r1, err := ExecuteTask(ctx, cfg, "task-fail", spec, tmp,
 		filepath.Join(tmp, "cache"), filepath.Join(tmp, "tasks"), nil, cache, expiry)
@@ -376,7 +377,7 @@ func TestExecuteTask_WritesResultFile(t *testing.T) {
 		Uploads:      &task_queue.UploadSpec{},
 		Parameters:   map[string]string{"env": "test"},
 	}
-	result, err := ExecuteTask(ctx, &AetherConfig{Root: aetherDir}, "task-result", spec, tmp,
+	result, err := ExecuteTask(ctx, &backend.AetherConfig{Root: aetherDir}, "task-result", spec, tmp,
 		filepath.Join(tmp, "cache"), filepath.Join(tmp, "tasks"), nil, nil, time.Time{})
 	require.NoError(t, err)
 
