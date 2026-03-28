@@ -3,6 +3,7 @@ package autoscaler
 import (
 	"context"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/broadinstitute/sparklesworker/backend"
@@ -20,6 +21,7 @@ var AutoscalerCmd = cli.Command{
 		cli.StringFlag{Name: "redis", Usage: "Redis address for local testing (e.g. localhost:6379); uses GCP Batch API when not set"},
 		cli.StringFlag{Name: "database", Usage: "Firestore database ID (defaults to the project's default database)", Value: "(default)"},
 		cli.DurationFlag{Name: "max-idle", Usage: "Stop polling after no active clusters for this long (defaults to 0s)", Value: 0},
+		cli.BoolFlag{Name: "skip-orphan-check", Usage: "Disable orphan task detection"},
 	},
 	Action: run,
 }
@@ -30,6 +32,7 @@ func run(c *cli.Context) error {
 	redisAddr := c.String("redis")
 	database := c.String("database")
 	maxIdle := c.Duration("max-idle")
+	checkForOrphans := !c.Bool("skip-orphan-check")
 
 	fmt.Printf("autoscaler\n")
 	fmt.Printf("  project: %s\n", projectID)
@@ -74,7 +77,7 @@ func run(c *cli.Context) error {
 		}
 
 		for _, clusterID := range clusterIDs {
-			if err := Poll(clusterID, extServices.Gshim, extServices.Sshim, extServices.SparklesWorkerArgs); err != nil {
+			if err := Poll(clusterID, extServices.Gshim, extServices.Sshim, extServices.CreateWorkerCommand, checkForOrphans); err != nil {
 				return fmt.Errorf("poll (clusterID=%s) error: %v\n", clusterID, err)
 			}
 		}
@@ -86,6 +89,10 @@ func run(c *cli.Context) error {
 		case <-time.After(pollInterval):
 		}
 	}
+
+	log.Printf("Autoscaler shutting down")
+	// calling cancel to shut down anything else still running
+	cancel()
 
 	return nil
 }

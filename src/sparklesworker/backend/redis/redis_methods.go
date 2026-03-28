@@ -45,7 +45,7 @@ func (r *RedisMethodsForPoll) ListRunningInstances(clusterID string, region stri
 	return nil, nil
 }
 
-func (r *RedisMethodsForPoll) SubmitBatchJobs(baseArgs []string, cluster *backend.Cluster, clusterID string, requests []*backend.BatchJobsToSubmit) error {
+func (r *RedisMethodsForPoll) SubmitBatchJobs(CreateWorkerCommand backend.CreateWorkerCommandCallback, cluster *backend.Cluster, clusterID string, requests []*backend.BatchJobsToSubmit) error {
 	for i, req := range requests {
 
 		job := &redisBatchJob{
@@ -55,7 +55,7 @@ func (r *RedisMethodsForPoll) SubmitBatchJobs(baseArgs []string, cluster *backen
 			Region:            cluster.Region,
 			InstanceCount:     req.InstanceCount,
 			WorkerDockerImage: cluster.WorkerDockerImage,
-			WorkerCommandArgs: backend.CreateWorkerCommand(clusterID, req.ShouldLinger, baseArgs, cluster.AetherConfig),
+			WorkerCommandArgs: CreateWorkerCommand(clusterID, req.ShouldLinger, cluster.AetherConfig),
 		}
 
 		data, err := json.Marshal(job)

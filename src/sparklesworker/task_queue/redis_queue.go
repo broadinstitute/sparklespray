@@ -39,12 +39,39 @@ func (q *RedisQueue) taskKey(taskID string) string {
 	return fmt.Sprintf("task:%s", taskID)
 }
 
-func (q *RedisQueue) pendingSetKey() string {
-	return fmt.Sprintf("cluster:%s:pending", q.cluster)
-}
-
 func (q *RedisQueue) jobKey(jobID string) string {
 	return fmt.Sprintf("job:%s", jobID)
+}
+
+// scanPendingTaskIDs scans all task:* keys and returns IDs of tasks that are
+// pending and belong to this queue's cluster.
+func (q *RedisQueue) scanPendingTaskIDs(ctx context.Context) ([]string, error) {
+	var taskIDs []string
+	var cursor uint64
+	for {
+		keys, next, err := q.client.Scan(ctx, cursor, "task:*", 100).Result()
+		if err != nil {
+			return nil, err
+		}
+		for _, key := range keys {
+			data, err := q.client.Get(ctx, key).Bytes()
+			if err != nil {
+				continue
+			}
+			var task Task
+			if err := json.Unmarshal(data, &task); err != nil {
+				continue
+			}
+			if task.Status == StatusPending && task.ClusterID == q.cluster {
+				taskIDs = append(taskIDs, task.TaskID)
+			}
+		}
+		cursor = next
+		if cursor == 0 {
+			break
+		}
+	}
+	return taskIDs, nil
 }
 
 // ClaimTask attempts to claim a pending task from the queue
@@ -57,8 +84,7 @@ func (q *RedisQueue) ClaimTask(ctx context.Context) (*Task, error) {
 			q.WatchdogNotifier()
 		}
 
-		// Get pending task IDs from the cluster's pending set
-		taskIDs, err := q.client.SMembers(ctx, q.pendingSetKey()).Result()
+		taskIDs, err := q.scanPendingTaskIDs(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -147,9 +173,6 @@ func (q *RedisQueue) AddJob(ctx context.Context, job *Job, tasks []*Task) error 
 			return err
 		}
 		pipe.Set(ctx, q.taskKey(task.TaskID), taskJSON, 0)
-		if task.Status == StatusPending {
-			pipe.SAdd(ctx, q.pendingSetKey(), task.TaskID)
-		}
 	}
 	_, err := pipe.Exec(ctx)
 	return err
@@ -226,15 +249,8 @@ func (q *RedisQueue) AtomicUpdateTask(ctx context.Context, taskID string, mutate
 			return err
 		}
 
-		// Execute transaction
 		_, err = tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
 			pipe.Set(ctx, taskKey, newTaskJSON, 0)
-
-			// Update set membership based on new status
-			if task.Status != StatusPending {
-				pipe.SRem(ctx, q.pendingSetKey(), taskID)
-			}
-
 			return nil
 		})
 

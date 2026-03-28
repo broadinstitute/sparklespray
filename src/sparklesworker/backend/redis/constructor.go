@@ -34,8 +34,9 @@ func CreateMockServices(ctx context.Context, redisAddr string, startMockBatchAPI
 		Close:     func() { redisClient.Close() },
 		Gshim:     gshim,
 		Sshim:     sshim,
-		SparklesWorkerArgs: []string{
-			"--localhost",
-			"--redisAddr", redisAddr},
-	}, nil
+		CreateWorkerCommand: func(clusterID string, shouldLinger bool, aetherConfig *backend.AetherConfig) []string {
+			return backend.CreateWorkerCommand(clusterID, false, []string{
+				"--localhost",
+				"--redisAddr", redisAddr}, aetherConfig)
+		}}, nil
 }

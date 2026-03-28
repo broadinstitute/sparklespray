@@ -90,22 +90,14 @@ func (r *RedisSparklesMethodsForPoll) GetClaimedTasks(clusterID string) ([]*task
 
 func (r *RedisSparklesMethodsForPoll) MarkTasksPending(tasks []*task_queue.Task) error {
 	for _, task := range tasks {
-		data, err := r.client.Get(r.ctx, r.taskKey(task.TaskID)).Bytes()
+		q := task_queue.NewRedisQueue(r.client, task.ClusterID, "", 0, 0)
+		_, err := q.AtomicUpdateTask(r.ctx, task.TaskID, func(t *task_queue.Task) bool {
+			t.Status = task_queue.StatusPending
+			t.OwnedByWorkerID = ""
+			return true
+		})
 		if err != nil {
-			return fmt.Errorf("getting task %s: %w", task.TaskID, err)
-		}
-		var t task_queue.Task
-		if err := json.Unmarshal(data, &t); err != nil {
-			return fmt.Errorf("decoding task %s: %w", task.TaskID, err)
-		}
-		t.Status = task_queue.StatusPending
-		t.OwnedByWorkerID = ""
-		updated, err := json.Marshal(t)
-		if err != nil {
-			return fmt.Errorf("encoding task %s: %w", task.TaskID, err)
-		}
-		if err := r.client.Set(r.ctx, r.taskKey(task.TaskID), updated, 0).Err(); err != nil {
-			return fmt.Errorf("storing task %s: %w", task.TaskID, err)
+			return fmt.Errorf("marking task %s pending: %w", task.TaskID, err)
 		}
 	}
 	return nil

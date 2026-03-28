@@ -8,7 +8,7 @@ import (
 type mockCloud struct {
 	listRunningInstancesFn func(clusterID string, region string) ([]string, error)
 	listBatchJobsFn        func(region, clusterID string) ([]*backend.BatchJob, error)
-	submitBatchJobsFn      func(baseArgs []string, cluster *backend.Cluster, clusterID string, requests []*backend.BatchJobsToSubmit) error
+	submitBatchJobsFn      func(callback backend.CreateWorkerCommandCallback, cluster *backend.Cluster, clusterID string, requests []*backend.BatchJobsToSubmit) error
 	deleteAllBatchJobsFn   func(region, clusterID string) error
 }
 
@@ -20,8 +20,8 @@ func (m *mockCloud) ListBatchJobs(region, clusterID string) ([]*backend.BatchJob
 	return m.listBatchJobsFn(region, clusterID)
 }
 
-func (m *mockCloud) SubmitBatchJobs(baseArgs []string, cluster *backend.Cluster, clusterID string, requests []*backend.BatchJobsToSubmit) error {
-	return m.submitBatchJobsFn(baseArgs, cluster, clusterID, requests)
+func (m *mockCloud) SubmitBatchJobs(callback backend.CreateWorkerCommandCallback, cluster *backend.Cluster, clusterID string, requests []*backend.BatchJobsToSubmit) error {
+	return m.submitBatchJobsFn(callback, cluster, clusterID, requests)
 }
 
 func (m *mockCloud) DeleteAllBatchJobs(region, clusterID string) error {

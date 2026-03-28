@@ -371,7 +371,7 @@ func defaultCloud() *mockCloud {
 		listBatchJobsFn: func(region, clusterID string) ([]*backend.BatchJob, error) {
 			return []*backend.BatchJob{}, nil
 		},
-		submitBatchJobsFn: func(baseArgs []string, cluster *backend.Cluster, clusterID string, requests []*backend.BatchJobsToSubmit) error {
+		submitBatchJobsFn: func(callback backend.CreateWorkerCommandCallback, cluster *backend.Cluster, clusterID string, requests []*backend.BatchJobsToSubmit) error {
 			return nil
 		},
 		deleteAllBatchJobsFn: func(region, clusterID string) error {
@@ -398,7 +398,7 @@ func TestPoll(t *testing.T) {
 	t.Run("happy path tasks pending nodes launched state updated", func(t *testing.T) {
 		cloud := defaultCloud()
 		var launched []*backend.BatchJobsToSubmit
-		cloud.submitBatchJobsFn = func(baseArgs []string, _ *backend.Cluster, _ string, requests []*backend.BatchJobsToSubmit) error {
+		cloud.submitBatchJobsFn = func(callback backend.CreateWorkerCommandCallback, _ *backend.Cluster, _ string, requests []*backend.BatchJobsToSubmit) error {
 			launched = requests
 			return nil
 		}
@@ -406,7 +406,7 @@ func TestPoll(t *testing.T) {
 		sparkles := defaultSparkles()
 		sparkles.nonCompleteTaskCount = 3
 
-		err := Poll("cluster1", cloud, sparkles, nil)
+		err := Poll("cluster1", cloud, sparkles, nil, true)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -426,7 +426,7 @@ func TestPoll(t *testing.T) {
 		sparkles := defaultSparkles()
 		sparkles.getClusterConfigErr = errors.New("config fetch failed")
 
-		err := Poll("cluster1", cloud, sparkles, nil)
+		err := Poll("cluster1", cloud, sparkles, nil, true)
 		if err == nil {
 			t.Fatal("expected error")
 		}
@@ -444,7 +444,7 @@ func TestPoll(t *testing.T) {
 			{TaskID: "t2", OwnedByWorkerID: "i-running"},
 		}
 
-		err := Poll("cluster1", cloud, sparkles, nil)
+		err := Poll("cluster1", cloud, sparkles, nil, true)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -480,7 +480,7 @@ func TestPoll(t *testing.T) {
 		// batchJobRequests=4 so expectedJobCount matches
 		sparkles.clusterConfig.MonitorState = `{"batchJobRequests":4}`
 
-		err := Poll("cluster1", cloud, sparkles, nil)
+		err := Poll("cluster1", cloud, sparkles, nil, true)
 		if err == nil {
 			t.Fatal("expected error due to suspicious failures")
 		}
@@ -492,7 +492,7 @@ func TestPoll(t *testing.T) {
 	t.Run("no work to do submitBatchJobs not called", func(t *testing.T) {
 		cloud := defaultCloud()
 		launchCalled := false
-		cloud.submitBatchJobsFn = func(baseArgs []string, _ *backend.Cluster, _ string, requests []*backend.BatchJobsToSubmit) error {
+		cloud.submitBatchJobsFn = func(callback backend.CreateWorkerCommandCallback, _ *backend.Cluster, _ string, requests []*backend.BatchJobsToSubmit) error {
 			if len(requests) > 0 {
 				launchCalled = true
 			}
@@ -502,7 +502,7 @@ func TestPoll(t *testing.T) {
 		sparkles := defaultSparkles()
 		sparkles.nonCompleteTaskCount = 0
 
-		err := Poll("cluster1", cloud, sparkles, nil)
+		err := Poll("cluster1", cloud, sparkles, nil, true)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -517,7 +517,7 @@ func TestPoll(t *testing.T) {
 		sparkles := defaultSparkles()
 		sparkles.nonCompleteTaskCount = 5
 
-		err := Poll("cluster1", cloud, sparkles, nil)
+		err := Poll("cluster1", cloud, sparkles, nil, true)
 		if err != nil {
 			t.Fatal(err)
 		}

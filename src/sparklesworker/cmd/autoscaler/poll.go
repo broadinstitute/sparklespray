@@ -8,7 +8,7 @@ import (
 	"github.com/broadinstitute/sparklesworker/task_queue"
 )
 
-func Poll(clusterID string, gshim backend.CloudMethodsForPoll, sshim backend.SparklesMethodsForPoll, baseArgs []string) error {
+func Poll(clusterID string, gshim backend.CloudMethodsForPoll, sshim backend.SparklesMethodsForPoll, createWorkerCommand backend.CreateWorkerCommandCallback, checkForOrphans bool) error {
 	clusterConfig, err := sshim.GetClusterConfig(clusterID)
 	if err != nil {
 		return fmt.Errorf("Failed fetching cluster config: %s", err)
@@ -41,28 +41,29 @@ func Poll(clusterID string, gshim backend.CloudMethodsForPoll, sshim backend.Spa
 	}
 
 	// phase 1: Identify orphaned tasks
-
-	claimedTasks, err := sshim.GetClaimedTasks(clusterID)
-	if err != nil {
-		return fmt.Errorf("Could not quey claimed tasks: %s", err)
-	}
-
-	runningInstances, err := gshim.ListRunningInstances(clusterID, clusterConfig.Region)
-	if err != nil {
-		return fmt.Errorf("Failed to query running instances: %s", err)
-	}
-	orphaned := findOrphanedTasks(claimedTasks, runningInstances)
-
-	if len(orphaned) > 0 {
-		// orphanedIDs := make([]string, len(orphaned))
-		// for i := range orphaned {
-		// 	orphanedIDs[i] = orphaned[i].TaskID
-		// }
-		log.Printf("Found %d orphaned tasks, resetting their state to 'pending'", len(orphaned))
-
-		err = sshim.MarkTasksPending(orphaned)
+	if checkForOrphans {
+		claimedTasks, err := sshim.GetClaimedTasks(clusterID)
 		if err != nil {
-			return fmt.Errorf("Could not mark orphaned tasks as pending: %s", err)
+			return fmt.Errorf("Could not quey claimed tasks: %s", err)
+		}
+
+		runningInstances, err := gshim.ListRunningInstances(clusterID, clusterConfig.Region)
+		if err != nil {
+			return fmt.Errorf("Failed to query running instances: %s", err)
+		}
+		orphaned := findOrphanedTasks(claimedTasks, runningInstances)
+
+		if len(orphaned) > 0 {
+			// orphanedIDs := make([]string, len(orphaned))
+			// for i := range orphaned {
+			// 	orphanedIDs[i] = orphaned[i].TaskID
+			// }
+			log.Printf("Found %d orphaned tasks, resetting their state to 'pending'", len(orphaned))
+
+			err = sshim.MarkTasksPending(orphaned)
+			if err != nil {
+				return fmt.Errorf("Could not mark orphaned tasks as pending: %s", err)
+			}
 		}
 	}
 
@@ -94,7 +95,7 @@ func Poll(clusterID string, gshim backend.CloudMethodsForPoll, sshim backend.Spa
 		currentRequestedInstanceCount,
 	)
 
-	err = gshim.SubmitBatchJobs(baseArgs, clusterConfig, clusterID, newBatchJobs)
+	err = gshim.SubmitBatchJobs(createWorkerCommand, clusterConfig, clusterID, newBatchJobs)
 	if err != nil {
 		return fmt.Errorf("Could not create nodes: %s", err)
 	}

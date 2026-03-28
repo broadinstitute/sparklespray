@@ -73,6 +73,10 @@ class ProcessGroup:
         self.procs.append(pproc)
         return pproc
 
+    async def wait_all(self):
+        for proc in self.procs:
+            await proc.wait()
+
 
 import contextlib
 import tempfile
@@ -253,7 +257,7 @@ async def minimal_end_to_end_test():
         #
         autoscale = await group.run_and_stream(
             "autoscale",
-            f"bin/sparklesworker autoscaler --redis localhost:{redis_port} --poll-interval 100ms",
+            f"bin/sparklesworker autoscaler --skip-orphan-check --redis localhost:{redis_port} --poll-interval 100ms",
         )
 
         # breakpoint()
@@ -268,6 +272,12 @@ async def minimal_end_to_end_test():
             stdout = fd.read()
 
         assert "hello from sparklespray" in stdout
+
+        # redis is the one service that doesn't automatically shut down
+        redis.kill()
+
+        # clean up to avoid process leak and an exception being thrown
+        await group.wait_all()
 
 
 if __name__ == "__main__":

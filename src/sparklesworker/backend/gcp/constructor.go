@@ -48,8 +48,10 @@ func CreateGCPServices(ctx context.Context, projectID string, database string) (
 		Close: func() { firestoreClient.Close() },
 		Gshim: gshim,
 		Sshim: sshim,
-		SparklesWorkerArgs: []string{
-			"--projectId", projectID,
-			"--database", database}}, nil
+		CreateWorkerCommand: func(clusterID string, shouldLinger bool, aetherConfig *backend.AetherConfig) []string {
+			return backend.CreateWorkerCommand(clusterID, shouldLinger, []string{
+				"--projectId", projectID,
+				"--database", database}, aetherConfig)
+		}}, nil
 
 }

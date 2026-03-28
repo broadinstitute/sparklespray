@@ -113,9 +113,9 @@ func (g *GCPMethodsForPoll) DeleteAllBatchJobs(region, clusterID string) error {
 	return nil
 }
 
-func (g *GCPMethodsForPoll) SubmitBatchJobs(baseArgs []string, cluster *backend.Cluster, clusterID string, requests []*backend.BatchJobsToSubmit) error {
+func (g *GCPMethodsForPoll) SubmitBatchJobs(CreateWorkerCommand backend.CreateWorkerCommandCallback, cluster *backend.Cluster, clusterID string, requests []*backend.BatchJobsToSubmit) error {
 	for _, req := range requests {
-		commandArgs := backend.CreateWorkerCommand(clusterID, req.ShouldLinger, baseArgs, cluster.AetherConfig)
+		commandArgs := CreateWorkerCommand(clusterID, req.ShouldLinger, cluster.AetherConfig)
 		jobSpec := &JobSpec{
 			Runnables:       []Runnable{{Image: cluster.WorkerDockerImage, Command: commandArgs}},
 			MachineType:     cluster.MachineType,
