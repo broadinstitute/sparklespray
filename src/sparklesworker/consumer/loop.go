@@ -78,7 +78,7 @@ func RunLoop(ctx context.Context, queue task_queue.TaskQueue, sleepUntilNotify f
 					return updateErr
 				}
 			} else {
-				_, updateErr := updateTaskCompleted(ctx, queue, claimed.TaskID, execTaskResult.RetCode, execTaskResult.OutputsKey, execTaskResult.LogsKey, execTaskResult.UsedCacheResultFromTaskID)
+				_, updateErr := UpdateTaskCompleted(ctx, queue, claimed.TaskID, execTaskResult.RetCode, execTaskResult.OutputsKey, execTaskResult.LogsKey, execTaskResult.UsedCacheResultFromTaskID)
 				if updateErr != nil {
 					log.Printf("Got error updating task %s is complete: %v", claimed.TaskID, updateErr)
 					return updateErr
@@ -98,7 +98,7 @@ func RunLoop(ctx context.Context, queue task_queue.TaskQueue, sleepUntilNotify f
 	return nil
 }
 
-func updateTaskCompleted(ctx context.Context, q task_queue.TaskQueue, taskID string, retcode string, outputKey string, logsKey string, usedCacheResultFromTaskID string) (*task_queue.Task, error) {
+func UpdateTaskCompleted(ctx context.Context, q task_queue.TaskQueue, taskID string, retcode string, outputKey string, logsKey string, usedCacheResultFromTaskID string) (*task_queue.Task, error) {
 	log.Printf("updateTaskCompleted of task %v, retcode=%s outputKey=%s logskey=%s", taskID, retcode, outputKey, logsKey)
 
 	now := backend.GetTimestampMillis()
@@ -108,6 +108,9 @@ func updateTaskCompleted(ctx context.Context, q task_queue.TaskQueue, taskID str
 	}
 
 	mutate := func(task *task_queue.Task) bool {
+		taskJSON, _ := json.MarshalIndent(task, "", "  ")
+		log.Printf("In mutate of updateTaskCompleted:\n%s", taskJSON)
+
 		if task.Status != task_queue.StatusClaimed {
 			log.Printf("While attempting to mark task as complete, found task had status %v. Aborting", task.Status)
 			return false

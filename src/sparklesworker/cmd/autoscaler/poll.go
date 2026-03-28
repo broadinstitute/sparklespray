@@ -53,9 +53,17 @@ func Poll(clusterID string, gshim backend.CloudMethodsForPoll, sshim backend.Spa
 	}
 	orphaned := findOrphanedTasks(claimedTasks, runningInstances)
 
-	err = sshim.MarkTasksPending(orphaned)
-	if err != nil {
-		return fmt.Errorf("Could not mark orphaned tasks as pending: %s", err)
+	if len(orphaned) > 0 {
+		// orphanedIDs := make([]string, len(orphaned))
+		// for i := range orphaned {
+		// 	orphanedIDs[i] = orphaned[i].TaskID
+		// }
+		log.Printf("Found %d orphaned tasks, resetting their state to 'pending'", len(orphaned))
+
+		err = sshim.MarkTasksPending(orphaned)
+		if err != nil {
+			return fmt.Errorf("Could not mark orphaned tasks as pending: %s", err)
+		}
 	}
 
 	// phase 2: Resize cluster as needed
