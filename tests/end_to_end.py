@@ -58,6 +58,11 @@ class ProcessGroup:
             # TODO add check to see if still running
             proc.kill()
 
+    async def run_with_check(self, name: str, command: str, watcher=None):
+        proc = await self.run_and_stream(name, command, watcher=watcher)
+        retcode = await proc.wait()
+        assert retcode == 0
+
     async def run_and_stream(self, name: str, command: str, watcher=None) -> Process:
         if watcher is None:
             watcher = Watcher()
@@ -95,24 +100,32 @@ def make_temp_dir():
     shutil.rmtree(tmpdir)
 
 
-async def minimal_end_to_end_test():
+async def minimal_end_to_end_test(use_sparklesworker_docker_image=False):
     # use ProcessGroup context manager so that we're guarenteed that processes are terminated
     # before returning. Don't want to accidently leave a process behind when an exception is thrown
     with ProcessGroup() as group, make_temp_dir() as tmpDir:
         print("building executables")
 
-        await (
-            await group.run_and_stream(
+        await group.run_with_check(
+            "build",
+            "cd src/sparklesworker/cmd && go build -o ../../../bin/sparkles sparkles/main.go",
+        )
+
+        await group.run_with_check(
+            "build",
+            "cd src/sparklesworker/cmd && go build -o ../../../bin/sparklesworker sparklesworker/main.go",
+        )
+
+        if use_sparklesworker_docker_image:
+            sparkles_docker_image = "sparklesworker:test"
+            sparklesworkerDir = "/sparkleswork"
+            await group.run_with_check(
                 "build",
-                "cd src/sparklesworker/cmd && go build -o ../../../bin/sparkles sparkles/main.go",
+                f"cd src/sparklesworker && docker build -t {sparkles_docker_image} .",
             )
-        ).wait()
-        await (
-            await group.run_and_stream(
-                "build",
-                "cd src/sparklesworker/cmd && go build -o ../../../bin/sparklesworker sparklesworker/main.go",
-            )
-        ).wait()
+        else:
+            sparkles_docker_image = ""
+            sparklesworkerDir = "sparkleswork"
 
         print("Submitting job with autoscaler running (but using simulated Batch API)")
 
@@ -207,7 +220,7 @@ async def minimal_end_to_end_test():
             "name": "test-end-to-end",
             "cluster": {
                 "MachineType": "n2-standard-2",
-                "WorkerDockerImage": "invalid-docker-image",
+                "WorkerDockerImage": sparkles_docker_image,
                 "PubSubInTopic": "sparkles-in",
                 "PubSubOutTopic": "sparkles-out",
                 "Region": "us-central1",
@@ -220,6 +233,7 @@ async def minimal_end_to_end_test():
             "aetherRoot": f"{tmpDir}/aether",
             "exportOutputTo": f"{tmpDir}/out",
             "exportLogTo": f"{tmpDir}/log",
+            "dir": sparklesworkerDir,
             "dockerImage": "",
             "command": "echo hello from sparklespray",
             "filesToStage": [],

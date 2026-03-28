@@ -81,23 +81,48 @@ func mockStartJob(ctx context.Context, client *redis.Client, job *redisBatchJob)
 		instanceCount = 1
 	}
 
-	go mockWatchJobInstances(ctx, client, job.ID, job.WorkerCommandArgs, instanceCount)
+	go mockWatchJobInstances(ctx, client, job.ID, job.WorkerDockerImage, job.WorkerCommandArgs, instanceCount)
 	return nil
+}
+
+func rewriteLocalhost(args []string) []string {
+	// the redis address will be of the form localhost:<port> but that won't
+	// work under docker, so rewrite it to use host.docker.internal for the
+	// host address
+	result := make([]string, len(args))
+	for i, arg := range args {
+		if strings.HasPrefix(arg, "localhost:") {
+			result[i] = strings.ReplaceAll(arg, "localhost:", "host.docker.internal:")
+		} else {
+			result[i] = arg
+		}
+	}
+	return result
 }
 
 // mockWatchJobInstances runs instanceCount copies of the command concurrently and
 // updates the job state to Complete (all succeeded) or Failed (any failed).
-func mockWatchJobInstances(ctx context.Context, client *redis.Client, jobID string, args []string, instanceCount int) {
+func mockWatchJobInstances(ctx context.Context, client *redis.Client, jobID string, imageName string, args []string, instanceCount int) {
 	type result struct{ err error }
 	results := make(chan result, instanceCount)
 
 	for i := 0; i < instanceCount; i++ {
 		go func() {
-			log.Printf("Mock BatchAPI service is running: %s", strings.Join(args, " "))
-			cmd := exec.CommandContext(ctx, args[0], args[1:]...)
+			var fullCmd []string
+			if imageName == "" {
+				fullCmd = args
+			} else {
+				dockerCmd := []string{"docker", "run", "--network", "host", "--rm", imageName}
+				rewrittenArgs := rewriteLocalhost(args)
+				dockerCmd = append(dockerCmd, rewrittenArgs[1:]...)
+				log.Printf("Mock BatchAPI service is running: %s", strings.Join(dockerCmd, " "))
+				fullCmd = dockerCmd
+			}
+			cmd := exec.CommandContext(ctx, fullCmd[0], fullCmd[1:]...)
 			cmd.Stdout = os.Stdout
 			cmd.Stderr = os.Stderr
 			err := cmd.Run()
+
 			results <- result{err: err}
 			log.Printf("Mock BatchAPI service job completed (err=%s)", err)
 		}()
