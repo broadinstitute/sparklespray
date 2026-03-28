@@ -108,8 +108,8 @@ func UpdateTaskCompleted(ctx context.Context, q task_queue.TaskQueue, taskID str
 	}
 
 	mutate := func(task *task_queue.Task) bool {
-		taskJSON, _ := json.MarshalIndent(task, "", "  ")
-		log.Printf("In mutate of updateTaskCompleted:\n%s", taskJSON)
+		// taskJSON, _ := json.MarshalIndent(task, "", "  ")
+		// log.Printf("In mutate of updateTaskCompleted:\n%s", taskJSON)
 
 		if task.Status != task_queue.StatusClaimed {
 			log.Printf("While attempting to mark task as complete, found task had status %v. Aborting", task.Status)

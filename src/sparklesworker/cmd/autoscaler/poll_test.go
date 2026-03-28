@@ -406,7 +406,7 @@ func TestPoll(t *testing.T) {
 		sparkles := defaultSparkles()
 		sparkles.nonCompleteTaskCount = 3
 
-		err := Poll("cluster1", cloud, sparkles, nil, true)
+		err := Poll("cluster1", cloud, sparkles, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -426,7 +426,7 @@ func TestPoll(t *testing.T) {
 		sparkles := defaultSparkles()
 		sparkles.getClusterConfigErr = errors.New("config fetch failed")
 
-		err := Poll("cluster1", cloud, sparkles, nil, true)
+		err := Poll("cluster1", cloud, sparkles, nil)
 		if err == nil {
 			t.Fatal("expected error")
 		}
@@ -444,7 +444,7 @@ func TestPoll(t *testing.T) {
 			{TaskID: "t2", OwnedByWorkerID: "i-running"},
 		}
 
-		err := Poll("cluster1", cloud, sparkles, nil, true)
+		err := Poll("cluster1", cloud, sparkles, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -480,7 +480,7 @@ func TestPoll(t *testing.T) {
 		// batchJobRequests=4 so expectedJobCount matches
 		sparkles.clusterConfig.MonitorState = `{"batchJobRequests":4}`
 
-		err := Poll("cluster1", cloud, sparkles, nil, true)
+		err := Poll("cluster1", cloud, sparkles, nil)
 		if err == nil {
 			t.Fatal("expected error due to suspicious failures")
 		}
@@ -502,7 +502,7 @@ func TestPoll(t *testing.T) {
 		sparkles := defaultSparkles()
 		sparkles.nonCompleteTaskCount = 0
 
-		err := Poll("cluster1", cloud, sparkles, nil, true)
+		err := Poll("cluster1", cloud, sparkles, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -517,7 +517,7 @@ func TestPoll(t *testing.T) {
 		sparkles := defaultSparkles()
 		sparkles.nonCompleteTaskCount = 5
 
-		err := Poll("cluster1", cloud, sparkles, nil, true)
+		err := Poll("cluster1", cloud, sparkles, nil)
 		if err != nil {
 			t.Fatal(err)
 		}

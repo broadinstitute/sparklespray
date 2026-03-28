@@ -257,7 +257,7 @@ async def minimal_end_to_end_test():
         #
         autoscale = await group.run_and_stream(
             "autoscale",
-            f"bin/sparklesworker autoscaler --skip-orphan-check --redis localhost:{redis_port} --poll-interval 100ms",
+            f"bin/sparklesworker autoscaler --redis localhost:{redis_port} --poll-interval 100ms",
         )
 
         # breakpoint()
