@@ -38,3 +38,4 @@ cli/sparklespray/bin/kubequeconsume
 cli/sparklespray/bin/sparklesworker
 hermit.log
 tmproot/
+bin
