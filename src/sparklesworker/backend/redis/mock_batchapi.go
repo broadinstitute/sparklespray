@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/broadinstitute/sparklesworker/backend"
@@ -26,6 +28,7 @@ func StartMockBatchAPI(ctx context.Context, client *redis.Client, pollInterval t
 			}
 			if err := mockBatchAPIPoll(ctx, client); err != nil {
 				log.Printf("mock batch API: poll error: %v", err)
+				break
 			}
 		}
 	}()
@@ -90,8 +93,13 @@ func mockWatchJobInstances(ctx context.Context, client *redis.Client, jobID stri
 
 	for i := 0; i < instanceCount; i++ {
 		go func() {
+			log.Printf("Mock BatchAPI service is running: %s", strings.Join(args, " "))
 			cmd := exec.CommandContext(ctx, args[0], args[1:]...)
-			results <- result{err: cmd.Run()}
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			err := cmd.Run()
+			results <- result{err: err}
+			log.Printf("Mock BatchAPI service job completed (err=%s)", err)
 		}()
 	}
 

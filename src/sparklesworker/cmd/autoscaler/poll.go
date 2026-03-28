@@ -76,6 +76,8 @@ func Poll(clusterID string, gshim backend.CloudMethodsForPoll, sshim backend.Spa
 		}
 	}
 
+	//log.Printf("Polling cluster %s: nonCompleteTaskCount=%d activeBatchJobs=%v currentRequestedInstanceCount=%d", clusterID, nonCompleteTaskCount, activeBatchJobs, currentRequestedInstanceCount)
+
 	newBatchJobs := determineBatchJobsToCreate(
 		nonCompleteTaskCount,
 		clusterConfig.MaxInstanceCount,

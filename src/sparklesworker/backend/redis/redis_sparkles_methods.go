@@ -132,32 +132,57 @@ func (r *RedisSparklesMethodsForPoll) GetNonCompleteTaskCount(clusterID string) 
 	return len(tasks), nil
 }
 
-func (r *RedisSparklesMethodsForPoll) GetActiveClusterIDs() ([]string, error) {
+func getAll(ctx context.Context, client *redis.Client, pattern string) ([][]byte, error) {
 	var cursor uint64
-	seen := make(map[string]struct{})
+	var result [][]byte
 	for {
-		keys, next, err := r.client.Scan(r.ctx, cursor, "task:*", 100).Result()
+		keys, next, err := client.Scan(ctx, cursor, pattern, 100).Result()
 		if err != nil {
 			return nil, fmt.Errorf("scanning tasks: %w", err)
 		}
 		for _, key := range keys {
-			data, err := r.client.Get(r.ctx, key).Bytes()
+			data, err := client.Get(ctx, key).Bytes()
 			if err != nil {
 				continue
 			}
-			var t task_queue.Task
-			if err := json.Unmarshal(data, &t); err != nil {
-				continue
-			}
-			if t.Status == task_queue.StatusClaimed || t.Status == task_queue.StatusPending {
-				seen[t.ClusterID] = struct{}{}
-			}
+			result = append(result, data)
 		}
 		cursor = next
 		if cursor == 0 {
 			break
 		}
 	}
+	return result, nil
+}
+
+func getAllTasks(ctx context.Context, client *redis.Client) ([]task_queue.Task, error) {
+	records, err := getAll(ctx, client, "task:*")
+	tasks := make([]task_queue.Task, len(records))
+	if err != nil {
+		return nil, fmt.Errorf("Couldn't get all tasks: %s", err)
+	}
+	for i, data := range records {
+		if err := json.Unmarshal(data, &tasks[i]); err != nil {
+			return nil, fmt.Errorf("Could not parse task: %s, data")
+		}
+	}
+	return tasks, nil
+}
+
+func (r *RedisSparklesMethodsForPoll) GetActiveClusterIDs() ([]string, error) {
+	seen := make(map[string]struct{})
+
+	tasks, err := getAllTasks(r.ctx, r.client)
+	if err != nil {
+		return nil, fmt.Errorf("Couldn't get all tasks: %s", err)
+	}
+	for i := range tasks {
+		t := &tasks[i]
+		if t.Status == task_queue.StatusClaimed || t.Status == task_queue.StatusPending {
+			seen[t.ClusterID] = struct{}{}
+		}
+	}
+
 	ids := make([]string, 0, len(seen))
 	for id := range seen {
 		ids = append(ids, id)
@@ -168,29 +193,15 @@ func (r *RedisSparklesMethodsForPoll) GetActiveClusterIDs() ([]string, error) {
 func (r *RedisSparklesMethodsForPoll) GetTasksCompletedBy(batchJobID string) int {
 	// Scan all task:* keys since we don't have a per-job index.
 	count := 0
-	var cursor uint64
-	for {
-		keys, next, err := r.client.Scan(r.ctx, cursor, "task:*", 100).Result()
-		if err != nil {
-			log.Printf("getTasksCompletedBy(%s): scan error: %v", batchJobID, err)
-			return count
-		}
-		for _, key := range keys {
-			data, err := r.client.Get(r.ctx, key).Bytes()
-			if err != nil {
-				continue
-			}
-			var t task_queue.Task
-			if err := json.Unmarshal(data, &t); err != nil {
-				continue
-			}
-			if t.OwnedByBatchJobID == batchJobID && t.Status == task_queue.StatusComplete {
-				count++
-			}
-		}
-		cursor = next
-		if cursor == 0 {
-			break
+	tasks, err := getAllTasks(r.ctx, r.client)
+	if err != nil {
+		log.Printf("getTasksCompletedBy(%s): scan error: %v", batchJobID, err)
+		return count
+	}
+	for i := range tasks {
+		t := tasks[i]
+		if t.OwnedByBatchJobID == batchJobID && t.Status == task_queue.StatusComplete {
+			count++
 		}
 	}
 	return count
@@ -198,22 +209,15 @@ func (r *RedisSparklesMethodsForPoll) GetTasksCompletedBy(batchJobID string) int
 
 // scanTasksWithFilter fetches all tasks for clusterID and returns those matching the predicate.
 func (r *RedisSparklesMethodsForPoll) scanTasksWithFilter(clusterID string, keep func(*task_queue.Task) bool) ([]*task_queue.Task, error) {
-	ids, err := r.client.SMembers(r.ctx, r.clusterTasksKey(clusterID)).Result()
+	tasks, err := getAllTasks(r.ctx, r.client)
 	if err != nil {
 		return nil, fmt.Errorf("listing task IDs for cluster %s: %w", clusterID, err)
 	}
 	var result []*task_queue.Task
-	for _, id := range ids {
-		data, err := r.client.Get(r.ctx, r.taskKey(id)).Bytes()
-		if err != nil {
-			continue
-		}
-		var t task_queue.Task
-		if err := json.Unmarshal(data, &t); err != nil {
-			continue
-		}
-		if keep(&t) {
-			result = append(result, &t)
+	for i := range tasks {
+		t := &tasks[i]
+		if keep(t) {
+			result = append(result, t)
 		}
 	}
 	return result, nil

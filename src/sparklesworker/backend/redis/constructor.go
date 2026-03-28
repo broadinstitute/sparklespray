@@ -10,7 +10,7 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-func CreateMockServices(ctx context.Context, redisAddr string, pollInterval time.Duration) (*backend.ExternalServices, error) {
+func CreateMockServices(ctx context.Context, redisAddr string, startMockBatchAPI bool) (*backend.ExternalServices, error) {
 	redisClient := redis.NewClient(&redis.Options{Addr: redisAddr})
 	if err := redisClient.Ping(ctx).Err(); err != nil {
 		return nil, fmt.Errorf("connecting to Redis at %s: %w", redisAddr, err)
@@ -18,10 +18,12 @@ func CreateMockServices(ctx context.Context, redisAddr string, pollInterval time
 	channel := NewRedisChannel(redisClient)
 	taskCache := task_queue.NewRedisTaskCache(redisClient)
 
-	StartMockBatchAPI(ctx, redisClient, pollInterval)
-
 	gshim := NewRedisMethodsForPoll(ctx, redisClient)
 	sshim := NewRedisSparklesMethodsForPoll(ctx, redisClient)
+
+	if startMockBatchAPI {
+		StartMockBatchAPI(ctx, redisClient, 500*time.Millisecond)
+	}
 
 	return &backend.ExternalServices{
 		Channel: channel,

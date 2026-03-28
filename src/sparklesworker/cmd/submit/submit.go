@@ -204,8 +204,7 @@ func submit(c *cli.Context) error {
 	var extServices *backend.ExternalServices
 	if redisAddr != "" {
 		log.Printf("Using Redis backend at %s", redisAddr)
-		pollInterval := 1 * time.Second
-		extServices, err = redis_backend.CreateMockServices(ctx, redisAddr, pollInterval)
+		extServices, err = redis_backend.CreateMockServices(ctx, redisAddr, false)
 		if err != nil {
 			return fmt.Errorf("Creating redis backed services failed: %s", err)
 		}

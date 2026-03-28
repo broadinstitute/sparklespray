@@ -25,8 +25,7 @@ type redisBatchJob struct {
 //
 // Key layout:
 //
-//	"batch_job:{id}"        → JSON-encoded redisBatchJob
-//	"batch_jobs:{clusterID}" → Redis SET of job IDs belonging to that cluster
+//	"batch_job:{id}" → JSON-encoded redisBatchJob
 type RedisMethodsForPoll struct {
 	client *redis.Client
 	ctx    context.Context
@@ -38,10 +37,6 @@ func NewRedisMethodsForPoll(ctx context.Context, client *redis.Client) *RedisMet
 
 func (r *RedisMethodsForPoll) jobKey(id string) string {
 	return "batch_job:" + id
-}
-
-func (r *RedisMethodsForPoll) clusterJobsKey(clusterID string) string {
-	return "batch_jobs:" + clusterID
 }
 
 // ListRunningInstances returns an empty list — no real GCE instances exist in
@@ -70,9 +65,6 @@ func (r *RedisMethodsForPoll) SubmitBatchJobs(baseArgs []string, cluster *backen
 		if err := r.client.Set(r.ctx, r.jobKey(job.ID), data, 0).Err(); err != nil {
 			return fmt.Errorf("storing job %s: %w", job.ID, err)
 		}
-		if err := r.client.SAdd(r.ctx, r.clusterJobsKey(clusterID), job.ID).Err(); err != nil {
-			return fmt.Errorf("indexing job %s: %w", job.ID, err)
-		}
 	}
 	return nil
 }
@@ -84,23 +76,30 @@ func (r *RedisMethodsForPoll) nextID(clusterID string) int64 {
 	return n
 }
 
-func (r *RedisMethodsForPoll) ListBatchJobs(region, clusterID string) ([]*backend.BatchJob, error) {
-	ids, err := r.client.SMembers(r.ctx, r.clusterJobsKey(clusterID)).Result()
+func getAllBatchJobs(ctx context.Context, client *redis.Client) ([]redisBatchJob, error) {
+	records, err := getAll(ctx, client, "batch_job:*")
 	if err != nil {
-		return nil, fmt.Errorf("listing job IDs for cluster %s: %w", clusterID, err)
+		return nil, fmt.Errorf("couldn't get all batch jobs: %w", err)
+	}
+	jobs := make([]redisBatchJob, len(records))
+	for i, data := range records {
+		if err := json.Unmarshal(data, &jobs[i]); err != nil {
+			return nil, fmt.Errorf("could not parse batch job: %w", err)
+		}
+	}
+	return jobs, nil
+}
+
+func (r *RedisMethodsForPoll) ListBatchJobs(region, clusterID string) ([]*backend.BatchJob, error) {
+	all, err := getAllBatchJobs(r.ctx, r.client)
+	if err != nil {
+		return nil, fmt.Errorf("listing batch jobs for cluster %s: %w", clusterID, err)
 	}
 
 	var jobs []*backend.BatchJob
-	for _, id := range ids {
-		data, err := r.client.Get(r.ctx, r.jobKey(id)).Bytes()
-		if err != nil {
-			return nil, fmt.Errorf("fetching job %s: %w", id, err)
-		}
-		var job redisBatchJob
-		if err := json.Unmarshal(data, &job); err != nil {
-			return nil, fmt.Errorf("decoding job %s: %w", id, err)
-		}
-		if job.Region != region {
+	for i := range all {
+		job := &all[i]
+		if job.ClusterID != clusterID || job.Region != region {
 			continue
 		}
 		jobs = append(jobs, &backend.BatchJob{ID: job.ID, State: job.State, RequestedInstances: job.InstanceCount})
@@ -109,26 +108,17 @@ func (r *RedisMethodsForPoll) ListBatchJobs(region, clusterID string) ([]*backen
 }
 
 func (r *RedisMethodsForPoll) DeleteAllBatchJobs(region, clusterID string) error {
-	ids, err := r.client.SMembers(r.ctx, r.clusterJobsKey(clusterID)).Result()
+	all, err := getAllBatchJobs(r.ctx, r.client)
 	if err != nil {
-		return fmt.Errorf("listing job IDs for cluster %s: %w", clusterID, err)
+		return fmt.Errorf("listing batch jobs for cluster %s: %w", clusterID, err)
 	}
 
-	for _, id := range ids {
-		// Only delete jobs in the requested region.
-		data, err := r.client.Get(r.ctx, r.jobKey(id)).Bytes()
-		if err != nil {
-			continue // already gone
-		}
-		var job redisBatchJob
-		if err := json.Unmarshal(data, &job); err != nil {
+	for i := range all {
+		job := &all[i]
+		if job.ClusterID != clusterID || job.Region != region {
 			continue
 		}
-		if job.Region != region {
-			continue
-		}
-		r.client.Del(r.ctx, r.jobKey(id))
-		r.client.SRem(r.ctx, r.clusterJobsKey(clusterID), id)
+		r.client.Del(r.ctx, r.jobKey(job.ID))
 	}
 	return nil
 }

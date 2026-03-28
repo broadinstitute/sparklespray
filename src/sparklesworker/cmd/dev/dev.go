@@ -241,7 +241,7 @@ func ExecuteSubmit(req *DevSubmitRequest) (*task_queue.Task, error) {
 	var extServices *backend.ExternalServices
 	if req.RedisAddr != "" {
 		log.Printf("Using Redis backend at %s", req.RedisAddr)
-		extServices, err = redis_backend.CreateMockServices(ctx, req.RedisAddr, 1*time.Second)
+		extServices, err = redis_backend.CreateMockServices(ctx, req.RedisAddr, false)
 	} else {
 		extServices, err = gcp_backend.CreateGCPServices(ctx, req.ProjectID, req.Database)
 	}
@@ -266,6 +266,11 @@ func ExecuteSubmit(req *DevSubmitRequest) (*task_queue.Task, error) {
 			BootDisk:               req.Cluster.BootDisk,
 			Disks:                  req.Cluster.Disks,
 			GCSBucketMounts:        req.Cluster.GCSBucketMounts,
+			AetherConfig: &backend.AetherConfig{
+				Root:            req.AetherRoot,
+				MaxSizeToBundle: req.AetherMaxSizeToBundle,
+				MaxBundleSize:   req.AetherMaxBundleSize,
+				Workers:         req.AetherWorkers},
 		}
 		if err := extServices.Sshim.SetClusterConfig(req.ClusterID, cluster); err != nil {
 			return nil, fmt.Errorf("storing cluster config: %w", err)

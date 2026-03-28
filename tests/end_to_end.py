@@ -120,9 +120,98 @@ async def minimal_end_to_end_test():
         watcher = Watcher()
         submitted_seen = watcher.watch_for("Successfully submitted")
 
+        # Name      string `json:"name"`
+        # SizeGB    int64  `json:"size_gb"`
+        # Type      string `json:"type"`
+        # MountPath string `json:"mount_path"`
+
+        # type DevClusterConfig struct {
+        # 	// MachineType is the GCE machine type used when launching worker nodes.
+        # 	MachineType string
+
+        # 	// WorkerDockerImage is the container image run on each worker node.
+        # 	WorkerDockerImage string
+
+        # 	// PubSubInTopic is the Pub/Sub topic the monitor publishes control messages to.
+        # 	PubSubInTopic string
+
+        # 	// PubSubOutTopic is the Pub/Sub topic workers publish status messages to.
+        # 	PubSubOutTopic string
+
+        # 	// Region is the GCP region where Batch jobs are submitted (e.g. "us-central1").
+        # 	// Used to construct the Batch API parent path.
+        # 	Region string
+
+        # 	// MaxPreemptableAttempts is the total number of preemptable node-attempts
+        # 	// allowed per job run. Resets when the queue drains to zero.
+        # 	MaxPreemptableAttempts int
+
+        # 	// MaxInstanceCount caps the number of nodes the monitor will request,
+        # 	// regardless of queue depth.
+        # 	MaxInstanceCount int
+
+        # 	// MaxSuspiciousFailures is the threshold for how many batch jobs may complete
+        # 	// without doing any work before the monitor halts node creation and alerts.
+        # 	MaxSuspiciousFailures int
+
+        # 	BootDisk        backend.Disk             `json:"boot_disk"`
+        # 	Disks           []backend.Disk           `json:"disks"`
+        # 	GCSBucketMounts []backend.GCSBucketMount `json:"gcs_bucket_mounts"`
+        # }
+
+        # type DevSubmitRequest struct {
+        # 	// --- backend ---
+        # 	ProjectID string `json:"projectID"`
+        # 	Database  string `json:"database"`
+        # 	// If non-empty, use the Redis backend instead of Firestore.
+        # 	RedisAddr string `json:"redisAddr"`
+
+        # 	// --- worker directories ---
+        # 	Dir      string `json:"dir"`
+        # 	CacheDir string `json:"cacheDir"`
+        # 	TasksDir string `json:"tasksDir"`
+
+        # 	// --- aether file-staging ---
+        # 	AetherRoot            string `json:"aetherRoot"`
+        # 	AetherMaxSizeToBundle int64  `json:"aetherMaxSizeToBundle"`
+        # 	AetherMaxBundleSize   int64  `json:"aetherMaxBundleSize"`
+        # 	AetherWorkers         int    `json:"aetherWorkers"`
+
+        # 	// --- timing / naming ---
+        # 	// Duration string accepted by time.ParseDuration, e.g. "24h".  Defaults to "24h".
+        # 	Expiry      string `json:"expiry"`
+        # 	TopicPrefix string `json:"topicPrefix"`
+        # 	// How long RunLoop waits for new tasks after the queue drains before exiting.
+        # 	// Also used as the first-poll retry delay. Defaults to 10s.
+        # 	RunLoopMaxWait time.Duration `json:"runLoopMaxWait"`
+
+        # 	// --- job spec ---
+        # 	Name         string            `json:"name"`
+        # 	ClusterID    string            `json:"clusterID"`
+        # 	Cluster      *DevClusterConfig `json:"cluster"`
+        # 	DockerImage  string            `json:"dockerImage"`
+        # 	Command      string            `json:"command"`
+        # 	FilesToStage []fileToStage     `json:"filesToStage"`
+
+        # 	// If non-empty, export OutputAetherFSRoot from the completed task to this local directory.
+        # 	ExportOutputTo string `json:"exportOutputTo"`
+        # 	// If non-empty, export LogAetherFSRoot from the completed task to this local directory.
+        # 	ExportLogTo string `json:"exportLogTo"`
+        # }
+
         submission = {
             "name": "test-end-to-end",
-            "clusterID": "testcluster",
+            "cluster": {
+                "MachineType": "n2-standard-2",
+                "WorkerDockerImage": "invalid-docker-image",
+                "PubSubInTopic": "sparkles-in",
+                "PubSubOutTopic": "sparkles-out",
+                "Region": "us-central1",
+                "MaxPreemptableAttempts": 1,
+                "MaxInstanceCount": 1,
+                "MaxSuspiciousFailures": 1,
+                "BootDisk": {"size_gb": 50, "type": "pd-standard"},
+            },
             "redisAddr": f"localhost:{redis_port}",
             "aetherRoot": f"{tmpDir}/aether",
             "exportOutputTo": f"{tmpDir}/out",
@@ -167,6 +256,7 @@ async def minimal_end_to_end_test():
             f"bin/sparklesworker autoscaler --redis localhost:{redis_port} --poll-interval 100ms",
         )
 
+        # breakpoint()
         # wait for the autoscale proccess to shutdown.
         await asyncio.wait_for(autoscale.wait(), 5)
 

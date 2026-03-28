@@ -42,11 +42,12 @@ func run(c *cli.Context) error {
 	var err error
 	if redisAddr != "" {
 		fmt.Printf("  mode: redis (%s)\n", redisAddr)
-		extServices, err = redis_backend.CreateMockServices(ctx, redisAddr, pollInterval)
+		extServices, err = redis_backend.CreateMockServices(ctx, redisAddr, true)
 
 		if err != nil {
 			return fmt.Errorf("Creating redis backed services failed: %s", err)
 		}
+
 	} else {
 		fmt.Printf("  mode: GCP\n")
 		extServices, err = gcp_backend.CreateGCPServices(ctx, projectID, database)

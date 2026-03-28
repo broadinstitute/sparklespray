@@ -6,7 +6,7 @@ import (
 
 func CreateWorkerCommand(clusterID string, shouldLinger bool, baseArgs []string, aetherConfig *AetherConfig) []string {
 	cmd := []string{
-		"sparklesworker", "--cluster", clusterID,
+		"bin/sparklesworker", "--cluster", clusterID,
 		"--aetherRoot", aetherConfig.Root,
 		"--aetherMaxSizeToBundle", strconv.Itoa(int(aetherConfig.MaxSizeToBundle)),
 		"--aetherMaxBundleSize", strconv.Itoa(int(aetherConfig.MaxBundleSize)),
