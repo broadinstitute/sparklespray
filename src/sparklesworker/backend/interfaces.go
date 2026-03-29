@@ -14,6 +14,7 @@ type CloudMethodsForPoll interface {
 	ListRunningInstances(clusterID string, region string) ([]string, error)
 	ListBatchJobs(region, clusterID string) ([]*BatchJob, error)
 	GetBatchJobByName(name string) (*BatchJob, error)
+	PutSingletonBatchJob(name, region, machineType string, bootVolumeInGB int64, bootVolumeType, dockerImage string, cmd []string) error
 	SubmitBatchJobs(CreateWorkerCommand CreateWorkerCommandCallback, cluster *Cluster, clusterID string, requests []*BatchJobsToSubmit) error
 	DeleteAllBatchJobs(region, clusterID string) error
 }

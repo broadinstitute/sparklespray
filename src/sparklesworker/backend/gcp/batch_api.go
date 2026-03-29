@@ -196,3 +196,62 @@ func createBatchJob(ctx context.Context, client *batch.Client, project, location
 
 	return client.CreateJob(ctx, req)
 }
+
+// createBatchJobWithID is like createBatchJob but uses an explicit job ID
+// instead of generating a random one.
+func createBatchJobWithID(ctx context.Context, client *batch.Client, project, location, jobID string, jobSpec *JobSpec) (*batchpb.Job, error) {
+	// Reuse the job construction logic from createBatchJob by temporarily
+	// building the job struct inline to avoid duplicating proto construction.
+	var runnables []*batchpb.Runnable
+	for _, r := range jobSpec.Runnables {
+		runnables = append(runnables, &batchpb.Runnable{
+			Executable: &batchpb.Runnable_Container_{
+				Container: &batchpb.Runnable_Container{
+					ImageUri: r.Image,
+					Commands: r.Command,
+					Options:  "-u 0",
+				},
+			},
+		})
+	}
+
+	job := &batchpb.Job{
+		TaskGroups: []*batchpb.TaskGroup{
+			{
+				TaskCount:        1,
+				TaskCountPerNode: 1,
+				TaskSpec: &batchpb.TaskSpec{
+					Runnables: runnables,
+				},
+			},
+		},
+		AllocationPolicy: &batchpb.AllocationPolicy{
+			Location: &batchpb.AllocationPolicy_LocationPolicy{
+				AllowedLocations: jobSpec.Locations,
+			},
+			Instances: []*batchpb.AllocationPolicy_InstancePolicyOrTemplate{
+				{
+					PolicyTemplate: &batchpb.AllocationPolicy_InstancePolicyOrTemplate_Policy{
+						Policy: &batchpb.AllocationPolicy_InstancePolicy{
+							MachineType: jobSpec.MachineType,
+							BootDisk: &batchpb.AllocationPolicy_Disk{
+								Type:       jobSpec.BootDisk.Type,
+								SizeGb:     jobSpec.BootDisk.SizeGB,
+								DataSource: &batchpb.AllocationPolicy_Disk_Image{Image: "batch-cos"},
+							},
+						},
+					},
+				},
+			},
+		},
+		LogsPolicy: &batchpb.LogsPolicy{
+			Destination: batchpb.LogsPolicy_CLOUD_LOGGING,
+		},
+	}
+
+	return client.CreateJob(ctx, &batchpb.CreateJobRequest{
+		Parent: "projects/" + project + "/locations/" + location,
+		JobId:  jobID,
+		Job:    job,
+	})
+}

@@ -98,6 +98,40 @@ func batchStateToBatchJobState(job *batchpb.Job) backend.BatchJobState {
 	}
 }
 
+func (g *GCPMethodsForPoll) PutSingletonBatchJob(name, region, machineType string, bootVolumeInGB int64, bootVolumeType, dockerImage string, cmd []string) error {
+	fullName := fmt.Sprintf("projects/%s/locations/%s/jobs/%s", g.projectID, region, name)
+
+	// Delete existing job if present
+	_, err := g.batchClient.GetJob(g.ctx, &batchpb.GetJobRequest{Name: fullName})
+	if err != nil && status.Code(err) != codes.NotFound {
+		return fmt.Errorf("checking for existing batch job %s: %w", name, err)
+	}
+	if err == nil {
+		op, err := g.batchClient.DeleteJob(g.ctx, &batchpb.DeleteJobRequest{Name: fullName})
+		if err != nil {
+			return fmt.Errorf("deleting existing batch job %s: %w", name, err)
+		}
+		if err := op.Wait(g.ctx); err != nil {
+			return fmt.Errorf("waiting for deletion of batch job %s: %w", name, err)
+		}
+	}
+
+	jobSpec := &JobSpec{
+		Runnables:   []Runnable{{Image: dockerImage, Command: cmd}},
+		MachineType: machineType,
+		Locations:   zonesAsLocations([]string{region}),
+		BootDisk: backend.Disk{
+			SizeGB: bootVolumeInGB,
+			Type:   bootVolumeType,
+		},
+	}
+	_, err = createBatchJobWithID(g.ctx, g.batchClient, g.projectID, region, name, jobSpec)
+	if err != nil {
+		return fmt.Errorf("creating batch job %s: %w", name, err)
+	}
+	return nil
+}
+
 func (g *GCPMethodsForPoll) GetBatchJobByName(name string) (*backend.BatchJob, error) {
 	job, err := g.batchClient.GetJob(g.ctx, &batchpb.GetJobRequest{Name: name})
 	if err != nil {

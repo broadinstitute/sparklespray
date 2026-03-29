@@ -52,7 +52,8 @@ type Cluster struct {
 	// MonitorState at the start of each poll and re-encoded at the end.
 	MonitorState string `firestore:"monitor_state" json:"monitor_state"`
 
-	BootDisk        Disk             `firestore:"boot_disk" json:"boot_disk"`
+	BootDiskType    string
+	BootDiskSizeGB  int
 	Disks           []Disk           `firestore:"disks" json:"disks"`
 	GCSBucketMounts []GCSBucketMount `firestore:"gcs_bucket_mounts" json:"gcs_bucket_mounts"`
 

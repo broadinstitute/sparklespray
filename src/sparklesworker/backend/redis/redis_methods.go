@@ -107,6 +107,28 @@ func (r *RedisMethodsForPoll) ListBatchJobs(region, clusterID string) ([]*backen
 	return jobs, nil
 }
 
+func (r *RedisMethodsForPoll) PutSingletonBatchJob(name, region, machineType string, bootVolumeInGB int64, bootVolumeType, dockerImage string, cmd []string) error {
+	// Delete existing job if present
+	r.client.Del(r.ctx, r.jobKey(name))
+
+	job := &redisBatchJob{
+		ID:                name,
+		State:             backend.Pending,
+		Region:            region,
+		InstanceCount:     1,
+		WorkerDockerImage: dockerImage,
+		WorkerCommandArgs: cmd,
+	}
+	data, err := json.Marshal(job)
+	if err != nil {
+		return fmt.Errorf("marshaling singleton batch job %s: %w", name, err)
+	}
+	if err := r.client.Set(r.ctx, r.jobKey(name), data, 0).Err(); err != nil {
+		return fmt.Errorf("storing singleton batch job %s: %w", name, err)
+	}
+	return nil
+}
+
 func (r *RedisMethodsForPoll) GetBatchJobByName(name string) (*backend.BatchJob, error) {
 	data, err := r.client.Get(r.ctx, r.jobKey(name)).Bytes()
 	if err == redis.Nil {
