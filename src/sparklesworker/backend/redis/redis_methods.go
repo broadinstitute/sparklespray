@@ -107,6 +107,21 @@ func (r *RedisMethodsForPoll) ListBatchJobs(region, clusterID string) ([]*backen
 	return jobs, nil
 }
 
+func (r *RedisMethodsForPoll) GetBatchJobByName(name string) (*backend.BatchJob, error) {
+	data, err := r.client.Get(r.ctx, r.jobKey(name)).Bytes()
+	if err == redis.Nil {
+		return nil, backend.NoSuchBatchJob
+	}
+	if err != nil {
+		return nil, fmt.Errorf("getting batch job %s: %w", name, err)
+	}
+	var job redisBatchJob
+	if err := json.Unmarshal(data, &job); err != nil {
+		return nil, fmt.Errorf("parsing batch job %s: %w", name, err)
+	}
+	return &backend.BatchJob{ID: job.ID, State: job.State, RequestedInstances: job.InstanceCount}, nil
+}
+
 func (r *RedisMethodsForPoll) DeleteAllBatchJobs(region, clusterID string) error {
 	all, err := getAllBatchJobs(r.ctx, r.client)
 	if err != nil {

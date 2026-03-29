@@ -17,6 +17,7 @@ import (
 	"github.com/broadinstitute/sparklesworker/backend"
 	gcp_backend "github.com/broadinstitute/sparklesworker/backend/gcp"
 	redis_backend "github.com/broadinstitute/sparklesworker/backend/redis"
+	"github.com/broadinstitute/sparklesworker/cmd/autoscaler"
 	"github.com/broadinstitute/sparklesworker/consumer"
 	"github.com/broadinstitute/sparklesworker/task_queue"
 	"github.com/urfave/cli"
@@ -136,6 +137,57 @@ func devSubmit(c *cli.Context) error {
 	_, err = ExecuteSubmit(&req)
 	return err
 }
+
+const AutoscalerBatchJob = "sparkles-autoscaler"
+
+func isAutoscalarRunning(ext *backend.ExternalServices) (bool, error) {
+	batchjob, err := ext.Gshim.GetBatchJobByName(AutoscalerBatchJob)
+	if err != nil {
+		return false, fmt.Errorf("Checking for autoscaler failed: %w", err)
+	}
+	return batchjob.State == backend.Pending || batchjob.State == backend.Running, nil
+}
+
+type AutoscaleConfig struct {
+	// GCP Specific settings
+	project  string
+	database string
+
+	// settings for testing/mocking config
+	redis string
+
+	// shared settings
+	pollInterval time.Duration
+	maxIdle      time.Duration
+
+	// batch API parameters
+	machineType    string
+	bootVolumeInGB int
+	bootVolumeType string
+}
+
+func ensureAutoscalarRunning(ext *backend.ExternalServices, sparklesWorkerDockerImage string, autoscaleConfig *AutoscaleConfig) error {
+	cmd := []string{"autoscaler"}
+	if autoscaleConfig.project != "" {
+		cmd = append(cmd, "--project", autoscaleConfig.project)
+	}
+	if autoscaleConfig.database != "" {
+		cmd = append(cmd, "--database", autoscaleConfig.database)
+	}
+	if autoscaleConfig.redis != "" {
+		cmd = append(cmd, "--redis", autoscaleConfig.redis)
+	}
+	cmd = append(cmd, "--pollInterval", fmt.Sprintf("%ds", autoscaleConfig.pollInterval/time.Second))
+	cmd = append(cmd, "--maxIdle", fmt.Sprintf("%ds", autoscaleConfig.maxIdle/time.Second))
+
+	return ext.Gshim.PutSingletonBatchJob(AutoscalerBatchJob, autoscaleConfig.machineType, autoscaleConfig.bootVolumeInGB, autoscaleConfig.bootVolumeType, sparklesWorkerDockerImage, cmd)
+}
+
+// cli.StringFlag{Name: "project", Usage: "Google Cloud project ID"},
+// cli.DurationFlag{Name: "poll-interval", Usage: "Delay between poll cycles", Value: 5 * time.Second},
+// cli.StringFlag{Name: "redis", Usage: "Redis address for local testing (e.g. localhost:6379); uses GCP Batch API when not set"},
+// cli.StringFlag{Name: "database", Usage: "Firestore database ID (defaults to the project's default database)", Value: "(default)"},
+// cli.DurationFlag{Name: "max-idle", Usage: "Stop polling after no active clusters for this long (defaults to 0s)", Value: 0},
 
 func ExecuteSubmit(req *DevSubmitRequest) (*task_queue.Task, error) {
 	// Apply defaults.
@@ -277,11 +329,14 @@ func ExecuteSubmit(req *DevSubmitRequest) (*task_queue.Task, error) {
 		}
 	}
 
+	useAutoscaler := true
 	if job.ClusterID != "local" {
 		_, err = extServices.Sshim.GetClusterConfig(job.ClusterID)
 		if err != nil {
 			return nil, fmt.Errorf("Attempted to submit job to cluster %s but got error fetching its config: %w", job.ClusterID, err)
 		}
+		useAutoscaler = false
+		// if the cluster ID isn't local, make sure we have an autoscaler job running (starting one if necessary)
 	}
 
 	queue := extServices.NewQueue(job.ClusterID)
@@ -307,6 +362,46 @@ func ExecuteSubmit(req *DevSubmitRequest) (*task_queue.Task, error) {
 		}
 	}
 
+	if useAutoscaler {
+		isRunning, err := isAutoscalarRunning(extServices)
+		if err != nil {
+			return nil, fmt.Errorf("Failed to check autoscaler: %w", err)
+		}
+
+		if !isRunning {
+			// if it'll take a while for the autoscaler to start, so do a round of autoscaling in this process
+			// before we start the autoscaler.
+			autoscaler.Poll(job.ClusterID, extServices.Gshim, extServices.Sshim, extServices.CreateWorkerCommand)
+
+		}
+
+		err := ensureAutoscalerStarted(extServices)
+		if err != nil {
+			return nil, fmt.Errorf("Failed to start autoscaler: %w", err)
+
+		}
+
+		// batchJob, err := extServices.Gshim.GetBatchJobByName(AutoscalerBatchJob)
+		// if err == NoSuchBatchJob {
+		// 	err = autoscaler.Poll()
+		// 	if err != nil {
+		// 		return nil, fmt.Errorf("Could not start first instances for job: %w", err)
+		// 	}
+
+		// 	// start autoscalar
+		// 	err = extServices.Gshim.SubmitBatchJobs(createAutoscalerCommand, cluster, clusterID, []*backend.BatchJobsToSubmit{{InstanceCount: 1, IsPreemptable: false, ShouldLinger: true}})
+		// 	if err != nil {
+		// 		return nil, fmt.Errorf("Could not create job for autoscaler: %w", err)
+		// 	}
+		// } else if err != nil {
+		// 	return nil, fmt.Errorf("Failed to fetch batch job information for autoscaler: %w", err)
+		// }
+
+		// todo: add check to see if it's job is running or has failed. If it failed, delete and resubmit
+	}
+
+	// todo: poll: 1. is autoscaler running? (if not, report an error. Should never be preempted and should keep running as long as tasks need running) 2. are task(s) still running?
+
 	// Poll until the task reaches a terminal state.
 	var finalTask *task_queue.Task
 	for {
@@ -320,6 +415,19 @@ func ExecuteSubmit(req *DevSubmitRequest) (*task_queue.Task, error) {
 			break
 		}
 		log.Printf("Task %s status: %s — waiting...", task.TaskID, t.Status)
+
+		if useAutoscaler {
+			// if we're using the autoscaler, confirm its still running/pending. If it fails or disappears, something has
+			// done wrong as it is running on a non-preemtable instance
+			isRunning, err := isAutoscalarRunning()
+			if err != nil {
+				return nil, fmt.Errorf("Failed to check for autoscaler: %w", err)
+			}
+			if !isRunning {
+				return nil, fmt.Errorf("Autoscaler unexpectedly exited")
+			}
+		}
+
 		time.Sleep(1 * time.Second)
 	}
 

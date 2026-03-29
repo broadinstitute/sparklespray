@@ -11,6 +11,8 @@ import (
 	"github.com/alicebob/miniredis/v2/proto"
 	"github.com/broadinstitute/sparklesworker/backend"
 	"google.golang.org/api/iterator"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 type GCPMethodsForPoll struct {
@@ -94,6 +96,21 @@ func batchStateToBatchJobState(job *batchpb.Job) backend.BatchJobState {
 	default:
 		return backend.Failed
 	}
+}
+
+func (g *GCPMethodsForPoll) GetBatchJobByName(name string) (*backend.BatchJob, error) {
+	job, err := g.batchClient.GetJob(g.ctx, &batchpb.GetJobRequest{Name: name})
+	if err != nil {
+		if status.Code(err) == codes.NotFound {
+			return nil, backend.NoSuchBatchJob
+		}
+		return nil, fmt.Errorf("getting batch job %s: %w", name, err)
+	}
+	instanceCount := 0
+	for _, tg := range job.GetTaskGroups() {
+		instanceCount += int(tg.GetTaskCount())
+	}
+	return &backend.BatchJob{ID: job.GetName(), State: batchStateToBatchJobState(job), RequestedInstances: instanceCount}, nil
 }
 
 func (g *GCPMethodsForPoll) DeleteAllBatchJobs(region, clusterID string) error {

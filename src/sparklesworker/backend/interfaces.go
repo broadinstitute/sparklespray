@@ -2,13 +2,18 @@ package backend
 
 import (
 	"context"
+	"errors"
 
 	"github.com/broadinstitute/sparklesworker/task_queue"
 )
 
+// NoSuchBatchJob is returned by GetBatchJobByName when the named job does not exist.
+var NoSuchBatchJob = errors.New("no such batch job")
+
 type CloudMethodsForPoll interface {
 	ListRunningInstances(clusterID string, region string) ([]string, error)
 	ListBatchJobs(region, clusterID string) ([]*BatchJob, error)
+	GetBatchJobByName(name string) (*BatchJob, error)
 	SubmitBatchJobs(CreateWorkerCommand CreateWorkerCommandCallback, cluster *Cluster, clusterID string, requests []*BatchJobsToSubmit) error
 	DeleteAllBatchJobs(region, clusterID string) error
 }
