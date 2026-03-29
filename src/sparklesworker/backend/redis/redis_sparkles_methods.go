@@ -155,7 +155,7 @@ func getAllTasks(ctx context.Context, client *redis.Client) ([]task_queue.Task, 
 	}
 	for i, data := range records {
 		if err := json.Unmarshal(data, &tasks[i]); err != nil {
-			return nil, fmt.Errorf("Could not parse task: %s, data")
+			return nil, fmt.Errorf("Could not parse task: %s", data)
 		}
 	}
 	return tasks, nil

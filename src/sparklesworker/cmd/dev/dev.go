@@ -367,6 +367,13 @@ func ExecuteSubmit(req *DevSubmitRequest) (*task_queue.Task, error) {
 	}
 
 	if useAutoscaler {
+		if req.Cluster == nil {
+			log.Printf("Could not start autoscaler because config is missing")
+			useAutoscaler = false
+		}
+	}
+
+	if useAutoscaler {
 		autoscaleConfig := &AutoscaleConfig{
 			project:        req.ProjectID,
 			database:       req.Database,
