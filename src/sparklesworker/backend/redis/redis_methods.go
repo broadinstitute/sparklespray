@@ -20,32 +20,32 @@ type redisBatchJob struct {
 	WorkerCommandArgs []string              `json:"worker_command_args"`
 }
 
-// RedisMethodsForPoll is a Redis-backed implementation of CloudMethodsForPoll
+// LocalWorkerPool is a Redis-backed implementation of WorkerPool
 // intended for local testing only.
 //
 // Key layout:
 //
 //	"batch_job:{id}" → JSON-encoded redisBatchJob
-type RedisMethodsForPoll struct {
+type LocalWorkerPool struct {
 	client *redis.Client
 	ctx    context.Context
 }
 
-func NewRedisMethodsForPoll(ctx context.Context, client *redis.Client) *RedisMethodsForPoll {
-	return &RedisMethodsForPoll{client: client, ctx: ctx}
+func NewLocalWorkerPool(ctx context.Context, client *redis.Client) *LocalWorkerPool {
+	return &LocalWorkerPool{client: client, ctx: ctx}
 }
 
-func (r *RedisMethodsForPoll) jobKey(id string) string {
+func (r *LocalWorkerPool) jobKey(id string) string {
 	return "batch_job:" + id
 }
 
 // ListRunningInstances returns an empty list — no real GCE instances exist in
 // local testing, so all claimed tasks will appear orphaned. Need to explictly deal with that in autosizer.
-func (r *RedisMethodsForPoll) ListRunningInstances(clusterID string, region string) ([]string, error) {
+func (r *LocalWorkerPool) ListRunningInstances(clusterID string, region string) ([]string, error) {
 	return nil, nil
 }
 
-func (r *RedisMethodsForPoll) SubmitBatchJobs(CreateWorkerCommand backend.CreateWorkerCommandCallback, cluster *backend.Cluster, clusterID string, requests []*backend.BatchJobsToSubmit) error {
+func (r *LocalWorkerPool) SubmitBatchJobs(CreateWorkerCommand backend.CreateWorkerCommandCallback, cluster *backend.Cluster, clusterID string, requests []*backend.BatchJobsToSubmit) error {
 	for i, req := range requests {
 
 		job := &redisBatchJob{
@@ -71,7 +71,7 @@ func (r *RedisMethodsForPoll) SubmitBatchJobs(CreateWorkerCommand backend.Create
 
 // nextID returns a monotonically incrementing integer for the cluster by
 // incrementing a counter key in Redis.
-func (r *RedisMethodsForPoll) nextID(clusterID string) int64 {
+func (r *LocalWorkerPool) nextID(clusterID string) int64 {
 	n, _ := r.client.Incr(r.ctx, "batch_job_counter:"+clusterID).Result()
 	return n
 }
@@ -90,7 +90,7 @@ func getAllBatchJobs(ctx context.Context, client *redis.Client) ([]redisBatchJob
 	return jobs, nil
 }
 
-func (r *RedisMethodsForPoll) ListBatchJobs(region, clusterID string) ([]*backend.BatchJob, error) {
+func (r *LocalWorkerPool) ListBatchJobs(region, clusterID string) ([]*backend.BatchJob, error) {
 	all, err := getAllBatchJobs(r.ctx, r.client)
 	if err != nil {
 		return nil, fmt.Errorf("listing batch jobs for cluster %s: %w", clusterID, err)
@@ -107,7 +107,7 @@ func (r *RedisMethodsForPoll) ListBatchJobs(region, clusterID string) ([]*backen
 	return jobs, nil
 }
 
-func (r *RedisMethodsForPoll) PutSingletonBatchJob(name, region, machineType string, bootVolumeInGB int64, bootVolumeType, dockerImage string, cmd []string) error {
+func (r *LocalWorkerPool) PutSingletonBatchJob(name, region, machineType string, bootVolumeInGB int64, bootVolumeType, dockerImage string, cmd []string) error {
 	// Delete existing job if present
 	r.client.Del(r.ctx, r.jobKey(name))
 
@@ -129,7 +129,7 @@ func (r *RedisMethodsForPoll) PutSingletonBatchJob(name, region, machineType str
 	return nil
 }
 
-func (r *RedisMethodsForPoll) GetBatchJobByName(name string) (*backend.BatchJob, error) {
+func (r *LocalWorkerPool) GetBatchJobByName(name string) (*backend.BatchJob, error) {
 	data, err := r.client.Get(r.ctx, r.jobKey(name)).Bytes()
 	if err == redis.Nil {
 		return nil, backend.NoSuchBatchJob
@@ -144,7 +144,7 @@ func (r *RedisMethodsForPoll) GetBatchJobByName(name string) (*backend.BatchJob,
 	return &backend.BatchJob{ID: job.ID, State: job.State, RequestedInstances: job.InstanceCount}, nil
 }
 
-func (r *RedisMethodsForPoll) DeleteAllBatchJobs(region, clusterID string) error {
+func (r *LocalWorkerPool) DeleteAllBatchJobs(region, clusterID string) error {
 	all, err := getAllBatchJobs(r.ctx, r.client)
 	if err != nil {
 		return fmt.Errorf("listing batch jobs for cluster %s: %w", clusterID, err)

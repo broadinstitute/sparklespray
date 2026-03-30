@@ -214,12 +214,12 @@ func submit(c *cli.Context) error {
 
 	log.Printf("Submitting job %s to cluster %s", job.Name, job.ClusterID)
 
-	_, err = extServices.Sshim.GetClusterConfig(job.ClusterID)
+	_, err = extServices.Cluster.GetClusterConfig(job.ClusterID)
 	if err != nil {
 		return fmt.Errorf("Attempted to submit job to cluster %s but got error fetching its config: %w", job.ClusterID, err)
 	}
 
-	queue := extServices.NewQueue(job.ClusterID)
+	queue := extServices.NewTaskStore(job.ClusterID)
 	channel := extServices.Channel
 	defer extServices.Close()
 

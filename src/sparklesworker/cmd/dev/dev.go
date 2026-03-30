@@ -149,7 +149,7 @@ func devSubmit(c *cli.Context) error {
 const AutoscalerBatchJob = "sparkles-autoscaler"
 
 func isAutoscalarRunning(ext *backend.ExternalServices) (bool, error) {
-	batchjob, err := ext.Gshim.GetBatchJobByName(AutoscalerBatchJob)
+	batchjob, err := ext.Compute.GetBatchJobByName(AutoscalerBatchJob)
 	if err != nil {
 		return false, fmt.Errorf("Checking for autoscaler failed: %w", err)
 	}
@@ -189,7 +189,7 @@ func ensureAutoscalarRunning(ext *backend.ExternalServices, sparklesWorkerDocker
 	cmd = append(cmd, "--pollInterval", fmt.Sprintf("%ds", autoscaleConfig.pollInterval/time.Second))
 	cmd = append(cmd, "--maxIdle", fmt.Sprintf("%ds", autoscaleConfig.maxIdle/time.Second))
 
-	return ext.Gshim.PutSingletonBatchJob(AutoscalerBatchJob, autoscaleConfig.region, autoscaleConfig.machineType, int64(autoscaleConfig.bootVolumeInGB), autoscaleConfig.bootVolumeType, sparklesWorkerDockerImage, cmd)
+	return ext.Compute.PutSingletonBatchJob(AutoscalerBatchJob, autoscaleConfig.region, autoscaleConfig.machineType, int64(autoscaleConfig.bootVolumeInGB), autoscaleConfig.bootVolumeType, sparklesWorkerDockerImage, cmd)
 }
 
 func ExecuteSubmit(req *DevSubmitRequest) (*task_queue.Task, error) {
@@ -328,14 +328,14 @@ func ExecuteSubmit(req *DevSubmitRequest) (*task_queue.Task, error) {
 				MaxBundleSize:   req.AetherMaxBundleSize,
 				Workers:         req.AetherWorkers},
 		}
-		if err := extServices.Sshim.SetClusterConfig(req.ClusterID, cluster); err != nil {
+		if err := extServices.Cluster.SetClusterConfig(req.ClusterID, cluster); err != nil {
 			return nil, fmt.Errorf("storing cluster config: %w", err)
 		}
 	}
 
 	useAutoscaler := true
 	if job.ClusterID != "local" {
-		_, err = extServices.Sshim.GetClusterConfig(job.ClusterID)
+		_, err = extServices.Cluster.GetClusterConfig(job.ClusterID)
 		if err != nil {
 			return nil, fmt.Errorf("Attempted to submit job to cluster %s but got error fetching its config: %w", job.ClusterID, err)
 		}
@@ -343,7 +343,7 @@ func ExecuteSubmit(req *DevSubmitRequest) (*task_queue.Task, error) {
 		// if the cluster ID isn't local, make sure we have an autoscaler job running (starting one if necessary)
 	}
 
-	queue := extServices.NewQueue(job.ClusterID)
+	queue := extServices.NewTaskStore(job.ClusterID)
 	channel := extServices.Channel
 	taskCache := extServices.TaskCache
 
@@ -394,7 +394,7 @@ func ExecuteSubmit(req *DevSubmitRequest) (*task_queue.Task, error) {
 		if !isRunning {
 			// if it'll take a while for the autoscaler to start, so do a round of autoscaling in this process
 			// before we start the autoscaler.
-			autoscaler.Poll(job.ClusterID, extServices.Gshim, extServices.Sshim, extServices.CreateWorkerCommand)
+			autoscaler.Poll(job.ClusterID, extServices.Compute, extServices.Cluster, extServices.Tasks, extServices.CreateWorkerCommand)
 
 			err := ensureAutoscalarRunning(extServices, sparklesWorkerDockerImage, autoscaleConfig)
 			if err != nil {

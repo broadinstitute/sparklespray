@@ -15,7 +15,8 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-type GCPMethodsForPoll struct {
+// GCPWorkerPool implements backend.WorkerPool using Google Cloud Batch and Compute APIs.
+type GCPWorkerPool struct {
 	projectID       string
 	ctx             context.Context
 	instancesClient *compute.InstancesClient
@@ -23,11 +24,11 @@ type GCPMethodsForPoll struct {
 	batchClient     *batch.Client
 }
 
-func (g *GCPMethodsForPoll) getZonesForRegion(region string) ([]string, error) {
+func (g *GCPWorkerPool) getZonesForRegion(region string) ([]string, error) {
 	panic("unimp")
 }
 
-func (g *GCPMethodsForPoll) ListRunningInstances(clusterID string, region string) ([]string, error) {
+func (g *GCPWorkerPool) ListRunningInstances(clusterID string, region string) ([]string, error) {
 	zones, err := g.getZonesForRegion(region)
 	if err != nil {
 		return nil, fmt.Errorf("listing zones in region %s: %w", region, err)
@@ -60,7 +61,7 @@ func (g *GCPMethodsForPoll) ListRunningInstances(clusterID string, region string
 	return instanceNames, nil
 }
 
-func (g *GCPMethodsForPoll) ListBatchJobs(region, clusterID string) ([]*backend.BatchJob, error) {
+func (g *GCPWorkerPool) ListBatchJobs(region, clusterID string) ([]*backend.BatchJob, error) {
 	req := &batchpb.ListJobsRequest{
 		Parent: fmt.Sprintf("projects/%s/locations/%s", g.projectID, region),
 		Filter: fmt.Sprintf(`labels.sparkles-cluster = "%s"`, clusterID),
@@ -98,7 +99,7 @@ func batchStateToBatchJobState(job *batchpb.Job) backend.BatchJobState {
 	}
 }
 
-func (g *GCPMethodsForPoll) PutSingletonBatchJob(name, region, machineType string, bootVolumeInGB int64, bootVolumeType, dockerImage string, cmd []string) error {
+func (g *GCPWorkerPool) PutSingletonBatchJob(name, region, machineType string, bootVolumeInGB int64, bootVolumeType, dockerImage string, cmd []string) error {
 	fullName := fmt.Sprintf("projects/%s/locations/%s/jobs/%s", g.projectID, region, name)
 
 	// Delete existing job if present
@@ -132,7 +133,7 @@ func (g *GCPMethodsForPoll) PutSingletonBatchJob(name, region, machineType strin
 	return nil
 }
 
-func (g *GCPMethodsForPoll) GetBatchJobByName(name string) (*backend.BatchJob, error) {
+func (g *GCPWorkerPool) GetBatchJobByName(name string) (*backend.BatchJob, error) {
 	job, err := g.batchClient.GetJob(g.ctx, &batchpb.GetJobRequest{Name: name})
 	if err != nil {
 		if status.Code(err) == codes.NotFound {
@@ -147,7 +148,7 @@ func (g *GCPMethodsForPoll) GetBatchJobByName(name string) (*backend.BatchJob, e
 	return &backend.BatchJob{ID: job.GetName(), State: batchStateToBatchJobState(job), RequestedInstances: instanceCount}, nil
 }
 
-func (g *GCPMethodsForPoll) DeleteAllBatchJobs(region, clusterID string) error {
+func (g *GCPWorkerPool) DeleteAllBatchJobs(region, clusterID string) error {
 	jobs, err := g.ListBatchJobs(region, clusterID)
 	if err != nil {
 		return err
@@ -164,7 +165,7 @@ func (g *GCPMethodsForPoll) DeleteAllBatchJobs(region, clusterID string) error {
 	return nil
 }
 
-func (g *GCPMethodsForPoll) SubmitBatchJobs(CreateWorkerCommand backend.CreateWorkerCommandCallback, cluster *backend.Cluster, clusterID string, requests []*backend.BatchJobsToSubmit) error {
+func (g *GCPWorkerPool) SubmitBatchJobs(CreateWorkerCommand backend.CreateWorkerCommandCallback, cluster *backend.Cluster, clusterID string, requests []*backend.BatchJobsToSubmit) error {
 	for _, req := range requests {
 		commandArgs := CreateWorkerCommand(clusterID, req.ShouldLinger, cluster.AetherConfig)
 		jobSpec := &JobSpec{

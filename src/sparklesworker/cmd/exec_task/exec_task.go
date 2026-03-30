@@ -162,7 +162,7 @@ func execTask(c *cli.Context) error {
 	if (redisAddr == "") == (projectId == "") {
 		return fmt.Errorf("exactly one of --redisAddr or --projectId is required")
 	}
-	var channel backend.ExtChannel
+	var channel backend.MessageBus
 	if redisAddr != "" {
 		redisClient := redis.NewClient(&redis.Options{Addr: redisAddr})
 		channel = redis_backend.NewRedisChannel(redisClient)

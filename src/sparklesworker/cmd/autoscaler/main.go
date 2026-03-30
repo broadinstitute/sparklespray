@@ -61,7 +61,7 @@ func run(c *cli.Context) error {
 
 	idleSince := time.Now()
 	for {
-		clusterIDs, err := extServices.Sshim.GetActiveClusterIDs()
+		clusterIDs, err := extServices.Tasks.GetClusterIDsFromActiveTasks()
 		if err != nil {
 			return fmt.Errorf("Couldn't find active clusters: %s", err)
 		}
@@ -75,7 +75,7 @@ func run(c *cli.Context) error {
 		}
 
 		for _, clusterID := range clusterIDs {
-			if err := Poll(clusterID, extServices.Gshim, extServices.Sshim, extServices.CreateWorkerCommand); err != nil {
+			if err := Poll(clusterID, extServices.Compute, extServices.Cluster, extServices.Tasks, extServices.CreateWorkerCommand); err != nil {
 				return fmt.Errorf("poll (clusterID=%s) error: %v\n", clusterID, err)
 			}
 		}

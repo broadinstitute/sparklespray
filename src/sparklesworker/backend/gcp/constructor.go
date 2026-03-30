@@ -9,7 +9,6 @@ import (
 	compute "cloud.google.com/go/compute/apiv1"
 	"cloud.google.com/go/firestore"
 	"github.com/broadinstitute/sparklesworker/backend"
-	"github.com/broadinstitute/sparklesworker/task_queue"
 )
 
 func CreateGCPServices(ctx context.Context, projectID string, database string) (*backend.ExternalServices, error) {
@@ -31,27 +30,30 @@ func CreateGCPServices(ctx context.Context, projectID string, database string) (
 	}
 	defer batchClient.Close()
 
-	gshim := &GCPMethodsForPoll{
+	compute := &GCPWorkerPool{
 		projectID:       projectID,
 		ctx:             ctx,
 		instancesClient: instancesClient,
 		batchClient:     batchClient,
 	}
 
-	sshim := &FirestoreSparklesMethodsForPoll{client: firestoreClient, ctx: ctx}
+	cluster := &FirestoreClusterStore{client: firestoreClient, ctx: ctx}
+	tasks := newFirestoreTaskStoreGlobal(ctx, firestoreClient)
+	taskCache := NewFirestoreTaskCache(firestoreClient)
 
 	return &backend.ExternalServices{
 		Channel: channel,
-		NewQueue: func(clusterID string) task_queue.TaskQueue {
-			return task_queue.NewFirestoreQueue(firestoreClient, clusterID, "", 0, 0)
+		NewTaskStore: func(clusterID string) backend.TaskStore {
+			return NewFirestoreTaskStore(firestoreClient, clusterID, "", 0, 0)
 		},
-		Close: func() { firestoreClient.Close() },
-		Gshim: gshim,
-		Sshim: sshim,
+		TaskCache: taskCache,
+		Close:     func() { firestoreClient.Close() },
+		Compute:   compute,
+		Cluster:   cluster,
+		Tasks:     tasks,
 		CreateWorkerCommand: func(clusterID string, shouldLinger bool, aetherConfig *backend.AetherConfig) []string {
 			return backend.CreateWorkerCommand(clusterID, shouldLinger, []string{
 				"--projectId", projectID,
 				"--database", database}, aetherConfig)
 		}}, nil
-
 }

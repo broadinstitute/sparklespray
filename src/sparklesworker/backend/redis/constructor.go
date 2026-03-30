@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/broadinstitute/sparklesworker/backend"
-	"github.com/broadinstitute/sparklesworker/task_queue"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -16,10 +15,11 @@ func CreateMockServices(ctx context.Context, redisAddr string, startMockBatchAPI
 		return nil, fmt.Errorf("connecting to Redis at %s: %w", redisAddr, err)
 	}
 	channel := NewRedisChannel(redisClient)
-	taskCache := task_queue.NewRedisTaskCache(redisClient)
+	taskCache := NewRedisTaskCache(redisClient)
 
-	gshim := NewRedisMethodsForPoll(ctx, redisClient)
-	sshim := NewRedisSparklesMethodsForPoll(ctx, redisClient)
+	compute := NewLocalWorkerPool(ctx, redisClient)
+	cluster := NewRedisClusterStore(ctx, redisClient)
+	tasks := newRedisTaskStoreGlobal(ctx, redisClient)
 
 	if startMockBatchAPI {
 		StartMockBatchAPI(ctx, redisClient, 500*time.Millisecond)
@@ -27,13 +27,14 @@ func CreateMockServices(ctx context.Context, redisAddr string, startMockBatchAPI
 
 	return &backend.ExternalServices{
 		Channel: channel,
-		NewQueue: func(clusterID string) task_queue.TaskQueue {
-			return task_queue.NewRedisQueue(redisClient, clusterID, "", 0, 0)
+		NewTaskStore: func(clusterID string) backend.TaskStore {
+			return NewRedisTaskStore(redisClient, clusterID, "", 0, 0)
 		},
 		TaskCache: taskCache,
 		Close:     func() { redisClient.Close() },
-		Gshim:     gshim,
-		Sshim:     sshim,
+		Compute:   compute,
+		Cluster:   cluster,
+		Tasks:     tasks,
 		CreateWorkerCommand: func(clusterID string, shouldLinger bool, aetherConfig *backend.AetherConfig) []string {
 			return backend.CreateWorkerCommand(clusterID, false, []string{
 				"--localhost",

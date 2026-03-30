@@ -3,14 +3,13 @@ package backend
 import (
 	"context"
 	"errors"
-
-	"github.com/broadinstitute/sparklesworker/task_queue"
 )
 
 // NoSuchBatchJob is returned by GetBatchJobByName when the named job does not exist.
 var NoSuchBatchJob = errors.New("no such batch job")
 
-type CloudMethodsForPoll interface {
+// WorkerPool manages compute resources (batch jobs and VM instances).
+type WorkerPool interface {
 	ListRunningInstances(clusterID string, region string) ([]string, error)
 	ListBatchJobs(region, clusterID string) ([]*BatchJob, error)
 	GetBatchJobByName(name string) (*BatchJob, error)
@@ -19,34 +18,58 @@ type CloudMethodsForPoll interface {
 	DeleteAllBatchJobs(region, clusterID string) error
 }
 
-type SparklesMethodsForPoll interface {
+// ClusterStore manages cluster configuration and monitor state.
+type ClusterStore interface {
 	UpdateClusterMonitorState(clusterID string, state *MonitorState) error
-	GetNonCompleteTaskCount(clusterID string) (int, error)
-	GetClaimedTasks(clusterID string) ([]*task_queue.Task, error)
-	MarkTasksPending(tasks []*task_queue.Task) error
 	GetClusterConfig(clusterID string) (*Cluster, error)
 	SetClusterConfig(clusterID string, cluster Cluster) error
+}
+
+// TaskStore manages task and job state. It covers both per-cluster worker
+// operations (ClaimTask, AtomicUpdateTask, etc.) and cross-cluster monitor
+// queries (GetClaimedTasks, GetNonCompleteTaskCount, etc.).
+type TaskStore interface {
+	// Cross-cluster query methods (clusterID passed as parameter)
+	GetClusterIDsFromActiveTasks() ([]string, error)
+	GetNonCompleteTaskCount(clusterID string) (int, error)
+	GetClaimedTasks(clusterID string) ([]*Task, error)
+	MarkTasksPending(tasks []*Task) error
 	GetPendingTaskCount(clusterID string) (int, error)
 	GetTasksCompletedBy(batchJobID string) int
-	GetActiveClusterIDs() ([]string, error)
+
+	// Per-cluster worker methods (cluster bound at construction time)
+	ClaimTask(ctx context.Context) (*Task, error)
+	IsJobKilled(ctx context.Context, jobID string) (bool, error)
+	AtomicUpdateTask(ctx context.Context, taskID string, mutateTaskCallback func(task *Task) bool) (*Task, error)
+	GetTask(ctx context.Context, taskID string) (*Task, error)
+	AddJob(ctx context.Context, job *Job, tasks []*Task) error
+}
+
+// TaskCache stores and retrieves cached task execution results.
+type TaskCache interface {
+	GetCachedEntry(ctx context.Context, cacheKey string) (*CachedTaskEntry, error)
+	SetCachedEntry(ctx context.Context, entry *CachedTaskEntry) error
 }
 
 type CreateWorkerCommandCallback func(clusterID string, shouldLinger bool, aetherConfig *AetherConfig) []string
 
+// ExternalServices bundles all backend service handles for a deployment
+// (either GCP production or local Redis testing).
 type ExternalServices struct {
-	Channel             ExtChannel
-	NewQueue            func(clusterID string) task_queue.TaskQueue
-	TaskCache           task_queue.TaskCache
+	Channel             MessageBus
+	NewTaskStore        func(clusterID string) TaskStore
+	TaskCache           TaskCache
 	Close               func()
-	Gshim               CloudMethodsForPoll
-	Sshim               SparklesMethodsForPoll
+	Compute             WorkerPool
+	Cluster             ClusterStore
+	Tasks               TaskStore
 	CreateWorkerCommand CreateWorkerCommandCallback
 }
 
-// ExtChannel is an abstract publish/subscribe mechanism. Implementations
+// MessageBus is an abstract publish/subscribe mechanism. Implementations
 // include PubSubChannel (Google Cloud Pub/Sub) and RedisChannel (Redis
 // pub/sub), as well as NullChannel for testing/no-op use.
-type ExtChannel interface {
+type MessageBus interface {
 	// Subscribe listens on topicName and calls callback for each received
 	// message. It blocks until the context is cancelled or an error occurs.
 	Subscribe(ctx context.Context, topicName string, callback func(message []byte)) error

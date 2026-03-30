@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/broadinstitute/sparklesworker/backend"
-	"github.com/broadinstitute/sparklesworker/task_queue"
 )
 
 // ---- determineBatchJobsToCreate ----
@@ -145,43 +144,43 @@ func TestDetermineNodesToCreate(t *testing.T) {
 // ---- findOrphanedTasks ----
 
 func TestFindOrphanedTasks(t *testing.T) {
-	task := func(id, owner string) *task_queue.Task {
-		return &task_queue.Task{TaskID: id, OwnedByWorkerID: owner}
+	task := func(id, owner string) *backend.Task {
+		return &backend.Task{TaskID: id, OwnedByWorkerID: owner}
 	}
 
 	tests := []struct {
 		name             string
-		claimed          []*task_queue.Task
+		claimed          []*backend.Task
 		runningInstances []string
 		wantIDs          []string
 	}{
 		{
 			name:             "all tasks have running owners",
-			claimed:          []*task_queue.Task{task("t1", "i1"), task("t2", "i2")},
+			claimed:          []*backend.Task{task("t1", "i1"), task("t2", "i2")},
 			runningInstances: []string{"i1", "i2"},
 			wantIDs:          nil,
 		},
 		{
 			name:             "all tasks have gone owners",
-			claimed:          []*task_queue.Task{task("t1", "i1"), task("t2", "i2")},
+			claimed:          []*backend.Task{task("t1", "i1"), task("t2", "i2")},
 			runningInstances: []string{},
 			wantIDs:          []string{"t1", "t2"},
 		},
 		{
 			name:             "mixed one running one gone",
-			claimed:          []*task_queue.Task{task("t1", "i1"), task("t2", "i2")},
+			claimed:          []*backend.Task{task("t1", "i1"), task("t2", "i2")},
 			runningInstances: []string{"i1"},
 			wantIDs:          []string{"t2"},
 		},
 		{
 			name:             "empty claimed tasks",
-			claimed:          []*task_queue.Task{},
+			claimed:          []*backend.Task{},
 			runningInstances: []string{"i1"},
 			wantIDs:          nil,
 		},
 		{
 			name:             "empty running instances all orphaned",
-			claimed:          []*task_queue.Task{task("t1", "i1")},
+			claimed:          []*backend.Task{task("t1", "i1")},
 			runningInstances: []string{},
 			wantIDs:          []string{"t1"},
 		},
@@ -389,7 +388,7 @@ func defaultSparkles() *mockSparkles {
 		},
 		pendingTaskCount:     0,
 		nonCompleteTaskCount: 0,
-		claimedTasks:         []*task_queue.Task{},
+		claimedTasks:         []*backend.Task{},
 		tasksCompletedBy:     map[string]int{},
 	}
 }
@@ -406,7 +405,7 @@ func TestPoll(t *testing.T) {
 		sparkles := defaultSparkles()
 		sparkles.nonCompleteTaskCount = 3
 
-		err := Poll("cluster1", cloud, sparkles, nil)
+		err := Poll("cluster1", cloud, sparkles, sparkles, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -426,7 +425,7 @@ func TestPoll(t *testing.T) {
 		sparkles := defaultSparkles()
 		sparkles.getClusterConfigErr = errors.New("config fetch failed")
 
-		err := Poll("cluster1", cloud, sparkles, nil)
+		err := Poll("cluster1", cloud, sparkles, sparkles, nil)
 		if err == nil {
 			t.Fatal("expected error")
 		}
@@ -439,12 +438,12 @@ func TestPoll(t *testing.T) {
 		}
 
 		sparkles := defaultSparkles()
-		sparkles.claimedTasks = []*task_queue.Task{
+		sparkles.claimedTasks = []*backend.Task{
 			{TaskID: "t1", OwnedByWorkerID: "i-gone"},
 			{TaskID: "t2", OwnedByWorkerID: "i-running"},
 		}
 
-		err := Poll("cluster1", cloud, sparkles, nil)
+		err := Poll("cluster1", cloud, sparkles, sparkles, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -480,7 +479,7 @@ func TestPoll(t *testing.T) {
 		// batchJobRequests=4 so expectedJobCount matches
 		sparkles.clusterConfig.MonitorState = `{"batchJobRequests":4}`
 
-		err := Poll("cluster1", cloud, sparkles, nil)
+		err := Poll("cluster1", cloud, sparkles, sparkles, nil)
 		if err == nil {
 			t.Fatal("expected error due to suspicious failures")
 		}
@@ -502,7 +501,7 @@ func TestPoll(t *testing.T) {
 		sparkles := defaultSparkles()
 		sparkles.nonCompleteTaskCount = 0
 
-		err := Poll("cluster1", cloud, sparkles, nil)
+		err := Poll("cluster1", cloud, sparkles, sparkles, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -517,7 +516,7 @@ func TestPoll(t *testing.T) {
 		sparkles := defaultSparkles()
 		sparkles.nonCompleteTaskCount = 5
 
-		err := Poll("cluster1", cloud, sparkles, nil)
+		err := Poll("cluster1", cloud, sparkles, sparkles, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
