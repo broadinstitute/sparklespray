@@ -27,10 +27,7 @@ func CreateMockServices(ctx context.Context, redisAddr string, startMockBatchAPI
 
 	return &backend.ExternalServices{
 		Channel: channel,
-		NewTaskStore: func(clusterID string) backend.TaskStore {
-			return NewRedisTaskStore(redisClient, clusterID, "", 0, 0)
-		},
-		TaskCache: taskCache,
+			TaskCache: taskCache,
 		Close:     func() { redisClient.Close() },
 		Compute:   compute,
 		Cluster:   cluster,

@@ -37,8 +37,8 @@ type TaskStore interface {
 	GetPendingTaskCount(clusterID string) (int, error)
 	GetTasksCompletedBy(batchJobID string) int
 
-	// Per-cluster worker methods (cluster bound at construction time)
-	ClaimTask(ctx context.Context) (*Task, error)
+	// Per-cluster worker methods
+	ClaimTask(ctx context.Context, clusterID string) (*Task, error)
 	IsJobKilled(ctx context.Context, jobID string) (bool, error)
 	AtomicUpdateTask(ctx context.Context, taskID string, mutateTaskCallback func(task *Task) bool) (*Task, error)
 	GetTask(ctx context.Context, taskID string) (*Task, error)
@@ -56,9 +56,8 @@ type CreateWorkerCommandCallback func(clusterID string, shouldLinger bool, aethe
 // ExternalServices bundles all backend service handles for a deployment
 // (either GCP production or local Redis testing).
 type ExternalServices struct {
-	Channel             MessageBus
-	NewTaskStore        func(clusterID string) TaskStore
-	TaskCache           TaskCache
+	Channel   MessageBus
+	TaskCache TaskCache
 	Close               func()
 	Compute             WorkerPool
 	Cluster             ClusterStore

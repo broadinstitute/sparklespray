@@ -208,7 +208,7 @@ func consume(c *cli.Context) error {
 		taskCache = task_queue.NewFirestoreTaskCache(client)
 	}
 
-	err = consumer.RunLoop(ctx, queue, sleepUntilNotify, executor, options.SleepOnEmpty, options.MaxWaitForNewTasks)
+	err = consumer.RunLoop(ctx, cluster, queue, sleepUntilNotify, executor, options.SleepOnEmpty, options.MaxWaitForNewTasks)
 	if err != nil {
 		log.Printf("consumerRunLoop exited with: %v\n", err)
 		return err

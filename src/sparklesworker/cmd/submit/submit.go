@@ -219,7 +219,7 @@ func submit(c *cli.Context) error {
 		return fmt.Errorf("Attempted to submit job to cluster %s but got error fetching its config: %w", job.ClusterID, err)
 	}
 
-	queue := extServices.NewTaskStore(job.ClusterID)
+	queue := extServices.Tasks
 	channel := extServices.Channel
 	defer extServices.Close()
 
@@ -238,7 +238,7 @@ func submit(c *cli.Context) error {
 			time.Sleep(sleepTime)
 		}
 
-		err = consumer.RunLoop(ctx, queue, sleepUntilNotify, executor, 1*time.Second, 10*time.Second)
+		err = consumer.RunLoop(ctx, job.ClusterID, queue, sleepUntilNotify, executor, 1*time.Second, 10*time.Second)
 		if err != nil {
 			return fmt.Errorf("RunLoop failed: %s", err)
 		}

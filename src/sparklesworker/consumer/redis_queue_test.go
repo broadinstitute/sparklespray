@@ -48,7 +48,7 @@ func TestClaimAndComplete3Tasks(t *testing.T) {
 
 	processed := 0
 	for {
-		task, err := q.ClaimTask(ctx)
+		task, err := q.ClaimTask(ctx, "test-cluster")
 		require.NoError(t, err)
 		if task == nil {
 			break

@@ -343,7 +343,7 @@ func ExecuteSubmit(req *DevSubmitRequest) (*task_queue.Task, error) {
 		// if the cluster ID isn't local, make sure we have an autoscaler job running (starting one if necessary)
 	}
 
-	queue := extServices.NewTaskStore(job.ClusterID)
+	queue := extServices.Tasks
 	channel := extServices.Channel
 	taskCache := extServices.TaskCache
 
@@ -361,7 +361,7 @@ func ExecuteSubmit(req *DevSubmitRequest) (*task_queue.Task, error) {
 			return consumer.ExecuteTask(ctx, &aetherCfg, taskId, taskSpec, req.Dir, req.CacheDir, req.TasksDir, nil, taskCache, expiry)
 		}
 		sleepUntilNotify := func(d time.Duration) { time.Sleep(d) }
-		if err := consumer.RunLoop(ctx, queue, sleepUntilNotify, executor, 1*time.Second, req.RunLoopMaxWait); err != nil {
+		if err := consumer.RunLoop(ctx, job.ClusterID, queue, sleepUntilNotify, executor, 1*time.Second, req.RunLoopMaxWait); err != nil {
 			return nil, fmt.Errorf("RunLoop failed: %w", err)
 		}
 	}

@@ -14,7 +14,7 @@ type FirestoreQueue = gcp_backend.FirestoreTaskStore
 
 // NewFirestoreQueue creates a per-cluster FirestoreTaskStore for worker use.
 func NewFirestoreQueue(client *firestore.Client, cluster string, workerID string, initialClaimRetry time.Duration, claimTimeout time.Duration) *FirestoreQueue {
-	return gcp_backend.NewFirestoreTaskStore(client, cluster, workerID, initialClaimRetry, claimTimeout)
+	return gcp_backend.NewFirestoreTaskStore(client, workerID, initialClaimRetry, claimTimeout)
 }
 
 // Cluster holds the Pub/Sub topic names for a cluster (compatibility alias).

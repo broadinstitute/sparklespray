@@ -96,7 +96,7 @@ func (m *mockSparkles) GetTasksCompletedBy(batchJobID string) int {
 	return m.tasksCompletedBy[batchJobID]
 }
 
-func (m *mockSparkles) ClaimTask(ctx context.Context) (*backend.Task, error) {
+func (m *mockSparkles) ClaimTask(ctx context.Context, clusterID string) (*backend.Task, error) {
 	return nil, nil
 }
 

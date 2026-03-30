@@ -13,7 +13,7 @@ type RedisQueue = redis_backend.RedisTaskStore
 
 // NewRedisQueue creates a per-cluster RedisTaskStore for worker use.
 func NewRedisQueue(client *redis.Client, cluster string, workerID string, initialClaimRetry time.Duration, claimTimeout time.Duration) *RedisQueue {
-	return redis_backend.NewRedisTaskStore(client, cluster, workerID, initialClaimRetry, claimTimeout)
+	return redis_backend.NewRedisTaskStore(client, workerID, initialClaimRetry, claimTimeout)
 }
 
 // RedisTaskCache is an alias for the implementation in backend/redis.

@@ -23,14 +23,14 @@ type Options struct {
 
 type Executor func(taskId string, taskSpec *task_queue.TaskSpec, expiry time.Time) (*ExecuteTaskResult, error)
 
-func RunLoop(ctx context.Context, queue task_queue.TaskQueue, sleepUntilNotify func(sleepTime time.Duration),
+func RunLoop(ctx context.Context, clusterID string, queue task_queue.TaskQueue, sleepUntilNotify func(sleepTime time.Duration),
 	executor Executor, SleepOnEmpty time.Duration, MaxWaitForNewTasks time.Duration) error {
 
 	firstClaim := true
 	lastClaim := time.Now()
 	log.Printf("Starting ConsumerRunLoop, sleeping %v once queue drains", SleepOnEmpty)
 	for {
-		claimed, err := queue.ClaimTask(ctx)
+		claimed, err := queue.ClaimTask(ctx, clusterID)
 		if err != nil {
 			return err
 		}

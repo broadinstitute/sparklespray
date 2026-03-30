@@ -18,19 +18,17 @@ import (
 type RedisTaskStore struct {
 	client            *redis.Client
 	ctx               context.Context
-	cluster           string
 	workerID          string
 	InitialClaimRetry time.Duration
 	ClaimTimeout      time.Duration
 	WatchdogNotifier  func()
 }
 
-// NewRedisTaskStore creates a per-cluster RedisTaskStore for worker use.
-func NewRedisTaskStore(client *redis.Client, cluster string, workerID string, initialClaimRetry time.Duration, claimTimeout time.Duration) *RedisTaskStore {
+// NewRedisTaskStore creates a RedisTaskStore for worker use.
+func NewRedisTaskStore(client *redis.Client, workerID string, initialClaimRetry time.Duration, claimTimeout time.Duration) *RedisTaskStore {
 	return &RedisTaskStore{
 		client:            client,
 		ctx:               context.Background(),
-		cluster:           cluster,
 		workerID:          workerID,
 		InitialClaimRetry: initialClaimRetry,
 		ClaimTimeout:      claimTimeout,
@@ -167,7 +165,7 @@ func (q *RedisTaskStore) scanTasksWithFilter(clusterID string, keep func(*backen
 
 // ---- Per-cluster worker methods ----
 
-func (q *RedisTaskStore) ClaimTask(ctx context.Context) (*backend.Task, error) {
+func (q *RedisTaskStore) ClaimTask(ctx context.Context, clusterID string) (*backend.Task, error) {
 	maxSleepTime := q.InitialClaimRetry
 	claimStart := time.Now()
 
@@ -176,7 +174,7 @@ func (q *RedisTaskStore) ClaimTask(ctx context.Context) (*backend.Task, error) {
 			q.WatchdogNotifier()
 		}
 
-		taskIDs, err := q.scanPendingTaskIDs(ctx)
+		taskIDs, err := q.scanPendingTaskIDs(ctx, clusterID)
 		if err != nil {
 			return nil, err
 		}
@@ -201,7 +199,7 @@ func (q *RedisTaskStore) ClaimTask(ctx context.Context) (*backend.Task, error) {
 	}
 }
 
-func (q *RedisTaskStore) scanPendingTaskIDs(ctx context.Context) ([]string, error) {
+func (q *RedisTaskStore) scanPendingTaskIDs(ctx context.Context, clusterID string) ([]string, error) {
 	var taskIDs []string
 	var cursor uint64
 	for {
@@ -218,7 +216,7 @@ func (q *RedisTaskStore) scanPendingTaskIDs(ctx context.Context) ([]string, erro
 			if err := json.Unmarshal(data, &task); err != nil {
 				continue
 			}
-			if task.Status == backend.StatusPending && task.ClusterID == q.cluster {
+			if task.Status == backend.StatusPending && task.ClusterID == clusterID {
 				taskIDs = append(taskIDs, task.TaskID)
 			}
 		}

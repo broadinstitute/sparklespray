@@ -20,19 +20,17 @@ import (
 type FirestoreTaskStore struct {
 	client            *firestore.Client
 	ctx               context.Context
-	cluster           string
 	workerID          string
 	InitialClaimRetry time.Duration
 	ClaimTimeout      time.Duration
 	WatchdogNotifier  func() // Called periodically during long operations
 }
 
-// NewFirestoreTaskStore creates a per-cluster FirestoreTaskStore for worker use.
-func NewFirestoreTaskStore(client *firestore.Client, cluster string, workerID string, initialClaimRetry time.Duration, claimTimeout time.Duration) *FirestoreTaskStore {
+// NewFirestoreTaskStore creates a FirestoreTaskStore for worker use.
+func NewFirestoreTaskStore(client *firestore.Client, workerID string, initialClaimRetry time.Duration, claimTimeout time.Duration) *FirestoreTaskStore {
 	return &FirestoreTaskStore{
 		client:            client,
 		ctx:               context.Background(),
-		cluster:           cluster,
 		workerID:          workerID,
 		InitialClaimRetry: initialClaimRetry,
 		ClaimTimeout:      claimTimeout,
@@ -152,7 +150,7 @@ func (q *FirestoreTaskStore) GetTasksCompletedBy(batchJobID string) int {
 
 // ---- Per-cluster worker methods ----
 
-func (q *FirestoreTaskStore) ClaimTask(ctx context.Context) (*backend.Task, error) {
+func (q *FirestoreTaskStore) ClaimTask(ctx context.Context, clusterID string) (*backend.Task, error) {
 	maxSleepTime := q.InitialClaimRetry
 	claimStart := time.Now()
 
@@ -161,7 +159,7 @@ func (q *FirestoreTaskStore) ClaimTask(ctx context.Context) (*backend.Task, erro
 			q.WatchdogNotifier()
 		}
 
-		tasks, err := q.getPendingTasks(ctx, 20)
+		tasks, err := q.getPendingTasks(ctx, clusterID, 20)
 		if err != nil {
 			return nil, err
 		}
@@ -186,9 +184,9 @@ func (q *FirestoreTaskStore) ClaimTask(ctx context.Context) (*backend.Task, erro
 	}
 }
 
-func (q *FirestoreTaskStore) getPendingTasks(ctx context.Context, maxFetch int) ([]*backend.Task, error) {
+func (q *FirestoreTaskStore) getPendingTasks(ctx context.Context, clusterID string, maxFetch int) ([]*backend.Task, error) {
 	docs, err := q.client.Collection(backend.TaskCollection).
-		Where("cluster", "==", q.cluster).
+		Where("cluster", "==", clusterID).
 		Where("status", "==", backend.StatusPending).
 		Limit(maxFetch).
 		Documents(ctx).GetAll()

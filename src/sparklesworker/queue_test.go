@@ -49,7 +49,7 @@ func spawnExecuteTasks(t *testing.T, projectID string, jobID string, index int, 
 		sleepFunc := func(sleepTime time.Duration) {
 			time.Sleep(sleepTime)
 		}
-		err := consumer.RunLoop(ctx, queue, sleepFunc, executor, 1*time.Second, 10*time.Second)
+		err := consumer.RunLoop(ctx, cluster, queue, sleepFunc, executor, 1*time.Second, 10*time.Second)
 		if err != nil {
 			log.Printf("consumerRunLoop returned error: %v\n", err)
 		}

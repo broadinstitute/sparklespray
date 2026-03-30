@@ -43,9 +43,6 @@ func CreateGCPServices(ctx context.Context, projectID string, database string) (
 
 	return &backend.ExternalServices{
 		Channel: channel,
-		NewTaskStore: func(clusterID string) backend.TaskStore {
-			return NewFirestoreTaskStore(firestoreClient, clusterID, "", 0, 0)
-		},
 		TaskCache: taskCache,
 		Close:     func() { firestoreClient.Close() },
 		Compute:   compute,
