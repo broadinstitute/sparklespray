@@ -72,6 +72,7 @@ type DevClusterConfig struct {
 type DevSubmitRequest struct {
 	// --- backend ---
 	ProjectID string `json:"projectID"`
+	Region    string `json:"region"`
 	Database  string `json:"database"`
 	// If non-empty, use the Redis backend instead of Firestore.
 	RedisAddr string `json:"redisAddr"`
@@ -150,7 +151,9 @@ const AutoscalerBatchJob = "sparkles-autoscaler"
 
 func isAutoscalarRunning(ext *backend.ExternalServices) (bool, error) {
 	batchjob, err := ext.Compute.GetBatchJobByName(AutoscalerBatchJob)
-	if err != nil {
+	if err == backend.NoSuchBatchJob {
+		return false, nil
+	} else if err != nil {
 		return false, fmt.Errorf("Checking for autoscaler failed: %w", err)
 	}
 	return batchjob.State == backend.Pending || batchjob.State == backend.Running, nil
@@ -180,14 +183,17 @@ func ensureAutoscalarRunning(ext *backend.ExternalServices, sparklesWorkerDocker
 	if autoscaleConfig.project != "" {
 		cmd = append(cmd, "--project", autoscaleConfig.project)
 	}
+	if autoscaleConfig.region != "" {
+		cmd = append(cmd, "--region", autoscaleConfig.region)
+	}
 	if autoscaleConfig.database != "" {
 		cmd = append(cmd, "--database", autoscaleConfig.database)
 	}
 	if autoscaleConfig.redis != "" {
 		cmd = append(cmd, "--redis", autoscaleConfig.redis)
 	}
-	cmd = append(cmd, "--pollInterval", fmt.Sprintf("%ds", autoscaleConfig.pollInterval/time.Second))
-	cmd = append(cmd, "--maxIdle", fmt.Sprintf("%ds", autoscaleConfig.maxIdle/time.Second))
+	cmd = append(cmd, "--poll-interval", fmt.Sprintf("%ds", autoscaleConfig.pollInterval/time.Second))
+	cmd = append(cmd, "--max-idle", fmt.Sprintf("%ds", autoscaleConfig.maxIdle/time.Second))
 
 	return ext.Compute.PutSingletonBatchJob(AutoscalerBatchJob, autoscaleConfig.region, autoscaleConfig.machineType, int64(autoscaleConfig.bootVolumeInGB), autoscaleConfig.bootVolumeType, sparklesWorkerDockerImage, cmd)
 }
@@ -298,7 +304,7 @@ func ExecuteSubmit(req *DevSubmitRequest) (*task_queue.Task, error) {
 		log.Printf("Using Redis backend at %s", req.RedisAddr)
 		extServices, err = redis_backend.CreateMockServices(ctx, req.RedisAddr, false)
 	} else {
-		extServices, err = gcp_backend.CreateGCPServices(ctx, req.ProjectID, req.Database)
+		extServices, err = gcp_backend.CreateGCPServices(ctx, req.ProjectID, req.Region, req.Database)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("creating backend services: %w", err)
@@ -334,13 +340,15 @@ func ExecuteSubmit(req *DevSubmitRequest) (*task_queue.Task, error) {
 	}
 
 	useAutoscaler := true
-	if job.ClusterID != "local" {
+	// validate cluster ID is valid
+
+	if job.ClusterID == "local" {
+		useAutoscaler = false
+	} else {
 		_, err = extServices.Cluster.GetClusterConfig(job.ClusterID)
 		if err != nil {
 			return nil, fmt.Errorf("Attempted to submit job to cluster %s but got error fetching its config: %w", job.ClusterID, err)
 		}
-		useAutoscaler = false
-		// if the cluster ID isn't local, make sure we have an autoscaler job running (starting one if necessary)
 	}
 
 	queue := extServices.Tasks
@@ -392,6 +400,8 @@ func ExecuteSubmit(req *DevSubmitRequest) (*task_queue.Task, error) {
 		}
 
 		if !isRunning {
+			log.Printf("Autoscaler isn't running. Doing a manual poll and submitting autoscaler to run")
+
 			// if it'll take a while for the autoscaler to start, so do a round of autoscaling in this process
 			// before we start the autoscaler.
 			autoscaler.Poll(job.ClusterID, extServices.Compute, extServices.Cluster, extServices.Tasks, extServices.CreateWorkerCommand)
@@ -400,6 +410,8 @@ func ExecuteSubmit(req *DevSubmitRequest) (*task_queue.Task, error) {
 			if err != nil {
 				return nil, fmt.Errorf("Failed to start autoscaler: %w", err)
 			}
+		} else {
+			log.Printf("Confirmed autoscaler is already running")
 		}
 	}
 

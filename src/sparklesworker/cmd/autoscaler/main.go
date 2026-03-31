@@ -17,6 +17,7 @@ var AutoscalerCmd = cli.Command{
 	Usage: "Create instances of worker based on cluster parameters",
 	Flags: []cli.Flag{
 		cli.StringFlag{Name: "project", Usage: "Google Cloud project ID"},
+		cli.StringFlag{Name: "region", Usage: "Google Cloud region"},
 		cli.DurationFlag{Name: "poll-interval", Usage: "Delay between poll cycles", Value: 5 * time.Second},
 		cli.StringFlag{Name: "redis", Usage: "Redis address for local testing (e.g. localhost:6379); uses GCP Batch API when not set"},
 		cli.StringFlag{Name: "database", Usage: "Firestore database ID (defaults to the project's default database)", Value: "(default)"},
@@ -29,6 +30,7 @@ func run(c *cli.Context) error {
 	projectID := c.String("project")
 	pollInterval := c.Duration("poll-interval")
 	redisAddr := c.String("redis")
+	region := c.String("region")
 	database := c.String("database")
 	maxIdle := c.Duration("max-idle")
 
@@ -51,7 +53,7 @@ func run(c *cli.Context) error {
 
 	} else {
 		fmt.Printf("  mode: GCP\n")
-		extServices, err = gcp_backend.CreateGCPServices(ctx, projectID, database)
+		extServices, err = gcp_backend.CreateGCPServices(ctx, projectID, region, database)
 		if err != nil {
 			return fmt.Errorf("Creating gcp backed services failed: %s", err)
 		}

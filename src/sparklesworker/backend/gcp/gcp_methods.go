@@ -3,12 +3,12 @@ package gcp
 import (
 	"context"
 	"fmt"
+	"log"
 
 	batch "cloud.google.com/go/batch/apiv1"
 	"cloud.google.com/go/batch/apiv1/batchpb"
 	compute "cloud.google.com/go/compute/apiv1"
 	"cloud.google.com/go/compute/apiv1/computepb"
-	"github.com/alicebob/miniredis/v2/proto"
 	"github.com/broadinstitute/sparklesworker/backend"
 	"google.golang.org/api/iterator"
 	"google.golang.org/grpc/codes"
@@ -18,27 +18,19 @@ import (
 // GCPWorkerPool implements backend.WorkerPool using Google Cloud Batch and Compute APIs.
 type GCPWorkerPool struct {
 	projectID       string
+	region          string
+	zones           []string
 	ctx             context.Context
 	instancesClient *compute.InstancesClient
-	zoneClient      *compute.ZoneOperationsClient
 	batchClient     *batch.Client
 }
 
-func (g *GCPWorkerPool) getZonesForRegion(region string) ([]string, error) {
-	panic("unimp")
-}
-
 func (g *GCPWorkerPool) ListRunningInstances(clusterID string, region string) ([]string, error) {
-	zones, err := g.getZonesForRegion(region)
-	if err != nil {
-		return nil, fmt.Errorf("listing zones in region %s: %w", region, err)
-	}
-
 	var instanceNames []string
 
-	filter := proto.String(fmt.Sprintf(`labels.sparkles-cluster-uuid = "%s"`, clusterID))
+	filter := fmt.Sprintf(`labels.sparkles-cluster=%q`, clusterID)
 
-	for _, zone := range zones {
+	for _, zone := range g.zones {
 		req := &computepb.ListInstancesRequest{
 			Project: g.projectID,
 			Zone:    zone,
@@ -120,7 +112,7 @@ func (g *GCPWorkerPool) PutSingletonBatchJob(name, region, machineType string, b
 	jobSpec := &JobSpec{
 		Runnables:   []Runnable{{Image: dockerImage, Command: cmd}},
 		MachineType: machineType,
-		Locations:   zonesAsLocations([]string{region}),
+		Locations:   []string{fmt.Sprintf("regions/%s", region)},
 		BootDisk: backend.Disk{
 			SizeGB: bootVolumeInGB,
 			Type:   bootVolumeType,
@@ -134,12 +126,31 @@ func (g *GCPWorkerPool) PutSingletonBatchJob(name, region, machineType string, b
 }
 
 func (g *GCPWorkerPool) GetBatchJobByName(name string) (*backend.BatchJob, error) {
-	job, err := g.batchClient.GetJob(g.ctx, &batchpb.GetJobRequest{Name: name})
+	projectID := g.projectID
+	region := g.region
+	fullName := fmt.Sprintf("projects/%s/locations/%s/jobs/%s", projectID, region, name)
+
+	// var isDone string
+	// select {
+	// case <-g.ctx.Done():
+	// 	isDone = "true"
+	// default:
+	// 	isDone = "false"
+	// }
+	// log.Printf("g.ctx.isDone %s", isDone)
+	// log.Printf("g.ctx.Err %s", g.ctx.Err())
+	job, err := g.batchClient.GetJob(g.ctx, &batchpb.GetJobRequest{Name: fullName})
 	if err != nil {
 		if status.Code(err) == codes.NotFound {
 			return nil, backend.NoSuchBatchJob
 		}
-		return nil, fmt.Errorf("getting batch job %s: %w", name, err)
+		// try again
+		log.Printf("Err 1: %s", err)
+		job, err = g.batchClient.GetJob(context.Background(), &batchpb.GetJobRequest{Name: name})
+		if err != nil {
+			log.Printf("Err 2: %s", err)
+			return nil, fmt.Errorf("getting batch job %s: %w", name, err)
+		}
 	}
 	instanceCount := 0
 	for _, tg := range job.GetTaskGroups() {

@@ -141,6 +141,7 @@ func makeTask(jobSpec *JobSpec, expiry time.Duration, rootID string) (*task_queu
 func submit(c *cli.Context) error {
 	ctx := context.Background()
 
+	region := c.String("region")
 	filePath := c.String("file")
 	projectID := c.String("projectId")
 	database := c.String("database")
@@ -209,7 +210,7 @@ func submit(c *cli.Context) error {
 			return fmt.Errorf("Creating redis backed services failed: %s", err)
 		}
 	} else {
-		extServices, err = gcp_backend.CreateGCPServices(ctx, projectID, database)
+		extServices, err = gcp_backend.CreateGCPServices(ctx, projectID, region, database)
 	}
 
 	log.Printf("Submitting job %s to cluster %s", job.Name, job.ClusterID)
