@@ -6,7 +6,6 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
-	"os"
 	"path"
 	"time"
 
@@ -15,6 +14,7 @@ import (
 	"cloud.google.com/go/firestore"
 	"github.com/broadinstitute/sparklesworker/backend"
 	"github.com/broadinstitute/sparklesworker/consumer"
+	gcp_backend "github.com/broadinstitute/sparklesworker/backend/gcp"
 	"github.com/broadinstitute/sparklesworker/task_queue"
 	"github.com/broadinstitute/sparklesworker/watchdog"
 	"github.com/redis/go-redis/v9"
@@ -36,7 +36,6 @@ var ConsumeCmd = cli.Command{
 		cli.StringFlag{Name: "database", Usage: "Firestore Database ID"},
 		cli.IntFlag{Name: "timeout", Value: 5, Usage: "Watchdog timeout in minutes; process is killed after 2x this value if main loop doesn't check in"},
 		cli.IntFlag{Name: "shutdownAfter", Value: 0, Usage: "Seconds to wait for new tasks before shutting down (0 = wait indefinitely)"},
-		cli.IntFlag{Name: "ftShutdownAfter", Value: 30, Usage: "Shutdown delay in seconds for the first task in a batch job"},
 		cli.BoolFlag{Name: "localhost", Usage: "If set, does not try to look up instance name and IP from metadata service, but assumes localhost"},
 		cli.StringFlag{Name: "expectedVersion", Usage: "Expected worker version; exits with error if version does not match"},
 		cli.StringFlag{Name: "redisAddr", Usage: "Redis server address (e.g., localhost:6379) for control channel; if empty, Redis control channel is disabled"},
@@ -90,16 +89,9 @@ func consume(c *cli.Context) error {
 		tasksDir = path.Join(dir, "tasks")
 	}
 	shutdownAfter := c.Int("shutdownAfter")
-	firstTaskShutdownAfter := c.Int("ftShutdownAfter")
 	expectedVersion := c.String("expectedVersion")
 	watchdogTimeout := time.Duration(c.Int("timeout")) * time.Minute
 	database := c.String("database")
-
-	batchTaskIndex := os.Getenv("BATCH_TASK_INDEX")
-	if batchTaskIndex == "0" {
-		shutdownAfter = firstTaskShutdownAfter
-		log.Printf("First task in batch. Updated shutdownAfter to %d", shutdownAfter)
-	}
 
 	if expectedVersion != "" && expectedVersion != WorkerVersion {
 		errMsg := fmt.Sprintf("Job was submitted for worker version %s but this worker's version is %s", expectedVersion, WorkerVersion)
@@ -195,12 +187,12 @@ func consume(c *cli.Context) error {
 			return err
 		}
 
-		clusterConfig, err := task_queue.GetCluster(ctx, client, cluster)
+		clusterConfig, err := gcp_backend.NewFirestoreClusterStore(ctx, client).GetClusterConfig(cluster)
 		if err != nil {
 			log.Printf("Failed to get cluster config: %v", err)
 			return err
 		}
-		log.Printf("Got cluster config: incoming_topic=%s, response_topic=%s", clusterConfig.IncomingTopic, clusterConfig.ResponseTopic)
+		log.Printf("Got cluster config: pub_sub_in_topic=%s, pub_sub_out_topic=%s", clusterConfig.PubSubInTopic, clusterConfig.PubSubOutTopic)
 
 		fsQueue := task_queue.NewFirestoreQueue(client, cluster, workerID, options.InitialClaimRetry, options.ClaimTimeout)
 		fsQueue.WatchdogNotifier = watchdog.Notify

@@ -2,7 +2,6 @@
 package task_queue
 
 import (
-	"context"
 	"time"
 
 	"cloud.google.com/go/firestore"
@@ -17,13 +16,6 @@ func NewFirestoreQueue(client *firestore.Client, cluster string, workerID string
 	return gcp_backend.NewFirestoreTaskStore(client, workerID, initialClaimRetry, claimTimeout)
 }
 
-// Cluster holds the Pub/Sub topic names for a cluster (compatibility alias).
-type Cluster = gcp_backend.ClusterTopics
-
-// GetCluster fetches cluster Pub/Sub topic configuration from Firestore.
-func GetCluster(ctx context.Context, client *firestore.Client, clusterID string) (*Cluster, error) {
-	return gcp_backend.GetCluster(ctx, client, clusterID)
-}
 
 // FirestoreTaskCache is an alias for the implementation in backend/gcp.
 type FirestoreTaskCache = gcp_backend.FirestoreTaskCache

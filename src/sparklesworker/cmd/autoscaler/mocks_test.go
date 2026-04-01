@@ -13,6 +13,7 @@ type mockCloud struct {
 	putSingletonBatchJobFn    func(name, region, machineType string, bootVolumeInGB int64, bootVolumeType, dockerImage string, cmd []string) error
 	submitBatchJobsFn         func(callback backend.CreateWorkerCommandCallback, cluster *backend.Cluster, clusterID string, requests []*backend.BatchJobsToSubmit) error
 	deleteAllBatchJobsFn      func(region, clusterID string) error
+	deleteBatchJobFn          func(jobID string) error
 }
 
 func (m *mockCloud) ListRunningInstances(clusterID string, region string) ([]string, error) {
@@ -37,6 +38,13 @@ func (m *mockCloud) SubmitBatchJobs(callback backend.CreateWorkerCommandCallback
 
 func (m *mockCloud) DeleteAllBatchJobs(region, clusterID string) error {
 	return m.deleteAllBatchJobsFn(region, clusterID)
+}
+
+func (m *mockCloud) DeleteBatchJob(jobID string) error {
+	if m.deleteBatchJobFn != nil {
+		return m.deleteBatchJobFn(jobID)
+	}
+	return nil
 }
 
 // mockSparkles implements both ClusterStore and TaskStore.

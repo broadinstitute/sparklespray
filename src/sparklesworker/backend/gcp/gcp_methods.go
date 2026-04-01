@@ -159,6 +159,17 @@ func (g *GCPWorkerPool) GetBatchJobByName(name string) (*backend.BatchJob, error
 	return &backend.BatchJob{ID: job.GetName(), State: batchStateToBatchJobState(job), RequestedInstances: instanceCount}, nil
 }
 
+func (g *GCPWorkerPool) DeleteBatchJob(jobID string) error {
+	op, err := g.batchClient.DeleteJob(g.ctx, &batchpb.DeleteJobRequest{Name: jobID})
+	if err != nil {
+		return fmt.Errorf("deleting batch job %s: %w", jobID, err)
+	}
+	if err := op.Wait(g.ctx); err != nil {
+		return fmt.Errorf("waiting for deletion of batch job %s: %w", jobID, err)
+	}
+	return nil
+}
+
 func (g *GCPWorkerPool) DeleteAllBatchJobs(region, clusterID string) error {
 	jobs, err := g.ListBatchJobs(region, clusterID)
 	if err != nil {
@@ -183,21 +194,13 @@ func (g *GCPWorkerPool) SubmitBatchJobs(CreateWorkerCommand backend.CreateWorker
 			Runnables:       []Runnable{{Image: cluster.WorkerDockerImage, Command: commandArgs}},
 			MachineType:     cluster.MachineType,
 			Preemptible:     req.IsPreemptable,
-			Locations:       zonesAsLocations([]string{cluster.Region}),
+			Locations:       []string{"regions/" + cluster.Region},
 			SparklesCluster: clusterID,
 		}
-		_, err := createBatchJob(g.ctx, g.batchClient, g.projectID, cluster.Region, jobSpec, req.InstanceCount, 0, clusterID)
+		_, err := createBatchJob(g.ctx, g.batchClient, g.projectID, cluster.Region, jobSpec, req.InstanceCount, 0, cluster.PubSubOutTopic)
 		if err != nil {
 			return fmt.Errorf("submitting batch job: %w", err)
 		}
 	}
 	return nil
-}
-
-func zonesAsLocations(zones []string) []string {
-	locs := make([]string, len(zones))
-	for i, z := range zones {
-		locs[i] = "zones/" + z
-	}
-	return locs
 }

@@ -9,16 +9,18 @@ import (
 	"github.com/broadinstitute/sparklesworker/backend"
 )
 
-const clusterCollection = "Cluster"
-
 // FirestoreClusterStore implements backend.ClusterStore using Google Cloud Firestore.
 type FirestoreClusterStore struct {
 	client *firestore.Client
 	ctx    context.Context
 }
 
+func NewFirestoreClusterStore(ctx context.Context, client *firestore.Client) *FirestoreClusterStore {
+	return &FirestoreClusterStore{client: client, ctx: ctx}
+}
+
 func (s *FirestoreClusterStore) GetClusterConfig(clusterID string) (*backend.Cluster, error) {
-	docSnap, err := s.client.Collection(clusterCollection).Doc(clusterID).Get(s.ctx)
+	docSnap, err := s.client.Collection(backend.ClusterCollection).Doc(clusterID).Get(s.ctx)
 	if err != nil {
 		return nil, fmt.Errorf("getting cluster %s: %w", clusterID, err)
 	}
@@ -30,7 +32,7 @@ func (s *FirestoreClusterStore) GetClusterConfig(clusterID string) (*backend.Clu
 }
 
 func (s *FirestoreClusterStore) SetClusterConfig(clusterID string, cluster backend.Cluster) error {
-	_, err := s.client.Collection(clusterCollection).Doc(clusterID).Set(s.ctx, cluster)
+	_, err := s.client.Collection(backend.ClusterCollection).Doc(clusterID).Set(s.ctx, cluster)
 	return err
 }
 
@@ -44,7 +46,7 @@ func (s *FirestoreClusterStore) UpdateClusterMonitorState(clusterID string, stat
 	if err != nil {
 		return fmt.Errorf("marshaling monitor state: %w", err)
 	}
-	_, err = s.client.Collection(clusterCollection).Doc(clusterID).Update(s.ctx, []firestore.Update{
+	_, err = s.client.Collection(backend.ClusterCollection).Doc(clusterID).Update(s.ctx, []firestore.Update{
 		{Path: "monitor_state", Value: string(data)},
 	})
 	return err

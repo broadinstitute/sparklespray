@@ -144,6 +144,11 @@ func (r *LocalWorkerPool) GetBatchJobByName(name string) (*backend.BatchJob, err
 	return &backend.BatchJob{ID: job.ID, State: job.State, RequestedInstances: job.InstanceCount}, nil
 }
 
+func (r *LocalWorkerPool) DeleteBatchJob(jobID string) error {
+	r.client.Del(r.ctx, r.jobKey(jobID))
+	return nil
+}
+
 func (r *LocalWorkerPool) DeleteAllBatchJobs(region, clusterID string) error {
 	all, err := getAllBatchJobs(r.ctx, r.client)
 	if err != nil {

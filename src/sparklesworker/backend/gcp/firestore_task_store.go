@@ -186,13 +186,16 @@ func (q *FirestoreTaskStore) ClaimTask(ctx context.Context, clusterID string) (*
 
 func (q *FirestoreTaskStore) getPendingTasks(ctx context.Context, clusterID string, maxFetch int) ([]*backend.Task, error) {
 	docs, err := q.client.Collection(backend.TaskCollection).
-		Where("cluster", "==", clusterID).
+		Where("cluster_id", "==", clusterID).
 		Where("status", "==", backend.StatusPending).
 		Limit(maxFetch).
 		Documents(ctx).GetAll()
 	if err != nil {
 		return nil, err
 	}
+
+	log.Printf("getPendingTasks(collection=%s, clusterID=%q, status=%q -> %d tasks", backend.TaskCollection, clusterID, backend.StatusPending, len(docs))
+
 	tasks := make([]*backend.Task, 0, len(docs))
 	for _, doc := range docs {
 		var task backend.Task
@@ -348,26 +351,4 @@ func (c *FirestoreTaskCache) GetCachedEntry(ctx context.Context, cacheKey string
 func (c *FirestoreTaskCache) SetCachedEntry(ctx context.Context, entry *backend.CachedTaskEntry) error {
 	_, err := c.client.Collection(backend.CachedTaskEntryCollection).Doc(entry.ID).Set(ctx, entry)
 	return err
-}
-
-// ---- ClusterTopics / GetCluster (used by consume command) ----
-
-// ClusterTopics holds the Pub/Sub topic names for a cluster, as stored in
-// the Firestore V7Cluster collection.
-type ClusterTopics struct {
-	IncomingTopic string `firestore:"incoming_topic"`
-	ResponseTopic string `firestore:"response_topic"`
-}
-
-// GetCluster fetches cluster Pub/Sub topic configuration from Firestore.
-func GetCluster(ctx context.Context, client *firestore.Client, clusterID string) (*ClusterTopics, error) {
-	docSnap, err := client.Collection(backend.ClusterCollection).Doc(clusterID).Get(ctx)
-	if err != nil {
-		return nil, err
-	}
-	var cluster ClusterTopics
-	if err := docSnap.DataTo(&cluster); err != nil {
-		return nil, err
-	}
-	return &cluster, nil
 }

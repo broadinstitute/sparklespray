@@ -16,6 +16,7 @@ type WorkerPool interface {
 	PutSingletonBatchJob(name, region, machineType string, bootVolumeInGB int64, bootVolumeType, dockerImage string, cmd []string) error
 	SubmitBatchJobs(CreateWorkerCommand CreateWorkerCommandCallback, cluster *Cluster, clusterID string, requests []*BatchJobsToSubmit) error
 	DeleteAllBatchJobs(region, clusterID string) error
+	DeleteBatchJob(jobID string) error
 }
 
 // ClusterStore manages cluster configuration and monitor state.
@@ -52,6 +53,10 @@ type TaskCache interface {
 }
 
 type CreateWorkerCommandCallback func(clusterID string, shouldLinger bool, aetherConfig *AetherConfig) []string
+
+func (e *ExternalServices) DeleteBatchJob(jobID string) error {
+	return e.Compute.DeleteBatchJob(jobID)
+}
 
 // ExternalServices bundles all backend service handles for a deployment
 // (either GCP production or local Redis testing).

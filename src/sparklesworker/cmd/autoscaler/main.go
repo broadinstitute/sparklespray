@@ -61,6 +61,8 @@ func run(c *cli.Context) error {
 
 	defer extServices.Close()
 
+	firstTimeSeenCluster := make(map[string]bool)
+
 	idleSince := time.Now()
 	for {
 		clusterIDs, err := extServices.Tasks.GetClusterIDsFromActiveTasks()
@@ -77,6 +79,15 @@ func run(c *cli.Context) error {
 		}
 
 		for _, clusterID := range clusterIDs {
+			if _, seenClusterID := firstTimeSeenCluster[clusterID]; !seenClusterID {
+				// if this is the first time we've polled this cluster ID, first clean up anything that might have been left behind
+				// from a past run, before this autoscaler started
+				firstTimeSeenCluster[clusterID] = false
+				if err := cleanupBatchJobs(extServices, clusterID); err != nil {
+					return fmt.Errorf("Could not clean up cluster %q: %v\n", clusterID, err)
+				}
+			}
+
 			if err := Poll(clusterID, extServices.Compute, extServices.Cluster, extServices.Tasks, extServices.CreateWorkerCommand); err != nil {
 				return fmt.Errorf("poll (clusterID=%s) error: %v\n", clusterID, err)
 			}
@@ -93,6 +104,63 @@ func run(c *cli.Context) error {
 	log.Printf("Autoscaler shutting down")
 	// calling cancel to shut down anything else still running
 	cancel()
+
+	return nil
+}
+
+func cleanupBatchJobs(extServices *backend.ExternalServices, clusterID string) error {
+	// delete any batch jobs which are complete so they don't confuse the health check
+	cluster, err := extServices.Cluster.GetClusterConfig(clusterID)
+	if err != nil {
+		return fmt.Errorf("In cleanup, getting cluster error: %v\n", err)
+	}
+
+	batchJobs, err := extServices.Compute.ListBatchJobs(cluster.Region, clusterID)
+	if err != nil {
+		return fmt.Errorf("List Batch jobs error: %v\n", err)
+	}
+	jobsNeedingDeletion := make(map[string]string)
+	for _, batchJob := range batchJobs {
+		if batchJob.State == backend.Failed || batchJob.State == backend.Complete {
+			jobsNeedingDeletion[batchJob.ID] = batchJob.ID
+		}
+	}
+
+	if len(jobsNeedingDeletion) > 0 {
+		log.Printf("Cleaning up %d batch jobs from previous run", len(jobsNeedingDeletion))
+		for jobID := range jobsNeedingDeletion {
+			err = extServices.DeleteBatchJob(jobID)
+			if err != nil {
+				return fmt.Errorf("Deletion of batch job %q failed: %s", jobID, err)
+			}
+		}
+	}
+
+	// now, the deletion takes some time, so poll until we see that the job is in fact gone
+	sleepDuration := 1 * time.Second
+	attempts := 0
+	for {
+		attempts += 1
+		if attempts > 10 {
+			return fmt.Errorf("Timeout waiting for deleted jobs to disappear")
+		}
+		time.Sleep(sleepDuration)
+		sleepDuration = min(sleepDuration*2, 20*time.Second)
+
+		batchJobs, err = extServices.Compute.ListBatchJobs(cluster.Region, clusterID)
+		jobsDeleted := true
+		for _, batchJob := range batchJobs {
+			// if we see a job in jobsNeedingDeletion, then not everything we deleted has disappeared. Try again
+			if _, inSet := jobsNeedingDeletion[batchJob.ID]; inSet {
+				jobsDeleted = false
+				break
+			}
+		}
+
+		if jobsDeleted {
+			break
+		}
+	}
 
 	return nil
 }

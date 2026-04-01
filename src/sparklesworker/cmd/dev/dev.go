@@ -108,6 +108,9 @@ type DevSubmitRequest struct {
 	ExportOutputTo string `json:"exportOutputTo"`
 	// If non-empty, export LogAetherFSRoot from the completed task to this local directory.
 	ExportLogTo string `json:"exportLogTo"`
+
+	// whether to start autoscaler or not
+	SkipAutoscale bool `json:"skipAutoscale"`
 }
 
 type fileToStage struct {
@@ -339,7 +342,7 @@ func ExecuteSubmit(req *DevSubmitRequest) (*task_queue.Task, error) {
 		}
 	}
 
-	useAutoscaler := true
+	useAutoscaler := !req.SkipAutoscale
 	// validate cluster ID is valid
 
 	if job.ClusterID == "local" {

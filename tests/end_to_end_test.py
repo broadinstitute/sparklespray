@@ -64,12 +64,20 @@ class ProcessGroup:
             # TODO add check to see if still running
             proc.kill()
 
-    async def run_with_check(self, name: str, command: str, watcher=None):
+    async def run_with_check(self, name: str, command: str, watcher=None, timeout=60):
+        if timeout is None:
+            timeout = 1000
+
         proc = await self.run_and_stream(name, command, watcher=watcher)
-        retcode = await proc.wait()
+        try:
+            retcode = await asyncio.wait_for(proc.wait(), timeout=timeout)
+        except asyncio.TimeoutError:
+            raise Exception("Timeout waiting for submission to complete")
+
         assert retcode == 0
 
     async def run_and_stream(self, name: str, command: str, watcher=None) -> Process:
+        print("running", command)
         if watcher is None:
             watcher = Watcher()
 
@@ -145,7 +153,7 @@ async def build_and_push_worker_image(proc_group, sparkles_docker_image):
     )
 
 
-async def minimal_gcp_submission(proc_group, tmpdir):
+async def minimal_gcp_submission_with_autoscale(proc_group, tmpdir):
     submit = lambda submission: _submit(
         proc_group=proc_group, tmpdir=tmpdir, submission=submission
     )
@@ -222,6 +230,97 @@ async def minimal_gcp_submission(proc_group, tmpdir):
     assert "second hello from sparklespray" in stdout
 
 
+async def minimal_gcp_with_local_autoscale(proc_group, tmpdir):
+    submit = lambda submission: _submit(
+        proc_group=proc_group, tmpdir=tmpdir, submission=submission
+    )
+
+    sparkles_docker_image = (
+        "us-central1-docker.pkg.dev/test-sparkles-2/docker/sparklesworker:test"
+    )
+    sparklesworkerDir = "/sparkleswork"
+
+    await build_and_push_worker_image(proc_group, sparkles_docker_image)
+    await build_executables(proc_group=proc_group, tmpdir=tmpdir)
+
+    project = "test-sparkles-2"
+    region = "us-central1"
+    database = "sparkles-v6"
+
+    submission = {
+        "name": "test-end-to-end",
+        "cluster": {
+            "MachineType": "n2-standard-2",
+            "WorkerDockerImage": sparkles_docker_image,
+            "PubSubInTopic": "sparkles-in",
+            "PubSubOutTopic": "sparkles-batchapi-out",
+            "Region": "us-central1",
+            "MaxPreemptableAttempts": 1,
+            "MaxInstanceCount": 1,
+            "MaxSuspiciousFailures": 1,
+            "BootDisk": {"size_gb": 50, "type": "pd-standard"},
+        },
+        "projectID": project,
+        "region": region,
+        "database": database,
+        "aetherRoot": f"{tmpdir}/aether",
+        "exportOutputTo": f"{tmpdir}/out",
+        "exportLogTo": f"{tmpdir}/log",
+        "dir": sparklesworkerDir,
+        "dockerImage": sparkles_docker_image,
+        "command": "echo hello from sparklespray",
+        "filesToStage": [],
+        "topicPrefix": "sparkles",
+        "runLoopMaxWait": 5,
+        "skipAutoscale": True,
+    }
+
+    submit_proc = await submit(submission)
+
+    # but make sure the submit process is still waiting for the job to complete
+    assert submit_proc.is_running()
+
+    # At this point there should be a should be sitting in a queue. We in this scenerio we need to start the autoscaler
+
+    await proc_group.run_with_check(
+        "autoscaler",
+        f"bin/sparklesworker autoscaler --project {project} --region {region} --database {database} --poll-interval 0s --max-idle 0s",
+        timeout=60 * 10,
+    )
+
+    # now that the autoscaler has completed, the submission process should have also completed
+
+    try:
+        await asyncio.wait_for(submit_proc.wait(), 60)
+    except asyncio.TimeoutError:
+        raise Exception("Timeout waiting for submission to complete")
+
+    # verify the outputs
+    with open(f"{tmpdir}/log/stdout.txt", "rt") as fd:
+        stdout = fd.read()
+
+    assert "hello from sparklespray" in stdout
+
+    # submit a second job, and this should be almost immediate
+    submission["command"] = ("echo second hello from sparklespray",)
+    submit_proc = await submit(submission)
+
+    # but make sure the submit process is still waiting for the job to complete
+    assert submit_proc.is_running()
+
+    # Since the autoscaler and existing worker should still be running, should start quickly
+    try:
+        await asyncio.wait_for(submit_proc.wait(), 10)
+    except asyncio.TimeoutError:
+        raise Exception("Timeout waiting for submission to complete")
+
+    # verify the outputs
+    with open(f"{tmpdir}/log/stdout.txt", "rt") as fd:
+        stdout = fd.read()
+
+    assert "second hello from sparklespray" in stdout
+
+
 async def minimal_local_test(
     proc_group, tmpdir, unused_tcp_port_factory, use_sparklesworker_docker_image=False
 ):
@@ -234,6 +333,7 @@ async def minimal_local_test(
         await proc_group.run_with_check(
             "build",
             f"cd src/sparklesworker && docker build -t {sparkles_docker_image} .",
+            timeout=1000,
         )
     else:
         sparkles_docker_image = ""
@@ -324,5 +424,5 @@ async def minimal_local_test(
 
 
 if __name__ == "__main__":
-    test_fn = minimal_gcp_submission
+    test_fn = minimal_gcp_with_local_autoscale
     asyncio.run(run_test(test_fn))

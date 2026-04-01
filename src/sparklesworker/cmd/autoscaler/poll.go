@@ -13,6 +13,7 @@ func Poll(clusterID string, compute backend.WorkerPool, cluster backend.ClusterS
 		return fmt.Errorf("Failed fetching cluster config: %s", err)
 	}
 
+	needsUpdateState := false
 	lastState, err := clusterConfig.GetMonitorState()
 	if err != nil {
 		return fmt.Errorf("Failed retreiving monitor state: %s", err)
@@ -86,16 +87,22 @@ func Poll(clusterID string, compute backend.WorkerPool, cluster backend.ClusterS
 		currentRequestedInstanceCount,
 	)
 
-	err = compute.SubmitBatchJobs(createWorkerCommand, clusterConfig, clusterID, newBatchJobs)
-	if err != nil {
-		return fmt.Errorf("Could not create nodes: %s", err)
+	if len(newBatchJobs) > 0 {
+		log.Printf("Requesting %d new batches of nodes", len(newBatchJobs))
+		err = compute.SubmitBatchJobs(createWorkerCommand, clusterConfig, clusterID, newBatchJobs)
+		if err != nil {
+			return fmt.Errorf("Could not create nodes: %s", err)
+		}
+		lastState.BatchJobRequests += len(newBatchJobs)
+		needsUpdateState = true
 	}
 
-	lastState.BatchJobRequests += len(newBatchJobs)
-
-	err = cluster.UpdateClusterMonitorState(clusterID, lastState)
-	if err != nil {
-		return fmt.Errorf("failed to update monitor state: %s", err)
+	if needsUpdateState {
+		// only update if state actually changed
+		err = cluster.UpdateClusterMonitorState(clusterID, lastState)
+		if err != nil {
+			return fmt.Errorf("failed to update monitor state: %s", err)
+		}
 	}
 
 	return nil
@@ -203,39 +210,42 @@ func checkClusterHealth(compute backend.WorkerPool, tasks backend.TaskStore, clu
 		return &HealthCheckResult{}, nil
 	}
 
-	// now what jobs have completed
-	jobs, err := compute.ListBatchJobs(region, clusterID)
-	if err != nil {
-		return nil, fmt.Errorf("Could not quey completed batch jobs: %s", err)
-	}
+	// TODO:
+	return &HealthCheckResult{}, nil
 
-	// I believe I've seen that querying for batch jobs does not immediately return new jobs. So, let's confirm we see the expected number of jobs. If we don't
-	// we probably want to hold off doing anything more for the moment
-	if len(jobs) != expectedJobCount {
-		return nil, fmt.Errorf("Expected to find %d Batch jobs associated with cluster %s, but found %d instead", expectedJobCount, clusterID, len(jobs))
-	}
+	// // now what jobs have completed
+	// jobs, err := compute.ListBatchJobs(region, clusterID)
+	// if err != nil {
+	// 	return nil, fmt.Errorf("Could not quey completed batch jobs: %s", err)
+	// }
 
-	// subset to just the completed jobs
-	completedJobIDs := make([]string, 0, len(jobs))
-	for _, job := range jobs {
-		if job.State == backend.Failed || job.State == backend.Complete {
-			completedJobIDs = append(completedJobIDs, job.ID)
-		}
-	}
+	// // I believe I've seen that querying for batch jobs does not immediately return new jobs. So, let's confirm we see the expected number of jobs. If we don't
+	// // we probably want to hold off doing anything more for the moment
+	// if len(jobs) != expectedJobCount {
+	// 	return nil, fmt.Errorf("Expected to find %d Batch jobs associated with cluster %s, but found %d instead", expectedJobCount, clusterID, len(jobs))
+	// }
 
-	// compare that with the previously completed jobs to figure out which ones are new completions
-	newlyCompletedJobIDs := calcSetDiff(completedJobIDs, previouslyCompletedJobIDs)
+	// // subset to just the completed jobs
+	// completedJobIDs := make([]string, 0, len(jobs))
+	// for _, job := range jobs {
+	// 	if job.State == backend.Failed || job.State == backend.Complete {
+	// 		completedJobIDs = append(completedJobIDs, job.ID)
+	// 	}
+	// }
 
-	// for each check: did we successfully complete any jobs before shutting down?
-	suspiciouslyFailedToRun := 0
-	for _, newlyCompletedJobID := range newlyCompletedJobIDs {
-		count := tasks.GetTasksCompletedBy(newlyCompletedJobID)
-		if count == 0 {
-			suspiciouslyFailedToRun += 1
-		}
-	}
+	// // compare that with the previously completed jobs to figure out which ones are new completions
+	// newlyCompletedJobIDs := calcSetDiff(completedJobIDs, previouslyCompletedJobIDs)
 
-	return &HealthCheckResult{suspiciouslyFailedToRun: suspiciouslyFailedToRun, newlyCompletedJobIDs: newlyCompletedJobIDs}, nil
+	// // for each check: did we successfully complete any jobs before shutting down?
+	// suspiciouslyFailedToRun := 0
+	// for _, newlyCompletedJobID := range newlyCompletedJobIDs {
+	// 	count := tasks.GetTasksCompletedBy(newlyCompletedJobID)
+	// 	if count == 0 {
+	// 		suspiciouslyFailedToRun += 1
+	// 	}
+	// }
+
+	// return &HealthCheckResult{suspiciouslyFailedToRun: suspiciouslyFailedToRun, newlyCompletedJobIDs: newlyCompletedJobIDs}, nil
 }
 
 func calcSetDiff(a []string, b []string) []string {

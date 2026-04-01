@@ -2,6 +2,7 @@ package gcp
 
 import (
 	"context"
+	"fmt"
 	"math/rand"
 	"regexp"
 	"strings"
@@ -60,7 +61,9 @@ func makeUniqueLabel(label string) string {
 	return truncated + "-" + string(suffix)
 }
 
-func createBatchJob(ctx context.Context, client *batch.Client, project, location string, jobSpec *JobSpec, workerCount, maxRetryCount int, pubsubTopicPrefix string) (*batchpb.Job, error) {
+func createBatchJob(ctx context.Context, client *batch.Client, project, location string, jobSpec *JobSpec, workerCount, maxRetryCount int, pubsubTopic string) (*batchpb.Job, error) {
+	fullPubsubTopic := fmt.Sprintf("projects/%s/topics/%s", project, pubsubTopic)
+
 	// Build volumes
 	var volumes []*batchpb.Volume
 	for _, disk := range jobSpec.Disks {
@@ -123,7 +126,9 @@ func createBatchJob(ctx context.Context, client *batch.Client, project, location
 		provisioningModel = batchpb.AllocationPolicy_SPOT
 	}
 
-	pubsubTopic := "projects/" + project + "/topics/" + pubsubTopicPrefix + "-batchapi-out"
+	if !strings.HasPrefix(pubsubTopic, "projects/") {
+
+	}
 
 	job := &batchpb.Job{
 		TaskGroups: []*batchpb.TaskGroup{
@@ -172,13 +177,13 @@ func createBatchJob(ctx context.Context, client *batch.Client, project, location
 		},
 		Notifications: []*batchpb.JobNotification{
 			{
-				PubsubTopic: pubsubTopic,
+				PubsubTopic: fullPubsubTopic,
 				Message: &batchpb.JobNotification_Message{
 					Type: batchpb.JobNotification_JOB_STATE_CHANGED,
 				},
 			},
 			{
-				PubsubTopic: pubsubTopic,
+				PubsubTopic: fullPubsubTopic,
 				Message: &batchpb.JobNotification_Message{
 					Type: batchpb.JobNotification_TASK_STATE_CHANGED,
 				},
