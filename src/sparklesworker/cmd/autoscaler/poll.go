@@ -30,16 +30,14 @@ func Poll(clusterID string, compute backend.WorkerPool, cluster backend.ClusterS
 	// update last state with the additional new completions
 	for _, completedJobID := range badStateResult.newlyCompletedJobIDs {
 		lastState.SuspiciouslyFailingJobIds = append(lastState.SuspiciouslyFailingJobIds, completedJobID)
-		log.Printf("Updated list of suspicious Batch JobIDs: %s", strings.Join(lastState.SuspiciouslyFailingJobIds, ", "))
+		log.Printf("Updated list of suspicious Batch JobIDs: %s", strings.Join(lastState.SuspiciouslyFailingJobIds, ","))
 		needsUpdateState = true
 
 		// update the count of suspicious failures and decide whether there's a problem or not
 		if len(lastState.SuspiciouslyFailingJobIds) > clusterConfig.MaxSuspiciousFailures {
 			// something wrong is going on. Shut everything down.
-			msg := fmt.Sprintf("Found %d nodes had shut down without doing any work. (max allowed: %d) Shutting down entire cluster in to avoid infinitely starting broken nodes.", len(lastState.SuspiciouslyFailingJobIds), clusterConfig.MaxSuspiciousFailures)
+			msg := fmt.Sprintf("Found %d nodes had shut down without doing any work. (max allowed: %d) Aborting to avoid infinitely starting broken nodes.", len(lastState.SuspiciouslyFailingJobIds), clusterConfig.MaxSuspiciousFailures)
 			log.Print(msg)
-			err = compute.DeleteAllBatchJobs(clusterConfig.Region, clusterID)
-			log.Printf("Got error while trying to delete all batch jobs: %s", err)
 			return fmt.Errorf("Too many suspicious failures -- aborting")
 		}
 	}
