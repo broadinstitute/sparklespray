@@ -138,7 +138,7 @@ async def minimal_gcp_with_local_autoscale(proc_group: ProcessGroup, tmpdir: str
     sparkles_docker_image = (
         "us-central1-docker.pkg.dev/test-sparkles-2/docker/sparklesworker:test"
     )
-    sparklesworkerDir = "/sparkleswork"
+    sparklesworkerDir = "/mnt/disks/mount_1/sparklesworker"
 
     await build_and_push_worker_image(proc_group, sparkles_docker_image)
     await build_executables(proc_group=proc_group, tmpdir=tmpdir)
@@ -163,7 +163,7 @@ async def minimal_gcp_with_local_autoscale(proc_group: ProcessGroup, tmpdir: str
         "projectID": project,
         "region": region,
         "database": database,
-        "aetherRoot": f"{tmpdir}/aether",
+        "aetherRoot": f"gs://test-sparkles-2/aether",
         "exportOutputTo": f"{tmpdir}/out",
         "exportLogTo": f"{tmpdir}/log",
         "dir": sparklesworkerDir,

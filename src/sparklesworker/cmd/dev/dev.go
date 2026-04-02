@@ -319,6 +319,7 @@ func ExecuteSubmit(req *DevSubmitRequest) (*task_queue.Task, error) {
 
 	if req.Cluster != nil {
 		cluster := backend.Cluster{
+			ClusterID:              req.ClusterID,
 			UUID:                   uuid.New().String(),
 			MachineType:            req.Cluster.MachineType,
 			WorkerDockerImage:      req.Cluster.WorkerDockerImage,
@@ -333,6 +334,7 @@ func ExecuteSubmit(req *DevSubmitRequest) (*task_queue.Task, error) {
 			Disks:                  req.Cluster.Disks,
 			GCSBucketMounts:        req.Cluster.GCSBucketMounts,
 			MaxLingerSeconds:       req.Cluster.MaxLingerSeconds,
+			SparklesDir:            req.Dir,
 			AetherConfig: &backend.AetherConfig{
 				Root:            req.AetherRoot,
 				MaxSizeToBundle: req.AetherMaxSizeToBundle,
@@ -432,7 +434,6 @@ func ExecuteSubmit(req *DevSubmitRequest) (*task_queue.Task, error) {
 			finalTask = t
 			break
 		}
-		log.Printf("Task %s status: %s — waiting...", task.TaskID, t.Status)
 
 		if useAutoscaler {
 			// if we're using the autoscaler, confirm its still running/pending. If it fails or disappears, something has

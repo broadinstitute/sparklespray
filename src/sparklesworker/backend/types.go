@@ -11,6 +11,8 @@ import (
 // fields describe the cluster's identity and never change after creation.
 // Mutable fields are updated by the monitor or manually by the user.
 type Cluster struct {
+	ClusterID string
+
 	// UUID uniquely identifies this cluster and is used as a label value when
 	// querying GCP resources (e.g. Compute instances, Batch jobs) that belong
 	// to this cluster.
@@ -58,6 +60,9 @@ type Cluster struct {
 	BootDiskSizeGB  int
 	Disks           []Disk           `firestore:"disks" json:"disks"`
 	GCSBucketMounts []GCSBucketMount `firestore:"gcs_bucket_mounts" json:"gcs_bucket_mounts"`
+
+	// Directory where files will be downloaded to and a temp directory will be created for each task
+	SparklesDir string
 
 	AetherConfig *AetherConfig `firestore:"aether_config" json:"aether_config"`
 }

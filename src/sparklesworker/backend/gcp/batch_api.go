@@ -3,6 +3,7 @@ package gcp
 import (
 	"context"
 	"fmt"
+	"log"
 	"math/rand"
 	"regexp"
 	"strings"
@@ -73,6 +74,7 @@ func createBatchJob(ctx context.Context, client *batch.Client, project, location
 				DeviceName: disk.Name,
 			},
 		})
+		log.Printf("createBatchJob mounting %s at %s", disk.Name, disk.MountPath)
 	}
 	for _, gcsMount := range jobSpec.GCSBucketMounts {
 		mountOptions := append([]string{"-o", "ro"}, gcsMount.MountOptions...)
