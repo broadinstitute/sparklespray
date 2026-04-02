@@ -38,9 +38,8 @@ func (s *FirestoreClusterStore) SetClusterConfig(clusterID string, cluster backe
 
 func (s *FirestoreClusterStore) UpdateClusterMonitorState(clusterID string, state *backend.MonitorState) error {
 	wire := backend.MonitorStateJSON{
-		BatchJobRequests:        state.BatchJobRequests,
-		CompletedJobIds:         state.CompletedJobIds,
-		SuspiciouslyFailedToRun: state.SuspiciouslyFailedToRun,
+		BatchJobRequests:          state.BatchJobRequests,
+		SuspiciouslyFailingJobIds: state.SuspiciouslyFailingJobIds,
 	}
 	data, err := json.Marshal(wire)
 	if err != nil {

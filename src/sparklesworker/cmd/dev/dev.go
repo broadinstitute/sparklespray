@@ -63,6 +63,7 @@ type DevClusterConfig struct {
 	AutoscaleBootDiskType   string
 	AutoscalePollInterval   time.Duration
 	AutoscaleMaxIdle        time.Duration
+	MaxLingerSeconds        int
 }
 
 // DevSubmitRequest encodes all parameters needed to submit and run a job.
@@ -331,6 +332,7 @@ func ExecuteSubmit(req *DevSubmitRequest) (*task_queue.Task, error) {
 			BootDiskType:           req.Cluster.BootDiskType,
 			Disks:                  req.Cluster.Disks,
 			GCSBucketMounts:        req.Cluster.GCSBucketMounts,
+			MaxLingerSeconds:       req.Cluster.MaxLingerSeconds,
 			AetherConfig: &backend.AetherConfig{
 				Root:            req.AetherRoot,
 				MaxSizeToBundle: req.AetherMaxSizeToBundle,

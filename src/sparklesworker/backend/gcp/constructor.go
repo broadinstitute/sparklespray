@@ -68,10 +68,10 @@ func CreateGCPServices(ctx context.Context, projectID string, region string, dat
 		Compute: compute,
 		Cluster: cluster,
 		Tasks:   tasks,
-		CreateWorkerCommand: func(clusterID string, shouldLinger bool, aetherConfig *backend.AetherConfig) []string {
-			return backend.CreateWorkerCommand(clusterID, shouldLinger, []string{
+		CreateWorkerCommand: func(cluster *backend.Cluster, shouldLinger bool) []string {
+			return backend.CreateWorkerCommand(cluster, shouldLinger, []string{
 				"--projectId", projectID,
-				"--database", database}, aetherConfig)
+				"--database", database})
 		}}, nil
 }
 

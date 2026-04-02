@@ -3,6 +3,8 @@ package autoscaler
 import (
 	"fmt"
 	"log"
+	"strings"
+	"time"
 
 	"github.com/broadinstitute/sparklesworker/backend"
 )
@@ -20,24 +22,26 @@ func Poll(clusterID string, compute backend.WorkerPool, cluster backend.ClusterS
 	}
 
 	// phase 0: check for failing batch jobs that are a sign that the cluster configuration is in a broken state
-	badStateResult, err := checkClusterHealth(compute, tasks, clusterID, clusterConfig.Region, lastState.CompletedJobIds, lastState.BatchJobRequests)
+	badStateResult, err := checkClusterHealth(compute, tasks, clusterID, clusterConfig.Region, lastState.SuspiciouslyFailingJobIds, lastState.BatchJobRequests)
 	if err != nil {
 		return fmt.Errorf("Failed while checking for bad state: %s", err)
 	}
 
 	// update last state with the additional new completions
 	for _, completedJobID := range badStateResult.newlyCompletedJobIDs {
-		lastState.CompletedJobIds = append(lastState.CompletedJobIds, completedJobID)
-	}
+		lastState.SuspiciouslyFailingJobIds = append(lastState.SuspiciouslyFailingJobIds, completedJobID)
+		log.Printf("Updated list of suspicious Batch JobIDs: %s", strings.Join(lastState.SuspiciouslyFailingJobIds, ", "))
+		needsUpdateState = true
 
-	// update the count of suspicious failures and decide whether there's a problem or not
-	lastState.SuspiciouslyFailedToRun = badStateResult.suspiciouslyFailedToRun + lastState.SuspiciouslyFailedToRun
-	if lastState.SuspiciouslyFailedToRun > clusterConfig.MaxSuspiciousFailures {
-		// something wrong is going on. Shut everything down.
-		msg := fmt.Sprintf("Found %d nodes had shut down without doing any work. (max allowed: %d) Shut down entire cluster in to avoid infinitely starting broken nodes.", lastState.SuspiciouslyFailedToRun, clusterConfig.MaxSuspiciousFailures)
-		log.Print(msg)
-		compute.DeleteAllBatchJobs(clusterConfig.Region, clusterID)
-		return fmt.Errorf("%s", msg)
+		// update the count of suspicious failures and decide whether there's a problem or not
+		if len(lastState.SuspiciouslyFailingJobIds) > clusterConfig.MaxSuspiciousFailures {
+			// something wrong is going on. Shut everything down.
+			msg := fmt.Sprintf("Found %d nodes had shut down without doing any work. (max allowed: %d) Shutting down entire cluster in to avoid infinitely starting broken nodes.", len(lastState.SuspiciouslyFailingJobIds), clusterConfig.MaxSuspiciousFailures)
+			log.Print(msg)
+			err = compute.DeleteAllBatchJobs(clusterConfig.Region, clusterID)
+			log.Printf("Got error while trying to delete all batch jobs: %s", err)
+			return fmt.Errorf("Too many suspicious failures -- aborting")
+		}
 	}
 
 	// phase 1: Identify orphaned tasks
@@ -210,14 +214,24 @@ func checkClusterHealth(compute backend.WorkerPool, tasks backend.TaskStore, clu
 		return &HealthCheckResult{}, nil
 	}
 
-	// TODO:
-	return &HealthCheckResult{}, nil
+	// now what jobs have completed
+	jobs, err := compute.ListBatchJobs(region, clusterID)
+	if err != nil {
+		return nil, fmt.Errorf("Could not quey completed batch jobs: %s", err)
+	}
 
-	// // now what jobs have completed
-	// jobs, err := compute.ListBatchJobs(region, clusterID)
-	// if err != nil {
-	// 	return nil, fmt.Errorf("Could not quey completed batch jobs: %s", err)
-	// }
+	suspiciouslyFailedToRun := 0
+
+	// subset to just the completed jobs which appear to have immediately exited
+	susCompletedJobIDs := make([]string, 0, len(jobs))
+	for _, job := range jobs {
+		if (job.State == backend.Failed || job.State == backend.Complete) && job.RunDuration < 10*time.Second {
+			susCompletedJobIDs = append(susCompletedJobIDs, job.ID)
+		}
+	}
+
+	// compare that with the previously completed jobs to figure out which ones are new completions
+	newSusJobIDs := calcSetDiff(susCompletedJobIDs, previouslyCompletedJobIDs)
 
 	// // I believe I've seen that querying for batch jobs does not immediately return new jobs. So, let's confirm we see the expected number of jobs. If we don't
 	// // we probably want to hold off doing anything more for the moment
@@ -225,19 +239,7 @@ func checkClusterHealth(compute backend.WorkerPool, tasks backend.TaskStore, clu
 	// 	return nil, fmt.Errorf("Expected to find %d Batch jobs associated with cluster %s, but found %d instead", expectedJobCount, clusterID, len(jobs))
 	// }
 
-	// // subset to just the completed jobs
-	// completedJobIDs := make([]string, 0, len(jobs))
-	// for _, job := range jobs {
-	// 	if job.State == backend.Failed || job.State == backend.Complete {
-	// 		completedJobIDs = append(completedJobIDs, job.ID)
-	// 	}
-	// }
-
-	// // compare that with the previously completed jobs to figure out which ones are new completions
-	// newlyCompletedJobIDs := calcSetDiff(completedJobIDs, previouslyCompletedJobIDs)
-
-	// // for each check: did we successfully complete any jobs before shutting down?
-	// suspiciouslyFailedToRun := 0
+	// for each check: did we successfully complete any jobs before shutting down?
 	// for _, newlyCompletedJobID := range newlyCompletedJobIDs {
 	// 	count := tasks.GetTasksCompletedBy(newlyCompletedJobID)
 	// 	if count == 0 {
@@ -245,7 +247,10 @@ func checkClusterHealth(compute backend.WorkerPool, tasks backend.TaskStore, clu
 	// 	}
 	// }
 
-	// return &HealthCheckResult{suspiciouslyFailedToRun: suspiciouslyFailedToRun, newlyCompletedJobIDs: newlyCompletedJobIDs}, nil
+	// count up the number of jobs which failed to do any real work
+	suspiciouslyFailedToRun += len(newSusJobIDs)
+
+	return &HealthCheckResult{suspiciouslyFailedToRun: suspiciouslyFailedToRun, newlyCompletedJobIDs: newSusJobIDs}, nil
 }
 
 func calcSetDiff(a []string, b []string) []string {

@@ -2,14 +2,12 @@ package backend
 
 import (
 	"strconv"
-	"time"
 )
 
-func CreateWorkerCommand(clusterID string, shouldLinger bool, baseArgs []string, aetherConfig *AetherConfig) []string {
-	lingerTime := 10 * time.Minute
-
+func CreateWorkerCommand(cluster *Cluster, shouldLinger bool, baseArgs []string) []string {
+	aetherConfig := cluster.AetherConfig
 	cmd := []string{
-		"consume", "--cluster", clusterID,
+		"consume", "--cluster", cluster.UUID,
 		"--aetherRoot", aetherConfig.Root,
 		"--aetherMaxSizeToBundle", strconv.Itoa(int(aetherConfig.MaxSizeToBundle)),
 		"--aetherMaxBundleSize", strconv.Itoa(int(aetherConfig.MaxBundleSize)),
@@ -18,7 +16,7 @@ func CreateWorkerCommand(clusterID string, shouldLinger bool, baseArgs []string,
 	cmd = append(cmd, baseArgs...)
 
 	if shouldLinger {
-		cmd = append(cmd, "--shutdownAfter", strconv.Itoa(int(lingerTime/time.Second)))
+		cmd = append(cmd, "--shutdownAfter", strconv.Itoa(cluster.MaxLingerSeconds))
 	}
 
 	return cmd

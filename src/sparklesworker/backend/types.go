@@ -40,6 +40,8 @@ type Cluster struct {
 	// regardless of queue depth.
 	MaxInstanceCount int `firestore:"max_instance_count" json:"max_instance_count"`
 
+	MaxLingerSeconds int `firestore:"max_linger_seconds" json:"max_linger_seconds"`
+
 	// UsedPreemptableAttempts tracks how many preemptable nodes have been
 	// requested in the current job run, counted against MaxPreemptableAttempts.
 	UsedPreemptableAttempts int `firestore:"used_preemptable_attempts" json:"used_preemptable_attempts"`
@@ -71,20 +73,14 @@ type MonitorState struct {
 	// completedJobIds is the set of Batch job IDs that have already been
 	// inspected after completion. Used to identify newly completed jobs on each
 	// poll so each job is only evaluated once.
-	CompletedJobIds []string
-
-	// suspiciouslyFailedToRun is the running count of Batch jobs that completed
-	// without executing any Sparkles tasks. Compared against
-	// Cluster.MaxSuspiciousFailures to decide whether to halt the cluster.
-	SuspiciouslyFailedToRun int
+	SuspiciouslyFailingJobIds []string
 }
 
 // monitorStateJSON is the exported-field mirror of MonitorState used for JSON
 // serialization, since encoding/json cannot marshal unexported fields.
 type MonitorStateJSON struct {
-	BatchJobRequests        int      `json:"batchJobRequests"`
-	CompletedJobIds         []string `json:"completedJobIds"`
-	SuspiciouslyFailedToRun int      `json:"suspiciouslyFailedToRun"`
+	BatchJobRequests          int      `json:"batchJobRequests"`
+	SuspiciouslyFailingJobIds []string `json:"suspiciouslyFailingJobIds"`
 }
 
 func (c *Cluster) GetMonitorState() (*MonitorState, error) {
@@ -96,9 +92,8 @@ func (c *Cluster) GetMonitorState() (*MonitorState, error) {
 		return nil, fmt.Errorf("unmarshaling monitor state: %w", err)
 	}
 	return &MonitorState{
-		BatchJobRequests:        wire.BatchJobRequests,
-		CompletedJobIds:         wire.CompletedJobIds,
-		SuspiciouslyFailedToRun: wire.SuspiciouslyFailedToRun,
+		BatchJobRequests:          wire.BatchJobRequests,
+		SuspiciouslyFailingJobIds: wire.SuspiciouslyFailingJobIds,
 	}, nil
 }
 
@@ -117,6 +112,7 @@ type BatchJob struct {
 	ID                 string
 	State              BatchJobState
 	RequestedInstances int
+	RunDuration        time.Duration
 }
 
 // BatchJobsToSubmit describes a batch of nodes to launch with uniform properties.

@@ -52,7 +52,7 @@ type TaskCache interface {
 	SetCachedEntry(ctx context.Context, entry *CachedTaskEntry) error
 }
 
-type CreateWorkerCommandCallback func(clusterID string, shouldLinger bool, aetherConfig *AetherConfig) []string
+type CreateWorkerCommandCallback func(cluster *Cluster, shouldLinger bool) []string
 
 func (e *ExternalServices) DeleteBatchJob(jobID string) error {
 	return e.Compute.DeleteBatchJob(jobID)

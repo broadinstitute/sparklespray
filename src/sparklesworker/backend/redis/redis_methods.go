@@ -55,7 +55,7 @@ func (r *LocalWorkerPool) SubmitBatchJobs(CreateWorkerCommand backend.CreateWork
 			Region:            cluster.Region,
 			InstanceCount:     req.InstanceCount,
 			WorkerDockerImage: cluster.WorkerDockerImage,
-			WorkerCommandArgs: CreateWorkerCommand(clusterID, req.ShouldLinger, cluster.AetherConfig),
+			WorkerCommandArgs: CreateWorkerCommand(cluster, req.ShouldLinger),
 		}
 
 		data, err := json.Marshal(job)

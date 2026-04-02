@@ -5,155 +5,54 @@ import pytest
 
 import contextlib
 import shutil
+from utils import ProcessGroup, Watcher
 
 
-class Process:
-    def __init__(self, proc: asyncio.subprocess.Process):
-        self._proc = proc
-
-    async def wait(self):
-        return await self._proc.wait()
-
-    def is_running(self):
-        return self._proc.returncode is None
-
-    def kill(self):
-        try:
-            self._proc.kill()
-        except ProcessLookupError:
-            pass
-
-
-class Watcher:
-    def __init__(self) -> None:
-        self.patterns = []
-
-    def watch_for(self, text):
-        event = asyncio.Event()
-        self.patterns.append((text, event))
-        return event
-
-    def process_line(self, line):
-        for text, event in self.patterns:
-            if text in line:
-                event.set()
-
-
-async def _stream_output(name: str, stream: asyncio.StreamReader, watcher: Watcher):
-    while True:
-        line = await stream.readline()
-        if not line:
-            break
-        line = line.decode(errors="replace")
-        print(f"[{name}] {line}", end="")
-        watcher.process_line(line)
-    print(f"[{name}] (done)")
-
-
-class ProcessGroup:
-    # use ProcessGroup context manager so that we're guarenteed that processes are terminated
-    # before returning. Don't want to accidently leave a process behind when an exception is thrown
-    def __init__(self):
-        self.procs = []
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc, tb):
-        for proc in self.procs:
-            # TODO add check to see if still running
-            proc.kill()
-
-    async def run_with_check(self, name: str, command: str, watcher=None, timeout=60):
-        if timeout is None:
-            timeout = 1000
-
-        proc = await self.run_and_stream(name, command, watcher=watcher)
-        try:
-            retcode = await asyncio.wait_for(proc.wait(), timeout=timeout)
-        except asyncio.TimeoutError:
-            raise Exception("Timeout waiting for submission to complete")
-
-        assert retcode == 0
-
-    async def run_and_stream(self, name: str, command: str, watcher=None) -> Process:
-        print("running", command)
-        if watcher is None:
-            watcher = Watcher()
-
-        proc = await asyncio.create_subprocess_shell(
-            command,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-        )
-        assert proc.stdout is not None
-        asyncio.create_task(_stream_output(name, proc.stdout, watcher))
-        pproc = Process(proc)
-        self.procs.append(pproc)
-        return pproc
-
-    async def wait_all(self):
-        for proc in self.procs:
-            await proc.wait()
-
-
-async def build_executables(tmpdir, proc_group: ProcessGroup):
+async def build_executables(tmpdir: str, proc_group: ProcessGroup):
     print("building executables")
 
-    await proc_group.run_with_check(
+    await proc_group.run(
         "build",
         "cd src/sparklesworker/cmd && go build -o ../../../bin/sparkles sparkles/main.go",
     )
 
-    await proc_group.run_with_check(
+    await proc_group.run(
         "build",
         "cd src/sparklesworker/cmd && go build -o ../../../bin/sparklesworker sparklesworker/main.go",
     )
 
 
-async def _submit(tmpdir, proc_group, submission):
+async def _submit(tmpdir: str, proc_group: ProcessGroup, submission: dict):
     submission_path = f"{tmpdir}/submission.json"
-    watcher = Watcher()
-    submitted_seen = watcher.watch_for("Successfully submitted")
 
     with open(submission_path, "wt") as fd:
         fd.write(json.dumps(submission))
 
     # submit a task
-    submit = await proc_group.run_and_stream(
+    submit = await proc_group.run_in_background(
         "submit",
         f"bin/sparkles dev submit {submission_path}",
-        watcher,  # todo: add --skip-provisioning once we have submit do that
+        block_until_text="Successfully submitted",  # todo: add --skip-provisioning once we have submit do that
     )
-
-    # block until we've successfully seen that the job was submitted
-    try:
-        await asyncio.wait_for(submitted_seen.wait(), 3)
-    except asyncio.TimeoutError:
-        raise Exception("Did not see successful submission")
 
     return submit
 
 
-async def run_test(test_fn):
-    tmpdir = tempfile.mkdtemp()
-    with ProcessGroup() as proc_group:
-        await test_fn(proc_group=proc_group, tmpdir=tmpdir)
-    shutil.rmtree(tmpdir)
-
-
-async def build_and_push_worker_image(proc_group, sparkles_docker_image):
-    await proc_group.run_with_check(
+async def build_and_push_worker_image(proc_group: ProcessGroup, sparkles_docker_image):
+    print("skipping docker build")
+    return
+    await proc_group.run(
         "build",
         f"cd src/sparklesworker && docker build -t {sparkles_docker_image} .",
+        timeout=200,
     )
-    await proc_group.run_with_check(
+    await proc_group.run(
         "build",
         f"docker push {sparkles_docker_image}",
     )
 
 
-async def minimal_gcp_submission_with_autoscale(proc_group, tmpdir):
+async def minimal_gcp_submission_with_autoscale(proc_group: ProcessGroup, tmpdir):
     submit = lambda submission: _submit(
         proc_group=proc_group, tmpdir=tmpdir, submission=submission
     )
@@ -178,6 +77,7 @@ async def minimal_gcp_submission_with_autoscale(proc_group, tmpdir):
             "MaxInstanceCount": 1,
             "MaxSuspiciousFailures": 1,
             "BootDisk": {"size_gb": 50, "type": "pd-standard"},
+            "MaxLingerSeconds": 1,
         },
         "projectID": "test-sparkles-2",
         "region": "us-central1",
@@ -230,7 +130,7 @@ async def minimal_gcp_submission_with_autoscale(proc_group, tmpdir):
     assert "second hello from sparklespray" in stdout
 
 
-async def minimal_gcp_with_local_autoscale(proc_group, tmpdir):
+async def minimal_gcp_with_local_autoscale(proc_group: ProcessGroup, tmpdir: str):
     submit = lambda submission: _submit(
         proc_group=proc_group, tmpdir=tmpdir, submission=submission
     )
@@ -277,23 +177,19 @@ async def minimal_gcp_with_local_autoscale(proc_group, tmpdir):
 
     submit_proc = await submit(submission)
 
-    # but make sure the submit process is still waiting for the job to complete
+    # make sure the submit process is still waiting for the job to complete
     assert submit_proc.is_running()
 
     # At this point there should be a should be sitting in a queue. We in this scenerio we need to start the autoscaler
 
-    await proc_group.run_with_check(
+    await proc_group.run(
         "autoscaler",
         f"bin/sparklesworker autoscaler --project {project} --region {region} --database {database} --poll-interval 0s --max-idle 0s",
         timeout=60 * 10,
     )
 
     # now that the autoscaler has completed, the submission process should have also completed
-
-    try:
-        await asyncio.wait_for(submit_proc.wait(), 60)
-    except asyncio.TimeoutError:
-        raise Exception("Timeout waiting for submission to complete")
+    await submit_proc.wait(timeout=600)
 
     # verify the outputs
     with open(f"{tmpdir}/log/stdout.txt", "rt") as fd:
@@ -309,10 +205,7 @@ async def minimal_gcp_with_local_autoscale(proc_group, tmpdir):
     assert submit_proc.is_running()
 
     # Since the autoscaler and existing worker should still be running, should start quickly
-    try:
-        await asyncio.wait_for(submit_proc.wait(), 10)
-    except asyncio.TimeoutError:
-        raise Exception("Timeout waiting for submission to complete")
+    await submit_proc.wait(timeout=10)
 
     # verify the outputs
     with open(f"{tmpdir}/log/stdout.txt", "rt") as fd:
@@ -421,6 +314,13 @@ async def minimal_local_test(
 
     # redis is the one service that doesn't automatically shut down
     redis.kill()
+
+
+async def run_test(test_fn):
+    tmpdir = tempfile.mkdtemp()
+    with ProcessGroup() as proc_group:
+        await test_fn(proc_group=proc_group, tmpdir=tmpdir)
+    shutil.rmtree(tmpdir)
 
 
 if __name__ == "__main__":

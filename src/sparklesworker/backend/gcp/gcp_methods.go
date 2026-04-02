@@ -73,7 +73,7 @@ func (g *GCPWorkerPool) ListBatchJobs(region, clusterID string) ([]*backend.Batc
 		for _, tg := range job.GetTaskGroups() {
 			instanceCount += int(tg.GetTaskCount())
 		}
-		jobs = append(jobs, &backend.BatchJob{ID: job.GetName(), State: batchStateToBatchJobState(job), RequestedInstances: instanceCount})
+		jobs = append(jobs, &backend.BatchJob{ID: job.GetName(), State: batchStateToBatchJobState(job), RequestedInstances: instanceCount, RunDuration: (job.GetStatus().GetRunDuration().AsDuration())})
 	}
 	return jobs, nil
 }
@@ -189,7 +189,7 @@ func (g *GCPWorkerPool) DeleteAllBatchJobs(region, clusterID string) error {
 
 func (g *GCPWorkerPool) SubmitBatchJobs(CreateWorkerCommand backend.CreateWorkerCommandCallback, cluster *backend.Cluster, clusterID string, requests []*backend.BatchJobsToSubmit) error {
 	for _, req := range requests {
-		commandArgs := CreateWorkerCommand(clusterID, req.ShouldLinger, cluster.AetherConfig)
+		commandArgs := CreateWorkerCommand(cluster, req.ShouldLinger)
 		jobSpec := &JobSpec{
 			Runnables:       []Runnable{{Image: cluster.WorkerDockerImage, Command: commandArgs}},
 			MachineType:     cluster.MachineType,

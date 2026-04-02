@@ -54,9 +54,8 @@ func (r *RedisClusterStore) UpdateClusterMonitorState(clusterID string, state *b
 		return err
 	}
 	wire := backend.MonitorStateJSON{
-		BatchJobRequests:        state.BatchJobRequests,
-		CompletedJobIds:         state.CompletedJobIds,
-		SuspiciouslyFailedToRun: state.SuspiciouslyFailedToRun,
+		BatchJobRequests:          state.BatchJobRequests,
+		SuspiciouslyFailingJobIds: state.SuspiciouslyFailingJobIds,
 	}
 	stateData, err := json.Marshal(wire)
 	if err != nil {
