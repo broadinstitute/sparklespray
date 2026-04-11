@@ -40,7 +40,7 @@ func spawnExecuteTasks(t *testing.T, projectID string, jobID string, index int, 
 
 	run := func() {
 		ready.Wait()
-		executor := func(taskID string, taskSpec *task_queue.TaskSpec, expiry time.Time) (*consumer.ExecuteTaskResult, error) {
+		executor := func(taskID, jobID string, taskSpec *task_queue.TaskSpec, expiry time.Time) (*consumer.ExecuteTaskResult, error) {
 			// remember we executed this task
 			taskParamPerClient[index] = append(taskParamPerClient[index], taskSpec.Command)
 			log.Printf("client %d executed %s\n", index, taskSpec.Command)
@@ -49,7 +49,7 @@ func spawnExecuteTasks(t *testing.T, projectID string, jobID string, index int, 
 		sleepFunc := func(sleepTime time.Duration) {
 			time.Sleep(sleepTime)
 		}
-		err := consumer.RunLoop(ctx, cluster, queue, sleepFunc, executor, 1*time.Second, 10*time.Second)
+		err := consumer.RunLoop(ctx, cluster, queue, sleepFunc, executor, 1*time.Second, 10*time.Second, &backend.NullEventPublisher{})
 		if err != nil {
 			log.Printf("consumerRunLoop returned error: %v\n", err)
 		}

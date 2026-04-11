@@ -87,7 +87,7 @@ func TestExecute(t *testing.T) {
 		Command:       []string{"/bin/sh", "-c", "echo hello"},
 		Uploads:       &task_queue.UploadSpec{},
 		AetherFSRoot:  "sha256:" + mkfsResult.ManifestKey}
-	execResult, err := consumer.ExecuteTask(ctx, aetherConfig, "test-task", spec, rootDir, cacheDir, tasksDir, nil, nil, time.Time{})
+	execResult, err := consumer.ExecuteTask(ctx, aetherConfig, "test-task", "job-1", spec, rootDir, cacheDir, tasksDir, nil, nil, time.Time{}, &backend.NullEventPublisher{})
 	assert.Nil(t, err)
 	assert.Equal(t, "0", execResult.RetCode)
 }

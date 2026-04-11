@@ -15,6 +15,7 @@ import (
 	"github.com/broadinstitute/sparklesworker/backend"
 	"github.com/broadinstitute/sparklesworker/consumer"
 	gcp_backend "github.com/broadinstitute/sparklesworker/backend/gcp"
+	redis_backend "github.com/broadinstitute/sparklesworker/backend/redis"
 	"github.com/broadinstitute/sparklesworker/task_queue"
 	"github.com/broadinstitute/sparklesworker/watchdog"
 	"github.com/redis/go-redis/v9"
@@ -147,12 +148,7 @@ func consume(c *cli.Context) error {
 	}
 
 	var taskCache task_queue.TaskCache
-
-	var executor consumer.Executor
-	executor = func(taskId string, taskSpec *task_queue.TaskSpec, expiry time.Time) (*consumer.ExecuteTaskResult, error) {
-		result, err := consumer.ExecuteTask(ctx, &aetherCfg, taskId, taskSpec, dir, cacheDir, tasksDir, nil, taskCache, expiry)
-		return result, err
-	}
+	var eventPublisher backend.EventPublisher
 
 	sleepUntilNotify := func(sleepTime time.Duration) {
 		log.Printf("Nothing to do. Sleeping for %d ms...", sleepTime/time.Millisecond)
@@ -175,9 +171,19 @@ func consume(c *cli.Context) error {
 		}
 		defer redisClient.Close()
 
+		clusterConfig, err := redis_backend.NewRedisClusterStore(ctx, redisClient).GetClusterConfig(cluster)
+		if err != nil {
+			log.Printf("Failed to get cluster config from Redis: %v", err)
+			return err
+		}
+		log.Printf("Got cluster config: pub_sub_out_topic=%s", clusterConfig.PubSubOutTopic)
+
 		redisQueue := task_queue.NewRedisQueue(redisClient, cluster, workerID, options.InitialClaimRetry, options.ClaimTimeout)
 		redisQueue.WatchdogNotifier = watchdog.Notify
 		queue = redisQueue
+
+		redisChannel := redis_backend.NewRedisChannel(redisClient)
+		eventPublisher = redis_backend.NewRedisEventPublisher(redisClient, redisChannel, clusterConfig.PubSubOutTopic)
 	} else {
 		log.Printf("Using Google Cloud backend (Pub/Sub + Firestore)")
 
@@ -198,11 +204,29 @@ func consume(c *cli.Context) error {
 		fsQueue.WatchdogNotifier = watchdog.Notify
 		queue = fsQueue
 		taskCache = task_queue.NewFirestoreTaskCache(client)
+
+		pubsubChannel := gcp_backend.NewPubSubChannel(projectID)
+		eventPublisher = gcp_backend.NewFirestoreEventPublisher(client, pubsubChannel, clusterConfig.PubSubOutTopic)
 	}
 
-	err = consumer.RunLoop(ctx, cluster, queue, sleepUntilNotify, executor, options.SleepOnEmpty, options.MaxWaitForNewTasks)
+	var executor consumer.Executor
+	executor = func(taskId, jobID string, taskSpec *task_queue.TaskSpec, expiry time.Time) (*consumer.ExecuteTaskResult, error) {
+		return consumer.ExecuteTask(ctx, &aetherCfg, taskId, jobID, taskSpec, dir, cacheDir, tasksDir, nil, taskCache, expiry, eventPublisher)
+	}
+
+	if err := eventPublisher.PublishEvent(ctx, backend.NewWorkerEvent(backend.EventTypeWorkerStarted, cluster, workerID)); err != nil {
+		log.Printf("Failed to publish worker_started event: %v", err)
+		return err
+	}
+
+	err = consumer.RunLoop(ctx, cluster, queue, sleepUntilNotify, executor, options.SleepOnEmpty, options.MaxWaitForNewTasks, eventPublisher)
 	if err != nil {
 		log.Printf("consumerRunLoop exited with: %v\n", err)
+		return err
+	}
+
+	if err := eventPublisher.PublishEvent(ctx, backend.NewWorkerEvent(backend.EventTypeWorkerCompleted, cluster, workerID)); err != nil {
+		log.Printf("Failed to publish worker_completed event: %v", err)
 		return err
 	}
 

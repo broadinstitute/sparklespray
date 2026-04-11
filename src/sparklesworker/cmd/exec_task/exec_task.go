@@ -174,7 +174,7 @@ func execTask(c *cli.Context) error {
 
 	lifeCycle := monitor.NewMonitor(ctx, channel, topicName, 1*time.Second, 5)
 
-	result, err := consumer.ExecuteTask(ctx, &aetherCfg, taskId, taskSpec, dir, cacheDir, tasksDir, lifeCycle, nil, time.Time{})
+	result, err := consumer.ExecuteTask(ctx, &aetherCfg, taskId, "", taskSpec, dir, cacheDir, tasksDir, lifeCycle, nil, time.Time{}, &backend.NullEventPublisher{})
 	if err != nil {
 		return fmt.Errorf("task failed: %w", err)
 	}

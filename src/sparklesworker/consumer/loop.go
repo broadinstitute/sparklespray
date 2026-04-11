@@ -1,11 +1,11 @@
 package consumer
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"time"
-
-	"context"
 
 	"cloud.google.com/go/logging"
 	"github.com/broadinstitute/sparklesworker/backend"
@@ -21,10 +21,10 @@ type Options struct {
 	LoggingClient      *logging.Client
 }
 
-type Executor func(taskId string, taskSpec *task_queue.TaskSpec, expiry time.Time) (*ExecuteTaskResult, error)
+type Executor func(taskId, jobID string, taskSpec *task_queue.TaskSpec, expiry time.Time) (*ExecuteTaskResult, error)
 
 func RunLoop(ctx context.Context, clusterID string, queue task_queue.TaskQueue, sleepUntilNotify func(sleepTime time.Duration),
-	executor Executor, SleepOnEmpty time.Duration, MaxWaitForNewTasks time.Duration) error {
+	executor Executor, SleepOnEmpty time.Duration, MaxWaitForNewTasks time.Duration, events backend.EventPublisher) error {
 
 	firstClaim := true
 	lastClaim := time.Now()
@@ -61,6 +61,10 @@ func RunLoop(ctx context.Context, clusterID string, queue task_queue.TaskQueue, 
 		log.Printf("Claimed task %s:\n%s", claimed.TaskID, taskJSON)
 		firstClaim = false
 
+		if err := events.PublishEvent(ctx, backend.NewTaskEvent(backend.EventTypeTaskClaimed, claimed.TaskID, claimed.JobID)); err != nil {
+			return fmt.Errorf("publishing task_claimed event for task %s: %w", claimed.TaskID, err)
+		}
+
 		jobKilled, err := queue.IsJobKilled(ctx, claimed.JobID)
 		if err != nil {
 			log.Printf("Got error in IsJobKilled for %s: %v", claimed.JobID, err)
@@ -68,7 +72,7 @@ func RunLoop(ctx context.Context, clusterID string, queue task_queue.TaskQueue, 
 		}
 
 		if !jobKilled {
-			execTaskResult, err := executor(claimed.TaskID, claimed.TaskSpec, claimed.Expiry)
+			execTaskResult, err := executor(claimed.TaskID, claimed.JobID, claimed.TaskSpec, claimed.Expiry)
 			if err != nil {
 				log.Printf("Got error executing task %s: %v, marking task as failed", claimed.TaskID, err)
 
@@ -77,11 +81,17 @@ func RunLoop(ctx context.Context, clusterID string, queue task_queue.TaskQueue, 
 					log.Printf("Got error updating task %s failed: %v", claimed.TaskID, updateErr)
 					return updateErr
 				}
+				if pubErr := events.PublishEvent(ctx, backend.NewTaskEvent(backend.EventTypeTaskFailed, claimed.TaskID, claimed.JobID)); pubErr != nil {
+					return fmt.Errorf("publishing task_failed event for task %s: %w", claimed.TaskID, pubErr)
+				}
 			} else {
 				_, updateErr := UpdateTaskCompleted(ctx, queue, claimed.TaskID, execTaskResult.RetCode, execTaskResult.OutputsKey, execTaskResult.LogsKey, execTaskResult.UsedCacheResultFromTaskID)
 				if updateErr != nil {
 					log.Printf("Got error updating task %s is complete: %v", claimed.TaskID, updateErr)
 					return updateErr
+				}
+				if pubErr := events.PublishEvent(ctx, backend.NewTaskEvent(backend.EventTypeTaskComplete, claimed.TaskID, claimed.JobID)); pubErr != nil {
+					return fmt.Errorf("publishing task_complete event for task %s: %w", claimed.TaskID, pubErr)
 				}
 			}
 		} else {

@@ -372,11 +372,11 @@ func ExecuteSubmit(req *DevSubmitRequest) (*task_queue.Task, error) {
 
 	// If running locally, drive the consumer loop ourselves.
 	if job.ClusterID == "local" {
-		executor := func(taskId string, taskSpec *task_queue.TaskSpec, expiry time.Time) (*consumer.ExecuteTaskResult, error) {
-			return consumer.ExecuteTask(ctx, &aetherCfg, taskId, taskSpec, req.Dir, req.CacheDir, req.TasksDir, nil, taskCache, expiry)
+		executor := func(taskId, jobID string, taskSpec *task_queue.TaskSpec, expiry time.Time) (*consumer.ExecuteTaskResult, error) {
+			return consumer.ExecuteTask(ctx, &aetherCfg, taskId, jobID, taskSpec, req.Dir, req.CacheDir, req.TasksDir, nil, taskCache, expiry, &backend.NullEventPublisher{})
 		}
 		sleepUntilNotify := func(d time.Duration) { time.Sleep(d) }
-		if err := consumer.RunLoop(ctx, job.ClusterID, queue, sleepUntilNotify, executor, 1*time.Second, req.RunLoopMaxWait); err != nil {
+		if err := consumer.RunLoop(ctx, job.ClusterID, queue, sleepUntilNotify, executor, 1*time.Second, req.RunLoopMaxWait, &backend.NullEventPublisher{}); err != nil {
 			return nil, fmt.Errorf("RunLoop failed: %w", err)
 		}
 	}

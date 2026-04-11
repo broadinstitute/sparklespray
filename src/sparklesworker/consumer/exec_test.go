@@ -81,7 +81,7 @@ func TestExecCommand_CapturesStdout(t *testing.T) {
 	tmp := t.TempDir()
 	f := stdoutFile(t)
 
-	result, err := execCommand([]string{"/bin/sh", "-c", "echo hello"}, tmp, tmp, f, "")
+	result, err := execCommand(context.Background(), []string{"/bin/sh", "-c", "echo hello"}, tmp, tmp, f, "")
 	require.NoError(t, err)
 
 	f.Seek(0, io.SeekStart)
@@ -93,7 +93,7 @@ func TestExecCommand_NonZeroExitCode(t *testing.T) {
 	tmp := t.TempDir()
 	f := stdoutFile(t)
 
-	result, err := execCommand([]string{"/bin/sh", "-c", "exit 42"}, tmp, tmp, f, "")
+	result, err := execCommand(context.Background(), []string{"/bin/sh", "-c", "exit 42"}, tmp, tmp, f, "")
 	require.NoError(t, err)
 	assert.Equal(t, "42", result.Status)
 }
@@ -103,7 +103,7 @@ func TestExecCommand_PathResolution(t *testing.T) {
 	tmp := t.TempDir()
 	f := stdoutFile(t)
 
-	result, err := execCommand([]string{"sh", "-c", "echo ok"}, tmp, tmp, f, "")
+	result, err := execCommand(context.Background(), []string{"sh", "-c", "echo ok"}, tmp, tmp, f, "")
 	require.NoError(t, err)
 	assert.Equal(t, "0", result.Status)
 	assert.Contains(t, readFile(t, f.Name()), "ok")
@@ -113,7 +113,7 @@ func TestExecCommand_UnknownExecutable(t *testing.T) {
 	tmp := t.TempDir()
 	f := stdoutFile(t)
 
-	_, err := execCommand([]string{"no-such-binary-xyz"}, tmp, tmp, f, "")
+	_, err := execCommand(context.Background(), []string{"no-such-binary-xyz"}, tmp, tmp, f, "")
 	require.Error(t, err)
 }
 
@@ -122,7 +122,7 @@ func TestExecCommand_ResultFields(t *testing.T) {
 	f := stdoutFile(t)
 
 	before := time.Now()
-	result, err := execCommand([]string{"/bin/sh", "-c", "true"}, tmp, tmp, f, "")
+	result, err := execCommand(context.Background(), []string{"/bin/sh", "-c", "true"}, tmp, tmp, f, "")
 	after := time.Now()
 
 	require.NoError(t, err)
@@ -250,8 +250,8 @@ func TestExecuteTask_BasicRun(t *testing.T) {
 	}
 	cfg := &backend.AetherConfig{Root: aetherDir}
 
-	result, err := ExecuteTask(ctx, cfg, "task-1", spec, tmp,
-		filepath.Join(tmp, "cache"), filepath.Join(tmp, "tasks"), nil, nil, time.Time{})
+	result, err := ExecuteTask(ctx, cfg, "task-1", "job-1", spec, tmp,
+		filepath.Join(tmp, "cache"), filepath.Join(tmp, "tasks"), nil, nil, time.Time{}, &backend.NullEventPublisher{})
 	require.NoError(t, err)
 	assert.Equal(t, "0", result.RetCode)
 	assert.NotEmpty(t, result.LogsKey)
@@ -278,8 +278,8 @@ func TestExecuteTask_NonZeroExitCode(t *testing.T) {
 		AetherFSRoot: emptyAetherRoot(t, aetherDir),
 		Uploads:      &task_queue.UploadSpec{},
 	}
-	result, err := ExecuteTask(ctx, &backend.AetherConfig{Root: aetherDir}, "task-fail", spec, tmp,
-		filepath.Join(tmp, "cache"), filepath.Join(tmp, "tasks"), nil, nil, time.Time{})
+	result, err := ExecuteTask(ctx, &backend.AetherConfig{Root: aetherDir}, "task-fail", "job-1", spec, tmp,
+		filepath.Join(tmp, "cache"), filepath.Join(tmp, "tasks"), nil, nil, time.Time{}, &backend.NullEventPublisher{})
 	require.NoError(t, err)
 	assert.Equal(t, "7", result.RetCode)
 }
@@ -295,8 +295,8 @@ func TestExecuteTask_UploadsOutputFiles(t *testing.T) {
 		AetherFSRoot: emptyAetherRoot(t, aetherDir),
 		Uploads:      &task_queue.UploadSpec{IncludePatterns: []string{"*.txt"}},
 	}
-	result, err := ExecuteTask(ctx, &backend.AetherConfig{Root: aetherDir}, "task-upload", spec, tmp,
-		filepath.Join(tmp, "cache"), filepath.Join(tmp, "tasks"), nil, nil, time.Time{})
+	result, err := ExecuteTask(ctx, &backend.AetherConfig{Root: aetherDir}, "task-upload", "job-1", spec, tmp,
+		filepath.Join(tmp, "cache"), filepath.Join(tmp, "tasks"), nil, nil, time.Time{}, &backend.NullEventPublisher{})
 	require.NoError(t, err)
 	assert.Equal(t, "0", result.RetCode)
 
@@ -325,15 +325,15 @@ func TestExecuteTask_CacheMissThenHit(t *testing.T) {
 	cfg := &backend.AetherConfig{Root: aetherDir}
 
 	// First call — cache miss, task executes.
-	r1, err := ExecuteTask(ctx, cfg, "task-a", spec, tmp,
-		filepath.Join(tmp, "cache"), filepath.Join(tmp, "tasks"), nil, cache, expiry)
+	r1, err := ExecuteTask(ctx, cfg, "task-a", "job-1", spec, tmp,
+		filepath.Join(tmp, "cache"), filepath.Join(tmp, "tasks"), nil, cache, expiry, &backend.NullEventPublisher{})
 	require.NoError(t, err)
 	assert.Equal(t, "0", r1.RetCode)
 	assert.Empty(t, r1.UsedCacheResultFromTaskID)
 
 	// Second call with identical spec — should be a cache hit.
-	r2, err := ExecuteTask(ctx, cfg, "task-b", spec, tmp,
-		filepath.Join(tmp, "cache"), filepath.Join(tmp, "tasks"), nil, cache, expiry)
+	r2, err := ExecuteTask(ctx, cfg, "task-b", "job-1", spec, tmp,
+		filepath.Join(tmp, "cache"), filepath.Join(tmp, "tasks"), nil, cache, expiry, &backend.NullEventPublisher{})
 	require.NoError(t, err)
 	assert.Equal(t, "task-a", r2.UsedCacheResultFromTaskID)
 	assert.Equal(t, r1.LogsKey, r2.LogsKey)
@@ -354,14 +354,14 @@ func TestExecuteTask_CacheNotStoredOnFailure(t *testing.T) {
 	}
 	cfg := &backend.AetherConfig{Root: aetherDir}
 
-	r1, err := ExecuteTask(ctx, cfg, "task-fail", spec, tmp,
-		filepath.Join(tmp, "cache"), filepath.Join(tmp, "tasks"), nil, cache, expiry)
+	r1, err := ExecuteTask(ctx, cfg, "task-fail", "job-1", spec, tmp,
+		filepath.Join(tmp, "cache"), filepath.Join(tmp, "tasks"), nil, cache, expiry, &backend.NullEventPublisher{})
 	require.NoError(t, err)
 	assert.Equal(t, "1", r1.RetCode)
 
 	// Second call must not get a cache hit — failure should not be cached.
-	r2, err := ExecuteTask(ctx, cfg, "task-fail-2", spec, tmp,
-		filepath.Join(tmp, "cache"), filepath.Join(tmp, "tasks"), nil, cache, expiry)
+	r2, err := ExecuteTask(ctx, cfg, "task-fail-2", "job-1", spec, tmp,
+		filepath.Join(tmp, "cache"), filepath.Join(tmp, "tasks"), nil, cache, expiry, &backend.NullEventPublisher{})
 	require.NoError(t, err)
 	assert.Empty(t, r2.UsedCacheResultFromTaskID)
 }
@@ -377,8 +377,8 @@ func TestExecuteTask_WritesResultFile(t *testing.T) {
 		Uploads:      &task_queue.UploadSpec{},
 		Parameters:   map[string]string{"env": "test"},
 	}
-	result, err := ExecuteTask(ctx, &backend.AetherConfig{Root: aetherDir}, "task-result", spec, tmp,
-		filepath.Join(tmp, "cache"), filepath.Join(tmp, "tasks"), nil, nil, time.Time{})
+	result, err := ExecuteTask(ctx, &backend.AetherConfig{Root: aetherDir}, "task-result", "job-1", spec, tmp,
+		filepath.Join(tmp, "cache"), filepath.Join(tmp, "tasks"), nil, nil, time.Time{}, &backend.NullEventPublisher{})
 	require.NoError(t, err)
 
 	// Export logs and parse result.json.

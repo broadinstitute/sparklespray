@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"sync"
 	"syscall"
 	"time"
 
@@ -18,6 +19,8 @@ import (
 	"github.com/broadinstitute/sparklesworker/backend"
 	"github.com/broadinstitute/sparklesworker/task_queue"
 	"github.com/broadinstitute/sparklesworker/watchdog"
+	"github.com/moby/moby/api/types/container"
+	dockerclient "github.com/moby/moby/client"
 	aetherclient "github.com/pgm/aether/client"
 )
 
@@ -101,23 +104,86 @@ type ExecResult struct {
 	ExeArgs   []string
 }
 
-func execCommand(command []string, rootdir string, workdir string, stdout *os.File, dockerImage string) (*ExecResult, error) {
-	var exePath string
-	var args []string
-
-	if dockerImage != "" {
-		exePath = "docker"
-		args = []string{
-			"docker", "run", "--rm",
-			"-v", rootdir + ":" + rootdir,
-			"-w", workdir,
-			dockerImage,
-		}
-		args = append(args, command...)
-	} else {
-		exePath = command[0]
-		args = command
+func execCommandDocker(ctx context.Context, command []string, rootdir string, workdir string, stdout *os.File, dockerImage string) (*ExecResult, error) {
+	cli, err := dockerclient.New(dockerclient.FromEnv)
+	if err != nil {
+		return nil, fmt.Errorf("creating docker client: %w", err)
 	}
+	defer cli.Close()
+
+	createResult, err := cli.ContainerCreate(ctx, dockerclient.ContainerCreateOptions{
+		Config: &container.Config{
+			Image:        dockerImage,
+			Cmd:          command,
+			WorkingDir:   workdir,
+			AttachStdin:  false,
+			AttachStdout: true,
+			AttachStderr: true,
+			Tty:          true,
+		},
+		HostConfig: &container.HostConfig{
+			Binds:      []string{rootdir + ":" + rootdir},
+			AutoRemove: true,
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("creating container: %w", err)
+	}
+	containerID := createResult.ID
+
+	startTime := time.Now()
+
+	attachResp, err := cli.ContainerAttach(ctx, containerID, dockerclient.ContainerAttachOptions{
+		Stream: true,
+		Stdout: true,
+		Stderr: false, // shouldn't be necessary because tty=True at creation, so we should get back a single stream with no multiplexing headers
+	})
+
+	var logTransfer sync.WaitGroup
+	logTransfer.Go(func() {
+		io.Copy(stdout, attachResp.Reader)
+		attachResp.Close()
+	})
+
+	_, err = cli.ContainerStart(ctx, containerID, dockerclient.ContainerStartOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("starting container: %w", err)
+	}
+
+	waitResult := cli.ContainerWait(ctx, containerID, dockerclient.ContainerWaitOptions{
+		Condition: container.WaitConditionNotRunning,
+	})
+
+	var exitCode int64
+	select {
+	case err := <-waitResult.Error:
+		return nil, fmt.Errorf("waiting for container: %w", err)
+	case status := <-waitResult.Result:
+		exitCode = status.StatusCode
+	}
+
+	endTime := time.Now()
+
+	// wait for the transfer of logs to stdout fd to complete before returning
+	logTransfer.Wait()
+
+	return &ExecResult{
+		Rusage:    &syscall.Rusage{},
+		Status:    fmt.Sprintf("%d", exitCode),
+		StartTime: startTime,
+		EndTime:   endTime,
+		ExePath:   dockerImage,
+		ExeArgs:   command,
+	}, nil
+}
+
+func execCommand(ctx context.Context, command []string, rootdir string, workdir string, stdout *os.File, dockerImage string) (*ExecResult, error) {
+	if dockerImage != "" {
+		return execCommandDocker(ctx, command, rootdir, workdir, stdout, dockerImage)
+	}
+
+	exePath := command[0]
+	args := command
 
 	var err error
 	exePath, err = exec.LookPath(exePath)
@@ -133,19 +199,8 @@ func execCommand(command []string, rootdir string, workdir string, stdout *os.Fi
 		return nil, err
 	}
 
-	var procState *os.ProcessState
-	procState, _ = proc.Wait()
-	// err = watchdog.NotifyUntilComplete(func() error {
-	// 	var err2 error
-	// 	procState, err2 = proc.Wait()
-	// 	return err2
-	// })
+	procState, _ := proc.Wait()
 	endTime := time.Now()
-
-	if err != nil {
-		// this should not be possible
-		panic(fmt.Sprintf("Error calling proc.Wait(): %s", err))
-	}
 
 	rusage := procState.SysUsage().(*syscall.Rusage)
 	status := procState.Sys().(syscall.WaitStatus)
@@ -418,7 +473,7 @@ type ExecuteLifecycle interface {
 	Finished()
 }
 
-func ExecuteTask(ctx context.Context, aetherCfg *backend.AetherConfig, taskId string, taskSpec *task_queue.TaskSpec, rootDir string, cacheDir string, tasksDir string, lifecycle ExecuteLifecycle, taskCache task_queue.TaskCache, expiry time.Time) (*ExecuteTaskResult, error) {
+func ExecuteTask(ctx context.Context, aetherCfg *backend.AetherConfig, taskId string, jobID string, taskSpec *task_queue.TaskSpec, rootDir string, cacheDir string, tasksDir string, lifecycle ExecuteLifecycle, taskCache task_queue.TaskCache, expiry time.Time, events backend.EventPublisher) (*ExecuteTaskResult, error) {
 	if taskCache != nil {
 		cacheKey, err := computeCacheKey(taskSpec)
 		if err == nil {
@@ -458,12 +513,27 @@ func ExecuteTask(ctx context.Context, aetherCfg *backend.AetherConfig, taskId st
 		return nil, err
 	}
 
+	if err := events.PublishEvent(ctx, backend.NewTaskEvent(backend.EventTypeTaskStaged, taskId, jobID)); err != nil {
+		return nil, fmt.Errorf("publishing task_staged event: %w", err)
+	}
+
+	if err := events.PublishEvent(ctx, backend.NewTaskEvent(backend.EventTypeTaskStarted, taskId, jobID)); err != nil {
+		return nil, fmt.Errorf("publishing task_started event: %w", err)
+	}
+
 	log.Printf("Executing (working dir: %s, output written to: %s): %s", dirs.cwdDir, dirs.stdoutPath, taskSpec.Command)
-	execResult, err := execCommand(taskSpec.Command, rootDir, dirs.cwdDir, stdout, taskSpec.DockerImage)
+	execResult, err := execCommand(ctx, taskSpec.Command, rootDir, dirs.cwdDir, stdout, taskSpec.DockerImage)
 	if err != nil {
 		return nil, err
 	}
 	retcode := execResult.Status
+
+	executedEvent := backend.NewTaskEvent(backend.EventTypeTaskExecuted, taskId, jobID)
+	executedEvent.ExitCode = retcode
+	executedEvent.MaxMemInGB = float64(execResult.Rusage.Maxrss) / (1024 * 1024)
+	if err := events.PublishEvent(ctx, executedEvent); err != nil {
+		return nil, fmt.Errorf("publishing task_executed event: %w", err)
+	}
 
 	execLifecycleScript("PostExecScript", dirs.workDir, taskSpec.PostExecScript)
 

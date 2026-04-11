@@ -58,11 +58,20 @@ func (e *ExternalServices) DeleteBatchJob(jobID string) error {
 	return e.Compute.DeleteBatchJob(jobID)
 }
 
+// EventPublisher writes event records to Firestore (or a Redis equivalent) and
+// then publishes a JSON-encoded copy to a Pub/Sub topic. Expiry is stamped by
+// the publisher, not by the caller. Implementations must write to the durable
+// store before publishing to the message bus.
+type EventPublisher interface {
+	PublishEvent(ctx context.Context, event Event) error
+}
+
 // ExternalServices bundles all backend service handles for a deployment
 // (either GCP production or local Redis testing).
 type ExternalServices struct {
 	Channel   MessageBus
 	TaskCache TaskCache
+	Events              EventPublisher
 	Close               func()
 	Compute             WorkerPool
 	Cluster             ClusterStore

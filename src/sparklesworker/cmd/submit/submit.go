@@ -232,14 +232,14 @@ func submit(c *cli.Context) error {
 	defer backend.StartLogStream(ctx, channel, topicName)()
 
 	if job.ClusterID == "local" {
-		executor := func(taskId string, taskSpec *task_queue.TaskSpec, expiry time.Time) (*consumer.ExecuteTaskResult, error) {
-			return consumer.ExecuteTask(ctx, &aetherCfg, taskId, taskSpec, dir, cacheDir, tasksDir, nil, nil, expiry)
+		executor := func(taskId, jobID string, taskSpec *task_queue.TaskSpec, expiry time.Time) (*consumer.ExecuteTaskResult, error) {
+			return consumer.ExecuteTask(ctx, &aetherCfg, taskId, jobID, taskSpec, dir, cacheDir, tasksDir, nil, nil, expiry, &backend.NullEventPublisher{})
 		}
 		sleepUntilNotify := func(sleepTime time.Duration) {
 			time.Sleep(sleepTime)
 		}
 
-		err = consumer.RunLoop(ctx, job.ClusterID, queue, sleepUntilNotify, executor, 1*time.Second, 10*time.Second)
+		err = consumer.RunLoop(ctx, job.ClusterID, queue, sleepUntilNotify, executor, 1*time.Second, 10*time.Second, &backend.NullEventPublisher{})
 		if err != nil {
 			return fmt.Errorf("RunLoop failed: %s", err)
 		}
