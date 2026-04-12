@@ -26,8 +26,8 @@ func CreateMockServices(ctx context.Context, redisAddr string, startMockBatchAPI
 	}
 
 	return &backend.ExternalServices{
-		Channel: channel,
-			TaskCache: taskCache,
+		Channel:   channel,
+		TaskCache: taskCache,
 		Close:     func() { redisClient.Close() },
 		Compute:   compute,
 		Cluster:   cluster,
@@ -36,5 +36,9 @@ func CreateMockServices(ctx context.Context, redisAddr string, startMockBatchAPI
 			return backend.CreateWorkerCommand(cluster, false, []string{
 				"--localhost",
 				"--redisAddr", redisAddr})
-		}}, nil
+		},
+		CreateEventPublisher: func(topic string) backend.EventPublisher {
+			return NewRedisEventPublisher(redisClient, channel, topic)
+		},
+	}, nil
 }

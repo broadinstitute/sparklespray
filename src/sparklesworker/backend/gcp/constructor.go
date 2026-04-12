@@ -72,7 +72,11 @@ func CreateGCPServices(ctx context.Context, projectID string, region string, dat
 			return backend.CreateWorkerCommand(cluster, shouldLinger, []string{
 				"--projectId", projectID,
 				"--database", database})
-		}}, nil
+		},
+		CreateEventPublisher: func(topic string) backend.EventPublisher {
+			return NewFirestoreEventPublisher(firestoreClient, channel, topic)
+		},
+	}, nil
 }
 
 func getZonesForRegion(ctx context.Context, zoneClient *compute.ZonesClient, projectID string, region string) ([]string, error) {

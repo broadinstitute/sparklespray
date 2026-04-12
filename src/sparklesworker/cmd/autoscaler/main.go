@@ -88,7 +88,7 @@ func run(c *cli.Context) error {
 				}
 			}
 
-			if err := Poll(clusterID, extServices.Compute, extServices.Cluster, extServices.Tasks, extServices.CreateWorkerCommand); err != nil {
+			if err := Poll(ctx, clusterID, extServices.Compute, extServices.Cluster, extServices.Tasks, extServices.CreateWorkerCommand, extServices.CreateEventPublisher); err != nil {
 				return fmt.Errorf("poll (clusterID=%s) error: %v\n", clusterID, err)
 			}
 		}

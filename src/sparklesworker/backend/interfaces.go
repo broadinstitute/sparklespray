@@ -14,7 +14,7 @@ type WorkerPool interface {
 	ListBatchJobs(region, clusterID string) ([]*BatchJob, error)
 	GetBatchJobByName(name string) (*BatchJob, error)
 	PutSingletonBatchJob(name, region, machineType string, bootVolumeInGB int64, bootVolumeType, dockerImage string, cmd []string) error
-	SubmitBatchJobs(CreateWorkerCommand CreateWorkerCommandCallback, cluster *Cluster, clusterID string, requests []*BatchJobsToSubmit) error
+	SubmitBatchJobs(CreateWorkerCommand CreateWorkerCommandCallback, cluster *Cluster, clusterID string, requests []*BatchJobsToSubmit) ([]string, error)
 	DeleteAllBatchJobs(region, clusterID string) error
 	DeleteBatchJob(jobID string) error
 }
@@ -69,14 +69,17 @@ type EventPublisher interface {
 // ExternalServices bundles all backend service handles for a deployment
 // (either GCP production or local Redis testing).
 type ExternalServices struct {
-	Channel   MessageBus
-	TaskCache TaskCache
+	Channel             MessageBus
+	TaskCache           TaskCache
 	Events              EventPublisher
 	Close               func()
 	Compute             WorkerPool
 	Cluster             ClusterStore
 	Tasks               TaskStore
 	CreateWorkerCommand CreateWorkerCommandCallback
+	// CreateEventPublisher returns an EventPublisher bound to the given Pub/Sub topic.
+	// Used by the autoscaler to create a per-cluster publisher from clusterConfig.PubSubOutTopic.
+	CreateEventPublisher func(topic string) EventPublisher
 }
 
 // MessageBus is an abstract publish/subscribe mechanism. Implementations

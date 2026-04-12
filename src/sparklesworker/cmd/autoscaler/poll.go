@@ -1,6 +1,7 @@
 package autoscaler
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"strings"
@@ -9,11 +10,13 @@ import (
 	"github.com/broadinstitute/sparklesworker/backend"
 )
 
-func Poll(clusterID string, compute backend.WorkerPool, cluster backend.ClusterStore, tasks backend.TaskStore, createWorkerCommand backend.CreateWorkerCommandCallback) error {
+func Poll(ctx context.Context, clusterID string, compute backend.WorkerPool, cluster backend.ClusterStore, tasks backend.TaskStore, createWorkerCommand backend.CreateWorkerCommandCallback, createEventPublisher func(topic string) backend.EventPublisher) error {
 	clusterConfig, err := cluster.GetClusterConfig(clusterID)
 	if err != nil {
 		return fmt.Errorf("Failed fetching cluster config: %s", err)
 	}
+
+	events := createEventPublisher(clusterConfig.PubSubOutTopic)
 
 	needsUpdateState := false
 	lastState, err := clusterConfig.GetMonitorState()
@@ -32,6 +35,13 @@ func Poll(clusterID string, compute backend.WorkerPool, cluster backend.ClusterS
 		lastState.SuspiciouslyFailingJobIds = append(lastState.SuspiciouslyFailingJobIds, completedJobID)
 		log.Printf("Updated list of suspicious Batch JobIDs: %s", strings.Join(lastState.SuspiciouslyFailingJobIds, ","))
 		needsUpdateState = true
+
+		// publish worker_request_failed for each newly-seen suspiciously short-lived batch job
+		ev := backend.NewWorkerEvent(backend.EventTypeWorkerRequestFailed, clusterID, "")
+		ev.WorkerReqID = completedJobID
+		if err := events.PublishEvent(ctx, ev); err != nil {
+			return fmt.Errorf("publishing worker_request_failed for job %s: %w", completedJobID, err)
+		}
 
 		// update the count of suspicious failures and decide whether there's a problem or not
 		if len(lastState.SuspiciouslyFailingJobIds) > clusterConfig.MaxSuspiciousFailures {
@@ -55,10 +65,27 @@ func Poll(clusterID string, compute backend.WorkerPool, cluster backend.ClusterS
 	orphaned := findOrphanedTasks(claimedTasks, runningInstances)
 
 	if len(orphaned) > 0 {
-		log.Printf("Found %d orphaned tasks, resetting their state to 'pending'", len(orphaned))
+		// publish worker_stopped_unexpectedly once per unique worker whose tasks are orphaned
+		seenWorkers := make(map[string]struct{})
+		for _, task := range orphaned {
+			if _, seen := seenWorkers[task.OwnedByWorkerID]; !seen {
+				seenWorkers[task.OwnedByWorkerID] = struct{}{}
+				ev := backend.NewWorkerEvent(backend.EventTypeWorkerStoppedUnexpect, clusterID, task.OwnedByWorkerID)
+				if err := events.PublishEvent(ctx, ev); err != nil {
+					return fmt.Errorf("publishing worker_stopped_unexpectedly for worker %s: %w", task.OwnedByWorkerID, err)
+				}
+			}
+		}
+		// publish task_orphaned for each orphaned task before resetting its state
+		for _, task := range orphaned {
+			ev := backend.NewTaskEvent(backend.EventTypeTaskOrphaned, task.TaskID, task.JobID)
+			if err := events.PublishEvent(ctx, ev); err != nil {
+				return fmt.Errorf("publishing task_orphaned for task %s: %w", task.TaskID, err)
+			}
+		}
 
-		err = tasks.MarkTasksPending(orphaned)
-		if err != nil {
+		log.Printf("Found %d orphaned tasks, resetting their state to 'pending'", len(orphaned))
+		if err = tasks.MarkTasksPending(orphaned); err != nil {
 			return fmt.Errorf("Could not mark orphaned tasks as pending: %s", err)
 		}
 	}
@@ -91,9 +118,18 @@ func Poll(clusterID string, compute backend.WorkerPool, cluster backend.ClusterS
 
 	if len(newBatchJobs) > 0 {
 		log.Printf("Requesting %d new batches of nodes", len(newBatchJobs))
-		err = compute.SubmitBatchJobs(createWorkerCommand, clusterConfig, clusterID, newBatchJobs)
+		jobIDs, err := compute.SubmitBatchJobs(createWorkerCommand, clusterConfig, clusterID, newBatchJobs)
 		if err != nil {
 			return fmt.Errorf("Could not create nodes: %s", err)
+		}
+		// publish workers_requested for each submitted batch job
+		for i, jobID := range jobIDs {
+			ev := backend.NewWorkerEvent(backend.EventTypeWorkersRequested, clusterID, "")
+			ev.WorkerReqID = jobID
+			ev.Count = newBatchJobs[i].InstanceCount
+			if err := events.PublishEvent(ctx, ev); err != nil {
+				return fmt.Errorf("publishing workers_requested for job %s: %w", jobID, err)
+			}
 		}
 		lastState.BatchJobRequests += len(newBatchJobs)
 		needsUpdateState = true

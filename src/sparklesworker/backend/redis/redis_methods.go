@@ -45,7 +45,8 @@ func (r *LocalWorkerPool) ListRunningInstances(clusterID string, region string) 
 	return nil, nil
 }
 
-func (r *LocalWorkerPool) SubmitBatchJobs(CreateWorkerCommand backend.CreateWorkerCommandCallback, cluster *backend.Cluster, clusterID string, requests []*backend.BatchJobsToSubmit) error {
+func (r *LocalWorkerPool) SubmitBatchJobs(CreateWorkerCommand backend.CreateWorkerCommandCallback, cluster *backend.Cluster, clusterID string, requests []*backend.BatchJobsToSubmit) ([]string, error) {
+	var jobIDs []string
 	for i, req := range requests {
 
 		job := &redisBatchJob{
@@ -60,13 +61,14 @@ func (r *LocalWorkerPool) SubmitBatchJobs(CreateWorkerCommand backend.CreateWork
 
 		data, err := json.Marshal(job)
 		if err != nil {
-			return fmt.Errorf("marshaling job %d: %w", i, err)
+			return nil, fmt.Errorf("marshaling job %d: %w", i, err)
 		}
 		if err := r.client.Set(r.ctx, r.jobKey(job.ID), data, 0).Err(); err != nil {
-			return fmt.Errorf("storing job %s: %w", job.ID, err)
+			return nil, fmt.Errorf("storing job %s: %w", job.ID, err)
 		}
+		jobIDs = append(jobIDs, job.ID)
 	}
-	return nil
+	return jobIDs, nil
 }
 
 // nextID returns a monotonically incrementing integer for the cluster by

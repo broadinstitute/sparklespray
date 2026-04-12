@@ -411,7 +411,7 @@ func ExecuteSubmit(req *DevSubmitRequest) (*task_queue.Task, error) {
 
 			// if it'll take a while for the autoscaler to start, so do a round of autoscaling in this process
 			// before we start the autoscaler.
-			autoscaler.Poll(job.ClusterID, extServices.Compute, extServices.Cluster, extServices.Tasks, extServices.CreateWorkerCommand)
+			autoscaler.Poll(ctx, job.ClusterID, extServices.Compute, extServices.Cluster, extServices.Tasks, extServices.CreateWorkerCommand, extServices.CreateEventPublisher)
 
 			err := ensureAutoscalarRunning(extServices, sparklesWorkerDockerImage, autoscaleConfig)
 			if err != nil {

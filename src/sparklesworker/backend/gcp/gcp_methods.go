@@ -187,7 +187,8 @@ func (g *GCPWorkerPool) DeleteAllBatchJobs(region, clusterID string) error {
 	return nil
 }
 
-func (g *GCPWorkerPool) SubmitBatchJobs(CreateWorkerCommand backend.CreateWorkerCommandCallback, cluster *backend.Cluster, clusterID string, requests []*backend.BatchJobsToSubmit) error {
+func (g *GCPWorkerPool) SubmitBatchJobs(CreateWorkerCommand backend.CreateWorkerCommandCallback, cluster *backend.Cluster, clusterID string, requests []*backend.BatchJobsToSubmit) ([]string, error) {
+	var jobIDs []string
 	for _, req := range requests {
 		commandArgs := CreateWorkerCommand(cluster, req.ShouldLinger)
 		jobSpec := &JobSpec{
@@ -197,10 +198,11 @@ func (g *GCPWorkerPool) SubmitBatchJobs(CreateWorkerCommand backend.CreateWorker
 			Locations:       []string{"regions/" + cluster.Region},
 			SparklesCluster: clusterID,
 		}
-		_, err := createBatchJob(g.ctx, g.batchClient, g.projectID, cluster.Region, jobSpec, req.InstanceCount, 0, cluster.PubSubOutTopic)
+		job, err := createBatchJob(g.ctx, g.batchClient, g.projectID, cluster.Region, jobSpec, req.InstanceCount, 0, cluster.PubSubOutTopic)
 		if err != nil {
-			return fmt.Errorf("submitting batch job: %w", err)
+			return nil, fmt.Errorf("submitting batch job: %w", err)
 		}
+		jobIDs = append(jobIDs, job.GetName())
 	}
-	return nil
+	return jobIDs, nil
 }

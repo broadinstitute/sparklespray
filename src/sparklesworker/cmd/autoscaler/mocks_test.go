@@ -11,7 +11,7 @@ type mockCloud struct {
 	listBatchJobsFn           func(region, clusterID string) ([]*backend.BatchJob, error)
 	getBatchJobByNameFn       func(name string) (*backend.BatchJob, error)
 	putSingletonBatchJobFn    func(name, region, machineType string, bootVolumeInGB int64, bootVolumeType, dockerImage string, cmd []string) error
-	submitBatchJobsFn         func(createWorkerCommand backend.CreateWorkerCommandCallback, cluster *backend.Cluster, clusterID string, requests []*backend.BatchJobsToSubmit) error
+	submitBatchJobsFn         func(createWorkerCommand backend.CreateWorkerCommandCallback, cluster *backend.Cluster, clusterID string, requests []*backend.BatchJobsToSubmit) ([]string, error)
 	deleteAllBatchJobsFn      func(region, clusterID string) error
 	deleteBatchJobFn          func(jobID string) error
 }
@@ -32,7 +32,7 @@ func (m *mockCloud) PutSingletonBatchJob(name, region, machineType string, bootV
 	return m.putSingletonBatchJobFn(name, region, machineType, bootVolumeInGB, bootVolumeType, dockerImage, cmd)
 }
 
-func (m *mockCloud) SubmitBatchJobs(callback backend.CreateWorkerCommandCallback, cluster *backend.Cluster, clusterID string, requests []*backend.BatchJobsToSubmit) error {
+func (m *mockCloud) SubmitBatchJobs(callback backend.CreateWorkerCommandCallback, cluster *backend.Cluster, clusterID string, requests []*backend.BatchJobsToSubmit) ([]string, error) {
 	return m.submitBatchJobsFn(callback, cluster, clusterID, requests)
 }
 

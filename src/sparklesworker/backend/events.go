@@ -61,6 +61,15 @@ const (
 // Similarly, at any point after a task is claimed, a task_failed
 // event might occur. At which time, the task transitions to the
 // terminal "failed" state.
+//
+// The lifecyle of a worker is:
+// 1. worker_started: The worker has successfully initialized and is about to
+// start reading from the task queue.
+// 2. the worker fetches tasks from the task queue and executes them until the queue is empty.
+// Eventually the queue is drained and the worker may keep polling for a few minutes
+// depending on its configuration.
+// 3. worker_completed: Assuming no additional items appear in the queue, the worker
+// declares itself done and exits
 
 type Event struct {
 	// Type identifies the event variant (one of the EventType* constants above).
