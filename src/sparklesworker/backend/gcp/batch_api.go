@@ -35,6 +35,42 @@ type JobSpec struct {
 	GCSBucketMounts     []backend.GCSBucketMount `json:"gcs_bucket_mounts"`
 }
 
+func createRunnables(runnableSpecs []Runnable, disks []backend.Disk) []*batchpb.Runnable {
+	var runnables []*batchpb.Runnable
+	for _, r := range runnableSpecs {
+		if r.Image == "" {
+			// No image: run directly on the host as a script
+			runnables = append(runnables, &batchpb.Runnable{
+				Executable: &batchpb.Runnable_Script_{
+					Script: &batchpb.Runnable_Script{
+						Command: &batchpb.Runnable_Script_Text{
+							Text: strings.Join(r.Command, " "),
+						},
+					},
+				},
+			})
+		} else {
+			var containerVolumes []string
+			for _, disk := range disks {
+				containerVolumes = append(containerVolumes, disk.MountPath+":"+disk.MountPath)
+			}
+			// allow this docker container to talk to the host docker daemon
+			containerVolumes = append(containerVolumes, "/var/run/docker.sock:/var/run/docker.sock")
+			runnables = append(runnables, &batchpb.Runnable{
+				Executable: &batchpb.Runnable_Container_{
+					Container: &batchpb.Runnable_Container{
+						ImageUri: r.Image,
+						Commands: r.Command,
+						Volumes:  containerVolumes,
+						Options:  "-u 0",
+					},
+				},
+			})
+		}
+	}
+	return runnables
+}
+
 var nonAlphanumRe = regexp.MustCompile(`[^a-z0-9]+`)
 
 func normalizeLabel(label string) string {
@@ -90,25 +126,7 @@ func createBatchJob(ctx context.Context, client *batch.Client, project, location
 	}
 
 	// Build runnables
-	var runnables []*batchpb.Runnable
-	for _, r := range jobSpec.Runnables {
-		var containerVolumes []string
-		for _, disk := range jobSpec.Disks {
-			containerVolumes = append(containerVolumes, disk.MountPath+":"+disk.MountPath)
-		}
-		// allow this docker container to talk to the host docker daemon
-		containerVolumes = append(containerVolumes, "/var/run/docker.sock:/var/run/docker.sock")
-		runnables = append(runnables, &batchpb.Runnable{
-			Executable: &batchpb.Runnable_Container_{
-				Container: &batchpb.Runnable_Container{
-					ImageUri: r.Image,
-					Commands: r.Command,
-					Volumes:  containerVolumes,
-					Options:  "-u 0",
-				},
-			},
-		})
-	}
+	runnables := createRunnables(jobSpec.Runnables, jobSpec.Disks)
 
 	// Build attached disks
 	var attachedDisks []*batchpb.AllocationPolicy_AttachedDisk
@@ -209,20 +227,7 @@ func createBatchJob(ctx context.Context, client *batch.Client, project, location
 // createBatchJobWithID is like createBatchJob but uses an explicit job ID
 // instead of generating a random one.
 func createBatchJobWithID(ctx context.Context, client *batch.Client, project, location, jobID string, jobSpec *JobSpec) (*batchpb.Job, error) {
-	// Reuse the job construction logic from createBatchJob by temporarily
-	// building the job struct inline to avoid duplicating proto construction.
-	var runnables []*batchpb.Runnable
-	for _, r := range jobSpec.Runnables {
-		runnables = append(runnables, &batchpb.Runnable{
-			Executable: &batchpb.Runnable_Container_{
-				Container: &batchpb.Runnable_Container{
-					ImageUri: r.Image,
-					Commands: r.Command,
-					Options:  "-u 0",
-				},
-			},
-		})
-	}
+	runnables := createRunnables(jobSpec.Runnables, jobSpec.Disks)
 
 	job := &batchpb.Job{
 		TaskGroups: []*batchpb.TaskGroup{

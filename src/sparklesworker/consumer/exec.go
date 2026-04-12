@@ -105,6 +105,8 @@ type ExecResult struct {
 }
 
 func execCommandDocker(ctx context.Context, command []string, rootdir string, workdir string, stdout *os.File, dockerImage string) (*ExecResult, error) {
+	// here we're using the docker API and connecting to the docker API to execute commands. Alternatively, we could
+	// have the batch job consist of two runnables: 1. (run in docker image) copy exe to a known path. 2. execute as a command outside of any container. (Yeah, that's probably better)
 	cli, err := dockerclient.New(dockerclient.FromEnv)
 	if err != nil {
 		return nil, fmt.Errorf("creating docker client: %w", err)
