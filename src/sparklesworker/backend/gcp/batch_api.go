@@ -96,6 +96,8 @@ func createBatchJob(ctx context.Context, client *batch.Client, project, location
 		for _, disk := range jobSpec.Disks {
 			containerVolumes = append(containerVolumes, disk.MountPath+":"+disk.MountPath)
 		}
+		// allow this docker container to talk to the host docker daemon
+		containerVolumes = append(containerVolumes, "/var/run/docker.sock:/var/run/docker.sock")
 		runnables = append(runnables, &batchpb.Runnable{
 			Executable: &batchpb.Runnable_Container_{
 				Container: &batchpb.Runnable_Container{
