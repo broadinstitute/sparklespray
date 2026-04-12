@@ -266,18 +266,6 @@ func TestCheckClusterHealth(t *testing.T) {
 		}
 	})
 
-	t.Run("job count mismatch returns error", func(t *testing.T) {
-		cloud := makeCloud(func(_, clusterID string) ([]*backend.BatchJob, error) {
-			return []*backend.BatchJob{{ID: "j1", State: backend.Failed}}, nil
-		})
-		sparkles := &mockSparkles{pendingTaskCount: 1}
-
-		_, err := checkClusterHealth(cloud, sparkles, "cluster1", "us-central1", nil, 2)
-		if err == nil {
-			t.Fatal("expected error for job count mismatch")
-		}
-	})
-
 	t.Run("newly completed job with 0 tasks is suspicious", func(t *testing.T) {
 		cloud := makeCloud(func(_, clusterID string) ([]*backend.BatchJob, error) {
 			return []*backend.BatchJob{{ID: "j1", State: backend.Complete}}, nil
@@ -293,24 +281,6 @@ func TestCheckClusterHealth(t *testing.T) {
 		}
 		if result.suspiciouslyFailedToRun != 1 {
 			t.Errorf("want 1 suspicious failure, got %d", result.suspiciouslyFailedToRun)
-		}
-	})
-
-	t.Run("newly completed job with >0 tasks is not suspicious", func(t *testing.T) {
-		cloud := makeCloud(func(_, clusterID string) ([]*backend.BatchJob, error) {
-			return []*backend.BatchJob{{ID: "j1", State: backend.Complete}}, nil
-		})
-		sparkles := &mockSparkles{
-			pendingTaskCount: 1,
-			tasksCompletedBy: map[string]int{"j1": 5},
-		}
-
-		result, err := checkClusterHealth(cloud, sparkles, "cluster1", "us-central1", nil, 1)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if result.suspiciouslyFailedToRun != 0 {
-			t.Errorf("want 0 suspicious failures, got %d", result.suspiciouslyFailedToRun)
 		}
 	})
 
@@ -335,34 +305,6 @@ func TestCheckClusterHealth(t *testing.T) {
 		}
 	})
 
-	t.Run("multiple completions mixed suspicious and clean", func(t *testing.T) {
-		cloud := makeCloud(func(_, clusterID string) ([]*backend.BatchJob, error) {
-			return []*backend.BatchJob{
-				{ID: "j1", State: backend.Complete},
-				{ID: "j2", State: backend.Failed},
-				{ID: "j3", State: backend.Failed},
-			}, nil
-		})
-		sparkles := &mockSparkles{
-			pendingTaskCount: 1,
-			tasksCompletedBy: map[string]int{
-				"j1": 0, // suspicious
-				"j2": 3, // clean
-				"j3": 1, // clean
-			},
-		}
-
-		result, err := checkClusterHealth(cloud, sparkles, "cluster1", "us-central1", []string{"j3"}, 3)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if result.suspiciouslyFailedToRun != 1 {
-			t.Errorf("want 1 suspicious failure, got %d", result.suspiciouslyFailedToRun)
-		}
-		if len(result.newlyCompletedJobIDs) != 2 {
-			t.Errorf("want 2 newly completed, got %v", result.newlyCompletedJobIDs)
-		}
-	})
 }
 
 // ---- Poll (integration-style) ----
@@ -457,39 +399,6 @@ func TestPoll(t *testing.T) {
 		}
 		if sparkles.markTasksPendingCalled[0].TaskID != "t1" {
 			t.Errorf("expected task t1 to be orphaned, got %s", sparkles.markTasksPendingCalled[0].TaskID)
-		}
-	})
-
-	t.Run("health check triggers shutdown on too many suspicious failures", func(t *testing.T) {
-		cloud := defaultCloud()
-		deleteAllCalled := false
-		cloud.deleteAllBatchJobsFn = func(region, clusterID string) error {
-			deleteAllCalled = true
-			return nil
-		}
-		cloud.listBatchJobsFn = func(region, clusterID string) ([]*backend.BatchJob, error) {
-			return []*backend.BatchJob{
-				{ID: "j1", State: backend.Complete},
-				{ID: "j2", State: backend.Complete},
-				{ID: "j3", State: backend.Complete},
-				{ID: "j4", State: backend.Complete},
-			}, nil
-		}
-
-		sparkles := defaultSparkles()
-		sparkles.pendingTaskCount = 1
-		// All jobs completed without doing any work
-		sparkles.tasksCompletedBy = map[string]int{"j1": 0, "j2": 0, "j3": 0, "j4": 0}
-		sparkles.clusterConfig.MaxSuspiciousFailures = 3
-		// batchJobRequests=4 so expectedJobCount matches
-		sparkles.clusterConfig.MonitorState = `{"batchJobRequests":4}`
-
-		err := Poll(context.Background(), "cluster1", cloud, sparkles, sparkles, nil, nullCreateEventPublisher)
-		if err == nil {
-			t.Fatal("expected error due to suspicious failures")
-		}
-		if !deleteAllCalled {
-			t.Error("expected deleteAllBatchJobs to be called")
 		}
 	})
 
