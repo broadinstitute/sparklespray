@@ -6,6 +6,7 @@ import (
 
 	"github.com/broadinstitute/sparklesworker/cmd/autoscaler"
 	"github.com/broadinstitute/sparklesworker/cmd/consume"
+	"github.com/broadinstitute/sparklesworker/cmd/copyexe"
 	"github.com/broadinstitute/sparklesworker/cmd/exec_task"
 	"github.com/urfave/cli"
 )
@@ -26,6 +27,7 @@ func Main() error {
 		consume.ConsumeCmd,
 		exec_task.ExecCmd,
 		autoscaler.AutoscalerCmd,
+		copyexe.CopyExeCmd,
 	}
 	return app.Run(os.Args)
 }
