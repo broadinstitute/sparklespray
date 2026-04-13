@@ -33,6 +33,9 @@ type DevClusterConfig struct {
 	// ControlMessageTopic is the Pub/Sub topic the monitor publishes control messages to.
 	ControlMessageTopic string
 
+	// ControlResponseTopic is the Pub/Sub topic the monitor publishes control messages to.
+	ControlResponseTopic string
+
 	// EventsTopic is the Pub/Sub topic workers publish status messages to.
 	EventsTopic string
 
@@ -323,8 +326,9 @@ func ExecuteSubmit(req *DevSubmitRequest) (*task_queue.Task, error) {
 			UUID:                   uuid.New().String(),
 			MachineType:            req.Cluster.MachineType,
 			WorkerDockerImage:      req.Cluster.WorkerDockerImage,
-			ControlMessageTopic:          req.Cluster.ControlMessageTopic,
-			EventsTopic:         req.Cluster.EventsTopic,
+			ControlMessageTopic:  req.Cluster.ControlMessageTopic,
+			ControlResponseTopic: req.Cluster.ControlResponseTopic,
+			EventsTopic:          req.Cluster.EventsTopic,
 			Region:                 req.Cluster.Region,
 			MaxPreemptableAttempts: req.Cluster.MaxPreemptableAttempts,
 			MaxInstanceCount:       req.Cluster.MaxInstanceCount,

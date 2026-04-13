@@ -198,7 +198,7 @@ func consume(c *cli.Context) error {
 			log.Printf("Failed to get cluster config: %v", err)
 			return err
 		}
-		log.Printf("Got cluster config: pub_sub_in_topic=%s, pub_sub_out_topic=%s", clusterConfig.ControlMessageTopic, clusterConfig.EventsTopic)
+		log.Printf("Got cluster config: control_message_topic=%s, control_response_topic=%s, events_topic=%s", clusterConfig.ControlMessageTopic, clusterConfig.ControlResponseTopic, clusterConfig.EventsTopic)
 
 		fsQueue := task_queue.NewFirestoreQueue(client, cluster, workerID, options.InitialClaimRetry, options.ClaimTimeout)
 		fsQueue.WatchdogNotifier = watchdog.Notify
