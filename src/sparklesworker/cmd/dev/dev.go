@@ -30,11 +30,11 @@ type DevClusterConfig struct {
 	// WorkerDockerImage is the container image run on each worker node.
 	WorkerDockerImage string
 
-	// PubSubInTopic is the Pub/Sub topic the monitor publishes control messages to.
-	PubSubInTopic string
+	// ControlMessageTopic is the Pub/Sub topic the monitor publishes control messages to.
+	ControlMessageTopic string
 
-	// PubSubOutTopic is the Pub/Sub topic workers publish status messages to.
-	PubSubOutTopic string
+	// EventsTopic is the Pub/Sub topic workers publish status messages to.
+	EventsTopic string
 
 	// Region is the GCP region where Batch jobs are submitted (e.g. "us-central1").
 	// Used to construct the Batch API parent path.
@@ -323,8 +323,8 @@ func ExecuteSubmit(req *DevSubmitRequest) (*task_queue.Task, error) {
 			UUID:                   uuid.New().String(),
 			MachineType:            req.Cluster.MachineType,
 			WorkerDockerImage:      req.Cluster.WorkerDockerImage,
-			PubSubInTopic:          req.Cluster.PubSubInTopic,
-			PubSubOutTopic:         req.Cluster.PubSubOutTopic,
+			ControlMessageTopic:          req.Cluster.ControlMessageTopic,
+			EventsTopic:         req.Cluster.EventsTopic,
 			Region:                 req.Cluster.Region,
 			MaxPreemptableAttempts: req.Cluster.MaxPreemptableAttempts,
 			MaxInstanceCount:       req.Cluster.MaxInstanceCount,

@@ -176,14 +176,14 @@ func consume(c *cli.Context) error {
 			log.Printf("Failed to get cluster config from Redis: %v", err)
 			return err
 		}
-		log.Printf("Got cluster config: pub_sub_out_topic=%s", clusterConfig.PubSubOutTopic)
+		log.Printf("Got cluster config: pub_sub_out_topic=%s", clusterConfig.EventsTopic)
 
 		redisQueue := task_queue.NewRedisQueue(redisClient, cluster, workerID, options.InitialClaimRetry, options.ClaimTimeout)
 		redisQueue.WatchdogNotifier = watchdog.Notify
 		queue = redisQueue
 
 		redisChannel := redis_backend.NewRedisChannel(redisClient)
-		eventPublisher = redis_backend.NewRedisEventPublisher(redisClient, redisChannel, clusterConfig.PubSubOutTopic)
+		eventPublisher = redis_backend.NewRedisEventPublisher(redisClient, redisChannel, clusterConfig.EventsTopic)
 	} else {
 		log.Printf("Using Google Cloud backend (Pub/Sub + Firestore)")
 
@@ -198,7 +198,7 @@ func consume(c *cli.Context) error {
 			log.Printf("Failed to get cluster config: %v", err)
 			return err
 		}
-		log.Printf("Got cluster config: pub_sub_in_topic=%s, pub_sub_out_topic=%s", clusterConfig.PubSubInTopic, clusterConfig.PubSubOutTopic)
+		log.Printf("Got cluster config: pub_sub_in_topic=%s, pub_sub_out_topic=%s", clusterConfig.ControlMessageTopic, clusterConfig.EventsTopic)
 
 		fsQueue := task_queue.NewFirestoreQueue(client, cluster, workerID, options.InitialClaimRetry, options.ClaimTimeout)
 		fsQueue.WatchdogNotifier = watchdog.Notify
@@ -206,7 +206,7 @@ func consume(c *cli.Context) error {
 		taskCache = task_queue.NewFirestoreTaskCache(client)
 
 		pubsubChannel := gcp_backend.NewPubSubChannel(projectID)
-		eventPublisher = gcp_backend.NewFirestoreEventPublisher(client, pubsubChannel, clusterConfig.PubSubOutTopic)
+		eventPublisher = gcp_backend.NewFirestoreEventPublisher(client, pubsubChannel, clusterConfig.EventsTopic)
 	}
 
 	var executor consumer.Executor

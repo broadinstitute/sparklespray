@@ -16,7 +16,7 @@ func Poll(ctx context.Context, clusterID string, compute backend.WorkerPool, clu
 		return fmt.Errorf("Failed fetching cluster config: %s", err)
 	}
 
-	events := createEventPublisher(clusterConfig.PubSubOutTopic)
+	events := createEventPublisher(clusterConfig.EventsTopic)
 
 	needsUpdateState := false
 	lastState, err := clusterConfig.GetMonitorState()

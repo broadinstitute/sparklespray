@@ -205,7 +205,7 @@ func (g *GCPWorkerPool) SubmitWorkerJobs(CreateWorkerCommand backend.CreateWorke
 			Locations:       []string{"regions/" + cluster.Region},
 			SparklesCluster: clusterID,
 		}
-		job, err := createBatchJob(g.ctx, g.batchClient, g.projectID, cluster.Region, jobSpec, req.InstanceCount, 0, cluster.PubSubOutTopic)
+		job, err := createBatchJob(g.ctx, g.batchClient, g.projectID, cluster.Region, jobSpec, req.InstanceCount, 0, cluster.EventsTopic)
 		if err != nil {
 			return nil, fmt.Errorf("submitting batch job: %w", err)
 		}

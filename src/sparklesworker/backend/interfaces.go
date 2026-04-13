@@ -78,7 +78,7 @@ type ExternalServices struct {
 	Tasks               TaskStore
 	CreateWorkerCommand CreateWorkerCommandCallback
 	// CreateEventPublisher returns an EventPublisher bound to the given Pub/Sub topic.
-	// Used by the autoscaler to create a per-cluster publisher from clusterConfig.PubSubOutTopic.
+	// Used by the autoscaler to create a per-cluster publisher from clusterConfig.EventsTopic.
 	CreateEventPublisher func(topic string) EventPublisher
 }
 

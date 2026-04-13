@@ -24,11 +24,11 @@ type Cluster struct {
 	// WorkerDockerImage is the container image run on each worker node.
 	WorkerDockerImage string `firestore:"worker_docker_image" json:"worker_docker_image"`
 
-	// PubSubInTopic is the Pub/Sub topic the monitor publishes control messages to.
-	PubSubInTopic string `firestore:"pub_sub_in_topic" json:"pub_sub_in_topic"`
+	// ControlMessageTopic is the Pub/Sub topic the monitor publishes control messages to.
+	ControlMessageTopic string `firestore:"pub_sub_in_topic" json:"pub_sub_in_topic"`
 
-	// PubSubOutTopic is the Pub/Sub topic workers publish status messages to.
-	PubSubOutTopic string `firestore:"pub_sub_out_topic" json:"pub_sub_out_topic"`
+	// EventsTopic is the Pub/Sub topic workers and the autoscaler publish events to
+	EventsTopic string `firestore:"pub_sub_out_topic" json:"pub_sub_out_topic"`
 
 	// Region is the GCP region where Batch jobs are submitted (e.g. "us-central1").
 	// Used to construct the Batch API parent path.
