@@ -14,7 +14,7 @@ type WorkerPool interface {
 	ListBatchJobs(region, clusterID string) ([]*BatchJob, error)
 	GetBatchJobByName(name string) (*BatchJob, error)
 	PutSingletonBatchJob(name, region, machineType string, bootVolumeInGB int64, bootVolumeType, dockerImage string, cmd []string) error
-	SubmitBatchJobs(CreateWorkerCommand CreateWorkerCommandCallback, cluster *Cluster, clusterID string, requests []*BatchJobsToSubmit) ([]string, error)
+	SubmitWorkerJobs(CreateWorkerCommand CreateWorkerCommandCallback, cluster *Cluster, clusterID string, requests []*BatchJobsToSubmit) ([]string, error)
 	DeleteAllBatchJobs(region, clusterID string) error
 	DeleteBatchJob(jobID string) error
 }

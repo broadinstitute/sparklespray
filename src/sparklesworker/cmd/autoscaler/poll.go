@@ -118,7 +118,7 @@ func Poll(ctx context.Context, clusterID string, compute backend.WorkerPool, clu
 
 	if len(newBatchJobs) > 0 {
 		log.Printf("Requesting %d new batches of nodes", len(newBatchJobs))
-		jobIDs, err := compute.SubmitBatchJobs(createWorkerCommand, clusterConfig, clusterID, newBatchJobs)
+		jobIDs, err := compute.SubmitWorkerJobs(createWorkerCommand, clusterConfig, clusterID, newBatchJobs)
 		if err != nil {
 			return fmt.Errorf("Could not create nodes: %s", err)
 		}

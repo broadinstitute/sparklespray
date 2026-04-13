@@ -45,7 +45,7 @@ func (r *LocalWorkerPool) ListRunningInstances(clusterID string, region string) 
 	return nil, nil
 }
 
-func (r *LocalWorkerPool) SubmitBatchJobs(CreateWorkerCommand backend.CreateWorkerCommandCallback, cluster *backend.Cluster, clusterID string, requests []*backend.BatchJobsToSubmit) ([]string, error) {
+func (r *LocalWorkerPool) SubmitWorkerJobs(CreateWorkerCommand backend.CreateWorkerCommandCallback, cluster *backend.Cluster, clusterID string, requests []*backend.BatchJobsToSubmit) ([]string, error) {
 	var jobIDs []string
 	for i, req := range requests {
 

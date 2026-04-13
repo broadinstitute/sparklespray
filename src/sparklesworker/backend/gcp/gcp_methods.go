@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"path"
 
 	batch "cloud.google.com/go/batch/apiv1"
 	"cloud.google.com/go/batch/apiv1/batchpb"
@@ -187,12 +188,18 @@ func (g *GCPWorkerPool) DeleteAllBatchJobs(region, clusterID string) error {
 	return nil
 }
 
-func (g *GCPWorkerPool) SubmitBatchJobs(CreateWorkerCommand backend.CreateWorkerCommandCallback, cluster *backend.Cluster, clusterID string, requests []*backend.BatchJobsToSubmit) ([]string, error) {
+func (g *GCPWorkerPool) SubmitWorkerJobs(CreateWorkerCommand backend.CreateWorkerCommandCallback, cluster *backend.Cluster, clusterID string, requests []*backend.BatchJobsToSubmit) ([]string, error) {
 	var jobIDs []string
 	for _, req := range requests {
+		localWorkerExe := path.Join(cluster.SparklesDir, "sparklesworker")
 		commandArgs := CreateWorkerCommand(cluster, req.ShouldLinger)
 		jobSpec := &JobSpec{
-			Runnables:       []Runnable{{Image: cluster.WorkerDockerImage, Command: commandArgs}},
+			Runnables: []Runnable{
+				// first step: Copy the worker executable out of the docker image
+				{Image: cluster.WorkerDockerImage, Command: []string{"copyexe", localWorkerExe}},
+				// now that we've got the worker outside of a container (makes it easier to start child docker containers) run it.
+				{Image: "", Command: append([]string{localWorkerExe}, commandArgs...)},
+			},
 			MachineType:     cluster.MachineType,
 			Preemptible:     req.IsPreemptable,
 			Locations:       []string{"regions/" + cluster.Region},

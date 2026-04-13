@@ -32,7 +32,7 @@ func (m *mockCloud) PutSingletonBatchJob(name, region, machineType string, bootV
 	return m.putSingletonBatchJobFn(name, region, machineType, bootVolumeInGB, bootVolumeType, dockerImage, cmd)
 }
 
-func (m *mockCloud) SubmitBatchJobs(callback backend.CreateWorkerCommandCallback, cluster *backend.Cluster, clusterID string, requests []*backend.BatchJobsToSubmit) ([]string, error) {
+func (m *mockCloud) SubmitWorkerJobs(callback backend.CreateWorkerCommandCallback, cluster *backend.Cluster, clusterID string, requests []*backend.BatchJobsToSubmit) ([]string, error) {
 	return m.submitBatchJobsFn(callback, cluster, clusterID, requests)
 }
 
