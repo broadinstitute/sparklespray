@@ -1,6 +1,7 @@
 package consume
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/ioutil"
@@ -13,9 +14,10 @@ import (
 
 	"cloud.google.com/go/firestore"
 	"github.com/broadinstitute/sparklesworker/backend"
-	"github.com/broadinstitute/sparklesworker/consumer"
 	gcp_backend "github.com/broadinstitute/sparklesworker/backend/gcp"
 	redis_backend "github.com/broadinstitute/sparklesworker/backend/redis"
+	"github.com/broadinstitute/sparklesworker/consumer"
+	"github.com/broadinstitute/sparklesworker/monitor"
 	"github.com/broadinstitute/sparklesworker/task_queue"
 	"github.com/broadinstitute/sparklesworker/watchdog"
 	"github.com/redis/go-redis/v9"
@@ -157,6 +159,7 @@ func consume(c *cli.Context) error {
 
 	var queue task_queue.TaskQueue
 
+	var monitor_ *monitor.Monitor
 	redisAddr := c.String("redisAddr")
 	if redisAddr != "" {
 		log.Printf("Using Redis backend at %s", redisAddr)
@@ -207,11 +210,37 @@ func consume(c *cli.Context) error {
 
 		pubsubChannel := gcp_backend.NewPubSubChannel(projectID)
 		eventPublisher = gcp_backend.NewFirestoreEventPublisher(client, pubsubChannel, clusterConfig.EventsTopic)
+		monitor_ = monitor.NewMonitor(ctx, pubsubChannel, clusterConfig.ControlResponseTopic, 1*time.Second, 5*time.Second)
+		pubsubChannel.Subscribe(ctx, clusterConfig.ControlMessageTopic, func(b []byte) {
+			var cmd backend.Command
+			if err := json.Unmarshal(b, &cmd); err != nil {
+				log.Printf("Failed to deserialize control message: %v", err)
+				return
+			}
+			switch cmd.Type {
+			case backend.CmdStartStatusStream:
+				var startCmd backend.StartStatusStreamCommand
+				if err := json.Unmarshal(b, &startCmd); err != nil {
+					log.Printf("Failed to deserialize StartStatusStreamCommand: %v", err)
+					return
+				}
+				monitor_.SetListeningReqIDIfTaskID(startCmd.TaskID, startCmd.ReqID)
+			case backend.CmdStopStatusStream:
+				var stopCmd backend.StopStatusStreamCommand
+				if err := json.Unmarshal(b, &stopCmd); err != nil {
+					log.Printf("Failed to deserialize StopStatusStreamCommand: %v", err)
+					return
+				}
+				monitor_.SetListeningReqIDIfTaskID(stopCmd.TaskID, "")
+			default:
+				log.Printf("Ignoring unknown control message type: %s", cmd.Type)
+			}
+		})
 	}
 
 	var executor consumer.Executor
 	executor = func(taskId, jobID string, taskSpec *task_queue.TaskSpec, expiry time.Time) (*consumer.ExecuteTaskResult, error) {
-		return consumer.ExecuteTask(ctx, &aetherCfg, taskId, jobID, taskSpec, dir, cacheDir, tasksDir, nil, taskCache, expiry, eventPublisher)
+		return consumer.ExecuteTask(ctx, &aetherCfg, taskId, jobID, taskSpec, dir, cacheDir, tasksDir, monitor_, taskCache, expiry, eventPublisher)
 	}
 
 	if err := eventPublisher.PublishEvent(ctx, backend.NewWorkerEvent(backend.EventTypeWorkerStarted, cluster, workerID)); err != nil {

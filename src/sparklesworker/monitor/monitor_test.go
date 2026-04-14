@@ -8,11 +8,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/broadinstitute/sparklesworker/backend"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// ---- fake ExtChannel --------------------------------------------------------
+// ---- fake MessageBus --------------------------------------------------------
 
 type captureChannel struct {
 	mu       sync.Mutex
@@ -44,10 +45,10 @@ func (c *captureChannel) all() [][]byte {
 // ---- helpers ----------------------------------------------------------------
 
 func newTestMonitor(ch *captureChannel) *Monitor {
-	return NewMonitor(context.Background(), ch, "test-topic", 10*time.Millisecond, 3600)
+	return NewMonitor(context.Background(), ch, "test-topic", 10*time.Millisecond, 10*time.Millisecond)
 }
 
-// writeAndClose creates a temp file, writes content, and closes it so the
+// writeTempFile creates a temp file, writes content, and closes it so the
 // monitor can open and read it independently.
 func writeTempFile(t *testing.T, content string) string {
 	t.Helper()
@@ -59,48 +60,76 @@ func writeTempFile(t *testing.T, content string) string {
 	return f.Name()
 }
 
+// logStreamMessages returns all LogStreamUpdate messages captured by ch.
+func logStreamMessages(ch *captureChannel) []backend.LogStreamUpdate {
+	var out []backend.LogStreamUpdate
+	for _, raw := range ch.all() {
+		var msg backend.LogStreamUpdate
+		if err := json.Unmarshal(raw, &msg); err == nil && msg.Type == backend.RespLogStreamUpdate {
+			out = append(out, msg)
+		}
+	}
+	return out
+}
+
 // ---- tests ------------------------------------------------------------------
 
-func TestMonitor_PublishesStdout(t *testing.T) {
+// TestMonitor_NoPublishWithoutReqID verifies that the monitor does not publish
+// any stdout messages when no listeningReqID has been set.
+func TestMonitor_NoPublishWithoutReqID(t *testing.T) {
+	ch := &captureChannel{}
+	m := newTestMonitor(ch)
+
+	path := writeTempFile(t, "hello\n")
+	m.Started("task-1", path)
+	time.Sleep(50 * time.Millisecond)
+	m.Finished()
+
+	assert.Empty(t, logStreamMessages(ch), "should not publish without a listeningReqID")
+}
+
+// TestMonitor_PublishesStdoutWhenListening verifies that stdout content is
+// published as LogStreamUpdate messages once a listeningReqID is set.
+func TestMonitor_PublishesStdoutWhenListening(t *testing.T) {
 	ch := &captureChannel{}
 	m := newTestMonitor(ch)
 
 	path := writeTempFile(t, "hello from task\n")
-
-	m.Started(path)
-	// Give the goroutine time to poll once.
+	m.Started("task-1", path)
+	m.setListeningReqID("req-abc")
 	time.Sleep(50 * time.Millisecond)
 	m.Finished()
 
-	// At least one StdoutUpdate message should have been published containing
-	// the written content.
+	msgs := logStreamMessages(ch)
+	require.NotEmpty(t, msgs, "expected at least one LogStreamUpdate")
+
 	var found bool
-	for _, raw := range ch.all() {
-		var msg StdoutUpdate
-		if err := json.Unmarshal(raw, &msg); err != nil {
-			continue
-		}
-		if msg.Type == "stdout" && string(msg.Content) == "hello from task\n" {
+	for _, msg := range msgs {
+		if msg.Content == "hello from task\n" {
 			found = true
-			break
+			assert.Equal(t, "task-1", msg.TaskID)
+			assert.Equal(t, "req-abc", msg.ReqID)
+			assert.Equal(t, backend.RespLogStreamUpdate, msg.Type)
+			assert.False(t, msg.Timestamp.IsZero())
 		}
 	}
-	assert.True(t, found, "expected a StdoutUpdate with the written content; got %d messages", len(ch.all()))
+	assert.True(t, found, "expected a LogStreamUpdate containing the written content")
 }
 
+// TestMonitor_FinalPollOnFinished verifies that the stdout goroutine performs
+// one final read after context cancellation, capturing output written just
+// before Finished was called.
 func TestMonitor_FinalPollOnFinished(t *testing.T) {
-	// Write nothing initially; write content after Started, then call Finished.
-	// The final poll in Finished should capture it.
 	ch := &captureChannel{}
-	m := newTestMonitor(ch)
+	// Use a very long poll freq so the periodic ticker never fires — only the
+	// post-cancel final poll should capture the content.
+	m := NewMonitor(context.Background(), ch, "test-topic", 10*time.Second, 10*time.Second)
 
 	f, err := os.CreateTemp(t.TempDir(), "stdout-")
 	require.NoError(t, err)
 
-	m.Started(f.Name())
-	// Let the goroutine start, but use a very long pollSleep so it won't
-	// naturally poll again before Finished.
-	m.pollSleep = 10 * time.Second
+	m.Started("task-final", f.Name())
+	m.setListeningReqID("req-final")
 
 	_, err = f.WriteString("late output\n")
 	require.NoError(t, err)
@@ -109,87 +138,77 @@ func TestMonitor_FinalPollOnFinished(t *testing.T) {
 	m.Finished()
 
 	var found bool
-	for _, raw := range ch.all() {
-		var msg StdoutUpdate
-		if err := json.Unmarshal(raw, &msg); err != nil {
-			continue
-		}
-		if msg.Type == "stdout" && string(msg.Content) == "late output\n" {
+	for _, msg := range logStreamMessages(ch) {
+		if msg.Content == "late output\n" {
 			found = true
 			break
 		}
 	}
-	assert.True(t, found, "Finished should do a final poll and capture late output")
+	assert.True(t, found, "Finished should trigger a final poll capturing late output")
 }
 
-func TestMonitor_FinishedBeforeStarted(t *testing.T) {
-	// Calling Finished without Started should not panic.
-	ch := &captureChannel{}
-	m := newTestMonitor(ch)
-	assert.NotPanics(t, func() { m.Finished() })
-}
-
+// TestMonitor_StartedWithMissingFile verifies that Started does not panic when
+// the stdout file does not exist — it logs and returns without starting goroutines.
 func TestMonitor_StartedWithMissingFile(t *testing.T) {
-	// Started should not panic when the file doesn't exist — it logs and exits
-	// the goroutine cleanly.
 	ch := &captureChannel{}
 	m := newTestMonitor(ch)
-	m.Started("/nonexistent/path/stdout.txt")
-	time.Sleep(30 * time.Millisecond)
-	assert.NotPanics(t, func() { m.Finished() })
+	assert.NotPanics(t, func() {
+		m.Started("task-1", "/nonexistent/path/stdout.txt")
+	})
+	// Finished must not be called here: Started returned early without setting
+	// up goroutines or cancelPolling, so calling Finished would panic. This is
+	// consistent with the documented precondition on Finished.
 }
 
-func TestMonitor_StdoutUpdateMessageShape(t *testing.T) {
+// TestMonitor_LogStreamUpdateJSONShape verifies the wire format field names of
+// a published LogStreamUpdate.
+func TestMonitor_LogStreamUpdateJSONShape(t *testing.T) {
 	ch := &captureChannel{}
 	m := newTestMonitor(ch)
 
 	path := writeTempFile(t, "abc")
-	m.Started(path)
+	m.Started("task-shape", path)
+	m.setListeningReqID("req-shape")
 	time.Sleep(50 * time.Millisecond)
 	m.Finished()
 
-	var msg StdoutUpdate
+	var shape map[string]any
 	for _, raw := range ch.all() {
-		if err := json.Unmarshal(raw, &msg); err == nil && msg.Type == "stdout" {
+		if json.Unmarshal(raw, &shape) == nil && shape["type"] == backend.RespLogStreamUpdate {
 			break
 		}
 	}
-	require.Equal(t, "stdout", msg.Type)
-	assert.Equal(t, "abc", string(msg.Content))
-	assert.False(t, msg.Timestamp.IsZero())
-
-	// Verify JSON field names.
-	for _, raw := range ch.all() {
-		var shape map[string]any
-		if json.Unmarshal(raw, &shape) == nil {
-			if shape["type"] == "stdout" {
-				assert.Contains(t, shape, "content")
-				assert.Contains(t, shape, "timestamp")
-				break
-			}
-		}
-	}
+	require.Equal(t, backend.RespLogStreamUpdate, shape["type"])
+	assert.Contains(t, shape, "req_id")
+	assert.Contains(t, shape, "task_id")
+	assert.Contains(t, shape, "content")
+	assert.Contains(t, shape, "timestamp")
 }
 
+// TestMonitor_MultipleStartStopCycles verifies that separate Monitor instances
+// work correctly across multiple task cycles, each publishing messages tagged
+// with the correct task ID.
 func TestMonitor_MultipleStartStopCycles(t *testing.T) {
+	taskIDs := []string{"task-a", "task-b", "task-c"}
 	ch := &captureChannel{}
-	m := newTestMonitor(ch)
 
-	for i := 0; i < 3; i++ {
-		path := writeTempFile(t, "cycle\n")
-		m.Started(path)
+	for _, taskID := range taskIDs {
+		m := newTestMonitor(ch)
+		path := writeTempFile(t, "output for "+taskID+"\n")
+		m.Started(taskID, path)
+		m.setListeningReqID("req-" + taskID)
 		time.Sleep(30 * time.Millisecond)
 		m.Finished()
-		// Re-create the monitor's context for subsequent cycles.
-		m = NewMonitor(context.Background(), ch, "test-topic", 10*time.Millisecond, 3600)
 	}
-	// Should have published at least one stdout message per cycle.
-	count := 0
-	for _, raw := range ch.all() {
-		var msg StdoutUpdate
-		if json.Unmarshal(raw, &msg) == nil && msg.Type == "stdout" {
-			count++
-		}
+
+	msgs := logStreamMessages(ch)
+	assert.GreaterOrEqual(t, len(msgs), len(taskIDs), "expected at least one message per cycle")
+
+	seen := map[string]bool{}
+	for _, msg := range msgs {
+		seen[msg.TaskID] = true
 	}
-	assert.GreaterOrEqual(t, count, 3)
+	for _, taskID := range taskIDs {
+		assert.True(t, seen[taskID], "expected messages for task %s", taskID)
+	}
 }

@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/broadinstitute/sparklesworker/backend"
@@ -14,23 +15,42 @@ import (
 type Monitor struct {
 	ctx              context.Context
 	cancel           context.CancelFunc
+	cancelPolling    context.CancelFunc
 	channel          backend.MessageBus
 	topicName        string
-	pollSleep        time.Duration
+	stdoutPollFreq   time.Duration
 	resourcePollFreq time.Duration
-	stdoutFile       *os.File
-	done             chan struct{}
+
+	lock           sync.RWMutex
+	taskID         string
+	listeningReqID string
+
+	wg sync.WaitGroup
 }
 
-func NewMonitor(ctx context.Context, channel backend.MessageBus, topicName string, pollSleep time.Duration, resourcePollFreqSecs int) *Monitor {
+func NewMonitor(ctx context.Context, channel backend.MessageBus, topicName string, stdoutPollFreq time.Duration, resourcePollFreq time.Duration) *Monitor {
 	ctx, cancel := context.WithCancel(ctx)
 	return &Monitor{
 		ctx:              ctx,
 		cancel:           cancel,
 		channel:          channel,
 		topicName:        topicName,
-		pollSleep:        pollSleep,
-		resourcePollFreq: time.Duration(resourcePollFreqSecs) * time.Second,
+		stdoutPollFreq:   stdoutPollFreq,
+		resourcePollFreq: resourcePollFreq,
+	}
+}
+
+func (m *Monitor) getListeningReqID() string {
+	m.lock.RLock()
+	defer m.lock.RUnlock()
+	return m.listeningReqID
+}
+
+func (m *Monitor) SetListeningReqIDIfTaskID(taskID string, reqID string) {
+	m.lock.Lock()
+	defer m.lock.Unlock()
+	if m.taskID == taskID {
+		m.listeningReqID = reqID
 	}
 }
 
@@ -42,15 +62,15 @@ func (m *Monitor) publish(v any) error {
 	return m.channel.Publish(m.ctx, m.topicName, data)
 }
 
-func (m *Monitor) pollStdout() error {
+func (m *Monitor) pollStdout(stdoutFile *os.File, taskID string, reqID string) error {
 	buf := make([]byte, 100*1024)
-	n, err := m.stdoutFile.Read(buf)
+	n, err := stdoutFile.Read(buf)
 	if err != nil && err != io.EOF {
 		log.Printf("Monitor.poll: read error: %v", err)
 		return err
 	}
 	if n > 0 {
-		msg := StdoutUpdate{Type: "stdout", Content: buf[:n], Timestamp: time.Now()}
+		msg := backend.LogStreamUpdate{Type: backend.RespLogStreamUpdate, TaskID: taskID, ReqID: reqID, Timestamp: time.Now(), Content: string(buf[:n])}
 		if pubErr := m.publish(msg); pubErr != nil {
 			log.Printf("Monitor.poll: publish error: %v", pubErr)
 			return pubErr
@@ -59,8 +79,8 @@ func (m *Monitor) pollStdout() error {
 	return nil
 }
 
-func (m *Monitor) pollResources() {
-	usage, err := GetResourceUsage()
+func (m *Monitor) pollResources(taskID string, reqID string) {
+	usage, err := GetResourceUsage(taskID, reqID)
 	if err != nil {
 		log.Printf("Monitor.pollResources: %v", err)
 		return
@@ -70,45 +90,73 @@ func (m *Monitor) pollResources() {
 	}
 }
 
-func (m *Monitor) Started(stdoutPath string) {
-	m.done = make(chan struct{})
-	go func() {
-		defer close(m.done)
+func callPeriodically(ctx context.Context, freq time.Duration, fn func()) {
+	ticker := time.NewTicker(freq)
+	defer ticker.Stop()
 
-		f, err := os.Open(stdoutPath)
-		if err != nil {
-			log.Printf("Monitor.Started: failed to open %s: %v", stdoutPath, err)
+	for {
+		select {
+		case <-ticker.C:
+			fn()
+		case <-ctx.Done():
 			return
 		}
-		m.stdoutFile = f
-
-		lastResourcePoll := time.Now()
-		for {
-			if err := m.pollStdout(); err != nil {
-				return
-			}
-			if time.Since(lastResourcePoll) >= m.resourcePollFreq {
-				m.pollResources()
-				lastResourcePoll = time.Now()
-			}
-			select {
-			case <-m.ctx.Done():
-				return
-			case <-time.After(m.pollSleep):
-			}
-		}
-	}()
+	}
 }
 
+func (m *Monitor) Started(taskID string, stdoutPath string) {
+	m.lock.Lock()
+	m.taskID = taskID
+	m.lock.Unlock()
+
+	stdoutFile, err := os.Open(stdoutPath)
+	if err != nil {
+		log.Printf("Monitor.Started: failed to open %s: %v", stdoutPath, err)
+		return
+	}
+
+	var periodicCtx context.Context
+	periodicCtx, m.cancelPolling = context.WithCancel(m.ctx)
+
+	m.wg.Go(func() {
+		callPeriodically(periodicCtx, m.resourcePollFreq, func() {
+			reqID := m.getListeningReqID()
+			if reqID != "" {
+				m.pollResources(taskID, reqID)
+			}
+		})
+	})
+
+	m.wg.Go(func() {
+		callPeriodically(periodicCtx, m.stdoutPollFreq, func() {
+			reqID := m.getListeningReqID()
+			if reqID != "" {
+				m.pollStdout(stdoutFile, taskID, reqID)
+			}
+		})
+
+		// do one final poll in case we've been canceled because the task completed
+		// and some more was written after our last poll
+		reqID := m.getListeningReqID()
+		if reqID != "" {
+			m.pollStdout(stdoutFile, taskID, reqID)
+		}
+
+		stdoutFile.Close()
+	})
+}
+
+// finished is only ever called after Started(). Also, Finished must be called *after* Started has completed.
 func (m *Monitor) Finished() {
-	m.cancel()
-	if m.done != nil {
-		<-m.done
-	}
-	if m.stdoutFile != nil {
-		// do one final poll to get the last bytes written before the process stopped
-		m.pollStdout()
-		m.stdoutFile.Close()
-		m.stdoutFile = nil
-	}
+	// stop the two goroutines which should be polling
+	m.cancelPolling()
+
+	// now wait for them to really complete
+	m.wg.Wait()
+
+	// clear the listening request ID
+	m.lock.Lock()
+	m.taskID = ""
+	m.listeningReqID = ""
+	m.lock.Unlock()
 }

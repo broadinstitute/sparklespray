@@ -471,7 +471,7 @@ func computeCacheKey(taskSpec *task_queue.TaskSpec) (string, error) {
 }
 
 type ExecuteLifecycle interface {
-	Started(stdoutPath string)
+	Started(taskID string, stdoutPath string)
 	Finished()
 }
 
@@ -506,7 +506,7 @@ func ExecuteTask(ctx context.Context, aetherCfg *backend.AetherConfig, taskId st
 	defer stdout.Close()
 
 	if lifecycle != nil {
-		lifecycle.Started(dirs.stdoutPath)
+		lifecycle.Started(taskId, dirs.stdoutPath)
 		defer lifecycle.Finished()
 	}
 

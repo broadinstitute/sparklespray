@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/broadinstitute/sparklesworker/backend"
 )
 
 // PageSize is the system page size in bytes
@@ -208,15 +210,17 @@ func GetMemoryPressure() *MemoryPressure {
 	return pressure
 }
 
-func GetResourceUsage() (*ResourceUsage, error) {
+func GetResourceUsage(taskID string, ReqID string) (*backend.ResourceUsageUpdate, error) {
 
 	mem, err := GetMemoryUsage()
 	if err != nil {
 		return nil, err
 	}
 
-	resp := &ResourceUsage{
-		Type:          "process_status",
+	resp := &backend.ResourceUsageUpdate{
+		Type:          backend.RespResourceUsageUpdate,
+		ReqID:         ReqID,
+		TaskID:        taskID,
 		Timestamp:     time.Now(),
 		TotalMemory:   mem.TotalSize * PageSize,
 		TotalData:     mem.TotalData * PageSize,

@@ -1331,10 +1331,15 @@ go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.2
 
 
 TODO:
-(x) get tests passing
-(x) get pyright checks passing
-(x) Fix node count
-(x) reimplement "validate"
-(x) Fix drive assignment
-Clean out excessive print statements (Maybe tackle this after vcr in place?)
+1. Test sparkles worker running on a Container Optimized OS instance
+   - Start hermit instance
+   - build instance inside hermit shell
+   - gcloud ssh to run it outside of hermit shell with long linger
+      - Can dev submit print out the command to run?
+   - use dev submit to submit a batch of work
+2. test autoscaler with job
+3. make an ergonomic job submission command
+4. finish UI
+   - add support for browsing aether dir
+5. add gc command
 ```
