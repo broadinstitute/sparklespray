@@ -3,6 +3,7 @@ package monitor
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"os"
@@ -14,43 +15,89 @@ import (
 
 type Monitor struct {
 	ctx              context.Context
-	cancel           context.CancelFunc
 	cancelPolling    context.CancelFunc
 	channel          backend.MessageBus
 	topicName        string
 	stdoutPollFreq   time.Duration
 	resourcePollFreq time.Duration
 
-	lock           sync.RWMutex
-	taskID         string
-	listeningReqID string
+	lock            sync.Mutex
+	taskID          string
+	logUpdates      []*backend.LogStreamUpdate
+	resourceUpdates []*backend.ResourceUsageUpdate
+	isPublishing    bool
 
 	wg sync.WaitGroup
 }
 
 func NewMonitor(ctx context.Context, channel backend.MessageBus, topicName string, stdoutPollFreq time.Duration, resourcePollFreq time.Duration) *Monitor {
-	ctx, cancel := context.WithCancel(ctx)
 	return &Monitor{
 		ctx:              ctx,
-		cancel:           cancel,
 		channel:          channel,
 		topicName:        topicName,
 		stdoutPollFreq:   stdoutPollFreq,
 		resourcePollFreq: resourcePollFreq,
+		logUpdates:       make([]*backend.LogStreamUpdate, 0, 100),
+		resourceUpdates:  make([]*backend.ResourceUsageUpdate, 0, 100),
 	}
 }
 
-func (m *Monitor) getListeningReqID() string {
-	m.lock.RLock()
-	defer m.lock.RUnlock()
-	return m.listeningReqID
+func (m *Monitor) flushUpdates() error {
+	m.lock.Lock()
+	var logUpdates []*backend.LogStreamUpdate
+	var resourceUpdates []*backend.ResourceUsageUpdate
+	if m.isPublishing {
+		logUpdates = make([]*backend.LogStreamUpdate, len(m.logUpdates))
+		resourceUpdates = make([]*backend.ResourceUsageUpdate, len(m.resourceUpdates))
+		copy(logUpdates, m.logUpdates)
+		copy(resourceUpdates, m.resourceUpdates)
+		m.logUpdates = m.logUpdates[:0]
+		m.resourceUpdates = m.resourceUpdates[:0]
+	}
+	m.lock.Unlock()
+
+	for _, msg := range logUpdates {
+		err := m.publish(msg)
+		if err != nil {
+			return fmt.Errorf("Could not publish message: %s", err)
+		}
+	}
+
+	for _, msg := range resourceUpdates {
+		err := m.publish(msg)
+		if err != nil {
+			return fmt.Errorf("Could not publish message: %s", err)
+		}
+	}
+
+	return nil
 }
 
-func (m *Monitor) SetListeningReqIDIfTaskID(taskID string, reqID string) {
+// not allowed to be called after Finished()
+func (m *Monitor) StartListeningIfTaskID(taskID string) error {
+	m.lock.Lock()
+
+	if m.taskID == taskID {
+		m.isPublishing = true
+	}
+
+	m.lock.Unlock()
+
+	err := m.flushUpdates()
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// not allowed to be called after Finished()
+func (m *Monitor) StopListeningIfTaskID(taskID string) {
 	m.lock.Lock()
 	defer m.lock.Unlock()
+
 	if m.taskID == taskID {
-		m.listeningReqID = reqID
+		m.isPublishing = false
 	}
 }
 
@@ -62,7 +109,9 @@ func (m *Monitor) publish(v any) error {
 	return m.channel.Publish(m.ctx, m.topicName, data)
 }
 
-func (m *Monitor) pollStdout(stdoutFile *os.File, taskID string, reqID string) error {
+const MaxUpdatesToKeep = 100
+
+func (m *Monitor) pollStdout(stdoutFile *os.File, taskID string) error {
 	buf := make([]byte, 100*1024)
 	n, err := stdoutFile.Read(buf)
 	if err != nil && err != io.EOF {
@@ -70,24 +119,44 @@ func (m *Monitor) pollStdout(stdoutFile *os.File, taskID string, reqID string) e
 		return err
 	}
 	if n > 0 {
-		msg := backend.LogStreamUpdate{Type: backend.RespLogStreamUpdate, TaskID: taskID, ReqID: reqID, Timestamp: time.Now(), Content: string(buf[:n])}
-		if pubErr := m.publish(msg); pubErr != nil {
-			log.Printf("Monitor.poll: publish error: %v", pubErr)
-			return pubErr
+		msg := backend.LogStreamUpdate{Type: backend.RespLogStreamUpdate, TaskID: taskID, Timestamp: time.Now(), Content: string(buf[:n])}
+
+		m.lock.Lock()
+		m.logUpdates = append(m.logUpdates, &msg)
+		if len(m.logUpdates) > MaxUpdatesToKeep {
+			copy(m.logUpdates, m.logUpdates[len(m.logUpdates)-MaxUpdatesToKeep:])
+			m.logUpdates = m.logUpdates[:MaxUpdatesToKeep]
+		}
+		m.lock.Unlock()
+
+		err = m.flushUpdates()
+		if err != nil {
+			return err
 		}
 	}
 	return nil
 }
 
-func (m *Monitor) pollResources(taskID string, reqID string) {
-	usage, err := GetResourceUsage(taskID, reqID)
+func (m *Monitor) pollResources(taskID string) error {
+	msg, err := GetResourceUsage(taskID)
 	if err != nil {
 		log.Printf("Monitor.pollResources: %v", err)
-		return
+		return err
 	}
-	if pubErr := m.publish(usage); pubErr != nil {
-		log.Printf("Monitor.pollResources: publish error: %v", pubErr)
+
+	m.lock.Lock()
+	m.resourceUpdates = append(m.resourceUpdates, msg)
+	if len(m.resourceUpdates) > MaxUpdatesToKeep {
+		copy(m.resourceUpdates, m.resourceUpdates[len(m.resourceUpdates)-MaxUpdatesToKeep:])
+		m.resourceUpdates = m.resourceUpdates[:MaxUpdatesToKeep]
 	}
+	m.lock.Unlock()
+
+	err = m.flushUpdates()
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func callPeriodically(ctx context.Context, freq time.Duration, fn func()) {
@@ -105,41 +174,41 @@ func callPeriodically(ctx context.Context, freq time.Duration, fn func()) {
 }
 
 func (m *Monitor) Started(taskID string, stdoutPath string) {
-	m.lock.Lock()
-	m.taskID = taskID
-	m.lock.Unlock()
-
 	stdoutFile, err := os.Open(stdoutPath)
 	if err != nil {
 		log.Printf("Monitor.Started: failed to open %s: %v", stdoutPath, err)
 		return
 	}
 
+	m.lock.Lock()
+	m.taskID = taskID
+	m.lock.Unlock()
+
 	var periodicCtx context.Context
 	periodicCtx, m.cancelPolling = context.WithCancel(m.ctx)
 
 	m.wg.Go(func() {
 		callPeriodically(periodicCtx, m.resourcePollFreq, func() {
-			reqID := m.getListeningReqID()
-			if reqID != "" {
-				m.pollResources(taskID, reqID)
+			err := m.pollResources(taskID)
+			if err != nil {
+				log.Printf("Error polling resources: %s", err)
 			}
 		})
 	})
 
 	m.wg.Go(func() {
 		callPeriodically(periodicCtx, m.stdoutPollFreq, func() {
-			reqID := m.getListeningReqID()
-			if reqID != "" {
-				m.pollStdout(stdoutFile, taskID, reqID)
+			err := m.pollStdout(stdoutFile, taskID)
+			if err != nil {
+				log.Printf("Error polling log: %s", err)
 			}
 		})
 
 		// do one final poll in case we've been canceled because the task completed
 		// and some more was written after our last poll
-		reqID := m.getListeningReqID()
-		if reqID != "" {
-			m.pollStdout(stdoutFile, taskID, reqID)
+		err := m.pollStdout(stdoutFile, taskID)
+		if err != nil {
+			log.Printf("Error polling log: %s", err)
 		}
 
 		stdoutFile.Close()
@@ -149,14 +218,11 @@ func (m *Monitor) Started(taskID string, stdoutPath string) {
 // finished is only ever called after Started(). Also, Finished must be called *after* Started has completed.
 func (m *Monitor) Finished() {
 	// stop the two goroutines which should be polling
-	m.cancelPolling()
+	if m.cancelPolling != nil {
+		m.cancelPolling()
+	}
 
 	// now wait for them to really complete
 	m.wg.Wait()
 
-	// clear the listening request ID
-	m.lock.Lock()
-	m.taskID = ""
-	m.listeningReqID = ""
-	m.lock.Unlock()
 }

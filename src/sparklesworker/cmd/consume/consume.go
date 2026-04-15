@@ -224,14 +224,16 @@ func consume(c *cli.Context) error {
 					log.Printf("Failed to deserialize StartStatusStreamCommand: %v", err)
 					return
 				}
-				monitor_.SetListeningReqIDIfTaskID(startCmd.TaskID, startCmd.ReqID)
+				if err := monitor_.StartListeningIfTaskID(startCmd.TaskID); err != nil {
+					log.Printf("Failed to start listening for task %s: %v", startCmd.TaskID, err)
+				}
 			case backend.CmdStopStatusStream:
 				var stopCmd backend.StopStatusStreamCommand
 				if err := json.Unmarshal(b, &stopCmd); err != nil {
 					log.Printf("Failed to deserialize StopStatusStreamCommand: %v", err)
 					return
 				}
-				monitor_.SetListeningReqIDIfTaskID(stopCmd.TaskID, "")
+				monitor_.StopListeningIfTaskID(stopCmd.TaskID)
 			default:
 				log.Printf("Ignoring unknown control message type: %s", cmd.Type)
 			}

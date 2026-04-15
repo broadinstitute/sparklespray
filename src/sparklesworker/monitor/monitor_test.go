@@ -74,9 +74,9 @@ func logStreamMessages(ch *captureChannel) []backend.LogStreamUpdate {
 
 // ---- tests ------------------------------------------------------------------
 
-// TestMonitor_NoPublishWithoutReqID verifies that the monitor does not publish
-// any stdout messages when no listeningReqID has been set.
-func TestMonitor_NoPublishWithoutReqID(t *testing.T) {
+// TestMonitor_NoPublishWithoutListening verifies that the monitor does not
+// publish any stdout messages when StartListeningIfTaskID has not been called.
+func TestMonitor_NoPublishWithoutListening(t *testing.T) {
 	ch := &captureChannel{}
 	m := newTestMonitor(ch)
 
@@ -85,18 +85,19 @@ func TestMonitor_NoPublishWithoutReqID(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 	m.Finished()
 
-	assert.Empty(t, logStreamMessages(ch), "should not publish without a listeningReqID")
+	assert.Empty(t, logStreamMessages(ch), "should not publish without StartListeningIfTaskID")
 }
 
 // TestMonitor_PublishesStdoutWhenListening verifies that stdout content is
-// published as LogStreamUpdate messages once a listeningReqID is set.
+// published as LogStreamUpdate messages once StartListeningIfTaskID is called
+// with the matching task ID.
 func TestMonitor_PublishesStdoutWhenListening(t *testing.T) {
 	ch := &captureChannel{}
 	m := newTestMonitor(ch)
 
 	path := writeTempFile(t, "hello from task\n")
 	m.Started("task-1", path)
-	m.setListeningReqID("req-abc")
+	require.NoError(t, m.StartListeningIfTaskID("task-1"))
 	time.Sleep(50 * time.Millisecond)
 	m.Finished()
 
@@ -108,12 +109,45 @@ func TestMonitor_PublishesStdoutWhenListening(t *testing.T) {
 		if msg.Content == "hello from task\n" {
 			found = true
 			assert.Equal(t, "task-1", msg.TaskID)
-			assert.Equal(t, "req-abc", msg.ReqID)
 			assert.Equal(t, backend.RespLogStreamUpdate, msg.Type)
 			assert.False(t, msg.Timestamp.IsZero())
 		}
 	}
 	assert.True(t, found, "expected a LogStreamUpdate containing the written content")
+}
+
+// TestMonitor_WrongTaskIDDoesNotPublish verifies that StartListeningIfTaskID
+// with a non-matching task ID does not enable publishing.
+func TestMonitor_WrongTaskIDDoesNotPublish(t *testing.T) {
+	ch := &captureChannel{}
+	m := newTestMonitor(ch)
+
+	path := writeTempFile(t, "hello\n")
+	m.Started("task-1", path)
+	require.NoError(t, m.StartListeningIfTaskID("task-other"))
+	time.Sleep(50 * time.Millisecond)
+	m.Finished()
+
+	assert.Empty(t, logStreamMessages(ch), "should not publish when task ID does not match")
+}
+
+// TestMonitor_StopListeningIfTaskID verifies that StopListeningIfTaskID
+// disables publishing for the matching task.
+func TestMonitor_StopListeningIfTaskID(t *testing.T) {
+	ch := &captureChannel{}
+	// Use a very long poll interval so we control exactly when publishing happens.
+	m := NewMonitor(context.Background(), ch, "test-topic", 10*time.Second, 10*time.Second)
+
+	path := writeTempFile(t, "before stop\n")
+	m.Started("task-1", path)
+	require.NoError(t, m.StartListeningIfTaskID("task-1"))
+	m.StopListeningIfTaskID("task-1")
+
+	// The final poll in Finished runs after cancelPolling, but isPublishing is
+	// now false so nothing should be sent.
+	m.Finished()
+
+	assert.Empty(t, logStreamMessages(ch), "should not publish after StopListeningIfTaskID")
 }
 
 // TestMonitor_FinalPollOnFinished verifies that the stdout goroutine performs
@@ -129,7 +163,7 @@ func TestMonitor_FinalPollOnFinished(t *testing.T) {
 	require.NoError(t, err)
 
 	m.Started("task-final", f.Name())
-	m.setListeningReqID("req-final")
+	require.NoError(t, m.StartListeningIfTaskID("task-final"))
 
 	_, err = f.WriteString("late output\n")
 	require.NoError(t, err)
@@ -148,16 +182,16 @@ func TestMonitor_FinalPollOnFinished(t *testing.T) {
 }
 
 // TestMonitor_StartedWithMissingFile verifies that Started does not panic when
-// the stdout file does not exist — it logs and returns without starting goroutines.
+// the stdout file does not exist — it logs and returns without starting
+// goroutines or setting cancelPolling. Finished handles the nil cancelPolling
+// gracefully via its nil guard.
 func TestMonitor_StartedWithMissingFile(t *testing.T) {
 	ch := &captureChannel{}
 	m := newTestMonitor(ch)
 	assert.NotPanics(t, func() {
 		m.Started("task-1", "/nonexistent/path/stdout.txt")
+		m.Finished()
 	})
-	// Finished must not be called here: Started returned early without setting
-	// up goroutines or cancelPolling, so calling Finished would panic. This is
-	// consistent with the documented precondition on Finished.
 }
 
 // TestMonitor_LogStreamUpdateJSONShape verifies the wire format field names of
@@ -168,7 +202,7 @@ func TestMonitor_LogStreamUpdateJSONShape(t *testing.T) {
 
 	path := writeTempFile(t, "abc")
 	m.Started("task-shape", path)
-	m.setListeningReqID("req-shape")
+	require.NoError(t, m.StartListeningIfTaskID("task-shape"))
 	time.Sleep(50 * time.Millisecond)
 	m.Finished()
 
@@ -179,7 +213,6 @@ func TestMonitor_LogStreamUpdateJSONShape(t *testing.T) {
 		}
 	}
 	require.Equal(t, backend.RespLogStreamUpdate, shape["type"])
-	assert.Contains(t, shape, "req_id")
 	assert.Contains(t, shape, "task_id")
 	assert.Contains(t, shape, "content")
 	assert.Contains(t, shape, "timestamp")
@@ -196,7 +229,7 @@ func TestMonitor_MultipleStartStopCycles(t *testing.T) {
 		m := newTestMonitor(ch)
 		path := writeTempFile(t, "output for "+taskID+"\n")
 		m.Started(taskID, path)
-		m.setListeningReqID("req-" + taskID)
+		require.NoError(t, m.StartListeningIfTaskID(taskID))
 		time.Sleep(30 * time.Millisecond)
 		m.Finished()
 	}

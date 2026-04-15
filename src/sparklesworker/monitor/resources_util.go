@@ -210,7 +210,7 @@ func GetMemoryPressure() *MemoryPressure {
 	return pressure
 }
 
-func GetResourceUsage(taskID string, ReqID string) (*backend.ResourceUsageUpdate, error) {
+func GetResourceUsage(taskID string) (*backend.ResourceUsageUpdate, error) {
 
 	mem, err := GetMemoryUsage()
 	if err != nil {
@@ -219,7 +219,6 @@ func GetResourceUsage(taskID string, ReqID string) (*backend.ResourceUsageUpdate
 
 	resp := &backend.ResourceUsageUpdate{
 		Type:          backend.RespResourceUsageUpdate,
-		ReqID:         ReqID,
 		TaskID:        taskID,
 		Timestamp:     time.Now(),
 		TotalMemory:   mem.TotalSize * PageSize,
