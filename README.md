@@ -1343,3 +1343,53 @@ TODO:
    - add support for browsing aether dir
 5. add gc command
 ```
+
+Making a UI would be easiest if there was a reliable endpoint that I could subscribe to.
+
+Could we make the front end do a long poll? (ie: create a temp token, a per-client subscription for the given task ID, and do a get on the REST endpoint?) Completion of slow poll would not deliver data, but indicate it's time to poll again.
+
+Maybe: But it speaks to best thing to do is store all events in DB so they
+can be fetched.
+
+Problem 1 with fetching events:
+
+- fetching a large number of objects isn't superfast. Can we take advantage of thier immutablabilty and cache them? We also know that they're append-only.
+- We could compact them:
+
+1. server api: fetch_events(task_id, event_types) (assumes we'll never have 'too-many' events to process at one time. Is that a safe assumption? Log events in particular sound like that's probably not a good idea. maybe a different api for that one...)
+2. when fetching events first query CompactedEvents(first_timestamp, end_timestamp, task_id, event_type) where task_id=?. That gives us our base line
+3. Then query from events table where task_id=? and timestamp >= max(stop_time) from compacted events. If >n events are older than grace_period (index is eventually consistent so events are not visible in a strictly atomic order. There may be new records we don't see yet. Is that true?) retreived insert new CompactedEvents record in db.
+
+(grace period sounds like it shouldn't be necessary: "Firestore has an immediately consistency model: once a write is completed, it is available to all clients and not just a subset of them.
+
+This means that once a certain value of FieldValue.serverTimestamp() is written to your createdAt field, there will never be an older value that is written.")
+
+This is making the assumption that fetching one document containing one big blob is faster then fetching lots of little blobs. Worth measuring to confirm.
+(Note: we can also compress the blob which should also help)
+Should add a uuid on events to support de-dupping when merging CompactedEvents.
+
+Maybe the monitor could be responsible for compacting events instead of doing it on the query path?
+
+Max Firestore doc is 1MB.
+Pricing $0.03/100k reads, 0.09/100k writes, $0.15/GB/month
+Sounds like even dumping a large amount of logs into the DB is cheap
+
+pubsub is more expensive at 0.27/GB/month however storage should be more transient.
+
+We definitely should be able to get a live event stream by generating a short-term-service-account-impersonation token and a pull URL.
+
+imagine an api like:
+
+- subscribeToEventStream(params) -> pull_url, ack_url, auth_token, subscription_expiry
+- queryPastEvents(min_timestamp, params) -> list of events
+
+listener = listenToEventStream(params, onNewEventsCallback: func(events[]))
+listener.cancel()
+
+All of this encourages writing out _everything_ to a single event stream (which admittedly may be filtered by different subscribers)
+
+Incremental improvements:
+
+1. simplest: Write everything to firestore and poll periodically
+2. Add support for compaction
+3. Switch from polling to subscription
