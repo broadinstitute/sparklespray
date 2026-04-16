@@ -12,7 +12,6 @@ project=broad-achilles
 default_image=python
 machine_type=n1-standard-2
 region=us-central1
-account=apple
 sparklesworker_image=invalid-sparklesworker-name
 """
     )

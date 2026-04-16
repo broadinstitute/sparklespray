@@ -62,7 +62,6 @@ class PrepConfig:
     sparklesworker_image: Optional[str] = None
     project: Optional[str] = None
     region: Optional[str] = None
-    account: Optional[str] = None
     service_account_key: Optional[str] = None
     credentials: Optional[str] = None
     boot_volume: Optional[PersistentDiskMount] = None
@@ -86,7 +85,6 @@ class Config:
     sparklesworker_image: str
     project: str
     region: str
-    account: str
     service_account_key: str
     boot_volume: PersistentDiskMount
     local_work_dir: str
@@ -125,7 +123,6 @@ NO_DEFAULT = NoDefault()
 
 @dataclass
 class GCloudConfig:
-    account: Optional[str] = None
     region: Optional[str] = None
     project: Optional[str] = None
 
@@ -142,11 +139,10 @@ def _safe_get(config, section, key, default=None):
 def _parse_gcloud_config(gcloud_config_file: str, verbose: bool) -> GCloudConfig:
     gcloud_config = RawConfigParser()
     gcloud_config.read(gcloud_config_file)
-    account = _safe_get(gcloud_config, "core", "account")
     project = _safe_get(gcloud_config, "core", "project")
     region = _safe_get(gcloud_config, "compute", "region")
 
-    config = GCloudConfig(account=account, region=region, project=project)
+    config = GCloudConfig(region=region, project=project)
     if verbose:
         print("Using defaults from {}: {}".format(gcloud_config_file, config))
     return config
@@ -224,7 +220,6 @@ def load_config(
         "default_image",
         "machine_type",
         "region",
-        "account",
     ]
     for property in required_properties:
         value = None
