@@ -74,7 +74,7 @@ async function pullMessages(creds: SubscriptionCreds) {
     },
     body: JSON.stringify({ maxMessages: 20 }),
   });
-  if (!res.ok) return [];
+  if (!res.ok) throw new Error(`pull failed: ${res.status}`);
   const data = await res.json();
   return (data.receivedMessages ?? []) as Array<{
     ackId: string;
