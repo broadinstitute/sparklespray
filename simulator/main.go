@@ -635,6 +635,24 @@ func runJobSpawner(ctx context.Context, cfg *Config) {
 	}
 }
 
+func ensureTopics(ctx context.Context) {
+	for _, name := range []string{TopicLifecycle, TopicTaskOut, TopicTaskIn} {
+		topic := psClient.Topic(name)
+		exists, err := topic.Exists(ctx)
+		if err != nil {
+			log.Fatalf("Failed to check topic %s: %v", name, err)
+		}
+		if !exists {
+			if _, err := psClient.CreateTopic(ctx, name); err != nil {
+				log.Fatalf("Failed to create topic %s: %v", name, err)
+			}
+			log.Printf("Created topic %s", name)
+		} else {
+			log.Printf("Topic %s already exists", name)
+		}
+	}
+}
+
 // listenForControlMessages pulls from an ephemeral subscription on sparklespray-task-in
 // and dispatches start_publishing messages to the appropriate task goroutine.
 func listenForControlMessages(ctx context.Context, projectID string) {
@@ -742,6 +760,8 @@ func main() {
 			log.Fatalf("Failed to create Pub/Sub client: %v", err)
 		}
 		defer psClient.Close()
+
+		ensureTopics(ctx)
 
 		if *reset {
 			resetCollections(ctx)
