@@ -1,8 +1,8 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useParams, Link } from "react-router-dom";
 import { getTaskEvents, deriveStatus, extractTimings } from "../data/events";
-import { simulateResourceUsage } from "../data/simulate";
 import { useEvents } from "../data/EventProvider";
+import { useTaskPubsub } from "../data/useTaskPubsub";
 import type { AnyEvent } from "../types";
 import TaskProperties from "../components/TaskProperties";
 import MultiLineChart from "../components/MultiLineChart";
@@ -30,7 +30,6 @@ export default function TaskDetail() {
     command: string;
     dockerImage: string;
   } | null>(null);
-  const [logContent, setLogContent] = useState<string>("");
   const logBottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -59,45 +58,6 @@ export default function TaskDetail() {
       .catch(() => setTaskInfo({ command: "missing", dockerImage: "missing" }));
   }, [taskId]);
 
-  useEffect(() => {
-    if (!taskId) return;
-    let cancelled = false;
-    let nextAfter = "";
-
-    async function pollLog() {
-      while (!cancelled) {
-        try {
-          const params = new URLSearchParams();
-          if (nextAfter) params.set("after", nextAfter);
-          const qs = params.toString();
-          const res = await fetch(
-            `/api/v1/task/${taskId}/log${qs ? "?" + qs : ""}`
-          );
-          if (res.ok) {
-            const data: {
-              content: string;
-              next_after: string;
-            } = await res.json();
-            if (data.content) setLogContent((prev) => prev + data.content);
-            nextAfter = data.next_after;
-          }
-        } catch {
-          /* ignore */
-        }
-        if (!cancelled) await new Promise<void>((r) => setTimeout(r, 5_000));
-      }
-    }
-
-    pollLog();
-    return () => {
-      cancelled = true;
-    };
-  }, [taskId]);
-
-  useEffect(() => {
-    logBottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [logContent]);
-
   const taskEvents = useMemo(
     () => (jobId && taskId ? getTaskEvents(localEvents, jobId, taskId) : []),
     [localEvents, jobId, taskId]
@@ -105,10 +65,15 @@ export default function TaskDetail() {
 
   const status = useMemo(() => deriveStatus(taskEvents), [taskEvents]);
   const timings = useMemo(() => extractTimings(taskEvents), [taskEvents]);
-  const resourceData = useMemo(
-    () => (taskId ? simulateResourceUsage(taskId, timings) : []),
-    [taskId, timings]
+
+  const isActive = ["claimed", "exec_started", "exec_complete"].includes(
+    status
   );
+  const { resourceData, logContent } = useTaskPubsub(taskId ?? "", isActive);
+
+  useEffect(() => {
+    logBottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [logContent]);
 
   if (!jobId || !taskId) {
     return (
@@ -292,7 +257,9 @@ export default function TaskDetail() {
             fontSize: "0.85rem",
           }}
         >
-          No metrics yet — task has not started.
+          {isActive
+            ? "Waiting for metrics…"
+            : "No metrics available — task is not currently running."}
         </p>
       )}
 
