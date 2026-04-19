@@ -177,6 +177,12 @@ def load_config(
     config_dict.update(overrides)
 
     # check for deprecated options
+    if "account" in config_dict:
+        print(
+            "Warning: The option 'account' has been deprecated. Please remove this from your config because it may become an error in a future version of sparkles"
+        )
+        del config_dict["account"]
+
     if "bootdisksizegb" in config_dict:
         print(
             'Warning: The option "bootdisksizegb" was seen in the config file but this name is deprecated. This parameter has been replaced with boot_volume_in_gb.'

@@ -37,3 +37,12 @@ main
 cli/sparklespray/bin/kubequeconsume
 cli/sparklespray/bin/sparklesworker
 hermit.log
+
+node_modules/
+sparkles-config
+sparkleswork/
+sparklesworker/tasks/
+events.json
+bin/
+dashboard-backend/sparklespray-dashboard-backend
+simulator/sparklespray-simulator

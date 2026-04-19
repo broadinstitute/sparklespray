@@ -1,0 +1,82 @@
+single page react app with a page for each of the following URLs
+
+
+```
+/clusters
+```
+Table of clusters. Following columns:
+* cluster ID
+* Number of jobs
+* Machine type
+API: getClusters(id?, nextPage?) -> list of clusters
+
+```
+/cluster/clusterID
+```
+Details of a cluster. At the top, graphs summarizing the state of the cluster over time and then a table of jobs for that cluster below. The graphs should both have the x-axis be time and be aligned. The top one should show the number of VMs which are in "pending" or "running" state. The bottom should report a line plot showing instantaneous rates of change for VMs which have switched to "complete" or "failed".
+
+The job table should show the following information:
+* job ID
+* Number of tasks
+* start time
+* cluster ID
+
+```
+/cluster/clusterID/activity
+```
+
+A series of events. (Should a distribution over time of number of events over time? Would be helpful to allow selection...)
+
+API: getClusterActivity(clusterID?, nextPage?) -> list of events
+
+```
+/jobs
+```
+Table of all jobs with same columns as above
+
+API: getJobs(ID?, clusterID?, nextPage?) -> list of jobs
+
+```
+/job/jobID
+```
+Details of a job. At the top graphs summarizing the state of the job over time and a table of tasks for that job below. The graphs should both have the x-axis be time and be aligned. The top one should show the number of tasks which are in "pending" or "running" state. The bottom should report a line plot showing instantaneous rates of change for tasks which have switched to "completed successfully", "completed with error", "orphaned" or "failed to run".
+
+Below plots should be a table of tasks with the following columns:
+* task ID
+* status
+* exit code
+* start time
+* end time
+API: getTaskEvents(taskID?, jobID?, nextPage?) -> list of jobs
+```
+/job/jobID/activity
+```
+List of events that are associated with this job (ie: task started, task completed, etc)
+
+```
+/job/jobID/perf-overview
+```
+A set of plots:
+1. Distribution of execution time per task
+2. Distribution of localization time per task
+3. Distribution of upload time per task
+4. Distribution of max mem per task
+5. Distribution of max disk usage per task
+6. Distribution of re-executions per task
+
+```
+/job/jobID/task/taskID
+```
+Details of a task.  Overview of key properties of task:
+1. Command that was executed
+2. Docker image used
+Two plots:
+3. Memory usage over time
+4. CPU usage over time
+Below:
+timestamped log of output
+
+
+Common UI elements: 
+Timeline plots
+log of events

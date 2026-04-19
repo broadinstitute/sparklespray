@@ -1,0 +1,14 @@
+{
+	"folders": [
+		{
+			"path": "../dashboard"
+		},
+		{
+			"path": "."
+		},
+		{
+			"path": "../dashboard-backend"
+		}
+	],
+	"settings": {}
+}
