@@ -69,7 +69,10 @@ export default function TaskDetail() {
   const isActive = ["claimed", "exec_started", "exec_complete"].includes(
     status
   );
-  const { resourceData, logContent } = useTaskPubsub(taskId ?? "", isActive);
+  const { resourceData, logContent, error: pubsubError } = useTaskPubsub(
+    taskId ?? "",
+    isActive
+  );
 
   useEffect(() => {
     logBottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -145,6 +148,24 @@ export default function TaskDetail() {
         timings={timings}
         status={status}
       />
+
+      {/* Pubsub error banner */}
+      {pubsubError && (
+        <div
+          style={{
+            background: "#ffebee",
+            border: "1px solid #ef9a9a",
+            borderRadius: 6,
+            color: "#b71c1c",
+            fontFamily: "monospace",
+            fontSize: "0.85rem",
+            padding: "0.6rem 1rem",
+            marginBottom: "1rem",
+          }}
+        >
+          Live data unavailable: {pubsubError}
+        </div>
+      )}
 
       {/* Tab bar */}
       <div

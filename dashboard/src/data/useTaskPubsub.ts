@@ -94,12 +94,19 @@ async function ackMessages(creds: SubscriptionCreds, ackIds: string[]) {
   });
 }
 
+const MAX_FAILURES = 10;
+
 export function useTaskPubsub(
   taskId: string,
   isActive: boolean
-): { resourceData: ResourceDataPoint[]; logContent: string } {
+): {
+  resourceData: ResourceDataPoint[];
+  logContent: string;
+  error: string | null;
+} {
   const [resourceData, setResourceData] = useState<ResourceDataPoint[]>([]);
   const [logContent, setLogContent] = useState("");
+  const [error, setError] = useState<string | null>(null);
   const credsRef = useRef<SubscriptionCreds | null>(null);
   const cancelledRef = useRef(false);
 
@@ -107,6 +114,7 @@ export function useTaskPubsub(
     if (!isActive) return;
 
     cancelledRef.current = false;
+    setError(null);
     let creds: SubscriptionCreds | null = null;
 
     async function start() {
@@ -114,7 +122,10 @@ export function useTaskPubsub(
         const res = await fetch(`/api/v1/task/${taskId}/subscription`, {
           method: "POST",
         });
-        if (!res.ok || cancelledRef.current) return;
+        if (!res.ok || cancelledRef.current) {
+          setError("Failed to create task subscription.");
+          return;
+        }
         const body = await res.json();
         creds = {
           subscriptionId: body.subscription_id,
@@ -124,12 +135,16 @@ export function useTaskPubsub(
         };
         credsRef.current = creds;
       } catch {
+        if (!cancelledRef.current) setError("Failed to connect to backend.");
         return;
       }
+
+      let failures = 0;
 
       while (!cancelledRef.current && creds) {
         try {
           const messages = await pullMessages(creds);
+          failures = 0;
           const ackIds: string[] = [];
           const newMetrics: ResourceDataPoint[] = [];
           let newLog = "";
@@ -159,7 +174,13 @@ export function useTaskPubsub(
 
           await ackMessages(creds, ackIds);
         } catch {
-          /* ignore transient errors */
+          failures++;
+          if (failures > MAX_FAILURES) {
+            setError(
+              `Stopped polling after ${MAX_FAILURES} consecutive errors.`
+            );
+            break;
+          }
         }
 
         if (!cancelledRef.current) {
@@ -189,7 +210,8 @@ export function useTaskPubsub(
   useEffect(() => {
     setResourceData([]);
     setLogContent("");
+    setError(null);
   }, [taskId]);
 
-  return { resourceData, logContent };
+  return { resourceData, logContent, error };
 }
