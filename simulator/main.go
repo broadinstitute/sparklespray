@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/datastore"
+	"cloud.google.com/go/pubsub"
 	"github.com/google/uuid"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -21,6 +23,10 @@ const ClusterCollection = "SparklesV5Cluster"
 const JobCollection = "SparklesV5Job"
 const TaskCollection = "SparklesV5Task"
 const EventExpiry = 7 * 24 * time.Hour
+
+const TopicLifecycle = "sparklespray-events"
+const TopicTaskOut = "sparkles-task-out"
+const TopicTaskIn = "sparklespray-task-in"
 
 var failureReasons = []string{
 	"out of memory",
@@ -45,9 +51,9 @@ type Config struct {
 	StagingDuration time.Duration
 	UploadDuration  time.Duration
 	JobInterval     time.Duration
-	RequeueDelay       time.Duration
-	WorkerStartDelay   time.Duration
-	DryRun             bool
+	RequeueDelay    time.Duration
+	WorkerStartDelay time.Duration
+	DryRun          bool
 }
 
 type Cluster struct {
@@ -82,16 +88,51 @@ type Task struct {
 }
 
 type Job struct {
-	JobID                  string   `datastore:"job_id"`
-	Tasks                  []string `datastore:"tasks,noindex"`
-	KubeJobSpec            string   `datastore:"kube_job_spec,noindex"`
-	Metadata               string   `datastore:"metadata,noindex"`
-	ClusterID              string   `datastore:"cluster_id"`
-	Status                 string   `datastore:"status"`
+	JobID                  string    `datastore:"job_id"`
+	Tasks                  []string  `datastore:"tasks,noindex"`
+	KubeJobSpec            string    `datastore:"kube_job_spec,noindex"`
+	Metadata               string    `datastore:"metadata,noindex"`
+	ClusterID              string    `datastore:"cluster_id"`
+	Status                 string    `datastore:"status"`
 	SubmitTime             time.Time `datastore:"submit_time"`
-	TaskCount              int32    `datastore:"task_count"`
-	MaxPreemptableAttempts int32    `datastore:"max_preemptable_attempts"`
-	TargetNodeCount        int32    `datastore:"target_node_count"`
+	TaskCount              int32     `datastore:"task_count"`
+	MaxPreemptableAttempts int32     `datastore:"max_preemptable_attempts"`
+	TargetNodeCount        int32     `datastore:"target_node_count"`
+}
+
+type ResourceUsageUpdate struct {
+	Type                 string    `json:"type"`
+	ReqID                string    `json:"req_id"`
+	TaskID               string    `json:"task_id"`
+	Timestamp            time.Time `json:"timestamp"`
+	ProcessCount         int32     `json:"process_count"`
+	TotalMemory          int64     `json:"total_memory"`
+	TotalData            int64     `json:"total_data"`
+	TotalShared          int64     `json:"total_shared"`
+	TotalResident        int64     `json:"total_resident"`
+	CpuUser              int64     `json:"cpu_user"`
+	CpuSystem            int64     `json:"cpu_system"`
+	CpuIdle              int64     `json:"cpu_idle"`
+	CpuIowait            int64     `json:"cpu_iowait"`
+	MemTotal             int64     `json:"mem_total"`
+	MemAvailable         int64     `json:"mem_available"`
+	MemFree              int64     `json:"mem_free"`
+	MemPressureSomeAvg10 int32     `json:"mem_pressure_some_avg10"`
+	MemPressureFullAvg10 int32     `json:"mem_pressure_full_avg10"`
+}
+
+type LogStreamUpdate struct {
+	Type      string    `json:"type"`
+	ReqID     string    `json:"req_id"`
+	Timestamp time.Time `json:"timestamp"`
+	TaskID    string    `json:"task_id"`
+	Content   string    `json:"content"`
+}
+
+type StartPublishing struct {
+	Type   string `json:"type"`
+	ReqID  string `json:"req_id"`
+	TaskID string `json:"task_id"`
 }
 
 type pendingTask struct {
@@ -103,8 +144,56 @@ type pendingTask struct {
 
 var (
 	dsClient    *datastore.Client
+	psClient    *pubsub.Client
 	runningJobs atomic.Int64
 )
+
+// activePublishers maps task_id -> channel that receives req_id when start_publishing is requested
+var (
+	activePublishersMu sync.Mutex
+	activePublishers   = map[string]chan string{}
+)
+
+func registerPublisher(taskID string) chan string {
+	ch := make(chan string, 1)
+	activePublishersMu.Lock()
+	activePublishers[taskID] = ch
+	activePublishersMu.Unlock()
+	return ch
+}
+
+func unregisterPublisher(taskID string) {
+	activePublishersMu.Lock()
+	delete(activePublishers, taskID)
+	activePublishersMu.Unlock()
+}
+
+func notifyPublisher(taskID, reqID string) {
+	activePublishersMu.Lock()
+	ch, ok := activePublishers[taskID]
+	activePublishersMu.Unlock()
+	if ok {
+		select {
+		case ch <- reqID:
+		default:
+		}
+	}
+}
+
+func publishToTopic(ctx context.Context, topicName string, data []byte, attrs map[string]string) {
+	if psClient == nil {
+		return
+	}
+	topic := psClient.Topic(topicName)
+	msg := &pubsub.Message{Attributes: attrs}
+	if data != nil {
+		msg.Data = data
+	}
+	result := topic.Publish(ctx, msg)
+	if _, err := result.Get(ctx); err != nil {
+		log.Printf("ERROR publishing to %s: %v", topicName, err)
+	}
+}
 
 func writeEvent(ctx context.Context, cfg *Config, props datastore.PropertyList) {
 	eventID := uuid.New().String()
@@ -114,6 +203,13 @@ func writeEvent(ctx context.Context, cfg *Config, props datastore.PropertyList) 
 		datastore.Property{Name: "timestamp", Value: now, NoIndex: false},
 		datastore.Property{Name: "expiry", Value: now.Add(EventExpiry), NoIndex: true},
 	)
+
+	var eventType string
+	for _, p := range props {
+		if p.Name == "type" {
+			eventType, _ = p.Value.(string)
+		}
+	}
 
 	if cfg.DryRun {
 		for _, p := range props {
@@ -132,6 +228,10 @@ func writeEvent(ctx context.Context, cfg *Config, props datastore.PropertyList) 
 			log.Fatalf("Permission denied writing to Datastore: %v", err)
 		}
 		log.Printf("ERROR writing event %v: %v", props, err)
+	}
+
+	if eventType != "" {
+		go publishToTopic(ctx, TopicLifecycle, nil, map[string]string{"type": eventType})
 	}
 }
 
@@ -229,6 +329,66 @@ func jitter(d time.Duration) time.Duration {
 	return time.Duration(float64(d) * (0.5 + rand.Float64()))
 }
 
+// publishTaskMetrics publishes metric_update and log_update messages to sparkles-task-out
+// until ctx is cancelled. reqID is used in all messages.
+func publishTaskMetrics(ctx context.Context, taskID, reqID string) {
+	metricTicker := time.NewTicker(10 * time.Second)
+	logTicker := time.NewTicker(time.Duration(3+rand.Intn(5)) * time.Second)
+	defer metricTicker.Stop()
+	defer logTicker.Stop()
+
+	lastLog := time.Now()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-metricTicker.C:
+			totalMem := int64(1+rand.Intn(8)) * 1024 * 1024 * 1024
+			free := totalMem / int64(2+rand.Intn(4))
+			update := ResourceUsageUpdate{
+				Type:                 "metric_update",
+				ReqID:                reqID,
+				TaskID:               taskID,
+				Timestamp:            time.Now().UTC(),
+				ProcessCount:         int32(1 + rand.Intn(8)),
+				TotalMemory:          totalMem,
+				TotalData:            totalMem - free - int64(rand.Intn(100*1024*1024)),
+				TotalShared:          int64(rand.Intn(50 * 1024 * 1024)),
+				TotalResident:        totalMem - free,
+				CpuUser:              int64(rand.Intn(90)),
+				CpuSystem:            int64(rand.Intn(10)),
+				CpuIdle:              int64(rand.Intn(30)),
+				CpuIowait:            int64(rand.Intn(5)),
+				MemTotal:             totalMem,
+				MemAvailable:         free,
+				MemFree:              free / 2,
+				MemPressureSomeAvg10: int32(rand.Intn(30)),
+				MemPressureFullAvg10: int32(rand.Intn(5)),
+			}
+			data, _ := json.Marshal(update)
+			go publishToTopic(ctx, TopicTaskOut, data, map[string]string{"type": "metric_update", "req_id": reqID})
+
+		case t := <-logTicker.C:
+			elapsed := int(t.Sub(lastLog).Seconds())
+			lastLog = t
+			content := fmt.Sprintf("%d seconds since last update to the log.\nThe time is now %s\n",
+				elapsed, t.UTC().Format(time.RFC3339))
+			update := LogStreamUpdate{
+				Type:      "log_update",
+				ReqID:     reqID,
+				Timestamp: time.Now().UTC(),
+				TaskID:    taskID,
+				Content:   content,
+			}
+			data, _ := json.Marshal(update)
+			go publishToTopic(ctx, TopicTaskOut, data, map[string]string{"type": "log_update", "req_id": reqID})
+
+			logTicker.Reset(time.Duration(3+rand.Intn(5)) * time.Second)
+		}
+	}
+}
+
 func runWorker(ctx context.Context, cfg *Config, taskQueue <-chan pendingTask, wg *sync.WaitGroup) {
 	defer wg.Done()
 
@@ -259,9 +419,7 @@ func runWorker(ctx context.Context, cfg *Config, taskQueue <-chan pendingTask, w
 				{Name: "cluster_id", Value: cfg.ClusterID},
 				{Name: "worker_id", Value: workerID},
 			})
-			// Return task to queue by spawning re-queuer (can't send to read-only chan)
 			go func(t pendingTask) {
-				// small delay before re-queue to simulate re-scheduling
 				time.Sleep(jitter(cfg.RequeueDelay))
 				requeue(t)
 			}(task)
@@ -285,8 +443,36 @@ func runWorker(ctx context.Context, cfg *Config, taskQueue <-chan pendingTask, w
 
 		writeEvent(ctx, cfg, baseTaskProps("task_exec_started", task.taskID, task.jobID, cfg.ClusterID))
 
+		// Register for start_publishing control messages during execution
+		publishCh := registerPublisher(task.taskID)
+		publishCtx, cancelPublish := context.WithCancel(ctx)
+
 		// Execution phase
-		time.Sleep(jitter(cfg.TaskDuration))
+		execDone := make(chan struct{})
+		go func() {
+			time.Sleep(jitter(cfg.TaskDuration))
+			close(execDone)
+		}()
+
+	execLoop:
+		for {
+			select {
+			case reqID := <-publishCh:
+				// Ack the control message
+				ack := map[string]interface{}{"type": "command_ack", "req_id": reqID, "task_id": task.taskID}
+				data, _ := json.Marshal(ack)
+				go publishToTopic(ctx, TopicTaskOut, data, map[string]string{"type": "command_ack", "req_id": reqID})
+				// Start publishing metrics/logs; cancel previous publisher if any
+				cancelPublish()
+				publishCtx, cancelPublish = context.WithCancel(ctx)
+				go publishTaskMetrics(publishCtx, task.taskID, reqID)
+			case <-execDone:
+				break execLoop
+			}
+		}
+
+		cancelPublish()
+		unregisterPublisher(task.taskID)
 
 		if rand.Float64() < cfg.WorkerFailRate {
 			log.Printf("Worker %s failed during exec of %s", workerID, task.taskID)
@@ -426,13 +612,11 @@ func spawnJob(ctx context.Context, cfg *Config) {
 }
 
 func runJobSpawner(ctx context.Context, cfg *Config) {
-	// Brief startup delay
 	time.Sleep(2 * time.Second)
 
 	ticker := time.NewTicker(cfg.JobInterval)
 	defer ticker.Stop()
 
-	// Try to fill up to maxJobs immediately
 	for runningJobs.Load() < int64(cfg.MaxJobs) {
 		runningJobs.Add(1)
 		go spawnJob(ctx, cfg)
@@ -448,6 +632,50 @@ func runJobSpawner(ctx context.Context, cfg *Config) {
 				go spawnJob(ctx, cfg)
 			}
 		}
+	}
+}
+
+// listenForControlMessages pulls from an ephemeral subscription on sparklespray-task-in
+// and dispatches start_publishing messages to the appropriate task goroutine.
+func listenForControlMessages(ctx context.Context, projectID string) {
+	topic := psClient.Topic(TopicTaskIn)
+	subID := "sparklespray-simulator-" + uuid.New().String()[:8]
+	sub, err := psClient.CreateSubscription(ctx, subID, pubsub.SubscriptionConfig{
+		Topic:                 topic,
+		AckDeadline:           10 * time.Second,
+		ExpirationPolicy:      24 * time.Hour,
+		EnableMessageOrdering: false,
+	})
+	if err != nil {
+		log.Printf("WARNING: could not create control subscription: %v (control messages disabled)", err)
+		return
+	}
+	log.Printf("Listening for control messages on subscription %s", subID)
+
+	defer func() {
+		delCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := sub.Delete(delCtx); err != nil {
+			log.Printf("WARNING: failed to delete control subscription %s: %v", subID, err)
+		}
+	}()
+
+	err = sub.Receive(ctx, func(ctx context.Context, msg *pubsub.Message) {
+		var cmd StartPublishing
+		if err := json.Unmarshal(msg.Data, &cmd); err != nil {
+			msg.Ack()
+			return
+		}
+		if cmd.Type != "start_publishing" {
+			msg.Ack()
+			return
+		}
+		log.Printf("Control message: start_publishing task=%s req_id=%s", cmd.TaskID, cmd.ReqID)
+		notifyPublisher(cmd.TaskID, cmd.ReqID)
+		msg.Ack()
+	})
+	if err != nil && ctx.Err() == nil {
+		log.Printf("ERROR receiving control messages: %v", err)
 	}
 }
 
@@ -478,21 +706,21 @@ func main() {
 	}
 
 	cfg := &Config{
-		ProjectID:       *projectID,
-		ClusterID:       *clusterID,
-		MachineType:     *machineType,
-		MaxJobs:         *maxJobs,
-		TasksPerJob:     *tasksPerJob,
-		NumWorkers:      *numWorkers,
-		WorkerFailRate:  *workerFailRate,
-		TaskFailRate:    *taskFailRate,
-		TaskDuration:    scale(*taskDuration),
-		StagingDuration: scale(*stagingDuration),
-		UploadDuration:  scale(*uploadDuration),
-		JobInterval:     scale(*jobInterval),
+		ProjectID:        *projectID,
+		ClusterID:        *clusterID,
+		MachineType:      *machineType,
+		MaxJobs:          *maxJobs,
+		TasksPerJob:      *tasksPerJob,
+		NumWorkers:       *numWorkers,
+		WorkerFailRate:   *workerFailRate,
+		TaskFailRate:     *taskFailRate,
+		TaskDuration:     scale(*taskDuration),
+		StagingDuration:  scale(*stagingDuration),
+		UploadDuration:   scale(*uploadDuration),
+		JobInterval:      scale(*jobInterval),
 		RequeueDelay:     scale(10 * time.Second),
 		WorkerStartDelay: scale(10 * time.Second),
-		DryRun:          *dryRun,
+		DryRun:           *dryRun,
 	}
 
 	if !cfg.DryRun && cfg.ProjectID == "" {
@@ -508,15 +736,23 @@ func main() {
 			log.Fatalf("Failed to create Datastore client: %v", err)
 		}
 		defer dsClient.Close()
+
+		psClient, err = pubsub.NewClient(ctx, cfg.ProjectID)
+		if err != nil {
+			log.Fatalf("Failed to create Pub/Sub client: %v", err)
+		}
+		defer psClient.Close()
+
 		if *reset {
 			resetCollections(ctx)
 		}
+
+		go listenForControlMessages(ctx, cfg.ProjectID)
 	}
 
 	log.Printf("Simulator starting: cluster=%s max-jobs=%d tasks-per-job=%d workers=%d",
 		cfg.ClusterID, cfg.MaxJobs, cfg.TasksPerJob, cfg.NumWorkers)
 
-	// Queue sized to hold all tasks from all concurrent jobs plus headroom
 	globalQueue = make(chan pendingTask, cfg.MaxJobs*cfg.TasksPerJob*2)
 
 	writeCluster(ctx, cfg)
@@ -533,6 +769,5 @@ func main() {
 
 	go runJobSpawner(ctx, cfg)
 
-	// Block forever (Ctrl+C to stop)
 	select {}
 }
