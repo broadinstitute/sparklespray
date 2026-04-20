@@ -456,6 +456,34 @@ func handleJob(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, &job)
 }
 
+func handleGC(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	now := time.Now()
+	q := datastore.NewQuery(EventCollection).FilterField("expiry", "<=", now).KeysOnly()
+	keys, err := dsClient.GetAll(ctx, q, nil)
+	if err != nil {
+		log.Printf("GC query error: %v", err)
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "gc query failed")
+		return
+	}
+	const batchSize = 500
+	deleted := 0
+	for i := 0; i < len(keys); i += batchSize {
+		end := i + batchSize
+		if end > len(keys) {
+			end = len(keys)
+		}
+		if err := dsClient.DeleteMulti(ctx, keys[i:end]); err != nil {
+			log.Printf("GC delete error: %v", err)
+			writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "gc delete failed")
+			return
+		}
+		deleted += end - i
+	}
+	log.Printf("GC deleted %d expired events", deleted)
+	writeJSON(w, http.StatusOK, map[string]int{"deleted": deleted})
+}
+
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -516,6 +544,7 @@ func main() {
 	mux.HandleFunc("POST /api/v1/subscription/{subscription_id}/unsubscribe", handleUnsubscribe)
 	mux.HandleFunc("POST /api/v1/task/{task_id}/subscription", handleCreateTaskSubscription)
 	mux.HandleFunc("POST /api/v1/task/{task_id}/subscription/{subscription_id}/unsubscribe", handleTaskUnsubscribe)
+	mux.HandleFunc("POST /gc", handleGC)
 
 	log.Printf("Listening on %s", *addr)
 	if err := http.ListenAndServe(*addr, corsMiddleware(mux)); err != nil && !errors.Is(err, http.ErrServerClosed) {

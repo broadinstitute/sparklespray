@@ -29,6 +29,23 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   const nextAfterRef = useRef<string | null>(null);
 
   useEffect(() => {
+    async function gc() {
+      try {
+        const res = await fetch("/gc", { method: "POST" });
+        const data = await res.json();
+        console.log("[EventProvider] GC completed:", data);
+      } catch (err) {
+        console.warn("[EventProvider] GC failed:", err);
+      }
+    }
+
+    gc();
+    const gcInterval = setInterval(gc, 60 * 60 * 1000);
+
+    return () => clearInterval(gcInterval);
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
 
     async function poll() {

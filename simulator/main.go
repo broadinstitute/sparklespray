@@ -204,7 +204,7 @@ func writeEvent(ctx context.Context, cfg *Config, props datastore.PropertyList) 
 	props = append(props,
 		datastore.Property{Name: "event_id", Value: eventID, NoIndex: false},
 		datastore.Property{Name: "timestamp", Value: now, NoIndex: false},
-		datastore.Property{Name: "expiry", Value: now.Add(EventExpiry), NoIndex: true},
+		datastore.Property{Name: "expiry", Value: now.Add(EventExpiry), NoIndex: false},
 	)
 
 	var eventType string
