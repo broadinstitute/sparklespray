@@ -28,9 +28,9 @@ const TaskCollection = "SparklesV5Task"
 const DefaultLimit = 1000
 const MaxLimit = 10000
 
-const topicLifecycle = "sparklespray-events"
+const topicLifecycle = "sparkles-events"
 const topicTaskOut = "sparkles-task-out"
-const topicTaskIn = "sparklespray-task-in"
+const topicTaskIn = "sparkles-task-in"
 
 var dsClient *datastore.Client
 var psClient *pubsub.Client
@@ -181,7 +181,7 @@ func generateSubscriberToken(ctx context.Context) (string, error) {
 
 // createPubSubSubscription creates a new Pub/Sub subscription with a 24-hour self-expiry.
 func createPubSubSubscription(ctx context.Context, topicName, filter string) (string, error) {
-	subName := "sparklespray-" + newID()
+	subName := "sparkles-" + newID()
 	fullSubName := fmt.Sprintf("projects/%s/subscriptions/%s", gProjectID, subName)
 	fullTopicName := fmt.Sprintf("projects/%s/topics/%s", gProjectID, topicName)
 	ttl := durationpb.New(24 * time.Hour)

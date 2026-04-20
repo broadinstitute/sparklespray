@@ -26,9 +26,9 @@ const JobCollection = "SparklesV5Job"
 const TaskCollection = "SparklesV5Task"
 const EventExpiry = 7 * 24 * time.Hour
 
-const TopicLifecycle = "sparklespray-events"
+const TopicLifecycle = "sparkles-events"
 const TopicTaskOut = "sparkles-task-out"
-const TopicTaskIn = "sparklespray-task-in"
+const TopicTaskIn = "sparkles-task-in"
 
 var failureReasons = []string{
 	"out of memory",
@@ -668,7 +668,7 @@ func ensureTopics(ctx context.Context) {
 // listenForControlMessages pulls from an ephemeral subscription on sparklespray-task-in
 // and dispatches start_publishing messages to the appropriate task goroutine.
 func listenForControlMessages(ctx context.Context, projectID string) {
-	subName := "sparklespray-simulator-" + uuid.New().String()[:8]
+	subName := "sparkles-simulator-" + uuid.New().String()[:8]
 	fullSubName := fmt.Sprintf("projects/%s/subscriptions/%s", projectID, subName)
 	fullTopicName := fmt.Sprintf("projects/%s/topics/%s", projectID, TopicTaskIn)
 	_, err := psClient.SubscriptionAdminClient.CreateSubscription(ctx, &pb.Subscription{

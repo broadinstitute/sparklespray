@@ -172,7 +172,13 @@ export function useTaskPubsub(
                   toResourceDataPoint(payload as ResourceUsageUpdate)
                 );
               } else if (payload.type === "log_update") {
-                newLog += (payload as LogStreamUpdate).content;
+                const lu = payload as LogStreamUpdate;
+                const ts = new Date(lu.timestamp).toLocaleTimeString("en-US", {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                  second: "2-digit",
+                });
+                newLog += `[${ts}] ${lu.content}`;
               }
             } catch {
               /* skip malformed messages */
