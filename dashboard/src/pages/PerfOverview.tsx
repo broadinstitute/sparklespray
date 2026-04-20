@@ -1,7 +1,8 @@
 import { useState, useEffect, useMemo } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import { useEvents, mergeEvents } from "../data/EventProvider";
 import type { AnyEvent } from "../types";
+import TabBar from "../components/TabBar";
 import {
   BarChart,
   Bar,
@@ -282,18 +283,19 @@ export default function PerfOverview() {
     uploadBytesStats,
   } = perf;
 
+  const jobTabs = [
+    { label: "Overview", href: `/jobs/${jobId}`, matchExact: true },
+    { label: "Tasks", href: `/jobs/${jobId}/tasks` },
+    {
+      label: "Completed Summary",
+      href: `/jobs/${jobId}/summary`,
+      matchExact: true,
+    },
+  ];
+
   const header = (
     <div style={{ marginBottom: "1.5rem" }}>
-      <div
-        style={{ fontSize: "0.8rem", color: "#888", marginBottom: "0.25rem" }}
-      >
-        <Link
-          to={`/job/${jobId}`}
-          style={{ color: "#1565c0", textDecoration: "none" }}
-        >
-          ← Job {jobId}
-        </Link>
-      </div>
+      <TabBar tabs={jobTabs} />
       <h1 style={{ margin: 0, fontSize: "1.3rem", fontWeight: 700 }}>
         Completed Task Metrics
       </h1>

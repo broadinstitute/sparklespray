@@ -237,7 +237,7 @@ export default function JobList() {
               <ul className="jl-list">
                 {jobs.map(({ jobId, startTime }, i) => (
                   <li key={jobId} className="jl-item">
-                    <Link to={`/job/${jobId}`} className="jl-link">
+                    <Link to={`/jobs/${jobId}`} className="jl-link">
                       <span className="jl-index">
                         {String(i + 1).padStart(2, "0")}
                       </span>
@@ -270,7 +270,7 @@ export default function JobList() {
                 {clusters.map(({ clusterId, startTime }, i) => (
                   <li key={clusterId} className="jl-item">
                     <Link
-                      to={`/cluster/${clusterId}`}
+                      to={`/clusters/${clusterId}`}
                       className="jl-link jl-cluster-link"
                     >
                       <span className="jl-index">

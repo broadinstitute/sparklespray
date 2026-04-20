@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, useLocation } from "react-router-dom";
 import { getTaskEvents, deriveStatus, extractTimings } from "../data/events";
 import { useEvents, mergeEvents } from "../data/EventProvider";
 import { useTaskPubsub } from "../data/useTaskPubsub";
@@ -7,8 +7,7 @@ import type { AnyEvent } from "../types";
 import TaskProperties from "../components/TaskProperties";
 import MultiLineChart from "../components/MultiLineChart";
 import EventLog from "../components/EventLog";
-
-type Tab = "metrics" | "output" | "events";
+import TabBar from "../components/TabBar";
 
 const STATUS_COLORS: Record<string, { bg: string; text: string }> = {
   pending: { bg: "#e3f2fd", text: "#1565c0" },
@@ -23,14 +22,21 @@ const STATUS_COLORS: Record<string, { bg: string; text: string }> = {
 
 export default function TaskDetail() {
   const { jobId, taskId } = useParams<{ jobId: string; taskId: string }>();
+  const location = useLocation();
   const { addEventListener } = useEvents();
-  const [tab, setTab] = useState<Tab>("metrics");
   const [localEvents, setLocalEvents] = useState<AnyEvent[]>([]);
   const [taskInfo, setTaskInfo] = useState<{
     command: string;
     dockerImage: string;
   } | null>(null);
   const logBottomRef = useRef<HTMLDivElement>(null);
+
+  const taskBase = `/jobs/${jobId}/tasks/${taskId}`;
+  const activeTab = location.pathname.endsWith("/metrics")
+    ? "metrics"
+    : location.pathname.endsWith("/log")
+    ? "log"
+    : "overview";
 
   useEffect(() => {
     if (!jobId || !taskId) return;
@@ -76,8 +82,9 @@ export default function TaskDetail() {
   );
 
   useEffect(() => {
-    logBottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [logContent]);
+    if (activeTab === "log")
+      logBottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [logContent, activeTab]);
 
   if (!jobId || !taskId) {
     return (
@@ -87,12 +94,35 @@ export default function TaskDetail() {
     );
   }
 
+  const jobTabs = [
+    { label: "Overview", href: `/jobs/${jobId}`, matchExact: true },
+    { label: "Tasks", href: `/jobs/${jobId}/tasks` },
+    {
+      label: "Completed Summary",
+      href: `/jobs/${jobId}/summary`,
+      matchExact: true,
+    },
+  ];
+
+  const taskTabs = [
+    { label: "Overview", href: taskBase, matchExact: true },
+    { label: "Metrics", href: `${taskBase}/metrics`, matchExact: true },
+    { label: "Log", href: `${taskBase}/log`, matchExact: true },
+  ];
+
   if (taskEvents.length === 0) {
     return (
-      <div style={{ padding: "2rem", fontFamily: "monospace" }}>
+      <div
+        style={{
+          maxWidth: 960,
+          margin: "0 auto",
+          padding: "2rem",
+          fontFamily: "monospace",
+        }}
+      >
+        <TabBar tabs={jobTabs} />
         <p>
-          Task not found or not yet started: <strong>{taskId}</strong> in job{" "}
-          <strong>{jobId}</strong>
+          Task not found or not yet started: <strong>{taskId}</strong>
         </p>
       </div>
     );
@@ -111,18 +141,11 @@ export default function TaskDetail() {
         fontFamily: "monospace",
       }}
     >
-      {/* Header */}
+      {/* Job-level tabs */}
+      <TabBar tabs={jobTabs} />
+
+      {/* Task header */}
       <div style={{ marginBottom: "1.5rem" }}>
-        <div
-          style={{ fontSize: "0.8rem", color: "#888", marginBottom: "0.25rem" }}
-        >
-          <Link
-            to={`/job/${jobId}`}
-            style={{ color: "#1565c0", textDecoration: "none" }}
-          >
-            ← Job: {jobId}
-          </Link>
-        </div>
         <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
           <h1 style={{ margin: 0, fontSize: "1.4rem", fontWeight: 700 }}>
             {taskId}
@@ -142,13 +165,8 @@ export default function TaskDetail() {
         </div>
       </div>
 
-      {/* Properties */}
-      <TaskProperties
-        command={command}
-        dockerImage={dockerImage}
-        timings={timings}
-        status={status}
-      />
+      {/* Task-level tabs */}
+      <TabBar tabs={taskTabs} />
 
       {/* Pubsub error banner */}
       {pubsubError && (
@@ -168,41 +186,23 @@ export default function TaskDetail() {
         </div>
       )}
 
-      {/* Tab bar */}
-      <div
-        style={{
-          display: "flex",
-          gap: 0,
-          borderBottom: "2px solid #e0e0e0",
-          marginBottom: "1.5rem",
-        }}
-      >
-        {(["metrics", "output", "events"] as Tab[]).map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            style={{
-              background: "none",
-              border: "none",
-              borderBottom:
-                tab === t ? "2px solid #1565c0" : "2px solid transparent",
-              marginBottom: -2,
-              padding: "0.5rem 1.25rem",
-              fontFamily: "monospace",
-              fontSize: "0.85rem",
-              fontWeight: tab === t ? 700 : 400,
-              color: tab === t ? "#1565c0" : "#888",
-              cursor: "pointer",
-              textTransform: "capitalize",
-            }}
-          >
-            {t}
-          </button>
-        ))}
-      </div>
+      {/* Overview tab: properties + events */}
+      {activeTab === "overview" && (
+        <>
+          <TaskProperties
+            command={command}
+            dockerImage={dockerImage}
+            timings={timings}
+            status={status}
+          />
+          <div style={{ marginBottom: "2rem" }}>
+            <EventLog events={taskEvents} />
+          </div>
+        </>
+      )}
 
-      {/* Tab panels */}
-      {tab === "metrics" && resourceData.length > 0 && (
+      {/* Metrics tab */}
+      {activeTab === "metrics" && resourceData.length > 0 && (
         <div
           style={{
             display: "flex",
@@ -271,7 +271,7 @@ export default function TaskDetail() {
           />
         </div>
       )}
-      {tab === "metrics" && resourceData.length === 0 && (
+      {activeTab === "metrics" && resourceData.length === 0 && (
         <p
           style={{
             color: "#aaa",
@@ -285,7 +285,8 @@ export default function TaskDetail() {
         </p>
       )}
 
-      {tab === "output" && (
+      {/* Log tab */}
+      {activeTab === "log" && (
         <div style={{ marginBottom: "2rem" }}>
           <div
             style={{
@@ -309,12 +310,6 @@ export default function TaskDetail() {
             )}
             <div ref={logBottomRef} />
           </div>
-        </div>
-      )}
-
-      {tab === "events" && (
-        <div style={{ marginBottom: "2rem" }}>
-          <EventLog events={taskEvents} />
         </div>
       )}
     </div>

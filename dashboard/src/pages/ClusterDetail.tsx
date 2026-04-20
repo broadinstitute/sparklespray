@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import { useEvents, mergeEvents } from "../data/EventProvider";
 import { computeClusterTimeSeries } from "../data/clusterTimeSeries";
 import type { AnyEvent } from "../types";
@@ -46,16 +46,6 @@ export default function ClusterDetail() {
   if (counts.length === 0) {
     return (
       <div style={{ padding: "2rem", fontFamily: "monospace" }}>
-        <Link
-          to="/"
-          style={{
-            color: "#2e7d32",
-            textDecoration: "none",
-            fontSize: "0.85rem",
-          }}
-        >
-          ← All Clusters
-        </Link>
         <p style={{ marginTop: "1rem" }}>
           No worker events found for cluster: <strong>{clusterId}</strong>
         </p>
@@ -77,11 +67,6 @@ export default function ClusterDetail() {
     >
       {/* Header */}
       <div style={{ marginBottom: "1.5rem" }}>
-        <div style={{ fontSize: "0.8rem", marginBottom: "0.25rem" }}>
-          <Link to="/" style={{ color: "#2e7d32", textDecoration: "none" }}>
-            ← All Clusters
-          </Link>
-        </div>
         <h1 style={{ margin: 0, fontSize: "1.3rem", fontWeight: 700 }}>
           {clusterId}
         </h1>
