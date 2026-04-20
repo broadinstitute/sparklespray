@@ -242,7 +242,8 @@ export default function PerfOverview() {
         (e) =>
           "job_id" in e &&
           (e as any).job_id === jobId &&
-          (e.type === "task_exec_started" ||
+          (e.type === "task_claimed" ||
+            e.type === "task_exec_started" ||
             e.type === "task_exec_complete" ||
             e.type === "task_complete")
       );
