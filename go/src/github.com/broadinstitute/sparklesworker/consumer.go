@@ -29,16 +29,18 @@ type Task struct {
 	JobID            string         `datastore:"job_id" json:"job_id"`
 	Status           string         `datastore:"status" json:"status"`
 	Owner            string         `datastore:"owner" json:"owner"`
-	Args             string         `datastore:"args" json:"args"`
-	History          []*TaskHistory `datastore:"history" json:"history"`
-	CommandResultURL string         `datastore:"command_result_url" json:"command_result_url"`
+	Args             string         `datastore:"args,noindex" json:"args"`
+	History          []*TaskHistory `datastore:"history,noindex" json:"history"`
+	CommandResultURL string         `datastore:"command_result_url,noindex" json:"command_result_url"`
 	FailureReason    string         `datastore:"failure_reason,omitempty" json:"failure_reason"`
 	Version          int32          `datastore:"version" json:"version"`
 	ExitCode         string         `datastore:"exit_code" json:"exit_code"`
-	Cluster          string         `datastore:"cluster" json:"cluster"`
-	MonitorAddress   string         `datastore:"monitor_address" json:"monitor_address"`
-	LogURL           string         `datastore:"log_url", json:"log_url"`
-	LastUpdated      float64        `datastore:"last_updated" json:"last_updated"`
+	ClusterID        string         `datastore:"cluster_id" json:"cluster_id"`
+	MonitorAddress   string         `datastore:"monitor_address,noindex" json:"monitor_address"`
+	LogURL           string         `datastore:"log_url,noindex" json:"log_url"`
+	LastUpdated      time.Time      `datastore:"last_updated" json:"last_updated"`
+	Command          string         `datastore:"command,noindex" json:"command"`
+	DockerImage      string         `datastore:"docker_image,noindex" json:"docker_image"`
 }
 
 type TaskStatusNotification struct {
@@ -50,15 +52,16 @@ type TaskStatusNotification struct {
 }
 
 type Job struct {
-	JobID                  int      `datastore:"job_id"`
-	Tasks                  []string `datastore:"tasks"`
-	KubeJobSpec            string   `datastore:"kube_job_spec"`
-	Metadata               string   `datastore:"metadata"`
-	Cluster                string   `datastore:"cluster"`
-	Status                 string   `datastore:"status"`
-	SubmitTime             float64  `datastore:"submit_time"`
-	MaxPreemptableAttempts int32    `datastore:"max_preemptable_attempts"`
-	TargetNodeCount        int32    `datastore:"target_node_count"`
+	JobID                  string    `datastore:"job_id"`
+	Tasks                  []string  `datastore:"tasks,noindex"`
+	KubeJobSpec            string    `datastore:"kube_job_spec,noindex"`
+	Metadata               string    `datastore:"metadata,noindex"`
+	ClusterID              string    `datastore:"cluster_id"`
+	Status                 string    `datastore:"status"`
+	SubmitTime             time.Time `datastore:"submit_time"`
+	TaskCount              int32     `datastore:"task_count"`
+	MaxPreemptableAttempts int32     `datastore:"max_preemptable_attempts"`
+	TargetNodeCount        int32     `datastore:"target_node_count"`
 }
 
 type ClusterKeys struct {
@@ -86,9 +89,6 @@ type Queue interface {
 
 type Executor func(taskId string, taskParam string) (string, error)
 
-func getTimestampMillis() int64 {
-	return int64(time.Now().UnixNano()) / int64(time.Millisecond)
-}
 
 func ConsumerRunLoop(ctx context.Context, queue Queue, sleepUntilNotify func(sleepTime time.Duration), executor Executor, SleepOnEmpty time.Duration, MaxWaitForNewTasks time.Duration) error {
 	firstClaim := true
@@ -162,8 +162,8 @@ func ConsumerRunLoop(ctx context.Context, queue Queue, sleepUntilNotify func(sle
 }
 
 func updateTaskClaimed(ctx context.Context, q *DataStoreQueue, task_id string, newOwner string, monitorAddress string) (*Task, error) {
-	now := getTimestampMillis()
-	event := TaskHistory{Timestamp: float64(now) / 1000.0,
+	now := time.Now().UTC()
+	event := TaskHistory{Timestamp: float64(now.UnixNano()) / 1e9,
 		Status: STATUS_CLAIMED,
 		Owner:  newOwner}
 
@@ -177,7 +177,7 @@ func updateTaskClaimed(ctx context.Context, q *DataStoreQueue, task_id string, n
 		task.Status = STATUS_CLAIMED
 		task.Owner = newOwner
 		task.MonitorAddress = monitorAddress
-		task.LastUpdated = float64(now) / 1000.0
+		task.LastUpdated = now
 
 		return true
 	}
@@ -195,20 +195,20 @@ func updateTaskClaimed(ctx context.Context, q *DataStoreQueue, task_id string, n
 func updateTaskCompleted(ctx context.Context, q Queue, task_id string, retcode string) (*Task, error) {
 	log.Printf("updateTaskCompleted of task %v, retcode=%s", task_id, retcode)
 
-	now := getTimestampMillis()
-	taskHistory := &TaskHistory{Timestamp: float64(now) / 1000.0,
+	now := time.Now().UTC()
+	taskHistory := &TaskHistory{Timestamp: float64(now.UnixNano()) / 1e9,
 		Status: STATUS_COMPLETE}
 
 	mutate := func(task *Task) bool {
 		if task.Status != STATUS_CLAIMED {
-			log.Printf("While attempting to mark task %v as complete, found task had status %v. Aborting", task.Status)
+			log.Printf("While attempting to mark task %v as complete, found task had status %v. Aborting", task_id, task.Status)
 			return false
 		}
 
 		task.History = append(task.History, taskHistory)
 		task.Status = STATUS_COMPLETE
 		task.ExitCode = retcode
-		task.LastUpdated = float64(now) / 1000.0
+		task.LastUpdated = now
 
 		return true
 	}
@@ -227,20 +227,20 @@ func updateTaskCompleted(ctx context.Context, q Queue, task_id string, retcode s
 func updateTaskFailed(ctx context.Context, q Queue, task_id string, failure string) (*Task, error) {
 	log.Printf("updateTaskFailed of task %v, failure=%s", task_id, failure)
 
-	now := getTimestampMillis()
-	taskHistory := &TaskHistory{Timestamp: float64(now) / 1000.0,
+	now := time.Now().UTC()
+	taskHistory := &TaskHistory{Timestamp: float64(now.UnixNano()) / 1e9,
 		Status: STATUS_FAILED}
 
 	mutate := func(task *Task) bool {
 		if task.Status != STATUS_CLAIMED {
-			log.Printf("While attempting to mark task %v as complete, found task had status %v. Aborting", task.Status)
+			log.Printf("While attempting to mark task %v as complete, found task had status %v. Aborting", task_id, task.Status)
 			return false
 		}
 
 		task.History = append(task.History, taskHistory)
 		task.Status = STATUS_FAILED
 		task.FailureReason = failure
-		task.LastUpdated = float64(now) / 1000.0
+		task.LastUpdated = now
 
 		return true
 	}
@@ -259,19 +259,19 @@ func updateTaskFailed(ctx context.Context, q Queue, task_id string, failure stri
 func updateTaskKilled(ctx context.Context, q Queue, task_id string) (*Task, error) {
 	log.Printf("updateTaskKilled of task %v", task_id)
 
-	now := getTimestampMillis()
-	taskHistory := &TaskHistory{Timestamp: float64(now) / 1000.0,
+	now := time.Now().UTC()
+	taskHistory := &TaskHistory{Timestamp: float64(now.UnixNano()) / 1e9,
 		Status: STATUS_KILLED}
 
 	mutate := func(task *Task) bool {
 		if task.Status != STATUS_CLAIMED {
-			log.Printf("While attempting to mark task %v as killed, found task had status %v. Aborting", task.Status)
+			log.Printf("While attempting to mark task %v as killed, found task had status %v. Aborting", task_id, task.Status)
 			return false
 		}
 
 		task.History = append(task.History, taskHistory)
 		task.Status = STATUS_KILLED
-		task.LastUpdated = float64(now) / 1000.0
+		task.LastUpdated = now
 
 		return true
 	}

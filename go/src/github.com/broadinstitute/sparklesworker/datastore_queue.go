@@ -17,16 +17,17 @@ type DataStoreQueue struct {
 	monitorAddress    string
 	InitialClaimRetry time.Duration
 	ClaimTimeout      time.Duration
+	eventWriter       *EventWriter
 }
 
-func CreateDataStoreQueue(client *datastore.Client, cluster string, owner string, InitialClaimRetry time.Duration, ClaimTimeout time.Duration, monitorAddress string) (*DataStoreQueue, error) {
-	return &DataStoreQueue{client: client, cluster: cluster, owner: owner, monitorAddress: monitorAddress, InitialClaimRetry: InitialClaimRetry, ClaimTimeout: ClaimTimeout}, nil
+func CreateDataStoreQueue(client *datastore.Client, cluster string, owner string, InitialClaimRetry time.Duration, ClaimTimeout time.Duration, monitorAddress string, eventWriter *EventWriter) (*DataStoreQueue, error) {
+	return &DataStoreQueue{client: client, cluster: cluster, owner: owner, monitorAddress: monitorAddress, InitialClaimRetry: InitialClaimRetry, ClaimTimeout: ClaimTimeout, eventWriter: eventWriter}, nil
 }
 
 const TaskCollection = "SparklesV5Task"
 
 func getTasks(ctx context.Context, client *datastore.Client, cluster string, status string, maxFetch int) ([]*Task, error) {
-	q := datastore.NewQuery(TaskCollection).FilterField("cluster", "=", cluster).FilterField("status", "=", status).Limit(maxFetch)
+	q := datastore.NewQuery(TaskCollection).FilterField("cluster_id", "=", cluster).FilterField("status", "=", status).Limit(maxFetch)
 	var tasks []*Task
 	keys, err := client.GetAll(ctx, q, &tasks)
 
@@ -65,6 +66,11 @@ func (q *DataStoreQueue) claimTask(ctx context.Context) (*Task, error) {
 		finalTask, err := updateTaskClaimed(ctx, q, task.TaskID, q.owner, q.monitorAddress)
 		if err == nil {
 			maxSleepTime = INITIAL_CLAIM_RETRY_DELAY
+			if q.eventWriter != nil {
+				if evErr := q.eventWriter.WriteTaskClaimed(ctx, finalTask.TaskID, finalTask.JobID); evErr != nil {
+					return nil, evErr
+				}
+			}
 			return finalTask, nil
 		}
 
@@ -83,7 +89,7 @@ func (q *DataStoreQueue) claimTask(ctx context.Context) (*Task, error) {
 }
 
 func (q *DataStoreQueue) isJobKilled(ctx context.Context, jobID string) (bool, error) {
-	jobKey := datastore.NameKey("Job", jobID, nil)
+	jobKey := datastore.NameKey("SparklesV5Job", jobID, nil)
 	var job Job
 	err := q.client.Get(ctx, jobKey, &job)
 	if err != nil {

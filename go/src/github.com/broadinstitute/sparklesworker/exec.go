@@ -77,6 +77,18 @@ type ResultStruct struct {
 // just in case we can't rely on that.
 const MaxUploadDelay = 30 * time.Second
 
+// ExecutionHooks lets callers observe task lifecycle events without coupling exec.go to specific backends.
+type ExecutionHooks struct {
+	// OnLogFileReady is called once the stdout log file path is established, before downloads begin.
+	OnLogFileReady func(taskID, logPath string)
+	// OnExecStarted is called immediately before the task command is executed.
+	OnExecStarted func(taskID string)
+	// OnExecComplete is called immediately after the task command exits (before upload).
+	// usage may be nil if resource tracking is unavailable.
+	OnExecComplete func(taskID string, usage *ResourceUsage, exitCode int64, downloadBytes, uploadBytes int64)
+}
+
+
 type stringset map[string]bool
 
 func copyFile(src, dst string) error {
@@ -149,7 +161,7 @@ func downloadAll(ioc IOClient, workdir string, downloads []*TaskDownload, cacheD
 				log.Printf("Warning: Removing existing file %s", destination)
 				err = os.Remove(destination)
 				if err != nil {
-					return fmt.Errorf("Could not remove existing file %s that is the destination of new DL", destination, err), downloaded
+					return fmt.Errorf("Could not remove existing file %s that is the destination of new DL: %w", destination, err), downloaded
 				}
 			}
 
@@ -382,7 +394,7 @@ func getFilesWithMatchingMTimes(a map[string]time.Time, b map[string]time.Time) 
 	for key, aTime := range a {
 		bTime, ok := b[key]
 		if !ok {
-			log.Printf("While checking if %s was updated, could not find the file. Skipping...")
+			log.Printf("While checking if %s was updated, could not find the file. Skipping...", key)
 			continue
 		}
 
@@ -393,7 +405,7 @@ func getFilesWithMatchingMTimes(a map[string]time.Time, b map[string]time.Time) 
 	return matching
 }
 
-func executeTaskInDir(ioc IOClient, workdir string, taskId string, spec *TaskSpec, cachedir string, monitor *Monitor) (string, error) {
+func executeTaskInDir(ioc IOClient, workdir string, taskId string, spec *TaskSpec, cachedir string, monitor *Monitor, hooks *ExecutionHooks) (string, error) {
 	stdoutPath := path.Join(workdir, "stdout.txt")
 	execLifecycleScript("PreDownloadScript", workdir, spec.PreDownloadScript)
 
@@ -404,6 +416,9 @@ func executeTaskInDir(ioc IOClient, workdir string, taskId string, spec *TaskSpe
 
 	if monitor != nil {
 		monitor.StartWatchingLog(taskId, stdoutPath)
+	}
+	if hooks != nil && hooks.OnLogFileReady != nil {
+		hooks.OnLogFileReady(taskId, stdoutPath)
 	}
 
 	if len(spec.Downloads) > 0 {
@@ -433,11 +448,33 @@ func executeTaskInDir(ioc IOClient, workdir string, taskId string, spec *TaskSpe
 
 	cwdDir := path.Join(workdir, commandWorkingDir)
 	log.Printf("Executing (working dir: %s, output written to: %s): %s", cwdDir, stdoutPath, spec.Command)
+
+	if hooks != nil && hooks.OnExecStarted != nil {
+		hooks.OnExecStarted(taskId)
+	}
+
 	execResult, err := execCommand(spec.Command, cwdDir, stdout)
 	if err != nil {
 		return "", err
 	}
 	retcode := execResult.Status
+
+	if hooks != nil && hooks.OnExecComplete != nil {
+		rusage := execResult.Rusage
+		usage := &ResourceUsage{
+			UserCPUTime:        rusage.Utime,
+			SystemCPUTime:      rusage.Stime,
+			MaxMemorySize:      rusage.Maxrss,
+			SharedMemorySize:   rusage.Isrss,
+			UnsharedMemorySize: rusage.Ixrss,
+			BlockInputOps:      rusage.Inblock,
+			BlockOutputOps:     rusage.Oublock,
+		}
+		// parse exit code; default to 0 on signal/parse failure
+		var exitCode int64
+		fmt.Sscanf(retcode, "%d", &exitCode)
+		hooks.OnExecComplete(taskId, usage, exitCode, 0, 0)
+	}
 
 	execLifecycleScript("PostExecScript", workdir, spec.PostExecScript)
 
@@ -462,7 +499,7 @@ func executeTaskInDir(ioc IOClient, workdir string, taskId string, spec *TaskSpe
 	return retcode, err
 }
 
-func executeTask(ioc IOClient, taskId string, taskSpec *TaskSpec, cacheDir string, tasksDir string, monitor *Monitor) (string, error) {
+func executeTask(ioc IOClient, taskId string, taskSpec *TaskSpec, cacheDir string, tasksDir string, monitor *Monitor, hooks *ExecutionHooks) (string, error) {
 	//	log.Printf("Job spec (%s) of claimed task: %s", json_url, json.dumps(spec, indent=2))
 
 	mode := os.FileMode(0700)
@@ -498,7 +535,7 @@ func executeTask(ioc IOClient, taskId string, taskSpec *TaskSpec, cacheDir strin
 		return "", err
 	}
 
-	retcode, err := executeTaskInDir(ioc, workDir, taskId, taskSpec, cacheDir, monitor)
+	retcode, err := executeTaskInDir(ioc, workDir, taskId, taskSpec, cacheDir, monitor, hooks)
 	if err != nil {
 		return retcode, err
 	}
@@ -620,11 +657,11 @@ func loadTaskSpec(ioc IOClient, taskURL string) (*TaskSpec, error) {
 	return &taskSpec, nil
 }
 
-func ExecuteTaskFromUrl(ioc IOClient, taskId string, taskURL string, cacheDir string, tasksDir string, monitor *Monitor) (string, error) {
+func ExecuteTaskFromUrl(ioc IOClient, taskId string, taskURL string, cacheDir string, tasksDir string, monitor *Monitor, hooks *ExecutionHooks) (string, error) {
 	taskSpec, err := loadTaskSpec(ioc, taskURL)
 	if err != nil {
 		return "", err
 	}
 
-	return executeTask(ioc, taskId, taskSpec, cacheDir, tasksDir, monitor)
+	return executeTask(ioc, taskId, taskSpec, cacheDir, tasksDir, monitor, hooks)
 }

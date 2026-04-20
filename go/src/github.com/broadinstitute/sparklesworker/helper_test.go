@@ -57,6 +57,10 @@ func (ioc *MockIOClient) DownloadAsBytes(srcUrl string) ([]byte, error) {
 	return make([]byte, 0), nil
 }
 
+func (ioc *MockIOClient) IsExists(url string) (bool, error) {
+	return true, nil
+}
+
 func TestResolveUploads(t *testing.T) {
 	tempDir, err := ioutil.TempDir("", "testTmp")
 	check(err)
@@ -80,7 +84,7 @@ func TestResolveUploads(t *testing.T) {
 
 	log.Printf("toUploadFile=%v\n", toUploadFile)
 
-	uploadSpecs := []*TaskUpload{&TaskUpload{DstURL: "gs://fake/dest", SrcWildcard: "*"}}
+	uploadSpecs := &UploadSpec{DstURL: "gs://fake/dest", IncludePatterns: []string{"*"}}
 	filesToUpload, err := resolveUploads(workdir, uploadSpecs, downloaded)
 	assert.Nil(t, err)
 
@@ -99,7 +103,7 @@ func TestIOClient(t *testing.T) {
 	destURL := "gs://broad-achilles-kubeque/test/TestIOClient"
 
 	ctx := context.Background()
-	ioc, err := NewIOClient(ctx)
+	ioc, err := NewIOClient(ctx, nil)
 	assert.Nil(t, err)
 
 	sourceFile, _ := ioutil.TempFile("", "sample")
@@ -127,7 +131,7 @@ func TestExecute(t *testing.T) {
 	cachedir := path.Join(tmpdir, "cache")
 
 	ctx := context.Background()
-	ioc, err := NewIOClient(ctx)
+	ioc, err := NewIOClient(ctx, nil)
 	assert.Nil(t, err)
 
 	spec := &TaskSpec{
@@ -137,7 +141,8 @@ func TestExecute(t *testing.T) {
 		CommandResultURL: urlprefix + "result.json",
 		StdoutURL:        urlprefix + "stdout.txt"}
 
-	retcode, err := executeTaskInDir(ioc, workdir, spec, cachedir)
+	taskID := "test-task.0000"
+	retcode, err := executeTaskInDir(ioc, workdir, taskID, spec, cachedir, nil, nil)
 	assert.Nil(t, err)
 	assert.Equal(t, "0", retcode)
 }

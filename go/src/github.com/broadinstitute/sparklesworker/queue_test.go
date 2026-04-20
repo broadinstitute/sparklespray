@@ -43,7 +43,14 @@ func spawnExecuteTasks(t *testing.T, projectID string, jobID string, index int, 
 			return "0", nil
 		}
 		cluster := "c"
-		err := ConsumerRunLoop(ctx, client, cluster, executor, options)
+		queue, err := CreateDataStoreQueue(client, cluster, options.Owner, options.InitialClaimRetry, options.ClaimTimeout, "", nil)
+		if err != nil {
+			log.Printf("CreateDataStoreQueue error: %v\n", err)
+			done.Done()
+			return
+		}
+		sleepUntilNotify := func(d time.Duration) { time.Sleep(d) }
+		err = ConsumerRunLoop(ctx, queue, sleepUntilNotify, executor, options.SleepOnEmpty, options.MaxWaitForNewTasks)
 		if err != nil {
 			log.Printf("consumerRunLoop returned error: %v\n", err)
 		}
@@ -92,7 +99,7 @@ func newTask(jobID string, index int) *Task {
 		Args:      fmt.Sprintf("param-%d", index),
 		History: []*TaskHistory{
 			&TaskHistory{
-				Timestamp: float64(getTimestampMillis()) / 1000.0,
+				Timestamp: float64(time.Now().UnixNano()) / 1e9,
 				Status:    STATUS_PENDING}},
 		Version: 0}
 	return &task

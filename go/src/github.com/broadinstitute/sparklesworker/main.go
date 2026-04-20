@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/datastore"
+	pubsub "cloud.google.com/go/pubsub/v2"
 	"cloud.google.com/go/storage"
 	"github.com/urfave/cli"
 	"golang.org/x/net/context"
@@ -53,6 +54,7 @@ func Main() error {
 				cli.IntFlag{Name: "ftShutdownAfter", Value: 30},
 				cli.BoolFlag{Name: "localhost", Usage: "If set, does not try to look up instance name and IP from metadata service, but assume it's localhost"},
 				cli.StringFlag{Name: "expectedVersion"},
+				cli.BoolFlag{Name: "pubsubDisable", Usage: "If set, disables Pub/Sub event publishing and metric streaming"},
 			},
 			Action: consume},
 		cli.Command{Name: "copyexe",
@@ -104,7 +106,7 @@ func copyexe(c *cli.Context) error {
 		return fmt.Errorf("failed copying %s to %s writing: %s", executablePath, dst, err)
 	}
 
-	log.Printf("Installed", executablePath, dst)
+	log.Printf("Installed %s to %s", executablePath, dst)
 
 	return nil
 }
@@ -232,6 +234,7 @@ func consume(c *cli.Context) error {
 	firstTaskShutdownAfter := c.Int("ftShutdownAfter")
 	expectedVersion := c.String("expectedVersion")
 	watchdogTimeout := time.Duration(c.Int("timeout")) * time.Minute
+	pubsubDisable := c.Bool("pubsubDisable")
 
 	batchTaskIndex := os.Getenv("BATCH_TASK_INDEX")
 	if batchTaskIndex == "0" {
@@ -241,7 +244,7 @@ func consume(c *cli.Context) error {
 
 	if expectedVersion != "" && expectedVersion != WorkerVersion {
 		errMsg := fmt.Sprintf("Job was submitted for worker version %s but this worker's version is %s", expectedVersion, WorkerVersion)
-		log.Printf(errMsg)
+		log.Print(errMsg)
 		return errors.New(errMsg)
 	}
 
@@ -263,9 +266,10 @@ func consume(c *cli.Context) error {
 	}
 
 	isLocalRun := c.Bool("localhost")
-	log.Printf("isLocal = %s (cluster=%s)", isLocalRun, cluster)
+	log.Printf("isLocal = %v (cluster=%s)", isLocalRun, cluster)
 	var owner string
 	var externalIP string
+	var machineType string
 	if !isLocalRun {
 		log.Printf("Querying metadata to get host instance name")
 		instanceName, err := GetInstanceName()
@@ -301,14 +305,101 @@ func consume(c *cli.Context) error {
 	monitor := NewMonitor()
 
 	options := &Options{
-		ClaimTimeout:       30 * time.Second,                           // how long do we keep trying if we get an error claiming a task
-		InitialClaimRetry:  1 * time.Second,                            // if we get an error claiming, how long until we try again?
-		SleepOnEmpty:       1 * time.Second,                            // how often to poll the queue if is empty
-		MaxWaitForNewTasks: time.Duration(shutdownAfter) * time.Second, // how long to wait for a new task to arrive if the queue is empty
+		ClaimTimeout:       30 * time.Second,
+		InitialClaimRetry:  1 * time.Second,
+		SleepOnEmpty:       1 * time.Second,
+		MaxWaitForNewTasks: time.Duration(shutdownAfter) * time.Second,
 		Owner:              owner}
 
+	log.Printf("Creating data store client")
+	transportCreds := grpc.WithTransportCredentials(credentials.NewClientTLSFromCert(certs, ""))
+	dsClient, err := datastore.NewClient(ctx, projectID, option.WithGRPCDialOption(transportCreds))
+	if err != nil {
+		log.Printf("Creating datastore client failed: %v", err)
+		return err
+	}
+
+	// Create Pub/Sub client unless disabled.
+	var psClient *pubsub.Client
+	if !pubsubDisable {
+		psClient, err = pubsub.NewClient(ctx, projectID)
+		if err != nil {
+			log.Printf("Creating pubsub client failed: %v", err)
+			return err
+		}
+	} else {
+		log.Printf("Pub/Sub disabled (--pubsubDisable)")
+	}
+
+	eventWriter := NewEventWriter(dsClient, psClient, cluster)
+
+	// Register this cluster in Datastore.
+	if err := eventWriter.WriteCluster(ctx, machineType); err != nil {
+		log.Printf("WriteCluster failed: %v", err)
+		return err
+	}
+
+	// Record worker lifecycle events.
+	if err := eventWriter.WriteWorkerStarted(ctx, owner); err != nil {
+		log.Printf("WriteWorkerStarted failed: %v", err)
+		return err
+	}
+	defer func() {
+		stopCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := eventWriter.WriteWorkerStopped(stopCtx, owner); err != nil {
+			log.Printf("WriteWorkerStopped failed: %v", err)
+		}
+	}()
+
+	// Set up Pub/Sub metric streaming publisher.
+	var publisher *PubSubPublisher
+	if psClient != nil {
+		publisher = NewPubSubPublisher(psClient, projectID, tasksDir, monitor)
+		go publisher.ListenForControlMessages(ctx)
+	}
+
+	// Build execution hooks that write lifecycle events and register tasks for streaming.
+	hooks := &ExecutionHooks{
+		OnLogFileReady: func(taskID, logPath string) {
+			if publisher != nil {
+				publisher.RegisterTask(taskID, logPath)
+				go publisher.waitForStartPublishing(ctx, taskID)
+			}
+		},
+		OnExecStarted: func(taskID string) {
+			// Retrieve jobID from the task record for the event.
+			taskKey := datastore.NameKey(TaskCollection, taskID, nil)
+			var t Task
+			if err := dsClient.Get(ctx, taskKey, &t); err != nil {
+				log.Printf("OnExecStarted: could not fetch task %s: %v", taskID, err)
+				return
+			}
+			if err := eventWriter.WriteTaskExecStarted(ctx, taskID, t.JobID); err != nil {
+				log.Printf("WriteTaskExecStarted failed for %s: %v", taskID, err)
+			}
+		},
+		OnExecComplete: func(taskID string, usage *ResourceUsage, exitCode int64, downloadBytes, uploadBytes int64) {
+			taskKey := datastore.NameKey(TaskCollection, taskID, nil)
+			var t Task
+			if err := dsClient.Get(ctx, taskKey, &t); err != nil {
+				log.Printf("OnExecComplete: could not fetch task %s: %v", taskID, err)
+				return
+			}
+			if err := eventWriter.WriteTaskExecComplete(ctx, taskID, t.JobID); err != nil {
+				log.Printf("WriteTaskExecComplete failed for %s: %v", taskID, err)
+			}
+			if err := eventWriter.WriteTaskComplete(ctx, taskID, t.JobID, exitCode, usage, downloadBytes, uploadBytes); err != nil {
+				log.Printf("WriteTaskComplete failed for %s: %v", taskID, err)
+			}
+			if publisher != nil {
+				publisher.UnregisterTask(taskID)
+			}
+		},
+	}
+
 	executor := func(taskId string, taskParam string) (string, error) {
-		return ExecuteTaskFromUrl(ioc, taskId, taskParam, cacheDir, tasksDir, monitor)
+		return ExecuteTaskFromUrl(ioc, taskId, taskParam, cacheDir, tasksDir, monitor, hooks)
 	}
 
 	sleepUntilNotify := func(sleepTime time.Duration) {
@@ -316,19 +407,11 @@ func consume(c *cli.Context) error {
 		time.Sleep(sleepTime)
 	}
 
-	log.Printf("Creating data store client")
-	transportCreds := grpc.WithTransportCredentials(credentials.NewClientTLSFromCert(certs, ""))
-	client, err := datastore.NewClient(ctx, projectID, option.WithGRPCDialOption(transportCreds))
-	if err != nil {
-		log.Printf("Creating datastore client failed: %v", err)
-		return err
-	}
-
 	monitorAddress := ""
 	if port != "" {
 		entityKey := datastore.NameKey("ClusterKeys", "sparklespray", nil)
 		var clusterKeys ClusterKeys
-		err := client.Get(ctx, entityKey, &clusterKeys)
+		err := dsClient.Get(ctx, entityKey, &clusterKeys)
 		if err != nil {
 			log.Printf("failed to get cluster keys: %v\n", err)
 			return err
@@ -346,7 +429,7 @@ func consume(c *cli.Context) error {
 	if tasksFile != "" {
 		queue, err = CreatePreloadedQueue(tasksFile)
 	} else {
-		queue, err = CreateDataStoreQueue(client, cluster, owner, options.InitialClaimRetry, options.ClaimTimeout, monitorAddress)
+		queue, err = CreateDataStoreQueue(dsClient, cluster, owner, options.InitialClaimRetry, options.ClaimTimeout, monitorAddress, eventWriter)
 	}
 	if err != nil {
 		log.Printf("failed to initialize queue: %v\n", err)
