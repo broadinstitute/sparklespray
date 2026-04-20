@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { useParams, Link } from "react-router-dom";
-import { useEvents } from "../data/EventProvider";
+import { useEvents, mergeEvents } from "../data/EventProvider";
 import { computeClusterTimeSeries } from "../data/clusterTimeSeries";
 import type { AnyEvent } from "../types";
 import MultiLineChart from "../components/MultiLineChart";
@@ -22,7 +22,8 @@ export default function ClusterDetail() {
             e.type === "cluster_started" ||
             e.type === "cluster_stopped")
       );
-      if (relevant.length > 0) setLocalEvents((prev) => [...prev, ...relevant]);
+      if (relevant.length > 0)
+        setLocalEvents((prev) => mergeEvents(prev, relevant));
     });
   }, [addEventListener, clusterId]);
 

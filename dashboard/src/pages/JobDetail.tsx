@@ -3,7 +3,7 @@ import { useParams, Link } from "react-router-dom";
 import { getJobTasks, getJobTaskCount } from "../data/events";
 import type { TaskStatus } from "../data/events";
 import { computeJobTimeSeries } from "../data/jobTimeSeries";
-import { useEvents } from "../data/EventProvider";
+import { useEvents, mergeEvents } from "../data/EventProvider";
 import type { AnyEvent } from "../types";
 import MultiLineChart from "../components/MultiLineChart";
 
@@ -48,7 +48,8 @@ export default function JobDetail() {
       const relevant = newEvents.filter(
         (e) => "job_id" in e && (e as any).job_id === jobId
       );
-      if (relevant.length > 0) setLocalEvents((prev) => [...prev, ...relevant]);
+      if (relevant.length > 0)
+        setLocalEvents((prev) => mergeEvents(prev, relevant));
     });
   }, [addEventListener, jobId]);
 

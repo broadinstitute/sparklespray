@@ -12,10 +12,12 @@ import (
 	"time"
 
 	"cloud.google.com/go/datastore"
-	"cloud.google.com/go/pubsub"
+	"cloud.google.com/go/pubsub/v2"
+	pb "cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
 	"github.com/google/uuid"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/durationpb"
 )
 
 const EventCollection = "SparklesV5Event"
@@ -39,21 +41,21 @@ var failureReasons = []string{
 }
 
 type Config struct {
-	ProjectID       string
-	ClusterID       string
-	MachineType     string
-	MaxJobs         int
-	TasksPerJob     int
-	NumWorkers      int
-	WorkerFailRate  float64
-	TaskFailRate    float64
-	TaskDuration    time.Duration
-	StagingDuration time.Duration
-	UploadDuration  time.Duration
-	JobInterval     time.Duration
-	RequeueDelay    time.Duration
+	ProjectID        string
+	ClusterID        string
+	MachineType      string
+	MaxJobs          int
+	TasksPerJob      int
+	NumWorkers       int
+	WorkerFailRate   float64
+	TaskFailRate     float64
+	TaskDuration     time.Duration
+	StagingDuration  time.Duration
+	UploadDuration   time.Duration
+	JobInterval      time.Duration
+	RequeueDelay     time.Duration
 	WorkerStartDelay time.Duration
-	DryRun          bool
+	DryRun           bool
 }
 
 type Cluster struct {
@@ -102,7 +104,7 @@ type Job struct {
 
 type ResourceUsageUpdate struct {
 	Type                 string    `json:"type"`
-	ReqID                string    `json:"req_id"`
+	ReqID                string    `json:"req_id"` // todo: remove this
 	TaskID               string    `json:"task_id"`
 	Timestamp            time.Time `json:"timestamp"`
 	ProcessCount         int32     `json:"process_count"`
@@ -123,7 +125,7 @@ type ResourceUsageUpdate struct {
 
 type LogStreamUpdate struct {
 	Type      string    `json:"type"`
-	ReqID     string    `json:"req_id"`
+	ReqID     string    `json:"req_id"` // todo: remove this
 	Timestamp time.Time `json:"timestamp"`
 	TaskID    string    `json:"task_id"`
 	Content   string    `json:"content"`
@@ -184,12 +186,13 @@ func publishToTopic(ctx context.Context, topicName string, data []byte, attrs ma
 	if psClient == nil {
 		return
 	}
-	topic := psClient.Topic(topicName)
+	publisher := psClient.Publisher(topicName)
+	defer publisher.Stop()
 	msg := &pubsub.Message{Attributes: attrs}
 	if data != nil {
 		msg.Data = data
 	}
-	result := topic.Publish(ctx, msg)
+	result := publisher.Publish(ctx, msg)
 	if _, err := result.Get(ctx); err != nil {
 		log.Printf("ERROR publishing to %s: %v", topicName, err)
 	}
@@ -331,7 +334,7 @@ func jitter(d time.Duration) time.Duration {
 
 // publishTaskMetrics publishes metric_update and log_update messages to sparkles-task-out
 // until ctx is cancelled. reqID is used in all messages.
-func publishTaskMetrics(ctx context.Context, taskID, reqID string) {
+func publishTaskMetrics(ctx context.Context, taskID string) {
 	metricTicker := time.NewTicker(10 * time.Second)
 	logTicker := time.NewTicker(time.Duration(3+rand.Intn(5)) * time.Second)
 	defer metricTicker.Stop()
@@ -348,7 +351,6 @@ func publishTaskMetrics(ctx context.Context, taskID, reqID string) {
 			free := totalMem / int64(2+rand.Intn(4))
 			update := ResourceUsageUpdate{
 				Type:                 "metric_update",
-				ReqID:                reqID,
 				TaskID:               taskID,
 				Timestamp:            time.Now().UTC(),
 				ProcessCount:         int32(1 + rand.Intn(8)),
@@ -367,7 +369,8 @@ func publishTaskMetrics(ctx context.Context, taskID, reqID string) {
 				MemPressureFullAvg10: int32(rand.Intn(5)),
 			}
 			data, _ := json.Marshal(update)
-			go publishToTopic(ctx, TopicTaskOut, data, map[string]string{"type": "metric_update", "req_id": reqID})
+			log.Printf("Writing task %s metrics to topic", taskID)
+			go publishToTopic(ctx, TopicTaskOut, data, map[string]string{"type": "metric_update", "task_id": taskID})
 
 		case t := <-logTicker.C:
 			elapsed := int(t.Sub(lastLog).Seconds())
@@ -376,13 +379,13 @@ func publishTaskMetrics(ctx context.Context, taskID, reqID string) {
 				elapsed, t.UTC().Format(time.RFC3339))
 			update := LogStreamUpdate{
 				Type:      "log_update",
-				ReqID:     reqID,
 				Timestamp: time.Now().UTC(),
 				TaskID:    taskID,
 				Content:   content,
 			}
 			data, _ := json.Marshal(update)
-			go publishToTopic(ctx, TopicTaskOut, data, map[string]string{"type": "log_update", "req_id": reqID})
+			log.Printf("Writing log %s metrics to topic", taskID)
+			go publishToTopic(ctx, TopicTaskOut, data, map[string]string{"type": "log_update", "task_id": taskID})
 
 			logTicker.Reset(time.Duration(3+rand.Intn(5)) * time.Second)
 		}
@@ -463,9 +466,7 @@ func runWorker(ctx context.Context, cfg *Config, taskQueue <-chan pendingTask, w
 				data, _ := json.Marshal(ack)
 				go publishToTopic(ctx, TopicTaskOut, data, map[string]string{"type": "command_ack", "req_id": reqID})
 				// Start publishing metrics/logs; cancel previous publisher if any
-				cancelPublish()
-				publishCtx, cancelPublish = context.WithCancel(ctx)
-				go publishTaskMetrics(publishCtx, task.taskID, reqID)
+				go publishTaskMetrics(publishCtx, task.taskID)
 			case <-execDone:
 				break execLoop
 			}
@@ -637,13 +638,13 @@ func runJobSpawner(ctx context.Context, cfg *Config) {
 
 func ensureTopics(ctx context.Context) {
 	for _, name := range []string{TopicLifecycle, TopicTaskOut, TopicTaskIn} {
-		topic := psClient.Topic(name)
-		exists, err := topic.Exists(ctx)
+		fullName := fmt.Sprintf("projects/%s/topics/%s", psClient.Project(), name)
+		_, err := psClient.TopicAdminClient.GetTopic(ctx, &pb.GetTopicRequest{Topic: fullName})
 		if err != nil {
-			log.Fatalf("Failed to check topic %s: %v", name, err)
-		}
-		if !exists {
-			if _, err := psClient.CreateTopic(ctx, name); err != nil {
+			if status.Code(err) != codes.NotFound {
+				log.Fatalf("Failed to check topic %s: %v", name, err)
+			}
+			if _, err := psClient.TopicAdminClient.CreateTopic(ctx, &pb.Topic{Name: fullName}); err != nil {
 				log.Fatalf("Failed to create topic %s: %v", name, err)
 			}
 			log.Printf("Created topic %s", name)
@@ -656,28 +657,31 @@ func ensureTopics(ctx context.Context) {
 // listenForControlMessages pulls from an ephemeral subscription on sparklespray-task-in
 // and dispatches start_publishing messages to the appropriate task goroutine.
 func listenForControlMessages(ctx context.Context, projectID string) {
-	topic := psClient.Topic(TopicTaskIn)
-	subID := "sparklespray-simulator-" + uuid.New().String()[:8]
-	sub, err := psClient.CreateSubscription(ctx, subID, pubsub.SubscriptionConfig{
-		Topic:                 topic,
-		AckDeadline:           10 * time.Second,
-		ExpirationPolicy:      24 * time.Hour,
+	subName := "sparklespray-simulator-" + uuid.New().String()[:8]
+	fullSubName := fmt.Sprintf("projects/%s/subscriptions/%s", projectID, subName)
+	fullTopicName := fmt.Sprintf("projects/%s/topics/%s", projectID, TopicTaskIn)
+	_, err := psClient.SubscriptionAdminClient.CreateSubscription(ctx, &pb.Subscription{
+		Name:                  fullSubName,
+		Topic:                 fullTopicName,
+		AckDeadlineSeconds:    10,
+		ExpirationPolicy:      &pb.ExpirationPolicy{Ttl: durationpb.New(24 * time.Hour)},
 		EnableMessageOrdering: false,
 	})
 	if err != nil {
 		log.Printf("WARNING: could not create control subscription: %v (control messages disabled)", err)
 		return
 	}
-	log.Printf("Listening for control messages on subscription %s", subID)
+	log.Printf("Listening for control messages on subscription %s", subName)
 
 	defer func() {
 		delCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		if err := sub.Delete(delCtx); err != nil {
-			log.Printf("WARNING: failed to delete control subscription %s: %v", subID, err)
+		if err := psClient.SubscriptionAdminClient.DeleteSubscription(delCtx, &pb.DeleteSubscriptionRequest{Subscription: fullSubName}); err != nil {
+			log.Printf("WARNING: failed to delete control subscription %s: %v", subName, err)
 		}
 	}()
 
+	sub := psClient.Subscriber(fullSubName)
 	err = sub.Receive(ctx, func(ctx context.Context, msg *pubsub.Message) {
 		var cmd StartPublishing
 		if err := json.Unmarshal(msg.Data, &cmd); err != nil {

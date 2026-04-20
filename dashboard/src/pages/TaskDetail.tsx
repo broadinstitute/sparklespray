@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useParams, Link } from "react-router-dom";
 import { getTaskEvents, deriveStatus, extractTimings } from "../data/events";
-import { useEvents } from "../data/EventProvider";
+import { useEvents, mergeEvents } from "../data/EventProvider";
 import { useTaskPubsub } from "../data/useTaskPubsub";
 import type { AnyEvent } from "../types";
 import TaskProperties from "../components/TaskProperties";
@@ -41,7 +41,8 @@ export default function TaskDetail() {
           (e as any).task_id === taskId &&
           (e as any).job_id === jobId
       );
-      if (relevant.length > 0) setLocalEvents((prev) => [...prev, ...relevant]);
+      if (relevant.length > 0)
+        setLocalEvents((prev) => mergeEvents(prev, relevant));
     });
   }, [addEventListener, jobId, taskId]);
 

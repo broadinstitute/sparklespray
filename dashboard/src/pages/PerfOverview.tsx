@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { useParams, Link } from "react-router-dom";
-import { useEvents } from "../data/EventProvider";
+import { useEvents, mergeEvents } from "../data/EventProvider";
 import type { AnyEvent } from "../types";
 import {
   BarChart,
@@ -246,7 +246,8 @@ export default function PerfOverview() {
             e.type === "task_exec_complete" ||
             e.type === "task_complete")
       );
-      if (relevant.length > 0) setLocalEvents((prev) => [...prev, ...relevant]);
+      if (relevant.length > 0)
+        setLocalEvents((prev) => mergeEvents(prev, relevant));
     });
   }, [addEventListener, jobId]);
 

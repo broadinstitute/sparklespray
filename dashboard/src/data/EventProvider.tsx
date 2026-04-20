@@ -2,6 +2,15 @@ import { createContext, useContext, useEffect, useRef, useMemo } from "react";
 import type { AnyEvent } from "../types";
 
 const POLL_INTERVAL_MS = 5_000;
+
+export function mergeEvents(
+  prev: AnyEvent[],
+  incoming: AnyEvent[]
+): AnyEvent[] {
+  const knownIds = new Set(prev.map((e) => e.id));
+  const novel = incoming.filter((e) => !knownIds.has(e.id));
+  return novel.length > 0 ? [...prev, ...novel] : prev;
+}
 const PAGE_LIMIT = 1000;
 
 export type EventListener = (events: AnyEvent[]) => void;

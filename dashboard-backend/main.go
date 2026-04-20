@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -13,6 +15,10 @@ import (
 	"time"
 
 	"cloud.google.com/go/datastore"
+	"cloud.google.com/go/pubsub/v2"
+	pb "cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
+	iamcredentials "google.golang.org/api/iamcredentials/v1"
+	"google.golang.org/protobuf/types/known/durationpb"
 )
 
 const EventCollection = "SparklesV5Event"
@@ -22,7 +28,15 @@ const TaskCollection = "SparklesV5Task"
 const DefaultLimit = 1000
 const MaxLimit = 10000
 
+const topicLifecycle = "sparklespray-events"
+const topicTaskOut = "sparkles-task-out"
+const topicTaskIn = "sparklespray-task-in"
+
 var dsClient *datastore.Client
+var psClient *pubsub.Client
+var iamSvc *iamcredentials.Service
+var subscriberSA string
+var gProjectID string
 
 // Event is a flexible map that serialises cleanly to the JSON shape the spec requires.
 type Event map[string]any
@@ -73,6 +87,14 @@ type Task struct {
 	DockerImage      string         `datastore:"docker_image,noindex" json:"docker_image"`
 }
 
+// SubscriptionResponse is returned by all subscription-creation endpoints.
+type SubscriptionResponse struct {
+	SubscriptionID     string `json:"subscription_id"`
+	PullURL            string `json:"pull_url"`
+	AckURL             string `json:"ack_url"`
+	AuthorizationToken string `json:"authorization_token"`
+}
+
 func propertyListToEvent(pl datastore.PropertyList) Event {
 	e := make(Event, len(pl))
 	for _, p := range pl {
@@ -114,6 +136,181 @@ func runQuery(ctx context.Context, w http.ResponseWriter, q *datastore.Query) ([
 		return nil, false
 	}
 	return plists, true
+}
+
+// newID returns 24 random hex characters suitable for use in a Pub/Sub subscription name.
+func newID() string {
+	b := make([]byte, 12)
+	if _, err := rand.Read(b); err != nil {
+		panic(err)
+	}
+	return hex.EncodeToString(b)
+}
+
+// buildTypeFilter converts a comma-separated types string into a Pub/Sub filter expression.
+func buildTypeFilter(types string) string {
+	if types == "" {
+		return ""
+	}
+	var clauses []string
+	for _, t := range strings.Split(types, ",") {
+		t = strings.TrimSpace(t)
+		if t != "" {
+			clauses = append(clauses, fmt.Sprintf("attributes.type = %q", t))
+		}
+	}
+	if len(clauses) == 0 {
+		return ""
+	}
+	return strings.Join(clauses, " OR ")
+}
+
+// generateSubscriberToken returns a short-lived access token for the subscriber service account,
+// scoped only to Pub/Sub pull/ack operations.
+func generateSubscriberToken(ctx context.Context) (string, error) {
+	name := "projects/-/serviceAccounts/" + subscriberSA
+	resp, err := iamSvc.Projects.ServiceAccounts.GenerateAccessToken(name,
+		&iamcredentials.GenerateAccessTokenRequest{
+			Scope: []string{"https://www.googleapis.com/auth/pubsub"},
+		}).Context(ctx).Do()
+	if err != nil {
+		return "", err
+	}
+	return resp.AccessToken, nil
+}
+
+// createPubSubSubscription creates a new Pub/Sub subscription with a 24-hour self-expiry.
+func createPubSubSubscription(ctx context.Context, topicName, filter string) (string, error) {
+	subName := "sparklespray-" + newID()
+	fullSubName := fmt.Sprintf("projects/%s/subscriptions/%s", gProjectID, subName)
+	fullTopicName := fmt.Sprintf("projects/%s/topics/%s", gProjectID, topicName)
+	ttl := durationpb.New(24 * time.Hour)
+	_, err := psClient.SubscriptionAdminClient.CreateSubscription(ctx, &pb.Subscription{
+		Name:                     fullSubName,
+		Topic:                    fullTopicName,
+		AckDeadlineSeconds:       10,
+		MessageRetentionDuration: ttl,
+		ExpirationPolicy:         &pb.ExpirationPolicy{Ttl: ttl},
+		Filter:                   filter,
+	})
+	if err != nil {
+		return "", err
+	}
+	return subName, nil
+}
+
+func subscriptionURLs(subID string) (pullURL, ackURL string) {
+	base := fmt.Sprintf("https://pubsub.googleapis.com/v1/projects/%s/subscriptions/%s", gProjectID, subID)
+	return base + ":pull", base + ":acknowledge"
+}
+
+func buildSubscriptionResponse(ctx context.Context, subID string) (*SubscriptionResponse, error) {
+	token, err := generateSubscriberToken(ctx)
+	if err != nil {
+		return nil, err
+	}
+	pullURL, ackURL := subscriptionURLs(subID)
+	return &SubscriptionResponse{
+		SubscriptionID:     subID,
+		PullURL:            pullURL,
+		AckURL:             ackURL,
+		AuthorizationToken: token,
+	}, nil
+}
+
+func handleCreateSubscription(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	filter := buildTypeFilter(r.URL.Query().Get("types"))
+
+	subID, err := createPubSubSubscription(ctx, topicLifecycle, filter)
+	if err != nil {
+		log.Printf("Failed to create lifecycle subscription: %v", err)
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to create subscription")
+		return
+	}
+
+	log.Printf("Created subscription %s", subID)
+
+	resp, err := buildSubscriptionResponse(ctx, subID)
+	if err != nil {
+		log.Printf("Failed to generate subscriber token: %v", err)
+		fullSubName := fmt.Sprintf("projects/%s/subscriptions/%s", gProjectID, subID)
+		psClient.SubscriptionAdminClient.DeleteSubscription(context.Background(), &pb.DeleteSubscriptionRequest{Subscription: fullSubName})
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to generate token")
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func handleUnsubscribe(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	subID := r.PathValue("subscription_id")
+	fullSubName := fmt.Sprintf("projects/%s/subscriptions/%s", gProjectID, subID)
+	if err := psClient.SubscriptionAdminClient.DeleteSubscription(ctx, &pb.DeleteSubscriptionRequest{Subscription: fullSubName}); err != nil {
+		log.Printf("Failed to delete subscription %q: %v", subID, err)
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to delete subscription")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func handleCreateTaskSubscription(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	taskID := r.PathValue("task_id")
+
+	filter := fmt.Sprintf("attributes.task_id = %q", taskID)
+	if typeFilter := buildTypeFilter(r.URL.Query().Get("types")); typeFilter != "" {
+		filter = filter + " AND (" + typeFilter + ")"
+	}
+
+	subID, err := createPubSubSubscription(ctx, topicTaskOut, filter)
+	if err != nil {
+		log.Printf("Failed to create task subscription for %q: %v", taskID, err)
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to create subscription")
+		return
+	}
+
+	log.Printf("Created task subscription %s", subID)
+
+	resp, err := buildSubscriptionResponse(ctx, subID)
+	if err != nil {
+		log.Printf("Failed to generate subscriber token: %v", err)
+		fullSubName := fmt.Sprintf("projects/%s/subscriptions/%s", gProjectID, subID)
+		psClient.SubscriptionAdminClient.DeleteSubscription(context.Background(), &pb.DeleteSubscriptionRequest{Subscription: fullSubName})
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to generate token")
+		return
+	}
+
+	// Fire-and-forget: tell the task to start publishing.
+	go func() {
+		pubCtx := context.Background()
+		reqID := newID()
+		data, _ := json.Marshal(map[string]string{
+			"type":    "start_publishing",
+			"req_id":  reqID,
+			"task_id": taskID,
+		})
+		publisher := psClient.Publisher(topicTaskIn)
+		res := publisher.Publish(pubCtx, &pubsub.Message{Data: data})
+		publisher.Stop()
+		if _, err := res.Get(pubCtx); err != nil {
+			log.Printf("Failed to publish start_publishing for task %q: %v", taskID, err)
+		}
+	}()
+
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func handleTaskUnsubscribe(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	subID := r.PathValue("subscription_id")
+	fullSubName := fmt.Sprintf("projects/%s/subscriptions/%s", gProjectID, subID)
+	if err := psClient.SubscriptionAdminClient.DeleteSubscription(ctx, &pb.DeleteSubscriptionRequest{Subscription: fullSubName}); err != nil {
+		log.Printf("Failed to delete task subscription %q: %v", subID, err)
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to delete subscription")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func handleEvents(w http.ResponseWriter, r *http.Request) {
@@ -262,7 +459,7 @@ func handleJob(w http.ResponseWriter, r *http.Request) {
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
@@ -275,19 +472,38 @@ func corsMiddleware(next http.Handler) http.Handler {
 func main() {
 	projectID := flag.String("project", "", "GCP project ID (required)")
 	addr := flag.String("addr", ":8080", "Listen address")
+	subSA := flag.String("subscriber-sa", "", "Service account email to impersonate for Pub/Sub subscriber tokens (required)")
 	flag.Parse()
 
 	if *projectID == "" {
 		log.Fatal("--project is required")
 	}
+	if *subSA == "" {
+		log.Fatal("--subscriber-sa is required")
+	}
+
+	gProjectID = *projectID
+	subscriberSA = *subSA
 
 	ctx := context.Background()
 	var err error
+
 	dsClient, err = datastore.NewClient(ctx, *projectID)
 	if err != nil {
 		log.Fatalf("Failed to create Datastore client: %v", err)
 	}
 	defer dsClient.Close()
+
+	psClient, err = pubsub.NewClient(ctx, *projectID)
+	if err != nil {
+		log.Fatalf("Failed to create Pub/Sub client: %v", err)
+	}
+	defer psClient.Close()
+
+	iamSvc, err = iamcredentials.NewService(ctx)
+	if err != nil {
+		log.Fatalf("Failed to create IAM credentials service: %v", err)
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/events", handleEvents)
@@ -296,6 +512,10 @@ func main() {
 	mux.HandleFunc("GET /api/v1/task/{task_id}/metrics", handleTaskMetrics)
 	mux.HandleFunc("GET /api/v1/cluster/{cluster_id}", handleCluster)
 	mux.HandleFunc("GET /api/v1/job/{job_id}", handleJob)
+	mux.HandleFunc("POST /api/v1/subscription", handleCreateSubscription)
+	mux.HandleFunc("POST /api/v1/subscription/{subscription_id}/unsubscribe", handleUnsubscribe)
+	mux.HandleFunc("POST /api/v1/task/{task_id}/subscription", handleCreateTaskSubscription)
+	mux.HandleFunc("POST /api/v1/task/{task_id}/subscription/{subscription_id}/unsubscribe", handleTaskUnsubscribe)
 
 	log.Printf("Listening on %s", *addr)
 	if err := http.ListenAndServe(*addr, corsMiddleware(mux)); err != nil && !errors.Is(err, http.ErrServerClosed) {

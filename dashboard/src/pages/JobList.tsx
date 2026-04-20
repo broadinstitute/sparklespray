@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { Link } from "react-router-dom";
 import { getJobs, getClusters } from "../data/events";
-import { useEvents } from "../data/EventProvider";
+import { useEvents, mergeEvents } from "../data/EventProvider";
 import type { AnyEvent } from "../types";
 
 const styles = `
@@ -207,7 +207,7 @@ export default function JobList() {
 
   useEffect(() => {
     return addEventListener((newEvents) =>
-      setAllEvents((prev) => [...prev, ...newEvents])
+      setAllEvents((prev) => mergeEvents(prev, newEvents))
     );
   }, [addEventListener]);
 
