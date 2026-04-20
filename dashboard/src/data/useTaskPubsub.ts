@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import type { ResourceDataPoint } from "./simulate";
+import type { ResourceDataPoint, VolumeDataPoint } from "./simulate";
 
 interface SubscriptionCreds {
   subscriptionId: string;
@@ -8,11 +8,18 @@ interface SubscriptionCreds {
   token: string;
 }
 
+interface VolumeUsageMsg {
+  location: string;
+  total_gb: number;
+  used_gb: number;
+}
+
 interface ResourceUsageUpdate {
   type: "metric_update";
   req_id: string;
   task_id: string;
   timestamp: string;
+  volumes?: VolumeUsageMsg[];
   process_count: number;
   total_memory: number;
   total_data: number;
@@ -62,6 +69,13 @@ function toResourceDataPoint(msg: ResourceUsageUpdate): ResourceDataPoint {
     memFreeGb: Math.round((msg.mem_free / GB) * 100) / 100,
     memPressureSomeAvg10: msg.mem_pressure_some_avg10,
     memPressureFullAvg10: msg.mem_pressure_full_avg10,
+    volumes: (msg.volumes ?? []).map(
+      (v): VolumeDataPoint => ({
+        location: v.location,
+        totalGb: v.total_gb,
+        usedGb: v.used_gb,
+      })
+    ),
   };
 }
 

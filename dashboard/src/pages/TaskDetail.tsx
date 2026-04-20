@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, Fragment } from "react";
 import { useParams, useLocation } from "react-router-dom";
 import { getTaskEvents, deriveStatus, extractTimings } from "../data/events";
 import { useEvents, mergeEvents } from "../data/EventProvider";
@@ -80,6 +80,24 @@ export default function TaskDetail() {
     taskId ?? "",
     isActive
   );
+
+  const volumeSeries = useMemo(() => {
+    const locations = Array.from(
+      new Set(resourceData.flatMap((p) => p.volumes.map((v) => v.location)))
+    );
+    return locations.map((loc) => ({
+      location: loc,
+      data: resourceData.map((p) => {
+        const v = p.volumes.find((v) => v.location === loc);
+        return {
+          time: p.time,
+          label: p.label,
+          usedGb: v ? Math.round(v.usedGb * 100) / 100 : 0,
+          totalGb: v ? Math.round(v.totalGb * 100) / 100 : 0,
+        };
+      }),
+    }));
+  }, [resourceData]);
 
   useEffect(() => {
     if (activeTab === "log")
@@ -269,6 +287,19 @@ export default function TaskDetail() {
               { key: "processCount", label: "processes", color: "#5c6bc0" },
             ]}
           />
+          {volumeSeries.map((vs) => (
+            <Fragment key={vs.location}>
+              <MultiLineChart
+                data={vs.data}
+                title={`Disk: ${vs.location}`}
+                yLabel="GB"
+                series={[
+                  { key: "totalGb", label: "total", color: "#bdbdbd" },
+                  { key: "usedGb", label: "used", color: "#f4511e" },
+                ]}
+              />
+            </Fragment>
+          ))}
         </div>
       )}
       {activeTab === "metrics" && resourceData.length === 0 && (

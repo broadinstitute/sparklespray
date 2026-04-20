@@ -102,12 +102,19 @@ type Job struct {
 	TargetNodeCount        int32     `datastore:"target_node_count"`
 }
 
+type VolumeUsage struct {
+	Location string  `json:"location"`
+	TotalGB  float64 `json:"total_gb"`
+	UsedGB   float64 `json:"used_gb"`
+}
+
 type ResourceUsageUpdate struct {
-	Type                 string    `json:"type"`
-	ReqID                string    `json:"req_id"` // todo: remove this
-	TaskID               string    `json:"task_id"`
-	Timestamp            time.Time `json:"timestamp"`
-	ProcessCount         int32     `json:"process_count"`
+	Type                 string        `json:"type"`
+	ReqID                string        `json:"req_id"` // todo: remove this
+	TaskID               string        `json:"task_id"`
+	Timestamp            time.Time     `json:"timestamp"`
+	ProcessCount         int32         `json:"process_count"`
+	Volumes              []VolumeUsage `json:"volumes,omitempty"`
 	TotalMemory          int64     `json:"total_memory"`
 	TotalData            int64     `json:"total_data"`
 	TotalShared          int64     `json:"total_shared"`
@@ -350,10 +357,14 @@ func publishTaskMetrics(ctx context.Context, taskID string) {
 			totalMem := int64(1+rand.Intn(8)) * 1024 * 1024 * 1024
 			free := totalMem / int64(2+rand.Intn(4))
 			update := ResourceUsageUpdate{
-				Type:                 "metric_update",
-				TaskID:               taskID,
-				Timestamp:            time.Now().UTC(),
-				ProcessCount:         int32(1 + rand.Intn(8)),
+				Type:      "metric_update",
+				TaskID:    taskID,
+				Timestamp: time.Now().UTC(),
+				Volumes: []VolumeUsage{
+					{Location: "/mnt/disk1", TotalGB: 100, UsedGB: 10 + float64(rand.Intn(80))},
+					{Location: "/", TotalGB: 50, UsedGB: 5 + float64(rand.Intn(40))},
+				},
+				ProcessCount: int32(1 + rand.Intn(8)),
 				TotalMemory:          totalMem,
 				TotalData:            totalMem - free - int64(rand.Intn(100*1024*1024)),
 				TotalShared:          int64(rand.Intn(50 * 1024 * 1024)),

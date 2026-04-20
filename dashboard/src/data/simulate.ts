@@ -121,6 +121,12 @@ export function simulateCpu(
   });
 }
 
+export interface VolumeDataPoint {
+  location: string;
+  totalGb: number;
+  usedGb: number;
+}
+
 export interface ResourceDataPoint {
   time: number;
   label: string;
@@ -138,6 +144,7 @@ export interface ResourceDataPoint {
   memFreeGb: number;
   memPressureSomeAvg10: number;
   memPressureFullAvg10: number;
+  volumes: VolumeDataPoint[];
 }
 
 export function simulateResourceUsage(
@@ -227,6 +234,7 @@ export function simulateResourceUsage(
       memFreeGb: Math.round(memFree * 100) / 100,
       memPressureSomeAvg10: Math.round(memPressureSome),
       memPressureFullAvg10: Math.round(memPressureFull),
+      volumes: [],
     });
   }
 
