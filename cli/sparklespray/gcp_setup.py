@@ -337,8 +337,9 @@ def setup_project(options: SetupOptions):
             "service-accounts",
             "add-iam-policy-binding",
             dashboard_user_service_account,
-            f'--member="serviceAccount:{service_account}"',
-            '--role="roles/iam.serviceAccountTokenCreator"',
+            f"--member=serviceAccount:{service_account}",
+            "--role=roles/iam.serviceAccountTokenCreator",
+            f"--project={project_id}",
         ],
         dry_run,
     )
