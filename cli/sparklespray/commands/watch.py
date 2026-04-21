@@ -180,7 +180,7 @@ def watch(
         tasks.append(ResetOrphans(jq, cluster))
 
     try:
-        run_tasks(job_id, job.cluster, tasks, cluster)
+        run_tasks(job_id, job.cluster_id, tasks, cluster)
 
         tasks = cluster.task_store.get_tasks(job_id=job_id)
         for task in tasks:

@@ -18,7 +18,7 @@ def _test_datastore_api(job_store: JobStore, job_id: str):
         tasks=[],
         kube_job_spec="invalid",
         metadata={},
-        cluster=job_id,
+        cluster_id=job_id,
         status=JOB_STATUS_KILLED,
         submit_time=time.time(),
         max_preemptable_attempts=2,

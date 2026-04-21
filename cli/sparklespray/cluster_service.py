@@ -82,7 +82,7 @@ def create_cluster(
     return Cluster(
         config.project,
         config.location,
-        job.cluster,
+        job.cluster_id,
         job_id,
         jq.job_storage,
         jq.task_storage,
@@ -139,7 +139,7 @@ class Cluster:
     def cluster_id(self):
         if self._cluster_id is None:
             job = self.job_store.get_job_must(self.job_id)
-            self._cluster_id = job.cluster
+            self._cluster_id = job.cluster_id
         return self._cluster_id
 
     def get_node_reqs(self):

@@ -20,7 +20,7 @@ def make_task(
         args="{}",
         history=[],
         command_result_url="",
-        cluster="test-cluster",
+        cluster_id="test-cluster",
         log_url="",
         last_updated=last_updated,
     )

@@ -9,7 +9,13 @@ from .task_store import (
     STATUS_PENDING,
     STATUS_KILLED,
 )
-from .job_store import JobStore, Job, JOB_STATUS_SUBMITTED, JOB_STATUS_KILLED
+from .job_store import (
+    JobStore,
+    Job,
+    JOB_STATUS_PENDING,
+    JOB_STATUS_SUBMITTED,
+    JOB_STATUS_KILLED,
+)
 from .task_store import TaskStore, TaskHistory, Task
 
 from fnmatch import fnmatch
@@ -116,7 +122,7 @@ class JobQueue:
         batch.flush()
 
         def mark_not_killed(job):
-            job.status = JOB_STATUS_SUBMITTED
+            job.status = JOB_STATUS_PENDING
             return True
 
         self.job_storage.update_job(jobid, mark_not_killed)
@@ -145,8 +151,8 @@ class JobQueue:
         max_preemptable_attempts,
     ):
         assert isinstance(sparkles_job_spec, str)
-        tasks: List[Task] = []
         now = time.time()
+        task_count = len(args)
 
         batch = Batch(self.client)
         task_index = 1
@@ -161,7 +167,7 @@ class JobQueue:
                 history=[TaskHistory(timestamp=now, status="pending")],
                 owner=None,
                 command_result_url=command_result_url,
-                cluster=cluster,
+                cluster_id=cluster,
                 monitor_address=None,
                 log_url=log_url,
             )
@@ -170,14 +176,13 @@ class JobQueue:
 
         job = Job(
             job_id=job_id,
-            tasks=[
-                t.task_id for t in tasks
-            ],  # we could just store the information needed to construct these task IDs
+            tasks=[],
             kube_job_spec=sparkles_job_spec,
             metadata=metadata,
-            cluster=cluster,
-            status=JOB_STATUS_SUBMITTED,
+            cluster_id=cluster,
+            status=JOB_STATUS_PENDING,
             submit_time=time.time(),
+            task_count=task_count,
             target_node_count=target_node_count,
             max_preemptable_attempts=max_preemptable_attempts,
         )
@@ -189,7 +194,7 @@ class JobQueue:
 
         self.task_storage.delete(job_id, batch=batch)
 
-        job_key = self.client.key("Job", job_id)
+        job_key = self.client.key("SparklesV5Job", job_id)
         entity_job = self.client.get(job_key)
         assert entity_job is not None, f"Could not get from datastore: {job_key}"
 

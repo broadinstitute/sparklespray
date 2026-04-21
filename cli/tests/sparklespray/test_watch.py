@@ -76,10 +76,12 @@ def job_queue(datastore_client, task_storage, job_storage):
     # Create a mock job
     job = MagicMock()
     job.job_id = "test-job-id"
-    job.cluster = "test-cluster"
+    job.cluster_id = "test-cluster"
     job.target_node_count = 2
     job.max_preemptable_attempts = 1
-    job_spec = job_spec_factory(sparkles_job=job.job_id, sparkles_cluster=job.cluster)
+    job_spec = job_spec_factory(
+        sparkles_job=job.job_id, sparkles_cluster=job.cluster_id
+    )
     job.kube_job_spec = job_spec.model_dump_json()
 
     # We still need to mock some methods for testing
@@ -155,7 +157,7 @@ def job(job_storage):
             tasks=[],
             kube_job_spec="",
             metadata={},
-            cluster="mock-cluster-id",
+            cluster_id="mock-cluster-id",
             status=JOB_STATUS_SUBMITTED,
             submit_time=0.0,
             max_preemptable_attempts=100,
@@ -174,7 +176,7 @@ def cluster(datastore_client, mock_node_reqs, task_storage, job_storage, job):
             tasks=[],
             kube_job_spec="",
             metadata={},
-            cluster="mock-cluster-id",
+            cluster_id="mock-cluster-id",
             status=JOB_STATUS_SUBMITTED,
             submit_time=0.0,
             max_preemptable_attempts=100,

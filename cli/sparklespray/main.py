@@ -159,8 +159,7 @@ def main(argv=None):
     if args.func == setup_cmd:
         # special case, because this is the one command which must work before the service account
         # is set up.
-        config = load_config(args.config, verbose=True, overrides=overrides)
-        args.func(args, config)
+        args.func(args)
     else:
         func_param_names = get_func_parameters(args.func)
         try:

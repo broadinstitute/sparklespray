@@ -6,14 +6,15 @@ from .datastore_batch import ImmediateBatch
 from dataclasses import dataclass
 from .log import log
 
-STATUS_CLAIMED = "claimed"
+STATUS_RUNNING = "running"
+STATUS_CLAIMED = STATUS_RUNNING  # backwards-compat alias
 STATUS_PENDING = "pending"
 STATUS_FAILED = "failed"
 STATUS_COMPLETE = "complete"
 STATUS_KILLED = "killed"
 
 
-INCOMPLETE_TASK_STATES = set([STATUS_CLAIMED, STATUS_PENDING])
+INCOMPLETE_TASK_STATES = set([STATUS_RUNNING, STATUS_PENDING])
 
 TASK_COLLECTION = "SparklesV5Task"
 
@@ -46,11 +47,11 @@ class Task(object):
     args: str
     history: List  # list of TaskHistory
     command_result_url: str
-    cluster: str
+    cluster_id: str
     log_url: str
     failure_reason: Optional[str] = None
     version: int = 1
-    exit_code: Optional[int] = None
+    exit_code: Optional[str] = None
     last_updated: Optional[float] = None
 
     def get_instance_name(self):
@@ -70,7 +71,7 @@ def task_to_entity(client, o: Task):
     entity["owner"] = o.owner
     entity["args"] = o.args
     entity["failure_reason"] = o.failure_reason
-    entity["cluster"] = o.cluster
+    entity["cluster_id"] = o.cluster_id
     entity["monitor_address"] = o.monitor_address
     entity["command_result_url"] = o.command_result_url
     history = []
@@ -116,7 +117,7 @@ def entity_to_task(entity):
         failure_reason=entity.get("failure_reason"),
         command_result_url=entity.get("command_result_url"),
         exit_code=entity.get("exit_code"),
-        cluster=entity.get("cluster"),
+        cluster_id=entity.get("cluster_id"),
         monitor_address=entity.get("monitor_address"),
         last_updated=entity.get("last_updated"),
     )
@@ -174,7 +175,7 @@ class TaskStore:
 
     def get_tasks_for_cluster(self, cluster_name, status, max_fetch=None):
         query = self.client.query(kind=TASK_COLLECTION)
-        query.add_filter("cluster", "=", cluster_name)
+        query.add_filter("cluster_id", "=", cluster_name)
         query.add_filter("status", "=", status)
         start_time = time.time()
         tasks_it = query.fetch(limit=max_fetch)
