@@ -148,6 +148,12 @@ def _parse_gcloud_config(gcloud_config_file: str, verbose: bool) -> GCloudConfig
     return config
 
 
+def get_default_key_path(project_id):
+    return os.path.expanduser(
+        f"~/.sparkles-cache/service-keys/{project_id}.json",
+    )
+
+
 def load_config(
     config_file: str,
     overrides: Dict[str, str],
@@ -257,9 +263,7 @@ def load_config(
 
     config.service_account_key = consume(
         "service_account_key",
-        default=os.path.expanduser(
-            f"~/.sparkles-cache/service-keys/{config.project}.json",
-        ),
+        default=get_default_key_path(config.project),
     )
 
     preemptible_yn = consume("preemptible", "y")

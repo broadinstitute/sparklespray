@@ -1,6 +1,9 @@
 import subprocess
 import os
+import tempfile
+from contextlib import contextmanager
 from importlib import resources
+import sys
 
 from sparklespray.gcp_permissions import parse_docker_image_name, ArtifactRegistryPath
 from sparklespray.util import random_string
@@ -42,6 +45,7 @@ services_to_add = [
     "artifactregistry.googleapis.com",
     "logging",
     "batch.googleapis.com",
+    "iamcredentials.googleapis.com",
 ]
 
 roles_to_add = [
@@ -55,18 +59,34 @@ roles_to_add = [
 
 
 def _run_cmd(
-    cmd, args, suppress_warning=False, max_attempts=10, success_if_output_contains=None
+    cmd,
+    args,
+    suppress_warning=False,
+    max_attempts=10,
+    success_if_output_contains=None,
+    dry_run=False,
 ):
     attempt = 0
 
     cmd = [cmd] + args
     cmd_str = " ".join(cmd)
 
+    if dry_run:
+        print(f"[dry run] {cmd_str}")
+        return
+
+    env = os.environ.copy()
+    env["PYTHONUNBUFFERED"] = "1"
+
     while attempt < max_attempts:
         print(f"Executing: {cmd_str}")
         try:
             return subprocess.check_output(
-                cmd, stderr=subprocess.STDOUT, text=True, stdin=subprocess.DEVNULL
+                cmd,
+                stderr=subprocess.STDOUT,
+                text=True,
+                stdin=subprocess.DEVNULL,
+                env=env,
             )
         except subprocess.CalledProcessError as e:
             if success_if_output_contains is not None:
@@ -160,7 +180,41 @@ def create_service_account(project_id, service_acct, dry_run):
     return f"{service_acct}@{project_id}.iam.gserviceaccount.com"
 
 
+@contextmanager
+def temp_access_key_file(project_id: str, service_acct: str, dry_run):
+    with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
+        key_path = f.name
+    key_id = None
+    try:
+        create_service_account_key(service_acct, key_path, dry_run)
+        if dry_run:
+            key_id = "fake_id"
+        else:
+            with open(key_path) as f:
+                key_id = json.load(f)["private_key_id"]
+        yield key_path
+    finally:
+        os.unlink(key_path)
+        if key_id is not None:
+            gcloud(
+                [
+                    "iam",
+                    "service-accounts",
+                    "keys",
+                    "delete",
+                    key_id,
+                    "--iam-account",
+                    service_acct,
+                    "--project",
+                    project_id,
+                    "--quiet",
+                ],
+                dry_run,
+            )
+
+
 def create_service_account_key(service_account, key_path, dry_run):
+    print(f"Creating access key for {service_account} and storing at {key_path}")
     gcloud(
         [
             "iam",
@@ -251,6 +305,9 @@ def setup_datastore(project_id: str, region: str, dry_run: bool):
     )
 
 
+from .config import get_default_key_path
+
+
 def setup_project(options: SetupOptions):
     project_id = options.project
     dry_run = options.dry_run
@@ -262,6 +319,7 @@ def setup_project(options: SetupOptions):
     project_settings = get_sparkles_project_settings(project_id)
 
     # ensure service account in place
+    key_path = None
     if options.service_account is None:
         # check to see if we have this set from a previous setup
         service_account = project_settings.get("service_account")
@@ -271,6 +329,8 @@ def setup_project(options: SetupOptions):
             service_account = create_service_account(
                 project_id, service_account_name, dry_run
             )
+            key_path = get_default_key_path(project_id)
+            create_service_account_key(service_account, key_path, dry_run)
     else:
         service_account = options.service_account
 
@@ -343,6 +403,33 @@ def setup_project(options: SetupOptions):
         ],
         dry_run,
     )
+
+    def run_verify(key_file):
+        print("Verifying permissions and services are set up correctly")
+        _run_cmd(
+            sys.executable,
+            [
+                "-m",
+                "sparklespray.gcp_verify",
+                "--keyfile",
+                key_file,
+                "--project",
+                project_id,
+                "--url-prefix",
+                url_prefix,
+                "--dashboard-user-service-account",
+                dashboard_user_service_account,
+            ],
+            dry_run,
+        )
+
+    if key_path is None:
+        with temp_access_key_file(
+            project_id, service_account, dry_run
+        ) as temp_key_file:
+            run_verify(temp_key_file)
+    else:
+        run_verify(key_path)
 
 
 def build_and_push_image(worker_docker_image, worker_dockerfile_path, dry_run):
