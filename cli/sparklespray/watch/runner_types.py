@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 import functools
-from typing import Dict, List, TYPE_CHECKING, Union
+from datetime import datetime, timezone, timedelta
+from typing import Dict, List, Optional, TYPE_CHECKING, Union
 import time
 
 if TYPE_CHECKING:
@@ -108,7 +109,7 @@ class IncrementalTaskFetcher:
         self.job_id = job_id
         self.min_delay = min_delay
         self.cached_tasks: Dict[str, "Task"] = {}
-        self.last_updated_watermark: float = 0.0
+        self.last_updated_watermark: Optional[datetime] = None
         self.prev_call_timestamp: float = 0.0
         self.last_full_fetch_timestamp: float = 0.0
 
@@ -119,9 +120,10 @@ class IncrementalTaskFetcher:
 
         self.prev_call_timestamp = now
 
-        # Determine if we need a full fetch (first call or safety net refresh)
+        # Determine if we need a full fetch (first call, safety net refresh, or no watermark yet)
         needs_full_fetch = (
             not self.cached_tasks
+            or self.last_updated_watermark is None
             or (now - self.last_full_fetch_timestamp) > self.MAX_TIME_UNTIL_FULL_REFRESH
         )
 
@@ -135,7 +137,9 @@ class IncrementalTaskFetcher:
             # Incremental fetch: only changed tasks.
             # Subtract padding to handle eventual consistency - we may get
             # duplicates but won't miss recently updated tasks.
-            query_since = self.last_updated_watermark - self.INDEX_CONSISTENCY_PADDING
+            query_since = self.last_updated_watermark - timedelta(
+                seconds=self.INDEX_CONSISTENCY_PADDING
+            )
             changed = self.task_store.get_tasks_updated_since(self.job_id, query_since)
             for task in changed:
                 self.cached_tasks[task.task_id] = task
@@ -147,5 +151,8 @@ class IncrementalTaskFetcher:
         """Update the watermark to the max last_updated from the given tasks."""
         for task in tasks:
             if task.last_updated is not None:
-                if task.last_updated > self.last_updated_watermark:
+                if (
+                    self.last_updated_watermark is None
+                    or task.last_updated > self.last_updated_watermark
+                ):
                     self.last_updated_watermark = task.last_updated

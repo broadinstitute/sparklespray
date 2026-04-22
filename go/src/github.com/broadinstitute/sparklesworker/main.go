@@ -322,7 +322,7 @@ func consume(c *cli.Context) error {
 	// Create Pub/Sub client unless disabled.
 	var psClient *pubsub.Client
 	if !pubsubDisable {
-		psClient, err = pubsub.NewClient(ctx, projectID)
+		psClient, err = pubsub.NewClient(ctx, projectID, option.WithGRPCDialOption(transportCreds))
 		if err != nil {
 			log.Printf("Creating pubsub client failed: %v", err)
 			return err

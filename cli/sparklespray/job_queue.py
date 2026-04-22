@@ -24,6 +24,7 @@ from .datastore_batch import Batch
 import collections
 
 import time
+from datetime import datetime, timezone
 from typing import Dict, List
 
 
@@ -181,7 +182,7 @@ class JobQueue:
             metadata=metadata,
             cluster_id=cluster,
             status=JOB_STATUS_PENDING,
-            submit_time=time.time(),
+            submit_time=datetime.now(tz=timezone.utc),
             task_count=task_count,
             target_node_count=target_node_count,
             max_preemptable_attempts=max_preemptable_attempts,

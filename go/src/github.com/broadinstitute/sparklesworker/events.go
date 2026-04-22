@@ -2,6 +2,7 @@ package sparklesworker
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"time"
 
@@ -55,7 +56,7 @@ func (ew *EventWriter) writeEvent(ctx context.Context, props datastore.PropertyL
 
 	key := datastore.NameKey(EventCollection, eventID, nil)
 	if _, err := ew.dsClient.Put(ctx, key, &props); err != nil {
-		return err
+		return fmt.Errorf("writeEvent failed in DS put: %s", err)
 	}
 
 	var eventType string
@@ -72,7 +73,7 @@ func (ew *EventWriter) writeEvent(ctx context.Context, props datastore.PropertyL
 			Attributes: map[string]string{"type": eventType},
 		})
 		if _, err := result.Get(ctx); err != nil {
-			return err
+			return fmt.Errorf("writeEvent failed in publish.Get(): %s", err)
 		}
 	}
 

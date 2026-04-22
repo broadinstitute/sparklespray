@@ -1,3 +1,4 @@
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 from sparklespray.watch.runner_types import IncrementalTaskFetcher
@@ -6,8 +7,13 @@ from unittest.mock import Mock, call
 import time
 
 
+def dt(seconds: float) -> datetime:
+    """Create a UTC datetime from a unix timestamp for test readability."""
+    return datetime.fromtimestamp(seconds, tz=timezone.utc)
+
+
 def make_task(
-    task_id: str, status: str = STATUS_PENDING, last_updated: Optional[float] = None
+    task_id: str, status: str = STATUS_PENDING, last_updated: Optional[datetime] = None
 ):
     """Helper to create a Task with minimal required fields."""
     return Task(
@@ -29,7 +35,7 @@ def make_task(
 def test_first_call_fetches_all_tasks():
     """First call should fetch all tasks using get_tasks()."""
     task_store = Mock()
-    tasks = [make_task("test-job.1", last_updated=100.0)]
+    tasks = [make_task("test-job.1", last_updated=dt(100))]
     task_store.get_tasks.return_value = tasks
 
     fetcher = IncrementalTaskFetcher(task_store, "test-job", min_delay=0)
@@ -45,8 +51,8 @@ def test_subsequent_calls_fetch_incrementally():
     """After first call, should use get_tasks_updated_since()."""
     task_store = Mock()
     initial_tasks = [
-        make_task("test-job.1", last_updated=100.0),
-        make_task("test-job.2", last_updated=100.0),
+        make_task("test-job.1", last_updated=dt(100)),
+        make_task("test-job.2", last_updated=dt(100)),
     ]
     task_store.get_tasks.return_value = initial_tasks
     task_store.get_tasks_updated_since.return_value = []
@@ -67,13 +73,13 @@ def test_incremental_fetch_merges_changed_tasks():
     """Changed tasks should be merged into the cache."""
     task_store = Mock()
     initial_tasks = [
-        make_task("test-job.1", status=STATUS_PENDING, last_updated=100.0),
-        make_task("test-job.2", status=STATUS_PENDING, last_updated=100.0),
+        make_task("test-job.1", status=STATUS_PENDING, last_updated=dt(100)),
+        make_task("test-job.2", status=STATUS_PENDING, last_updated=dt(100)),
     ]
     task_store.get_tasks.return_value = initial_tasks
 
     # Task 1 has been updated to complete
-    updated_task = make_task("test-job.1", status=STATUS_COMPLETE, last_updated=200.0)
+    updated_task = make_task("test-job.1", status=STATUS_COMPLETE, last_updated=dt(200))
     task_store.get_tasks_updated_since.return_value = [updated_task]
 
     fetcher = IncrementalTaskFetcher(task_store, "test-job", min_delay=0)
@@ -93,7 +99,7 @@ def test_incremental_fetch_merges_changed_tasks():
 def test_rate_limiting_returns_cached_results():
     """Calls within min_delay should return cached results without fetching."""
     task_store = Mock()
-    tasks = [make_task("test-job.1", last_updated=100.0)]
+    tasks = [make_task("test-job.1", last_updated=dt(100))]
     task_store.get_tasks.return_value = tasks
 
     fetcher = IncrementalTaskFetcher(task_store, "test-job", min_delay=10.0)
@@ -112,9 +118,9 @@ def test_watermark_updated_from_tasks():
     """Watermark should be updated to max last_updated from fetched tasks."""
     task_store = Mock()
     initial_tasks = [
-        make_task("test-job.1", last_updated=100.0),
-        make_task("test-job.2", last_updated=150.0),
-        make_task("test-job.3", last_updated=120.0),
+        make_task("test-job.1", last_updated=dt(100)),
+        make_task("test-job.2", last_updated=dt(150)),
+        make_task("test-job.3", last_updated=dt(120)),
     ]
     task_store.get_tasks.return_value = initial_tasks
     task_store.get_tasks_updated_since.return_value = []
@@ -122,19 +128,21 @@ def test_watermark_updated_from_tasks():
     fetcher = IncrementalTaskFetcher(task_store, "test-job", min_delay=0)
     fetcher()
 
-    # Watermark should be 150.0 (max of all tasks)
-    assert fetcher.last_updated_watermark == 150.0
+    # Watermark should be dt(150) (max of all tasks)
+    assert fetcher.last_updated_watermark == dt(150)
 
     # Second call should query with watermark - padding
     fetcher()
-    expected_since = 150.0 - IncrementalTaskFetcher.INDEX_CONSISTENCY_PADDING
+    expected_since = dt(150) - timedelta(
+        seconds=IncrementalTaskFetcher.INDEX_CONSISTENCY_PADDING
+    )
     task_store.get_tasks_updated_since.assert_called_with("test-job", expected_since)
 
 
 def test_padding_applied_for_eventual_consistency():
     """Query should use watermark - padding to handle eventual consistency."""
     task_store = Mock()
-    initial_tasks = [make_task("test-job.1", last_updated=1000.0)]
+    initial_tasks = [make_task("test-job.1", last_updated=dt(1000))]
     task_store.get_tasks.return_value = initial_tasks
     task_store.get_tasks_updated_since.return_value = []
 
@@ -145,14 +153,16 @@ def test_padding_applied_for_eventual_consistency():
     # Should query with padding subtracted
     call_args = task_store.get_tasks_updated_since.call_args
     query_since = call_args[0][1]
-    expected = 1000.0 - IncrementalTaskFetcher.INDEX_CONSISTENCY_PADDING
+    expected = dt(1000) - timedelta(
+        seconds=IncrementalTaskFetcher.INDEX_CONSISTENCY_PADDING
+    )
     assert query_since == expected
 
 
 def test_full_refresh_after_max_time(monkeypatch):
     """Should do full fetch after MAX_TIME_UNTIL_FULL_REFRESH elapses."""
     task_store = Mock()
-    initial_tasks = [make_task("test-job.1", last_updated=100.0)]
+    initial_tasks = [make_task("test-job.1", last_updated=dt(100))]
     task_store.get_tasks.return_value = initial_tasks
     task_store.get_tasks_updated_since.return_value = []
 
@@ -187,7 +197,7 @@ def test_handles_tasks_without_last_updated():
     task_store = Mock()
     initial_tasks = [
         make_task("test-job.1", last_updated=None),
-        make_task("test-job.2", last_updated=100.0),
+        make_task("test-job.2", last_updated=dt(100)),
     ]
     task_store.get_tasks.return_value = initial_tasks
     task_store.get_tasks_updated_since.return_value = []
@@ -197,23 +207,23 @@ def test_handles_tasks_without_last_updated():
 
     assert len(result) == 2
     # Watermark should only consider tasks with last_updated
-    assert fetcher.last_updated_watermark == 100.0
+    assert fetcher.last_updated_watermark == dt(100)
 
 
 def test_watermark_updates_on_incremental_fetch():
     """Watermark should update when incremental fetch returns newer tasks."""
     task_store = Mock()
-    initial_tasks = [make_task("test-job.1", last_updated=100.0)]
+    initial_tasks = [make_task("test-job.1", last_updated=dt(100))]
     task_store.get_tasks.return_value = initial_tasks
 
     # Incremental fetch returns task with newer timestamp
-    updated_task = make_task("test-job.1", status=STATUS_COMPLETE, last_updated=500.0)
+    updated_task = make_task("test-job.1", status=STATUS_COMPLETE, last_updated=dt(500))
     task_store.get_tasks_updated_since.return_value = [updated_task]
 
     fetcher = IncrementalTaskFetcher(task_store, "test-job", min_delay=0)
 
     fetcher()
-    assert fetcher.last_updated_watermark == 100.0
+    assert fetcher.last_updated_watermark == dt(100)
 
     fetcher()
-    assert fetcher.last_updated_watermark == 500.0
+    assert fetcher.last_updated_watermark == dt(500)

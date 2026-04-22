@@ -6,7 +6,7 @@ from ..job_queue import JobQueue
 from ..io_helper import IO
 from ..cluster_service import Cluster
 from ..job_store import JobStore, Job, JOB_STATUS_KILLED
-import time
+from datetime import datetime, timezone
 from ..config import Config
 from ..batch_api import ClusterAPI
 
@@ -20,7 +20,7 @@ def _test_datastore_api(job_store: JobStore, job_id: str):
         metadata={},
         cluster_id=job_id,
         status=JOB_STATUS_KILLED,
-        submit_time=time.time(),
+        submit_time=datetime.now(tz=timezone.utc),
         max_preemptable_attempts=2,
     )
 

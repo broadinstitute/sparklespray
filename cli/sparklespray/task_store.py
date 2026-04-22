@@ -1,6 +1,7 @@
 from google.cloud import datastore
 
 import time
+from datetime import datetime, timezone, timedelta
 from typing import List, Optional
 from .datastore_batch import ImmediateBatch
 from dataclasses import dataclass
@@ -52,7 +53,7 @@ class Task(object):
     failure_reason: Optional[str] = None
     version: int = 1
     exit_code: Optional[str] = None
-    last_updated: Optional[float] = None
+    last_updated: Optional[datetime] = None
 
     def get_instance_name(self):
         owner = self.owner
@@ -189,7 +190,7 @@ class TaskStore:
         return tasks
 
     def get_tasks_updated_since(
-        self, job_id: str, since_timestamp: float
+        self, job_id: str, since_timestamp: datetime
     ) -> List[Task]:
         """Fetch only tasks modified after since_timestamp.
 

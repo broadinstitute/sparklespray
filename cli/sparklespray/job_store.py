@@ -1,5 +1,6 @@
 from google.cloud import datastore
 
+from datetime import datetime, timezone
 from typing import List, Tuple, Optional, Dict
 from .datastore_batch import ImmediateBatch
 from .task_store import STATUS_KILLED, Task
@@ -15,7 +16,7 @@ class Job:
     metadata: Dict[str, str]
     cluster_id: str
     status: str
-    submit_time: float
+    submit_time: datetime
     max_preemptable_attempts: int
     task_count: int = 0
     target_node_count: int = 1
