@@ -103,7 +103,7 @@ def main(argv=None):
     from .commands.delete import add_delete_cmd
     from .commands.kill import add_kill_cmd
     from .commands.fetch import add_fetch_cmd
-    from .commands.version import add_version_cmd
+    from .commands.version import add_version_cmd, version_cmd
     from .commands.list import add_list_cmd
     from .commands.prep_image import add_prep_image_cmd
     from .workflow import add_workflow_cmd
@@ -156,8 +156,8 @@ def main(argv=None):
         parse.print_help()
         sys.exit(1)
 
-    if args.func == setup_cmd:
-        # special case, because this is the one command which must work before the service account
+    if args.func in [setup_cmd, version_cmd]:
+        # special case, because these commands must work before the service account
         # is set up.
         args.func(args)
     else:

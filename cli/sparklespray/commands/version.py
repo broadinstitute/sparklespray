@@ -2,7 +2,7 @@ import sparklespray
 from ..log import log
 
 
-def version_cmd():
+def version_cmd(args):
     log.info("version command ran")
     print(sparklespray.__version__)
 
