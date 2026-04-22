@@ -181,11 +181,12 @@ def load_config(
     config_dict.update(overrides)
 
     # check for deprecated options
-    if "account" in config_dict:
-        print(
-            "Warning: The option 'account' has been deprecated. Please remove this from your config because it may become an error in a future version of sparkles"
-        )
-        del config_dict["account"]
+    for old_param in ["sparklesworker_exe_path", "account"]:
+        if old_param in config_dict:
+            print(
+                f"Warning: The option '{old_param}' has been deprecated. Please remove this from your config because it may become an error in a future version of sparkles"
+            )
+            del config_dict[old_param]
 
     if "bootdisksizegb" in config_dict:
         print(
