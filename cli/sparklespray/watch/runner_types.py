@@ -137,6 +137,7 @@ class IncrementalTaskFetcher:
             # Incremental fetch: only changed tasks.
             # Subtract padding to handle eventual consistency - we may get
             # duplicates but won't miss recently updated tasks.
+            assert self.last_updated_watermark is not None
             query_since = self.last_updated_watermark - timedelta(
                 seconds=self.INDEX_CONSISTENCY_PADDING
             )
