@@ -58,7 +58,6 @@ class PrepConfig:
     machine_type: Optional[str] = None
     cas_url_prefix: Optional[str] = None
     default_url_prefix: Optional[str] = None
-    sparklesworker_exe_path: Optional[str] = None
     sparklesworker_image: Optional[str] = None
     project: Optional[str] = None
     region: Optional[str] = None
@@ -81,7 +80,6 @@ class Config:
     machine_type: str
     cas_url_prefix: str
     default_url_prefix: str
-    sparklesworker_exe_path: str
     sparklesworker_image: str
     project: str
     region: str
@@ -252,10 +250,6 @@ def load_config(
         )
 
     config.sparklesworker_image = consume("sparklesworker_image")
-    config.sparklesworker_exe_path = consume(
-        "sparklesworker_exe_path",
-        os.path.join(os.path.dirname(__file__), "bin/sparklesworker"),
-    )
     assert config.default_url_prefix is not None
     config.cas_url_prefix = consume(
         "cas_url_prefix", config.default_url_prefix + "/CAS/"

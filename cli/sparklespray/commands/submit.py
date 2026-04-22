@@ -576,12 +576,6 @@ def submit_cmd(
         exclude_patterns=args.exclude_wildcards,
     )
 
-    if not os.path.exists(config.sparklesworker_exe_path):
-        raise UserError(
-            f"Could not find {config.sparklesworker_exe_path}. This most commonly happens when one doesn't "
-            "install from the packaged releases at https://github.com/broadinstitute/sparklespray/releases"
-        )
-
     log.debug("upload_map = %s", upload_map)
 
     # First check existance of files, so we can print out a single summary statement
