@@ -216,6 +216,7 @@ def load_config(
         return value
 
     config = PrepConfig()
+    config.default_image = consume("default_image", None)
     config.sparkles_config_path = config_file
     config.monitor_port = consume("monitor_port", 6032, int)
     config.work_root_dir = consume("work_root_dir", "/mnt/disks/mount_1")

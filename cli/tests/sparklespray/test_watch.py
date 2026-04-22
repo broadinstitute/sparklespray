@@ -1,5 +1,6 @@
 import pytest
 import time
+from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 from typing import List
 
@@ -159,7 +160,7 @@ def job(job_storage):
             metadata={},
             cluster_id="mock-cluster-id",
             status=JOB_STATUS_SUBMITTED,
-            submit_time=0.0,
+            submit_time=datetime(2024, 1, 1, tzinfo=timezone.utc),
             max_preemptable_attempts=100,
             target_node_count=1,
         )
@@ -178,7 +179,7 @@ def cluster(datastore_client, mock_node_reqs, task_storage, job_storage, job):
             metadata={},
             cluster_id="mock-cluster-id",
             status=JOB_STATUS_SUBMITTED,
-            submit_time=0.0,
+            submit_time=datetime(2024, 1, 1, tzinfo=timezone.utc),
             max_preemptable_attempts=100,
             target_node_count=1,
         )
