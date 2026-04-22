@@ -26,21 +26,21 @@ should be treated as the normative contract for all field names, types, and valu
 All resources live in a single GCP project. Collection and topic names are
 versioned to allow in-place schema migrations without disrupting existing data.
 
-| Resource                                | Name                |
-| --------------------------------------- | ------------------- |
-| Datastore collection – events           | `SparklesV5Event`   |
-| Datastore collection – clusters         | `SparklesV5Cluster` |
-| Datastore collection – jobs             | `SparklesV5Job`     |
-| Datastore collection – tasks            | `SparklesV5Task`    |
-| Pub/Sub topic – lifecycle notifications | `sparkles-events`   |
-| Pub/Sub topic – task metrics/log output | `sparkles-task-out` |
-| Pub/Sub topic – worker control input    | `sparkles-task-in`  |
+| Resource                                | Name                   |
+| --------------------------------------- | ---------------------- |
+| Datastore collection – events           | `SparklesV6Event`      |
+| Datastore collection – clusters         | `SparklesV6Cluster`    |
+| Datastore collection – jobs             | `SparklesV6Job`        |
+| Datastore collection – tasks            | `SparklesV6Task`       |
+| Pub/Sub topic – lifecycle notifications | `sparkles-v6-events`   |
+| Pub/Sub topic – task metrics/log output | `sparkles-v6-task-out` |
+| Pub/Sub topic – worker control input    | `sparkles-v6-task-in`  |
 
 ---
 
 ## Datastore Collections
 
-### SparklesV5Cluster
+### SparklesV6Cluster
 
 One document per compute cluster. Written once when the cluster starts.
 
@@ -50,11 +50,11 @@ One document per compute cluster. Written once when the cluster starts.
 | `machine_type` | string    | yes     | GCE machine type label (e.g. `n1-standard-4`) |
 | `created_at`   | timestamp | yes     | UTC time the cluster was registered           |
 
-**Key**: `NameKey("SparklesV5Cluster", cluster_id)`
+**Key**: `NameKey("SparklesV6Cluster", cluster_id)`
 
 ---
 
-### SparklesV5Job
+### SparklesV6Job
 
 One document per submitted job. Written when the job is created and updated as
 its status changes.
@@ -72,11 +72,11 @@ its status changes.
 | `max_preemptable_attempts` | int32     | yes     | Maximum times a task may be preempted before being failed                    |
 | `target_node_count`        | int32     | yes     | Target number of worker nodes for this job                                   |
 
-**Key**: `NameKey("SparklesV5Job", job_id)`
+**Key**: `NameKey("SparklesV6Job", job_id)`
 
 ---
 
-### SparklesV5Task
+### SparklesV6Task
 
 One document per task. Written when the task is created and updated at each
 status transition.
@@ -87,7 +87,7 @@ status transition.
 | `task_index`         | int64         | yes     | Zero-based position within the job                                |
 | `job_id`             | string        | yes     | Parent job ID                                                     |
 | `cluster_id`         | string        | yes     | ID of the cluster owning this task                                |
-| `status`             | string        | yes     | Current status (Similar to those for SparklesV5Job)               |
+| `status`             | string        | yes     | Current status (Similar to those for SparklesV6Job)               |
 | `owner`              | string        | yes     | Worker ID currently holding the task (empty if not claimed)       |
 | `last_updated`       | timestamp     | yes     | UTC time of most recent status change                             |
 | `failure_reason`     | string        | yes     | Human-readable failure message (present when status is `failed`)  |
@@ -101,7 +101,7 @@ status transition.
 | `log_url`            | string        | no      | GCS URL for the task's stdout/stderr log                          |
 | `history`            | []TaskHistory | no      | Ordered list of all status transitions (noindex – embedded slice) |
 
-**Key**: `NameKey("SparklesV5Task", task_id)`
+**Key**: `NameKey("SparklesV6Task", task_id)`
 
 #### TaskHistory (embedded in Task.history)
 
@@ -114,12 +114,12 @@ status transition.
 
 ---
 
-### SparklesV5Event
+### SparklesV6Event
 
 Immutable event log. One document is appended for every significant lifecycle
 event. Events are never updated; they accumulate and expire after 7 days.
 
-**Key**: `NameKey("SparklesV5Event", event_id)` where `event_id` is a UUID.
+**Key**: `NameKey("SparklesV6Event", event_id)` where `event_id` is a UUID.
 
 #### Common fields on every event
 
@@ -246,7 +246,7 @@ All fields below are indexed unless marked **noindex**.
 
 ## Pub/Sub Topics
 
-### `sparkles-events` — Lifecycle Notifications
+### `sparkles-v6-events` — Lifecycle Notifications
 
 **Direction**: workers → dashboard backend (and any other consumers)
 
@@ -263,11 +263,11 @@ The `type` attribute enables server-side Pub/Sub filter expressions, allowing
 subscribers to receive only the event types they care about (e.g.
 `attributes.type = "job_started" OR attributes.type = "task_claimed"`).
 
-One message is published for every event written to `SparklesV5Event`.
+One message is published for every event written to `SparklesV6Event`.
 
 ---
 
-### `sparkles-task-out` — Task Metric and Log Output
+### `sparkles-v6-task-out` — Task Metric and Log Output
 
 **Direction**: worker nodes → dashboard
 
@@ -356,7 +356,7 @@ so that clients can confirm the command was received.
 
 ---
 
-### `sparkles-task-in` — Worker Control Input
+### `sparkles-v6-task-in` — Worker Control Input
 
 **Direction**: dashboard backend → worker nodes
 
@@ -369,7 +369,7 @@ present as message **attributes** to support server-side filtering.
 #### `start_publishing` — Request metric/log streaming
 
 Sent by the backend when a client creates a task subscription. The worker should
-begin publishing `metric_update` and `log_update` messages to `sparkles-task-out`
+begin publishing `metric_update` and `log_update` messages to `sparkles-v6-task-out`
 after receiving this.
 
 ```json
@@ -390,7 +390,7 @@ after receiving this.
 ### Lifecycle subscriptions (lifecycle events)
 
 1. Client calls `POST /api/v1/subscription` on the dashboard backend.
-2. Backend creates a Pub/Sub subscription on `sparkles-events` with:
+2. Backend creates a Pub/Sub subscription on `sparkles-v6-events` with:
    - A `sparkles-{random_id}` subscription name.
    - A 24-hour message retention and TTL (so abandoned subscriptions self-clean).
    - An optional filter expression built from the `types` query parameter.
@@ -405,9 +405,9 @@ after receiving this.
 ### Task metric/log subscriptions
 
 1. Client calls `POST /api/v1/task/{task_id}/subscription`.
-2. Backend creates a Pub/Sub subscription on `sparkles-task-out` filtered to
+2. Backend creates a Pub/Sub subscription on `sparkles-v6-task-out` filtered to
    `attributes.task_id = "{task_id}"`.
-3. Backend publishes a `start_publishing` control message to `sparkles-task-in`.
+3. Backend publishes a `start_publishing` control message to `sparkles-v6-task-in`.
 4. Backend returns the same `{ subscription_id, pull_url, ack_url, authorization_token }` shape as above.
 5. Client pulls directly from the GCP Pub/Sub REST API.
 6. Client calls `POST /api/v1/task/{task_id}/subscription/{subscription_id}/unsubscribe`
@@ -436,7 +436,7 @@ job-{YYYYMMDD-HHMMSS}-{6_char_uuid_prefix}
 
 ## Event Expiry
 
-Events in `SparklesV5Event` are written with an `expiry` field set to 7 days
+Events in `SparklesV6Event` are written with an `expiry` field set to 7 days
 after the event timestamp. This field should be used as the basis for a Datastore
 TTL policy so that old events are deleted automatically. No other collections have
 automatic expiry.

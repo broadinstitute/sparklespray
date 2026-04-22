@@ -59,7 +59,7 @@ def verify(
     blob_name = f"{blob_prefix}gcp-verify-{random_string(10)}.tmp"
     sub_id = f"gcp-verify-{random_string(10)}"
     subscription_path = f"projects/{project}/subscriptions/{sub_id}"
-    topic_path = f"projects/{project}/topics/sparkles-task-out"
+    topic_path = f"projects/{project}/topics/sparkles-v6-task-out"
     entity_key_name = f"gcp-verify-{random_string(10)}"
 
     failures = []
@@ -182,7 +182,7 @@ def _gcs_delete(bucket, blob_name: str):
 
 
 def _datastore_write_delete(client: datastore.Client, key_name: str):
-    key = client.key("SparklesVerify", key_name)
+    key = client.key("SparklesV6Verify", key_name)
     entity = datastore.Entity(key=key)
     entity["verify"] = True
     client.put(entity)

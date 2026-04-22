@@ -5,7 +5,7 @@ Usage:
     datastore_helper.py set --project <project> --in <json_file>
     datastore_helper.py wait-for-indexes --project <project>
 
-The entity is stored with Kind='SparklesProjectConfig', id='SparklesProjectConfig'.
+The entity is stored with Kind='SparklesV6ProjectConfig', id='SparklesV6ProjectConfig'.
 Authentication uses the access token in the GCP_ACCESS_TOKEN environment variable.
 """
 
@@ -20,8 +20,8 @@ from google.cloud.datastore_admin_v1 import DatastoreAdminClient
 from google.cloud.datastore_admin_v1.types import Index
 from google.oauth2.credentials import Credentials
 
-_KIND = "SparklesProjectConfig"
-_ENTITY_ID = "SparklesProjectConfig"
+_KIND = "SparklesV6ProjectConfig"
+_ENTITY_ID = "SparklesV6ProjectConfig"
 
 
 def _get_token() -> str:

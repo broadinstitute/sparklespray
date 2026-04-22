@@ -20,15 +20,15 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 
-const EventCollection = "SparklesV5Event"
-const ClusterCollection = "SparklesV5Cluster"
-const JobCollection = "SparklesV5Job"
-const TaskCollection = "SparklesV5Task"
+const EventCollection = "SparklesV6Event"
+const ClusterCollection = "SparklesV6Cluster"
+const JobCollection = "SparklesV6Job"
+const TaskCollection = "SparklesV6Task"
 const EventExpiry = 7 * 24 * time.Hour
 
-const TopicLifecycle = "sparkles-events"
-const TopicTaskOut = "sparkles-task-out"
-const TopicTaskIn = "sparkles-task-in"
+const TopicLifecycle = "sparkles-v6-events"
+const TopicTaskOut = "sparkles-v6-task-out"
+const TopicTaskIn = "sparkles-v6-task-in"
 
 var failureReasons = []string{
 	"out of memory",

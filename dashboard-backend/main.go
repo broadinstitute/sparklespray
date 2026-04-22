@@ -21,16 +21,16 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 
-const EventCollection = "SparklesV5Event"
-const ClusterCollection = "SparklesV5Cluster"
-const JobCollection = "SparklesV5Job"
-const TaskCollection = "SparklesV5Task"
+const EventCollection = "SparklesV6Event"
+const ClusterCollection = "SparklesV6Cluster"
+const JobCollection = "SparklesV6Job"
+const TaskCollection = "SparklesV6Task"
 const DefaultLimit = 1000
 const MaxLimit = 10000
 
-const topicLifecycle = "sparkles-events"
-const topicTaskOut = "sparkles-task-out"
-const topicTaskIn = "sparkles-task-in"
+const topicLifecycle = "sparkles-v6-events"
+const topicTaskOut = "sparkles-v6-task-out"
+const topicTaskIn = "sparkles-v6-task-in"
 
 var dsClient *datastore.Client
 var psClient *pubsub.Client

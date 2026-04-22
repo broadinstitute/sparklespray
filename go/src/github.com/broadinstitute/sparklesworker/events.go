@@ -11,9 +11,9 @@ import (
 	"github.com/google/uuid"
 )
 
-const EventCollection = "SparklesV5Event"
-const ClusterCollection = "SparklesV5Cluster"
-const TopicLifecycle = "sparkles-events"
+const EventCollection = "SparklesV6Event"
+const ClusterCollection = "SparklesV6Cluster"
+const TopicLifecycle = "sparkles-v6-events"
 const EventExpiry = 7 * 24 * time.Hour
 
 type Cluster struct {

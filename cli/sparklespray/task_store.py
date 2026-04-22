@@ -17,7 +17,7 @@ STATUS_KILLED = "killed"
 
 INCOMPLETE_TASK_STATES = set([STATUS_RUNNING, STATUS_PENDING])
 
-TASK_COLLECTION = "SparklesV5Task"
+TASK_COLLECTION = "SparklesV6Task"
 
 
 def is_terminal_status(status):

@@ -16,8 +16,8 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 
-const TopicTaskOut = "sparkles-task-out"
-const TopicTaskIn = "sparkles-task-in"
+const TopicTaskOut = "sparkles-v6-task-out"
+const TopicTaskIn = "sparkles-v6-task-in"
 
 type VolumeUsage struct {
 	Location string  `json:"location"`

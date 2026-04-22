@@ -124,7 +124,7 @@ class SafeRemoteCaller:
 
 class LogMonitor:
     def __init__(self, datastore_client, node_address, task_id):
-        entity_key = datastore_client.key("ClusterKeys", "sparklespray")
+        entity_key = datastore_client.key("SparklesV6ClusterKeys", "sparklespray")
         entity = datastore_client.get(entity_key)
 
         cert = entity["cert"]

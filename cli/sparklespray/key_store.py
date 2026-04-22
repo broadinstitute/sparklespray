@@ -11,14 +11,14 @@ class KeyStore:
         self.client = client
 
     def get_cert_and_key(self) -> Tuple[Optional[bytes], Optional[bytes]]:
-        entity_key = self.client.key("ClusterKeys", "sparklespray")
+        entity_key = self.client.key("SparklesV6ClusterKeys", "sparklespray")
         entity = self.client.get(entity_key)
         if entity is None:
             return None, None
         return entity["cert"], entity["private_key"]
 
     def set_cert_and_key(self, cert: bytes, key: bytes):
-        entity_key = self.client.key("ClusterKeys", "sparklespray")
+        entity_key = self.client.key("SparklesV6ClusterKeys", "sparklespray")
         entity = datastore.Entity(
             key=entity_key,
             exclude_from_indexes=("cert", "private_key", "shared_secret"),

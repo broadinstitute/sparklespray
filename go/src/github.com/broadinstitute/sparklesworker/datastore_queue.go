@@ -24,7 +24,7 @@ func CreateDataStoreQueue(client *datastore.Client, cluster string, owner string
 	return &DataStoreQueue{client: client, cluster: cluster, owner: owner, monitorAddress: monitorAddress, InitialClaimRetry: InitialClaimRetry, ClaimTimeout: ClaimTimeout, eventWriter: eventWriter}, nil
 }
 
-const TaskCollection = "SparklesV5Task"
+const TaskCollection = "SparklesV6Task"
 
 func getTasks(ctx context.Context, client *datastore.Client, cluster string, status string, maxFetch int) ([]*Task, error) {
 	q := datastore.NewQuery(TaskCollection).FilterField("cluster_id", "=", cluster).FilterField("status", "=", status).Limit(maxFetch)
@@ -89,7 +89,7 @@ func (q *DataStoreQueue) claimTask(ctx context.Context) (*Task, error) {
 }
 
 func (q *DataStoreQueue) isJobKilled(ctx context.Context, jobID string) (bool, error) {
-	jobKey := datastore.NameKey("SparklesV5Job", jobID, nil)
+	jobKey := datastore.NameKey("SparklesV6Job", jobID, nil)
 	var job Job
 	err := q.client.Get(ctx, jobKey, &job)
 	if err != nil {

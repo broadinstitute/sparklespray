@@ -18,6 +18,8 @@ FINAL_NODE_STATES = set([NODE_REQ_FAILED, NODE_REQ_COMPLETE])
 NODE_REQ_CLASS_PREEMPTIVE = "preemptable"
 NODE_REQ_CLASS_NORMAL = "normal"
 
+NODE_REQ_COLLECTION = "SparklesV6NodeReq"
+
 
 def is_terminal_state(status: str):
     return status in FINAL_NODE_STATES
@@ -36,7 +38,7 @@ class NodeReq:
 
 def node_req_to_entity(client: datastore.Client, o: NodeReq) -> datastore.Entity:
     assert o.operation_id is not None
-    entity_key = client.key("NodeReq", o.operation_id)
+    entity_key = client.key(NODE_REQ_COLLECTION, o.operation_id)
     entity = datastore.Entity(key=entity_key)
     entity["cluster_id"] = o.cluster_id
     entity["job_id"] = o.job_id

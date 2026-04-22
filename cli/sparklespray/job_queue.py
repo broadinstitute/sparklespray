@@ -195,7 +195,7 @@ class JobQueue:
 
         self.task_storage.delete(job_id, batch=batch)
 
-        job_key = self.client.key("SparklesV5Job", job_id)
+        job_key = self.client.key("SparklesV6Job", job_id)
         entity_job = self.client.get(job_key)
         assert entity_job is not None, f"Could not get from datastore: {job_key}"
 

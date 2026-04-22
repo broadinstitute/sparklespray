@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Dump SparklesV5Task documents with a specific job_id to JSON."""
+"""Dump SparklesV6Task documents with a specific job_id to JSON."""
 
 import json
 from google.cloud import datastore
@@ -12,7 +12,7 @@ def main():
 
     client = datastore.Client(project=project)
 
-    query = client.query(kind="SparklesV5Task")
+    query = client.query(kind="SparklesV6Task")
     query.add_filter("job_id", "=", job_id)
 
     tasks = []

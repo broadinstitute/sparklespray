@@ -409,7 +409,7 @@ func consume(c *cli.Context) error {
 
 	monitorAddress := ""
 	if port != "" {
-		entityKey := datastore.NameKey("ClusterKeys", "sparklespray", nil)
+		entityKey := datastore.NameKey("SparklesV6ClusterKeys", "sparklespray", nil)
 		var clusterKeys ClusterKeys
 		err := dsClient.Get(ctx, entityKey, &clusterKeys)
 		if err != nil {
