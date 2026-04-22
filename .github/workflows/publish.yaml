@@ -1,0 +1,62 @@
+name: publish
+
+on:
+  workflow_run:
+    workflows: ["build"]
+    types: [completed]
+    branches: [main]
+
+env:
+  PYTHON_VERSION: "3.11"
+  POETRY_VERSION: "1.4.2"
+
+jobs:
+  publish-package:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Set up poetry
+        uses: abatilo/actions-poetry@v2
+        with:
+          poetry-version: ${{ env.POETRY_VERSION }}
+
+      - name: Install Google Artifact Registry keyring
+        run: poetry self add keyrings.google-artifactregistry-auth
+
+      - name: Configure public-python repository
+        run: poetry config repositories.public-python https://us-central1-python.pkg.dev/cds-artifacts/public-python/
+
+      - name: Write GCP service account credentials
+        run: echo '${{ secrets.GCP_SVC_ACCT }}' > /tmp/gcp-key.json
+
+      # the strategy here is to always bump the patch number. This
+      # ensures we always have a unique version, although admittedly,
+      # doesn't give us proper semanticly versioned builds. However,
+      # we can use the policy: if someone makes an non-patch change
+      # they should manually bump the version as part of the commit
+      - name: Tag the repo
+        run: |
+          cd cli
+          poetry version patch
+          VERSION=$(poetry version --short)
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add pyproject.toml
+          git commit -m "bumped version to v$VERSION"
+          git tag "v$VERSION"
+          git push origin "v$VERSION"
+
+      - name: Publish package
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: /tmp/gcp-key.json
+        run: poetry publish --build --repository public-python
+        working-directory: cli
