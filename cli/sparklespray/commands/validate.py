@@ -9,6 +9,7 @@ from ..job_store import JobStore, Job, JOB_STATUS_KILLED
 from datetime import datetime, timezone
 from ..config import Config
 from ..batch_api import ClusterAPI
+import time
 
 
 def _test_datastore_api(job_store: JobStore, job_id: str):
@@ -31,7 +32,7 @@ def _test_datastore_api(job_store: JobStore, job_id: str):
     job_store.delete(job_id)
 
 
-def validate_cmd(jq: JobQueue, io: IO, config: Config, cluster_api: ClusterAPI):
+def validate_cmd(jq: JobQueue, io: IO, config: Config, cluster_api: ClusterAPI, args):
     print(f"Validating config, using sparklespray {sparklespray.__version__}")
 
     service_acct = config.credentials.service_account_email  # pyright: ignore
@@ -57,10 +58,19 @@ def validate_cmd(jq: JobQueue, io: IO, config: Config, cluster_api: ClusterAPI):
     from ..batch_api import is_job_complete, is_job_successful
     from ..gcp_utils import make_unique_label
 
+    if args.image:
+        image = args.image
+    elif config.default_image is not None:
+        image = config.default_image
+    else:
+        raise Exception(
+            "No image specified. Either add default_image to config or provide image via --image parameter"
+        )
+
     job = create_test_job(
         "validate-test",
         make_unique_label("cluster"),
-        config.default_image,
+        image,
         service_acct,
         config,
     )
@@ -84,5 +94,11 @@ def validate_cmd(jq: JobQueue, io: IO, config: Config, cluster_api: ClusterAPI):
 def add_validate_cmd(subparser):
     parser = subparser.add_parser(
         "validate", help="Run a series of tests to confirm the configuration is valid"
+    )
+    parser.add_argument(
+        "-i",
+        "--image",
+        default=None,
+        help="Docker image to use for the test job (overrides default_image in config)",
     )
     parser.set_defaults(func=validate_cmd)

@@ -512,8 +512,12 @@ def submit_cmd(
 
     if args.image:
         image = args.image
-    else:
+    elif config.default_image is not None:
         image = config.default_image
+    else:
+        raise Exception(
+            "No docker image specified. Either default_image should be specified in config or --image specified when submitting job"
+        )
 
     boot_volume = config.boot_volume
     default_url_prefix = config.default_url_prefix
