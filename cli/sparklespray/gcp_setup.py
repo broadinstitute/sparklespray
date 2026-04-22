@@ -528,7 +528,15 @@ def build_and_push_image(worker_docker_image, worker_dockerfile_path, dry_run):
             shutil.copytree(worker_dockerfile_path, go_code_dir)
             create_embedded_cert_bundle(go_code_dir)
             subprocess.run(
-                ["docker", "build", ".", "-t", worker_docker_image],
+                [
+                    "docker",
+                    "build",
+                    ".",
+                    "--platform",
+                    "linux/amd64",
+                    "-t",
+                    worker_docker_image,
+                ],
                 cwd=go_code_dir,
                 check=True,
             )
