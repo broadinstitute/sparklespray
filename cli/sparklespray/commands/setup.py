@@ -44,8 +44,8 @@ def add_setup_cmd(subparser):
     )
     parser.add_argument(
         "--worker-dockerfile-path",
-        help="path to the directory which contains the sparkles worker code and Dockerfile",
-        required=True,
+        help="path to the directory which contains the sparkles worker code and Dockerfile (defaults to embedded copy)",
+        default=None,
     )
     parser.add_argument(
         "--image-for-job",

@@ -24,7 +24,7 @@ def add_prep_image_cmd(subparser):
     )
     parser.add_argument(
         "--worker-dockerfile-path",
-        help="Path to directory containing Dockerfile and go code used to build sparklesworker",
-        required=True,
+        help="Path to directory containing Dockerfile and go code used to build sparklesworker (defaults to embedded copy)",
+        default=None,
     )
     parser.set_defaults(func=prep_image_cmd)

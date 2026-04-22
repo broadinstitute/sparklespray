@@ -30,7 +30,7 @@ from sparklespray import __version__
 class SetupOptions:
     project: str
     region: str
-    worker_dockerfile_path: str
+    worker_dockerfile_path: Optional[str]
     dry_run: bool
     url_prefix: Optional[str]
     service_account: Optional[str]
@@ -511,17 +511,22 @@ def _write_sparkles_config(
         print(f"Wrote sparkles config to {path}")
 
 
+def get_embedded_worker_path():
+    return os.path.join(os.path.dirname(__file__), "worker")
+
+
 def build_and_push_image(worker_docker_image, worker_dockerfile_path, dry_run):
+    if worker_dockerfile_path is None:
+        worker_dockerfile_path = get_embedded_worker_path()
     if dry_run:
         print(
             f"[dry run] Skipping build in {worker_dockerfile_path} and push of {worker_docker_image}"
         )
     else:
         with tempfile.TemporaryDirectory() as tmpdir:
-            # make a copy of the go code and docker file
             go_code_dir = os.path.join(tmpdir, "staged")
             shutil.copytree(worker_dockerfile_path, go_code_dir)
-            create_embedded_cert_bundle(worker_dockerfile_path)
+            create_embedded_cert_bundle(go_code_dir)
             subprocess.run(
                 ["docker", "build", ".", "-t", worker_docker_image],
                 cwd=go_code_dir,
@@ -650,7 +655,7 @@ def setup_dashboard_user_service_account(project_id: str, dry_run: bool):
 
 
 def setup_pubsub_topics(project_id: str, dry_run: bool):
-    for topic in ["sparkles-task-in", "sparkles-task-out", "sparkles-events"]:
+    for topic in ["sparkles-v6-task-in", "sparkles-v6-task-out", "sparkles-v6-events"]:
         gcloud(
             ["pubsub", "topics", "create", topic, f"--project={project_id}"],
             dry_run,
