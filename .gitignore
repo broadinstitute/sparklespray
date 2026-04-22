@@ -46,3 +46,4 @@ events.json
 bin/
 dashboard-backend/sparklespray-dashboard-backend
 simulator/sparklespray-simulator
+fake-home/
