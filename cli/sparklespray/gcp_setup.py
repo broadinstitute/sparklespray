@@ -4,6 +4,9 @@ import tempfile
 from contextlib import contextmanager
 from importlib import resources
 import sys
+import certifi
+import shutil
+from .config import get_default_key_path
 
 from sparklespray.gcp_permissions import parse_docker_image_name, ArtifactRegistryPath
 from sparklespray.util import random_string
@@ -33,6 +36,7 @@ class SetupOptions:
     service_account: Optional[str]
     worker_docker_image: Optional[str]
     images_for_jobs: list[str]
+    write_config: Optional[str] = None
 
 
 services_to_add = [
@@ -55,6 +59,7 @@ roles_to_add = [
     "roles/compute.admin",
     "roles/artifactregistry.createOnPushWriter",
     "roles/batch.admin",
+    "roles/editor",
 ]
 
 
@@ -65,6 +70,7 @@ def _run_cmd(
     max_attempts=10,
     success_if_output_contains=None,
     dry_run=False,
+    env=None,
 ):
     attempt = 0
 
@@ -75,7 +81,8 @@ def _run_cmd(
         print(f"[dry run] {cmd_str}")
         return
 
-    env = os.environ.copy()
+    if env is None:
+        env = os.environ.copy()
     env["PYTHONUNBUFFERED"] = "1"
 
     while attempt < max_attempts:
@@ -303,12 +310,25 @@ def setup_datastore(project_id: str, region: str, dry_run: bool):
         dry_run,
         success_if_output_contains="Database already exists",
     )
-
-
-from .config import get_default_key_path
+    gcloud(
+        [
+            "datastore",
+            "indexes",
+            "create",
+            os.path.join(os.path.dirname(__file__), "index.yaml"),
+            f"--project={project_id}",
+        ],
+        dry_run,
+    )
 
 
 def setup_project(options: SetupOptions):
+    # setup only runs commands but does not directly use google cloud APIs. This is largely
+    # because we want the operations to occur using the user's gcloud credentials. Also, it
+    # has been observed that making datastore API requests results in weird hangs in subsequent
+    # calls to subprocess.run. Not fully understood why, but to work around, put any cloud API
+    # calls into a separate script and run via subprocess to keep processes insulated from one
+    # another.
     project_id = options.project
     dry_run = options.dry_run
     region = options.region
@@ -369,6 +389,18 @@ def setup_project(options: SetupOptions):
 
     setup_pubsub_topics(project_id, dry_run)
     setup_datastore(project_id, region, dry_run)
+    _run_cmd(
+        sys.executable,
+        [
+            "-m",
+            "sparklespray.datastore_helper",
+            "wait-for-indexes",
+            "--project",
+            project_id,
+        ],
+        dry_run=dry_run,
+        env=_datastore_helper_env(),
+    )
     setup_firewall(project_id, dry_run)
 
     store_sparkles_project_settings(
@@ -403,6 +435,19 @@ def setup_project(options: SetupOptions):
         ],
         dry_run,
     )
+    # allow `service_account` to attach itself as the identity for Batch job VMs
+    gcloud(
+        [
+            "iam",
+            "service-accounts",
+            "add-iam-policy-binding",
+            service_account,
+            f"--member=serviceAccount:{service_account}",
+            "--role=roles/iam.serviceAccountUser",
+            f"--project={project_id}",
+        ],
+        dry_run,
+    )
 
     def run_verify(key_file):
         print("Verifying permissions and services are set up correctly")
@@ -431,6 +476,40 @@ def setup_project(options: SetupOptions):
     else:
         run_verify(key_path)
 
+    if options.write_config:
+        _write_sparkles_config(
+            options.write_config,
+            project_id,
+            region,
+            url_prefix,
+            worker_docker_image,
+            dry_run,
+        )
+
+
+def _write_sparkles_config(
+    path: str,
+    project_id: str,
+    region: str,
+    url_prefix: str,
+    worker_docker_image: str,
+    dry_run: bool,
+):
+    content = (
+        "[config]\n"
+        f"default_url_prefix={url_prefix}\n"
+        f"project={project_id}\n"
+        f"region={region}\n"
+        "machine_type=n2-standard-2\n"
+        f"sparklesworker_image={worker_docker_image}\n"
+    )
+    if dry_run:
+        print(f"[dry run] Would write config to {path}:\n{content}")
+    else:
+        with open(path, "w") as f:
+            f.write(content)
+        print(f"Wrote sparkles config to {path}")
+
 
 def build_and_push_image(worker_docker_image, worker_dockerfile_path, dry_run):
     if dry_run:
@@ -438,12 +517,38 @@ def build_and_push_image(worker_docker_image, worker_dockerfile_path, dry_run):
             f"[dry run] Skipping build in {worker_dockerfile_path} and push of {worker_docker_image}"
         )
     else:
-        subprocess.run(
-            ["docker", "build", ".", "-t", worker_docker_image],
-            cwd=worker_dockerfile_path,
-            check=True,
-        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # make a copy of the go code and docker file
+            go_code_dir = os.path.join(tmpdir, "staged")
+            shutil.copytree(worker_dockerfile_path, go_code_dir)
+            create_embedded_cert_bundle(worker_dockerfile_path)
+            subprocess.run(
+                ["docker", "build", ".", "-t", worker_docker_image],
+                cwd=go_code_dir,
+                check=True,
+            )
         subprocess.run(["docker", "push", worker_docker_image], check=True)
+
+
+def create_embedded_cert_bundle(go_root):
+    cert_go_path = os.path.join(
+        go_root, "src/github.com/broadinstitute/sparklesworker/certs.go"
+    )
+    assert os.path.exists(cert_go_path), f"Expected path to exist: {cert_go_path}"
+    with open(cert_go_path, "wt") as o:
+        # write out the
+        with open(certifi.where()) as fd:
+            o.write(
+                f"// autogenerated from create_cert_bundle() in gcp_setup.py using {certifi.__version__}\n"
+            )
+            o.write(
+                """
+package sparklesworker
+
+const pemCerts = `"""
+            )
+            o.write(fd.read())
+            o.write("`\n")
 
 
 def create_artifact_registry_docker_repo(project_id, region, repo_name, dry_run):
@@ -462,13 +567,67 @@ def create_artifact_registry_docker_repo(project_id, region, repo_name, dry_run)
     )
 
 
+def _get_gcloud_access_token() -> str:
+    return subprocess.check_output(
+        ["gcloud", "auth", "print-access-token"], text=True
+    ).strip()
+
+
+def _datastore_helper_env() -> dict:
+    env = os.environ.copy()
+    env["GCP_ACCESS_TOKEN"] = _get_gcloud_access_token()
+    return env
+
+
 def get_sparkles_project_settings(project_id):
-    print("warning: get_sparkles_project_settings is a no-op")
-    return {}
+    with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
+        out_path = f.name
+    try:
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "sparklespray.datastore_helper",
+                "get",
+                "--project",
+                project_id,
+                "--out",
+                out_path,
+            ],
+            capture_output=True,
+            text=True,
+            env=_datastore_helper_env(),
+        )
+        if result.returncode != 0:
+            # Entity may not exist yet (first run)
+            return {}
+        with open(out_path) as f:
+            return json.load(f)
+    finally:
+        os.unlink(out_path)
 
 
 def store_sparkles_project_settings(project_id, settings, dry_run):
-    print("warning: store_sparkles_project_settings is a no-op")
+    with tempfile.NamedTemporaryFile(suffix=".json", delete=False, mode="w") as f:
+        json.dump(settings, f)
+        in_path = f.name
+    try:
+        _run_cmd(
+            sys.executable,
+            [
+                "-m",
+                "sparklespray.datastore_helper",
+                "set",
+                "--project",
+                project_id,
+                "--in",
+                in_path,
+            ],
+            dry_run=dry_run,
+            env=_datastore_helper_env(),
+        )
+    finally:
+        os.unlink(in_path)
 
 
 def create_bucket(project_id, bucket, region, dry_run):
@@ -534,37 +693,3 @@ def grant_access(service_account_name, parsed: ArtifactRegistryPath, dry_run):
         ],
         dry_run,
     )
-
-
-# def setup_bucket(project_id, bucket_name, dry_run):
-#     credentials = service_account.Credentials.from_service_account_file(
-#         service_account_key, scopes=SCOPES
-#     )
-
-#     client = GSClient(project_id, credentials)
-#     bucket = client.bucket(bucket_name)
-
-#     attempt = 1
-#     max_attempts = 100
-#     while True:
-#         try:
-#             needs_create = not bucket.exists()
-#             break
-#         except (Forbidden, RefreshError):
-#             attempt += 1
-#             if attempt > max_attempts:
-#                 raise Exception(
-#                     "Too many attempts. There's probably something else wrong with permissions"
-#                 )
-#             print(
-#                 "Attempt {} out of {}: Got a Forbidden except accessing bucket {} with service account -- may just be a delay in permissions being applied. (It can take a few minutes for this to take effect) Retrying in 15 seconds...".format(
-#                     attempt, max_attempts, bucket_name
-#                 )
-#             )
-#             time.sleep(15)
-
-#     if needs_create:
-#         print(f"Bucket {bucket_name} does not exist. Creating...")
-#         bucket.create()
-#     else:
-#         print(f"Found existing bucket named {bucket_name}. Skipping creation")

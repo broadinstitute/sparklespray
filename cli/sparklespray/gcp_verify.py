@@ -7,6 +7,8 @@ import time
 from google.auth import impersonated_credentials
 from google.cloud import datastore, pubsub_v1, storage
 from google.cloud.batch_v1alpha.services.batch_service import BatchServiceClient
+from google.cloud.batch_v1alpha import types as batch
+from google.cloud.batch_v1alpha import types as batch
 from google.oauth2 import service_account
 
 from sparklespray.config import SCOPES
@@ -189,9 +191,8 @@ def _datastore_write_delete(client: datastore.Client, key_name: str):
 
 def _batch_list_jobs(batch_client: BatchServiceClient, project: str):
     pager = batch_client.list_jobs(
-        parent=f"projects/{project}/locations/-", page_size=5
+        batch.ListJobsRequest(parent=f"projects/{project}/locations/-", page_size=5)
     )
-    # consume first page to confirm access
     for _ in zip(pager, range(5)):
         pass
 

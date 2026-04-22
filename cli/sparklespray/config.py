@@ -77,7 +77,7 @@ class PrepConfig:
 @dataclass
 class Config:
     sparkles_config_path: str
-    default_image: str
+    default_image: Optional[str]
     machine_type: str
     cas_url_prefix: str
     default_url_prefix: str
@@ -229,7 +229,6 @@ def load_config(
     required_properties = [
         "default_url_prefix",
         "project",
-        "default_image",
         "machine_type",
         "region",
     ]
@@ -407,6 +406,13 @@ class LazyInit:
 from google.cloud.compute_v1.services.instances import InstancesClient
 
 
+def _make_batch_client(credentials) -> BatchServiceClient:
+    print(
+        f"Connecting to Batch API as {credentials.service_account_email}"
+    )  # pyright: ignore
+    return BatchServiceClient(credentials=credentials)
+
+
 def create_services_from_config(config: Config, requested: List[str]):
     credentials = config.credentials
     project_id = config.project
@@ -423,9 +429,7 @@ def create_services_from_config(config: Config, requested: List[str]):
             project_id, credentials=credentials
         ),
         io=lambda services: IO(project_id, config.cas_url_prefix, credentials),
-        batch_service_client=lambda services: BatchServiceClient(
-            credentials=credentials
-        ),
+        batch_service_client=lambda services: _make_batch_client(credentials),
         compute_engine_client=lambda services: InstancesClient(credentials=credentials),
         cluster_api=lambda services: ClusterAPI(
             services.get("batch_service_client"), services.get("compute_engine_client")

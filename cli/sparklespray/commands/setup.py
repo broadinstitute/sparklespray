@@ -13,6 +13,7 @@ def setup_cmd(args):
         region=args.region,
         worker_dockerfile_path=args.worker_dockerfile_path,
         images_for_jobs=[] if args.image_for_job is None else args.image_for_job,
+        write_config=args.write_config,
     )
     setup_project(options)
 
@@ -50,5 +51,10 @@ def add_setup_cmd(subparser):
         "--image-for-job",
         action="append",
         help="A docker image that we want to use in a job submission (specified so that any necessary grants can be made). This option can be specified multiple times",
+    )
+    parser.add_argument(
+        "--write-config",
+        metavar="sparkles_config_file",
+        help="If specified, write a sparkles .ini config file to this path at the end of setup",
     )
     parser.set_defaults(func=setup_cmd)
