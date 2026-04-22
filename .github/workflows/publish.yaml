@@ -5,6 +5,7 @@ on:
     workflows: ["build"]
     types: [completed]
     branches: [main]
+  workflow_dispatch:
 
 env:
   PYTHON_VERSION: "3.11"
@@ -13,7 +14,7 @@ env:
 jobs:
   publish-package:
     runs-on: ubuntu-latest
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     steps:
       - uses: actions/checkout@v4
         with:
