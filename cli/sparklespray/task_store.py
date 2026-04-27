@@ -7,7 +7,8 @@ from .datastore_batch import ImmediateBatch
 from dataclasses import dataclass
 from .log import log
 
-STATUS_RUNNING = "running"
+# TODO: change "claimed" -> "running"
+STATUS_RUNNING = "claimed"
 STATUS_CLAIMED = STATUS_RUNNING  # backwards-compat alias
 STATUS_PENDING = "pending"
 STATUS_FAILED = "failed"

@@ -181,12 +181,13 @@ class StreamLogs:
         failed_tasks = _only_failed_tasks(tasks)
         successful_tasks = _only_successful_tasks(tasks)
 
-        assert len(tasks) == len(failed_tasks) + len(
-            successful_tasks
-        ), "Everything should be either failed or completed by this point"
+        if len(tasks) != (len(failed_tasks) + len(successful_tasks)):
+            log.warning(
+                f"Everything should be either failed or completed by this point but there were {len(tasks)} overall, but there were {len(successful_tasks)} successful_tasks and {len(failed_tasks)} failed tasks"
+            )
 
         txtui.user_print(
-            f"Job finished. {len(successful_tasks)} tasks completed successfully, {len(failed_tasks)} tasks failed"
+            f"Printing final summary. {len(successful_tasks)} tasks completed successfully, {len(failed_tasks)} tasks failed"
         )
 
         if len(failed_tasks) > 0:

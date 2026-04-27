@@ -329,7 +329,7 @@ def run_workflow(
 
         try:
             sparkles.wait_for_completion(sub_job_name)
-        except UserError:
+        except KeyboardInterrupt:
             print(
                 f"User interrupted while waiting for waiting for job {sub_job_name} to complete"
             )
