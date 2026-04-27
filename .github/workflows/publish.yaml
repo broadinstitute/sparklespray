@@ -54,7 +54,7 @@ jobs:
           git add pyproject.toml
           git commit -m "bumped version to v$VERSION"
           git tag "v$VERSION"
-          git push origin "v$VERSION"
+          git push origin "v$VERSION" master
 
       - name: Publish package
         env:
