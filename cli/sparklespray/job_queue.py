@@ -24,8 +24,9 @@ from .datastore_batch import Batch
 import collections
 
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Dict, List
+import uuid
 
 
 def get_credentials(account, cred_file="~/.config/gcloud/credentials"):
@@ -189,6 +190,26 @@ class JobQueue:
         )
         self.job_storage.insert(job, batch=batch)
         batch.flush()
+
+        self._write_job_started_event(job_id, cluster, task_count)
+
+    def _write_job_started_event(self, job_id: str, cluster_id: str, task_count: int):
+        now = datetime.now(tz=timezone.utc)
+        event_id = str(uuid.uuid4())
+        key = self.client.key("SparklesV6Event", event_id)
+        entity = datastore.Entity(key=key)
+        entity.update(
+            {
+                "event_id": event_id,
+                "type": "job_started",
+                "job_id": job_id,
+                "cluster_id": cluster_id,
+                "task_count": task_count,
+                "timestamp": now,
+                "expiry": now + timedelta(days=7),
+            }
+        )
+        self.client.put(entity)
 
     def delete_job(self, job_id: str):
         batch = Batch(self.client)
