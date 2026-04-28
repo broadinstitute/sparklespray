@@ -161,6 +161,30 @@ func ConsumerRunLoop(ctx context.Context, queue Queue, sleepUntilNotify func(sle
 	return nil
 }
 
+func updateTaskClaimedForce(ctx context.Context, q *DataStoreQueue, task_id string, newOwner string, monitorAddress string) (*Task, error) {
+	now := time.Now().UTC()
+	event := TaskHistory{Timestamp: float64(now.UnixNano()) / 1e9,
+		Status: STATUS_CLAIMED,
+		Owner:  newOwner}
+
+	mutate := func(task *Task) bool {
+		task.History = append(task.History, &event)
+		task.Status = STATUS_CLAIMED
+		task.Owner = newOwner
+		task.MonitorAddress = monitorAddress
+		task.LastUpdated = now
+		return true
+	}
+
+	updatedTask, err := q.atomicUpdateTask(ctx, task_id, mutate)
+	if err != nil {
+		return nil, err
+	}
+
+	notifyTaskStatusChanged(updatedTask)
+	return updatedTask, nil
+}
+
 func updateTaskClaimed(ctx context.Context, q *DataStoreQueue, task_id string, newOwner string, monitorAddress string) (*Task, error) {
 	now := time.Now().UTC()
 	event := TaskHistory{Timestamp: float64(now.UnixNano()) / 1e9,

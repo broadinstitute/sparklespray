@@ -99,6 +99,44 @@ func (q *DataStoreQueue) isJobKilled(ctx context.Context, jobID string) (bool, e
 	return job.Status == JOB_STATUS_KILLED, nil
 }
 
+type SingleTaskQueue struct {
+	inner   *DataStoreQueue
+	taskID  string
+	claimed bool
+}
+
+func CreateSingleTaskQueue(inner *DataStoreQueue, taskID string) *SingleTaskQueue {
+	return &SingleTaskQueue{inner: inner, taskID: taskID}
+}
+
+func (q *SingleTaskQueue) claimTask(ctx context.Context) (*Task, error) {
+	if q.claimed {
+		return nil, nil
+	}
+	q.claimed = true
+
+	task, err := updateTaskClaimedForce(ctx, q.inner, q.taskID, q.inner.owner, q.inner.monitorAddress)
+	if err != nil {
+		return nil, err
+	}
+
+	if q.inner.eventWriter != nil {
+		if evErr := q.inner.eventWriter.WriteTaskClaimed(ctx, task.TaskID, task.JobID); evErr != nil {
+			return nil, evErr
+		}
+	}
+
+	return task, nil
+}
+
+func (q *SingleTaskQueue) isJobKilled(ctx context.Context, jobID string) (bool, error) {
+	return q.inner.isJobKilled(ctx, jobID)
+}
+
+func (q *SingleTaskQueue) atomicUpdateTask(ctx context.Context, task_id string, mutateTaskCallback func(task *Task) bool) (*Task, error) {
+	return q.inner.atomicUpdateTask(ctx, task_id, mutateTaskCallback)
+}
+
 func (q *DataStoreQueue) atomicUpdateTask(ctx context.Context, task_id string, mutateTaskCallback func(task *Task) bool) (*Task, error) {
 	var task Task
 	client := q.client

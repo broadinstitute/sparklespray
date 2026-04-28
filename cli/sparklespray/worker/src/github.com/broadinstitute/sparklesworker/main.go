@@ -55,6 +55,7 @@ func Main() error {
 				cli.BoolFlag{Name: "localhost", Usage: "If set, does not try to look up instance name and IP from metadata service, but assume it's localhost"},
 				cli.StringFlag{Name: "expectedVersion"},
 				cli.BoolFlag{Name: "pubsubDisable", Usage: "If set, disables Pub/Sub event publishing and metric streaming"},
+				cli.StringFlag{Name: "taskID", Usage: "If set, run only this specific task (ignoring its current status) and exit"},
 			},
 			Action: consume},
 		cli.Command{Name: "copyexe",
@@ -235,6 +236,7 @@ func consume(c *cli.Context) error {
 	expectedVersion := c.String("expectedVersion")
 	watchdogTimeout := time.Duration(c.Int("timeout")) * time.Minute
 	pubsubDisable := c.Bool("pubsubDisable")
+	taskID := c.String("taskID")
 
 	batchTaskIndex := os.Getenv("BATCH_TASK_INDEX")
 	if batchTaskIndex == "0" {
@@ -426,7 +428,15 @@ func consume(c *cli.Context) error {
 	}
 
 	var queue Queue
-	if tasksFile != "" {
+	if taskID != "" {
+		dsQueue, dsErr := CreateDataStoreQueue(dsClient, cluster, owner, options.InitialClaimRetry, options.ClaimTimeout, monitorAddress, eventWriter)
+		if dsErr != nil {
+			log.Printf("failed to initialize queue: %v\n", dsErr)
+			return dsErr
+		}
+		queue = CreateSingleTaskQueue(dsQueue, taskID)
+		options.MaxWaitForNewTasks = 0
+	} else if tasksFile != "" {
 		queue, err = CreatePreloadedQueue(tasksFile)
 	} else {
 		queue, err = CreateDataStoreQueue(dsClient, cluster, owner, options.InitialClaimRetry, options.ClaimTimeout, monitorAddress, eventWriter)
