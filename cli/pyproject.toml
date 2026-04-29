@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "sparklespray"
-version = "6.0.2"
+version = "6.1.0"
 description = "CLI for submitting batch jobs to GCP for execution"
 authors = ["Philip Montgomery <pmontgom@broadinstitute.org>"]
 include = ["sparklespray/bin/sparklesworker", "sparklespray/index.yaml", "sparklespray/worker/**"]
