@@ -1,6 +1,7 @@
 package sparklesworker
 
 import (
+	"fmt"
 	"log"
 	"time"
 
@@ -89,7 +90,6 @@ type Queue interface {
 
 type Executor func(taskId string, taskParam string) (string, error)
 
-
 func ConsumerRunLoop(ctx context.Context, queue Queue, sleepUntilNotify func(sleepTime time.Duration), executor Executor, SleepOnEmpty time.Duration, MaxWaitForNewTasks time.Duration) error {
 	firstClaim := true
 	lastClaim := time.Now()
@@ -127,7 +127,7 @@ func ConsumerRunLoop(ctx context.Context, queue Queue, sleepUntilNotify func(sle
 		jobKilled, err := queue.isJobKilled(ctx, claimed.JobID)
 		if err != nil {
 			log.Printf("Got error in isJobKilled for %s: %v", claimed.JobID, err)
-			return err
+			return fmt.Errorf("isJobKilled check failed: %s", err)
 		}
 
 		if !jobKilled {

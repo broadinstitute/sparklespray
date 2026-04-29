@@ -88,7 +88,6 @@ type ExecutionHooks struct {
 	OnExecComplete func(taskID string, usage *ResourceUsage, exitCode int64, downloadBytes, uploadBytes int64)
 }
 
-
 type stringset map[string]bool
 
 func copyFile(src, dst string) error {
@@ -212,7 +211,7 @@ func execCommand(command string, workdir string, stdout *os.File) (*ExecResult, 
 	exePath := "/bin/sh"
 
 	startTime := time.Now()
-	proc, err := os.StartProcess(exePath, []string{exePath, "-c", command}, attr)
+	proc, err := os.StartProcess(exePath, []string{exePath, "-c", "exec " + command}, attr)
 	if err != nil {
 		return nil, err
 	}
@@ -500,8 +499,7 @@ func executeTaskInDir(ioc IOClient, workdir string, taskId string, spec *TaskSpe
 }
 
 func executeTask(ioc IOClient, taskId string, taskSpec *TaskSpec, cacheDir string, tasksDir string, monitor *Monitor, hooks *ExecutionHooks) (string, error) {
-	//	log.Printf("Job spec (%s) of claimed task: %s", json_url, json.dumps(spec, indent=2))
-
+	log.Printf("Entered executeTask")
 	mode := os.FileMode(0700)
 	err := os.MkdirAll(tasksDir, mode)
 	if err != nil {
@@ -660,7 +658,7 @@ func loadTaskSpec(ioc IOClient, taskURL string) (*TaskSpec, error) {
 func ExecuteTaskFromUrl(ioc IOClient, taskId string, taskURL string, cacheDir string, tasksDir string, monitor *Monitor, hooks *ExecutionHooks) (string, error) {
 	taskSpec, err := loadTaskSpec(ioc, taskURL)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("Failed to read task spec from %s: %s", taskURL, err)
 	}
 
 	return executeTask(ioc, taskId, taskSpec, cacheDir, tasksDir, monitor, hooks)
