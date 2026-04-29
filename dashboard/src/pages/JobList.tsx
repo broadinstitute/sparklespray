@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { Link } from "react-router-dom";
-import { getJobs, getClusters } from "../data/events";
+import { getJobs, getClusters, getJobTaskStats } from "../data/events";
+import type { JobTaskStats } from "../data/events";
 import { useEvents, mergeEvents } from "../data/EventProvider";
 import type { AnyEvent } from "../types";
 
@@ -189,7 +190,38 @@ const styles = `
     color: #ddd;
     text-align: right;
   }
+
+  .jl-chip {
+    font-size: 0.68rem;
+    font-weight: 600;
+    border-radius: 4px;
+    padding: 1px 8px;
+    white-space: nowrap;
+    flex-shrink: 0;
+    background: #f0f0f0;
+    color: #777;
+    margin: 0 0.5rem;
+  }
+
+  .jl-chip-green {
+    background: #e8f5e9;
+    color: #2e7d32;
+  }
+
+  .jl-chip-red {
+    background: #ffebee;
+    color: #b71c1c;
+  }
 `;
+
+function JobChip({ stats }: { stats: JobTaskStats }) {
+  const label = `${stats.total} / ${stats.success} / ${stats.failure}`;
+  let cls = "jl-chip";
+  if (stats.failure > 0) cls += " jl-chip-red";
+  else if (stats.total > 0 && stats.total === stats.success)
+    cls += " jl-chip-green";
+  return <span className={cls}>{label}</span>;
+}
 
 function formatTimestamp(d: Date): string {
   const pad = (n: number, w = 2) => String(n).padStart(w, "0");
@@ -213,6 +245,11 @@ export default function JobList() {
 
   const jobs = useMemo(() => getJobs(allEvents), [allEvents]);
   const clusters = useMemo(() => getClusters(allEvents), [allEvents]);
+  const jobsWithStats = useMemo(
+    () =>
+      jobs.map((j) => ({ ...j, stats: getJobTaskStats(allEvents, j.jobId) })),
+    [jobs, allEvents]
+  );
 
   return (
     <>
@@ -229,19 +266,21 @@ export default function JobList() {
             <div className="jl-divider" />
             <div className="jl-col-headers">
               <span>Identifier</span>
+              <span>tasks / ok / fail</span>
               <span>Start Time (UTC)</span>
             </div>
-            {jobs.length === 0 ? (
+            {jobsWithStats.length === 0 ? (
               <div className="jl-empty">no jobs found</div>
             ) : (
               <ul className="jl-list">
-                {jobs.map(({ jobId, startTime }, i) => (
+                {jobsWithStats.map(({ jobId, startTime, stats }, i) => (
                   <li key={jobId} className="jl-item">
                     <Link to={`/jobs/${jobId}`} className="jl-link">
                       <span className="jl-index">
                         {String(i + 1).padStart(2, "0")}
                       </span>
                       <span className="jl-id">{jobId}</span>
+                      <JobChip stats={stats} />
                       <span className="jl-leader" aria-hidden="true" />
                       <span className="jl-timestamp">
                         {formatTimestamp(startTime)}

@@ -37,7 +37,7 @@ export function getJobs(events: AnyEvent[]): JobSummary[] {
       jobId: (e as JobStartedEvent).job_id,
       startTime: new Date(e.timestamp),
     }))
-    .sort((a, b) => a.startTime.getTime() - b.startTime.getTime());
+    .sort((a, b) => b.startTime.getTime() - a.startTime.getTime());
 }
 
 export interface ClusterSummary {
@@ -46,13 +46,17 @@ export interface ClusterSummary {
 }
 
 export function getClusters(events: AnyEvent[]): ClusterSummary[] {
-  return events
-    .filter((e) => e.type === "cluster_started")
-    .map((e) => ({
-      clusterId: (e as any).cluster_id as string,
-      startTime: new Date(e.timestamp),
-    }))
-    .sort((a, b) => a.startTime.getTime() - b.startTime.getTime());
+  const earliest = new Map<string, Date>();
+  for (const e of events) {
+    if (e.type !== "job_started") continue;
+    const je = e as JobStartedEvent;
+    const t = new Date(e.timestamp);
+    const prev = earliest.get(je.cluster_id);
+    if (!prev || t < prev) earliest.set(je.cluster_id, t);
+  }
+  return Array.from(earliest.entries())
+    .map(([clusterId, startTime]) => ({ clusterId, startTime }))
+    .sort((a, b) => b.startTime.getTime() - a.startTime.getTime());
 }
 
 export function getJobTasks(events: AnyEvent[], jobId: string): TaskSummary[] {
@@ -132,6 +136,32 @@ export interface TimingWindows {
   exitCode?: number;
 }
 
+export interface JobTaskStats {
+  total: number;
+  success: number;
+  failure: number;
+}
+
+export function getJobTaskStats(
+  events: AnyEvent[],
+  jobId: string
+): JobTaskStats {
+  const total = getJobTaskCount(events, jobId);
+  const tasks = getJobTasks(events, jobId);
+  let success = 0;
+  let failure = 0;
+  for (const task of tasks) {
+    if (task.status === "complete") {
+      const timings = extractTimings(task.events);
+      if (timings.exitCode === 0) success++;
+      else failure++;
+    } else if (task.status === "failed") {
+      failure++;
+    }
+  }
+  return { total, success, failure };
+}
+
 export function extractTimings(events: AnyTaskEvent[]): TimingWindows {
   const result: TimingWindows = {};
   for (const e of events) {
@@ -145,6 +175,7 @@ export function extractTimings(events: AnyTaskEvent[]): TimingWindows {
     if (e.type === "task_complete") {
       result.complete = new Date(e.timestamp);
       result.maxMemInGb = (e as TaskCompleteEvent).max_mem_in_gb;
+      result.exitCode = (e as TaskCompleteEvent).exit_code;
     }
   }
   return result;
