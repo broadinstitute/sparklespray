@@ -105,3 +105,12 @@ export type AnyEvent =
   | JobStartedEvent
   | JobKilledEvent
   | AnyTaskEvent;
+
+export interface JobDetail {
+  job_id: string;
+  cluster_id: string;
+  status: string;
+  submit_time: string;
+  task_count: number;
+  metadata?: Record<string, string>;
+}
