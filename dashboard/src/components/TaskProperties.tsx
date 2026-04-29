@@ -111,7 +111,27 @@ export default function TaskProperties({
           {exitCode !== undefined && (
             <Row
               label="Exit Code"
-              value={exitCode === 0 ? "0 (success)" : `${exitCode} (error)`}
+              value={
+                <>
+                  {exitCode === 0 ? "0 (success)" : `${exitCode} (error)`}
+                  {exitCode === 137 && (
+                    <span
+                      style={{
+                        marginLeft: 10,
+                        background: "#dc3545",
+                        color: "#fff",
+                        borderRadius: 4,
+                        padding: "2px 8px",
+                        fontSize: "0.8em",
+                        fontWeight: 600,
+                        letterSpacing: "0.02em",
+                      }}
+                    >
+                      Likely killed due to memory exhaustion
+                    </span>
+                  )}
+                </>
+              }
             />
           )}
           {maxMemInGb !== undefined && (
