@@ -14,6 +14,7 @@ from sparklespray.workflow import (
 
 from pathlib import Path
 
+
 class MockSparkles(SparklesInterface):
     def __init__(self):
         self.jobs = {}
@@ -33,7 +34,9 @@ class MockSparkles(SparklesInterface):
     def wait_for_completion(self, name: str):
         self.wait_for_completion_calls.append(name)
 
-    def start(self, name: str, command, params, image, uploads, machine_type):
+    def start(
+        self, name: str, command, params, image, uploads, machine_type, step_labels={}
+    ):
         self.start_calls.append((name, command, params, image, uploads, machine_type))
         self.jobs[name] = True
 
@@ -156,8 +159,6 @@ def test_run_workflow_with_parameters(tmpdir):
     assert machine_type is None
 
 
-
-
 def test_run_workflow_with_file_localization(tmpdir):
     # Create a workflow definition with files_to_localize and paths_to_localize
     workflow_def = {
@@ -170,10 +171,13 @@ def test_run_workflow_with_file_localization(tmpdir):
                 "command": ["process", "data"],
                 "files_to_localize": ["step_file.txt"],
                 "paths_to_localize": [
-                    {"src": "gs://bucket/{job_name}/step_path.txt", "dst": "step_dest.txt"}
+                    {
+                        "src": "gs://bucket/{job_name}/step_path.txt",
+                        "dst": "step_dest.txt",
+                    }
                 ],
             }
-        ]
+        ],
     }
 
     workflow_path = str(tmpdir.join("workflow.json"))
@@ -200,13 +204,19 @@ def test_run_workflow_with_file_localization(tmpdir):
     name, command, params, image, uploads, machine_type = sparkles.start_calls[0]
     assert name == "test-job-1"
     assert command == ["process", "data"]
-    
+
     # Check that uploads include both files_to_localize and paths_to_localize
     expected_uploads = {
         ("local_global_file.txt", "global_file.txt"),  # from workflow files_to_localize
-        ("local_step_file.txt", "step_file.txt"),      # from step files_to_localize
-        ("gs://bucket/global_path.txt", "global_dest.txt"),  # from workflow paths_to_localize
-        ("gs://bucket/test-job-1/step_path.txt", "step_dest.txt"),  # from step paths_to_localize (with variable expansion)
+        ("local_step_file.txt", "step_file.txt"),  # from step files_to_localize
+        (
+            "gs://bucket/global_path.txt",
+            "global_dest.txt",
+        ),  # from workflow paths_to_localize
+        (
+            "gs://bucket/test-job-1/step_path.txt",
+            "step_dest.txt",
+        ),  # from step paths_to_localize (with variable expansion)
     }
     assert set(uploads) == expected_uploads
     assert sparkles.wait_for_completion_calls == ["test-job-1"]
