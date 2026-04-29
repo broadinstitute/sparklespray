@@ -602,6 +602,18 @@ def submit_cmd(
 
     max_preemptable_attempts_scale = config.max_preemptable_attempts_scale
 
+    if config.sparklesworker_image is None:
+        key = datastore_client.key("SparklesV6ProjectConfig", "SparklesV6ProjectConfig")
+        entity = datastore_client.get(key)
+        if entity is not None:
+            config.sparklesworker_image = entity.get("worker_docker_image")
+        if config.sparklesworker_image is None:
+            raise UserError(
+                "sparklesworker_image is not set in the config file and could not be found "
+                "in the SparklesV6ProjectConfig Datastore entity. "
+                "Set sparklesworker_image in your .sparkles config or re-run 'sparkles gcp-setup'."
+            )
+
     for image_ in [image, config.sparklesworker_image]:
         ok, err = has_access_to_docker_image(
             config.service_account_email, config.credentials, image_

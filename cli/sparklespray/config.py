@@ -80,7 +80,7 @@ class Config:
     machine_type: str
     cas_url_prefix: str
     default_url_prefix: str
-    sparklesworker_image: str
+    sparklesworker_image: Optional[str]
     project: str
     region: str
     service_account_key: str
@@ -250,7 +250,7 @@ def load_config(
             f"Missing the following required parameters in {config_file}: {', '.join(missing_values)}"
         )
 
-    config.sparklesworker_image = consume("sparklesworker_image")
+    config.sparklesworker_image = consume("sparklesworker_image", None)
     assert config.default_url_prefix is not None
     config.cas_url_prefix = consume(
         "cas_url_prefix", config.default_url_prefix + "/CAS/"
