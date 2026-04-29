@@ -23,7 +23,7 @@ def get_consume_command(job_spec: JobSpec):
 
 def create_job_spec(
     job_id,
-    sparklesworker_image,
+    sparklesworker_image: str,
     work_root_dir,
     docker_image,
     cluster_name,

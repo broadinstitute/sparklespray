@@ -52,6 +52,7 @@ class SparklesInterface:
         image: Optional[str],
         uploads: List[Tuple[str, str]],
         machine_type: Optional[str],
+        step_labels: Dict[str, str] = {},
     ):
         raise NotImplementedError()
 
@@ -78,6 +79,7 @@ class WorkflowStep(BaseModel):
     files_to_localize: Optional[List[str]] = None
     paths_to_localize: Optional[List[FileToLocalize]] = None
     machine_type: Optional[str] = None
+    labels: Dict[str, str] = Field(default_factory=dict)
 
 
 class WriteOnCompletion(BaseModel):
@@ -325,6 +327,7 @@ def run_workflow(
             image,
             list(uploads_for_step),
             machine_type,
+            step_labels=step.labels,
         )
 
         try:
@@ -434,6 +437,12 @@ def add_workflow_cmd(subparser):
         action="append",
         type=upload_file,
     )
+    run_parser.add_argument(
+        "--label",
+        help="Attach a label to each job submission in the form key=value. May be specified multiple times.",
+        action="append",
+        type=key_value_pair,
+    )
     run_parser.set_defaults(func=workflow_run_cmd)
 
 
@@ -441,6 +450,7 @@ def workflow_run_cmd(
     jq: JobQueue, io: IO, cluster_api, config: Config, args, datastore_client
 ):
     """Command handler for 'workflow run'."""
+    labels = args.label or []
     # Create a SparklesInterface implementation that uses the provided services
     class SparklesImpl(SparklesInterface):
         def __init__(self, target_nodes):
@@ -490,9 +500,14 @@ def workflow_run_cmd(
             image: Optional[str],
             uploads: List[Tuple[str, str]],
             machine_type: Optional[str],
+            step_labels: Dict[str, str] = {},
         ):
             # Submit a new job with the given parameters
             submit_cmd_args = ["-n", name, "--no-wait", "--retry"]
+
+            merged_labels = {**dict(labels), **step_labels}
+            for key, value in merged_labels.items():
+                submit_cmd_args.extend(["--label", f"{key}={value}"])
 
             if machine_type:
                 submit_cmd_args.extend(["-m", machine_type])

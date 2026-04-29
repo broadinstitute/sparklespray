@@ -51,13 +51,30 @@ type Job struct {
 	JobID                  string    `datastore:"job_id" json:"job_id"`
 	Tasks                  []string  `datastore:"tasks,noindex" json:"tasks,omitempty"`
 	KubeJobSpec            string    `datastore:"kube_job_spec,noindex" json:"kube_job_spec,omitempty"`
-	Metadata               string    `datastore:"metadata,noindex" json:"metadata,omitempty"`
+	Metadata               string    `datastore:"metadata,noindex" json:"-"`
 	ClusterID              string    `datastore:"cluster_id" json:"cluster_id"`
 	Status                 string    `datastore:"status" json:"status"`
 	SubmitTime             time.Time `datastore:"submit_time" json:"submit_time"`
 	TaskCount              int32     `datastore:"task_count" json:"task_count"`
 	MaxPreemptableAttempts int32     `datastore:"max_preemptable_attempts" json:"max_preemptable_attempts"`
 	TargetNodeCount        int32     `datastore:"target_node_count" json:"target_node_count"`
+}
+
+func (j *Job) MarshalJSON() ([]byte, error) {
+	type Alias Job
+	var metadataRaw json.RawMessage
+	if j.Metadata != "" {
+		if err := json.Unmarshal([]byte(j.Metadata), &metadataRaw); err != nil {
+			metadataRaw = nil
+		}
+	}
+	return json.Marshal(&struct {
+		*Alias
+		Metadata json.RawMessage `json:"metadata,omitempty"`
+	}{
+		Alias:    (*Alias)(j),
+		Metadata: metadataRaw,
+	})
 }
 
 type TaskHistory struct {

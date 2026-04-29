@@ -1,5 +1,12 @@
-import { createContext, useContext, useEffect, useRef, useMemo } from "react";
-import type { AnyEvent } from "../types";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useRef,
+  useMemo,
+  useState,
+} from "react";
+import type { AnyEvent, JobDetail } from "../types";
 
 const POLL_INTERVAL_MS = 5_000;
 
@@ -17,16 +24,20 @@ export type EventListener = (events: AnyEvent[]) => void;
 
 export interface EventContextValue {
   addEventListener: (callback: EventListener) => () => void;
+  jobCache: Record<string, JobDetail>;
 }
 
 const EventContext = createContext<EventContextValue>({
   addEventListener: () => () => {},
+  jobCache: {},
 });
 
 export function EventProvider({ children }: { children: React.ReactNode }) {
   const eventCacheRef = useRef<AnyEvent[]>([]);
   const listenersRef = useRef<Set<EventListener>>(new Set());
   const nextAfterRef = useRef<string | null>(null);
+  const pendingJobFetchesRef = useRef<Set<string>>(new Set());
+  const [jobCache, setJobCache] = useState<Record<string, JobDetail>>({});
 
   useEffect(() => {
     async function gc() {
@@ -69,11 +80,29 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
             if (newEvents.length > 0) {
               eventCacheRef.current = [...eventCacheRef.current, ...newEvents];
               for (const cb of listenersRef.current) cb(newEvents);
+
+              for (const e of newEvents) {
+                if (e.type === "job_started") {
+                  const jobId = (e as any).job_id as string;
+                  if (!pendingJobFetchesRef.current.has(jobId)) {
+                    pendingJobFetchesRef.current.add(jobId);
+                    fetch(`/api/v1/job/${jobId}`)
+                      .then((r) => (r.ok ? r.json() : null))
+                      .then((detail: JobDetail | null) => {
+                        if (detail)
+                          setJobCache((prev) => ({
+                            ...prev,
+                            [jobId]: detail,
+                          }));
+                      })
+                      .catch(() => {});
+                  }
+                }
+              }
             }
 
             if (data.next_after) nextAfterRef.current = data.next_after;
 
-            // If we got a full page, immediately fetch the next one
             if (data.events.length >= PAGE_LIMIT) continue;
           }
         } catch (err) {
@@ -99,8 +128,9 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
           listenersRef.current.delete(callback);
         };
       },
+      jobCache,
     }),
-    []
+    [jobCache]
   );
 
   return (

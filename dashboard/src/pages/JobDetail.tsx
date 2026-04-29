@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { useParams, Link, useLocation } from "react-router-dom";
-import { getJobTasks, getJobTaskCount } from "../data/events";
+import { getJobTasks, getJobTaskCount, extractTimings } from "../data/events";
 import type { TaskStatus } from "../data/events";
 import { computeJobTimeSeries } from "../data/jobTimeSeries";
 import { useEvents, mergeEvents } from "../data/EventProvider";
@@ -303,6 +303,18 @@ export default function JobDetail() {
                   Status
                 </th>
                 <th
+                  title="The number of times this task was started. Values > 1 are signs that the job was re-run or the worker was preempted and the task was reattempted"
+                  style={{
+                    padding: "8px 16px",
+                    textAlign: "left",
+                    fontWeight: 600,
+                    color: "#555",
+                    cursor: "help",
+                  }}
+                >
+                  Attempts
+                </th>
+                <th
                   style={{
                     padding: "8px 16px",
                     textAlign: "left",
@@ -310,7 +322,7 @@ export default function JobDetail() {
                     color: "#555",
                   }}
                 >
-                  Events
+                  Exit Code
                 </th>
                 <th
                   style={{
@@ -327,6 +339,10 @@ export default function JobDetail() {
             <tbody>
               {tasks.map((task, i) => {
                 const lastEvent = task.events[task.events.length - 1];
+                const timings = extractTimings(task.events);
+                const exitCode = timings.exitCode;
+                const exitCodeDefined = exitCode !== undefined;
+                const exitOk = exitCode === 0;
                 return (
                   <tr
                     key={task.taskId}
@@ -348,7 +364,25 @@ export default function JobDetail() {
                       <StatusBadge status={task.status} />
                     </td>
                     <td style={{ padding: "8px 16px", color: "#777" }}>
-                      {task.events.length}
+                      {
+                        task.events.filter((e) => e.type === "task_claimed")
+                          .length
+                      }
+                    </td>
+                    <td style={{ padding: "8px 16px" }}>
+                      {exitCodeDefined ? (
+                        <span
+                          style={{
+                            fontFamily: "monospace",
+                            fontWeight: 600,
+                            color: exitOk ? "#2e7d32" : "#c62828",
+                          }}
+                        >
+                          {exitCode}
+                        </span>
+                      ) : (
+                        <span style={{ color: "#ccc" }}>—</span>
+                      )}
                     </td>
                     <td
                       style={{
