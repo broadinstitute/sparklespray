@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
-import { Link } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { getJobs, getClusters, getJobTaskStats } from "../data/events";
 import type { JobTaskStats } from "../data/events";
 import { useEvents, mergeEvents } from "../data/EventProvider";
@@ -63,6 +63,8 @@ const styles = `
     letter-spacing: -0.03em;
   }
 
+  /* ── Filter bar ─────────────────────────────────── */
+
   .jl-filter-bar {
     display: flex;
     align-items: center;
@@ -104,9 +106,7 @@ const styles = `
     transition: border-color 0.12s;
   }
 
-  .jl-search-input:focus {
-    border-color: #333;
-  }
+  .jl-search-input:focus { border-color: #333; }
 
   .jl-search-clear {
     font-family: 'JetBrains Mono', 'Courier New', monospace;
@@ -153,16 +153,11 @@ const styles = `
     transition: background 0.1s, color 0.1s;
   }
 
-  .jl-time-preset:last-child {
-    border-right: none;
-  }
+  .jl-time-preset:last-child { border-right: none; }
+  .jl-time-preset.active { background: #111; color: white; }
 
-  .jl-time-preset.active {
-    background: #111;
-    color: white;
-  }
+  /* ── Label visibility dropdown ───────────────────── */
 
-  /* Label visibility dropdown */
   .jl-labels-wrap {
     position: relative;
     flex-shrink: 0;
@@ -181,15 +176,8 @@ const styles = `
     transition: border-color 0.1s, color 0.1s;
   }
 
-  .jl-labels-btn:hover {
-    border-color: #999;
-    color: #111;
-  }
-
-  .jl-labels-btn.has-hidden {
-    border-color: #bbb;
-    background: #f5f5f5;
-  }
+  .jl-labels-btn:hover { border-color: #999; color: #111; }
+  .jl-labels-btn.has-hidden { border-color: #bbb; background: #f5f5f5; }
 
   .jl-labels-badge {
     display: inline-block;
@@ -243,9 +231,7 @@ const styles = `
     text-underline-offset: 2px;
   }
 
-  .jl-labels-reset:hover {
-    color: #333;
-  }
+  .jl-labels-reset:hover { color: #333; }
 
   .jl-labels-empty {
     padding: 12px;
@@ -270,9 +256,7 @@ const styles = `
     transition: background 0.08s;
   }
 
-  .jl-labels-row:hover {
-    background: #f7f7f7;
-  }
+  .jl-labels-row:hover { background: #f7f7f7; }
 
   .jl-labels-check {
     width: 13px;
@@ -289,27 +273,18 @@ const styles = `
     background: white;
   }
 
-  .jl-labels-check.checked {
-    background: #222;
-    border-color: #222;
-  }
+  .jl-labels-check.checked { background: #222; border-color: #222; }
 
-  .jl-labels-key {
-    font-size: 0.72rem;
-    color: #333;
-    flex: 1;
-  }
-
+  .jl-labels-key { font-size: 0.72rem; color: #333; flex: 1; }
   .jl-labels-key.hidden-label {
     color: #bbb;
     text-decoration: line-through;
     text-decoration-color: #ccc;
   }
 
-  /* Job list */
-  .jl-section {
-    margin-bottom: 3.5rem;
-  }
+  /* ── Section chrome ──────────────────────────────── */
+
+  .jl-section { margin-bottom: 3.5rem; }
 
   .jl-section-title {
     font-size: 0.65rem;
@@ -329,110 +304,97 @@ const styles = `
   .jl-divider {
     height: 1px;
     background: linear-gradient(90deg, #1565c044, #1565c011 60%, transparent);
-    margin-bottom: 0.25rem;
+    margin-bottom: 0;
   }
 
   .jl-divider-green {
     height: 1px;
     background: linear-gradient(90deg, #1b5e2044, #1b5e2011 60%, transparent);
-    margin-bottom: 0.25rem;
+    margin-bottom: 0;
   }
 
-  .jl-col-headers {
-    display: flex;
-    justify-content: space-between;
+  /* ── Table ───────────────────────────────────────── */
+
+  .jl-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+  }
+
+  .jl-th {
     font-size: 0.6rem;
     letter-spacing: 0.18em;
     text-transform: uppercase;
     color: #aaa;
-    padding: 0.4rem 0.5rem 0.6rem 0.5rem;
-  }
-
-  .jl-list {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-  }
-
-  .jl-item {
-    border-top: 1px solid #f0f0f0;
-  }
-
-  .jl-item:last-child {
+    font-weight: 400;
+    padding: 0.45rem 0.5rem;
+    text-align: left;
     border-bottom: 1px solid #f0f0f0;
   }
 
-  .jl-link {
-    display: flex;
-    align-items: flex-start;
-    gap: 0;
-    padding: 0.7rem 0.5rem;
-    text-decoration: none;
-    color: inherit;
-    transition: background 0.12s ease;
-    position: relative;
+  .jl-th-stats { text-align: right; width: 9rem; }
+  .jl-th-time  { text-align: right; width: 15rem; }
+  .jl-th-index { width: 2.5rem; }
+
+  .jl-tr { cursor: pointer; }
+
+  .jl-td {
+    padding: 0.65rem 0.5rem;
+    vertical-align: top;
+    border-bottom: 1px solid #f0f0f0;
+    transition: background 0.12s;
   }
 
-  .jl-link::before {
-    content: '';
-    position: absolute;
-    left: 0;
-    top: 0;
-    bottom: 0;
-    width: 2px;
-    background: #1565c0;
-    transform: scaleY(0);
-    transform-origin: center;
-    transition: transform 0.15s ease;
-  }
+  .jl-tr:hover .jl-td { background: #f0f5ff; }
+  .jl-tr:hover .jl-id  { color: #1565c0; }
 
-  .jl-link:hover {
-    background: #f0f5ff;
-  }
+  .jl-tr-cluster:hover .jl-td { background: #f1f8f1; }
+  .jl-tr-cluster:hover .jl-id  { color: #2e7d32; }
 
-  .jl-link:hover::before {
-    transform: scaleY(1);
-  }
-
-  .jl-link:hover .jl-id {
-    color: #1565c0;
-  }
-
-  .jl-cluster-link::before {
-    background: #2e7d32;
-  }
-
-  .jl-cluster-link:hover {
-    background: #f1f8f1;
-  }
-
-  .jl-cluster-link:hover .jl-id {
-    color: #2e7d32;
-  }
-
-  .jl-index {
+  /* 2px accent bar via left border on the index cell */
+  .jl-td-index {
     font-size: 0.65rem;
     color: #ccc;
-    min-width: 2.5rem;
     font-weight: 400;
-    flex-shrink: 0;
-    padding-top: 1px;
+    padding-top: 0.68rem;
+    border-left: 2px solid transparent;
+    transition: background 0.12s, border-color 0.15s;
   }
 
-  .jl-id-col {
-    flex: 1;
-    min-width: 0;
-  }
+  .jl-tr:hover        .jl-td-index { border-left-color: #1565c0; }
+  .jl-tr-cluster:hover .jl-td-index { border-left-color: #2e7d32; }
 
   .jl-id {
     font-size: 0.82rem;
     font-weight: 500;
     color: #222;
-    transition: color 0.12s ease;
+    transition: color 0.12s;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
+
+  .jl-td-stats {
+    text-align: right;
+    white-space: nowrap;
+    padding-top: 0.68rem;
+  }
+
+  .jl-td-time {
+    text-align: right;
+    font-size: 0.72rem;
+    color: #999;
+    white-space: nowrap;
+    padding-top: 0.68rem;
+  }
+
+  .jl-stat-total { color: #999; }
+  .jl-stat-sep   { color: #ddd; margin: 0 3px; }
+  .jl-stat-ok    { color: oklch(45% 0.14 145); }
+  .jl-stat-fail-zero { color: #ddd; }
+  .jl-stat-fail-nonzero { color: oklch(45% 0.18 25); }
+
+  /* ── Label chips ─────────────────────────────────── */
 
   .jl-label-chips {
     display: flex;
@@ -455,40 +417,12 @@ const styles = `
     transition: box-shadow 0.1s;
   }
 
-  .jl-label-chip-key {
-    opacity: 0.7;
-  }
+  .jl-label-chip-key { opacity: 0.7; }
+  .jl-label-chip-eq  { margin: 0 2px; }
+  .jl-label-chip-val { font-weight: 700; }
 
-  .jl-label-chip-eq {
-    margin: 0 2px;
-  }
+  /* ── Misc ────────────────────────────────────────── */
 
-  .jl-label-chip-val {
-    font-weight: 700;
-  }
-
-  .jl-leader {
-    flex: 1;
-    min-width: 1rem;
-    overflow: hidden;
-    margin: 0 0.75rem;
-    padding-bottom: 2px;
-    background-image: radial-gradient(circle, #ccc 1px, transparent 1px);
-    background-size: 6px 4px;
-    background-repeat: repeat-x;
-    background-position: left center;
-    opacity: 0.6;
-    flex-shrink: 0;
-    align-self: flex-start;
-    margin-top: 3px;
-  }
-
-  .jl-timestamp {
-    font-size: 0.72rem;
-    color: #999;
-    white-space: nowrap;
-    flex-shrink: 0;
-  }
 
   .jl-chip {
     font-size: 0.68rem;
@@ -511,7 +445,7 @@ const styles = `
     background: #ffebee;
     color: #b71c1c;
   }
-
+    
   .jl-empty {
     font-size: 0.75rem;
     color: #ccc;
@@ -536,6 +470,14 @@ function JobChip({ stats }: { stats: JobTaskStats }) {
   else if (stats.total > 0 && stats.total === stats.success)
     cls += " jl-chip-green";
   return <span className={cls}>{label}</span>;
+}
+
+function StatCell({ stats }: { stats: JobTaskStats }) {
+  return (
+    <td className="jl-td jl-td-stats">
+      <JobChip stats={stats} />
+    </td>
+  );
 }
 
 function LabelChips({
@@ -655,6 +597,7 @@ function formatTimestamp(d: Date): string {
 }
 
 export default function JobList() {
+  const navigate = useNavigate();
   const { addEventListener, jobCache } = useEvents();
   const [allEvents, setAllEvents] = useState<AnyEvent[]>([]);
   const [search, setSearch] = useState("");
@@ -671,7 +614,6 @@ export default function JobList() {
     );
   }, [addEventListener]);
 
-  // Close panel on outside click
   useEffect(() => {
     if (!showLabelPanel) return;
     function handleClick(e: MouseEvent) {
@@ -821,38 +763,44 @@ export default function JobList() {
               found
             </p>
             <div className="jl-divider" />
-            <div className="jl-col-headers">
-              <span>Identifier</span>
-              <span>tasks / ok / fail</span>
-              <span>Start Time (UTC)</span>
-            </div>
             {filteredJobs.length === 0 ? (
               <div className="jl-empty">no jobs found</div>
             ) : (
-              <ul className="jl-list">
-                {filteredJobs.map(({ jobId, startTime, stats }, i) => (
-                  <li key={jobId} className="jl-item">
-                    <Link to={`/jobs/${jobId}`} className="jl-link">
-                      <span className="jl-index">
+              <table className="jl-table">
+                <thead>
+                  <tr>
+                    <th className="jl-th jl-th-index" />
+                    <th className="jl-th">Identifier</th>
+                    <th className="jl-th jl-th-stats">tasks / ok / fail</th>
+                    <th className="jl-th jl-th-time">Start Time (UTC)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredJobs.map(({ jobId, startTime, stats }, i) => (
+                    <tr
+                      key={jobId}
+                      className="jl-tr"
+                      onClick={() => navigate(`/jobs/${jobId}`)}
+                    >
+                      <td className="jl-td jl-td-index">
                         {String(i + 1).padStart(2, "0")}
-                      </span>
-                      <div className="jl-id-col">
+                      </td>
+                      <td className="jl-td">
                         <div className="jl-id">{jobId}</div>
                         <LabelChips
                           metadata={jobCache[jobId]?.metadata}
                           search={search}
                           hiddenLabels={hiddenLabels}
                         />
-                      </div>
-                      <JobChip stats={stats} />
-                      <span className="jl-leader" aria-hidden="true" />
-                      <span className="jl-timestamp">
+                      </td>
+                      <StatCell stats={stats} />
+                      <td className="jl-td jl-td-time">
                         {formatTimestamp(startTime)}
-                      </span>
-                    </Link>
-                  </li>
-                ))}
-              </ul>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             )}
           </section>
 
@@ -862,32 +810,37 @@ export default function JobList() {
               {clusters.length} cluster{clusters.length !== 1 ? "s" : ""} found
             </p>
             <div className="jl-divider-green" />
-            <div className="jl-col-headers">
-              <span>Cluster ID</span>
-              <span>Start Time (UTC)</span>
-            </div>
             {clusters.length === 0 ? (
               <div className="jl-empty">no clusters found</div>
             ) : (
-              <ul className="jl-list">
-                {clusters.map(({ clusterId, startTime }, i) => (
-                  <li key={clusterId} className="jl-item">
-                    <Link
-                      to={`/clusters/${clusterId}`}
-                      className="jl-link jl-cluster-link"
+              <table className="jl-table">
+                <thead>
+                  <tr>
+                    <th className="jl-th jl-th-index" />
+                    <th className="jl-th">Cluster ID</th>
+                    <th className="jl-th jl-th-time">Start Time (UTC)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {clusters.map(({ clusterId, startTime }, i) => (
+                    <tr
+                      key={clusterId}
+                      className="jl-tr jl-tr-cluster"
+                      onClick={() => navigate(`/clusters/${clusterId}`)}
                     >
-                      <span className="jl-index">
+                      <td className="jl-td jl-td-index">
                         {String(i + 1).padStart(2, "0")}
-                      </span>
-                      <span className="jl-id">{clusterId}</span>
-                      <span className="jl-leader" aria-hidden="true" />
-                      <span className="jl-timestamp">
+                      </td>
+                      <td className="jl-td">
+                        <div className="jl-id">{clusterId}</div>
+                      </td>
+                      <td className="jl-td jl-td-time">
                         {formatTimestamp(startTime)}
-                      </span>
-                    </Link>
-                  </li>
-                ))}
-              </ul>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             )}
           </section>
 
