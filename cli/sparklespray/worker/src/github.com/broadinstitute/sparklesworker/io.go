@@ -1,6 +1,7 @@
 package sparklesworker
 
 import (
+	"encoding/json"
 	"errors"
 	"io"
 	"io/ioutil"
@@ -106,7 +107,33 @@ func (ioc *GCSIOClient) getObj(srcUrl string) (*storage.ObjectHandle, error) {
 	return obj, nil
 }
 
+func logActiveServiceAccount() {
+	if credFile := os.Getenv("GOOGLE_APPLICATION_CREDENTIALS"); credFile != "" {
+		data, err := os.ReadFile(credFile)
+		if err != nil {
+			log.Printf("DownloadAsBytes: GOOGLE_APPLICATION_CREDENTIALS=%s but could not read file: %v", credFile, err)
+			return
+		}
+		var keyFile struct {
+			ClientEmail string `json:"client_email"`
+		}
+		if err := json.Unmarshal(data, &keyFile); err != nil {
+			log.Printf("DownloadAsBytes: could not parse service account key file: %v", err)
+			return
+		}
+		log.Printf("DownloadAsBytes: using service account from GOOGLE_APPLICATION_CREDENTIALS: %s", keyFile.ClientEmail)
+		return
+	}
+	if sa, err := getMetadata("http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/email"); err == nil {
+		log.Printf("DownloadAsBytes: using service account from metadata server: %s", sa)
+	} else {
+		log.Printf("DownloadAsBytes: could not determine service account (no GOOGLE_APPLICATION_CREDENTIALS, metadata failed: %v)", err)
+	}
+}
+
 func (ioc *GCSIOClient) DownloadAsBytes(srcUrl string) ([]byte, error) {
+	logActiveServiceAccount()
+
 	obj, err := ioc.getObj(srcUrl)
 	if err != nil {
 		return nil, err

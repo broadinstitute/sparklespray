@@ -124,7 +124,7 @@ func fetch(c *cli.Context) error {
 
 	var err error
 
-	httpClient, err := clientWithCerts(ctx, certs, "https://www.googleapis.com/auth/compute.readonly")
+	httpClient, err := clientWithCerts(ctx, certs, "https://www.googleapis.com/auth/devstorage.read_write")
 	if err != nil {
 		log.Printf("Could not create default client: %v", err)
 		return err
@@ -255,13 +255,13 @@ func consume(c *cli.Context) error {
 	ctx := context.Background()
 
 	var err error
-	httpclient, err := clientWithCerts(ctx, certs, "https://www.googleapis.com/auth/compute.readonly")
+	gcsHttpclient, err := clientWithCerts(ctx, certs, "https://www.googleapis.com/auth/devstorage.read_write")
 	if err != nil {
-		log.Printf("Could not create default client: %v", err)
+		log.Printf("Could not create GCS client: %v", err)
 		return err
 	}
 
-	ioc, err := NewIOClient(ctx, httpclient)
+	ioc, err := NewIOClient(ctx, gcsHttpclient)
 	if err != nil {
 		log.Printf("Creating io client failed: %v", err)
 		return err
