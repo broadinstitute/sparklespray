@@ -152,7 +152,7 @@ export function computeJobPerf(events: AnyEvent[], jobId: string): JobPerfData {
   return {
     entries,
     execStats: computeStats(entries.map((e) => e.executionMin)),
-    memStats: computeStats(entries.map((e) => e.maxMemGb)),
+    memStats: computeStats(entries.map((e) => e.maxMemGb * 1024)),
     locStats: computeStats(entries.map((e) => e.localizationMin)),
     uploadTimeStats:
       uploadTimeEntries.length > 0
@@ -169,9 +169,9 @@ export function computeJobPerf(events: AnyEvent[], jobId: string): JobPerfData {
     blockOutputStats: computeStats(entries.map((e) => e.blockOutputOps)),
     downloadStats: computeStats(entries.map((e) => e.downloadBytes / 1e9)),
     uploadBytesStats: computeStats(entries.map((e) => e.uploadBytes / 1e9)),
-    sharedMemStats: computeStats(entries.map((e) => e.sharedMemoryBytes / 1e9)),
+    sharedMemStats: computeStats(entries.map((e) => e.sharedMemoryBytes / 1e6)),
     unsharedMemStats: computeStats(
-      entries.map((e) => e.unsharedMemoryBytes / 1e9)
+      entries.map((e) => e.unsharedMemoryBytes / 1e6)
     ),
   };
 }

@@ -370,33 +370,33 @@ export default function PerfOverview() {
         {
           key: "peakMem",
           label: "Peak Memory",
-          unit: "GB",
+          unit: "MB",
           color: "#00897b",
           stats: memStats,
           histData: makeHistogram(
-            entries.map((e) => e.maxMemGb),
+            entries.map((e) => e.maxMemGb * 1024),
             20
           ),
         },
         {
           key: "sharedMem",
           label: "Shared Memory",
-          unit: "GB",
+          unit: "MB",
           color: "#00695c",
           stats: sharedMemStats,
           histData: makeHistogram(
-            entries.map((e) => e.sharedMemoryBytes / 1e9),
+            entries.map((e) => e.sharedMemoryBytes / 1e6),
             20
           ),
         },
         {
           key: "unsharedMem",
           label: "Unshared Memory",
-          unit: "GB",
+          unit: "MB",
           color: "#2e7d32",
           stats: unsharedMemStats,
           histData: makeHistogram(
-            entries.map((e) => e.unsharedMemoryBytes / 1e9),
+            entries.map((e) => e.unsharedMemoryBytes / 1e6),
             20
           ),
         },
