@@ -25,6 +25,7 @@ const EventCollection = "SparklesV6Event"
 const ClusterCollection = "SparklesV6Cluster"
 const JobCollection = "SparklesV6Job"
 const TaskCollection = "SparklesV6Task"
+const SummaryCollection = "SparklesV6JobSummary"
 const DefaultLimit = 1000
 const MaxLimit = 10000
 
@@ -102,6 +103,15 @@ type Task struct {
 	LastUpdated      time.Time      `datastore:"last_updated" json:"last_updated"`
 	Command          string         `datastore:"command,noindex" json:"command"`
 	DockerImage      string         `datastore:"docker_image,noindex" json:"docker_image"`
+}
+
+type JobSummary struct {
+	JobID        string    `datastore:"job_id"        json:"jobID"`
+	SubmitTime   time.Time `datastore:"submit_time"   json:"-"`
+	Expiry       time.Time `datastore:"expiry"        json:"-"`
+	TaskCount    int       `datastore:"task_count"    json:"taskCount"`
+	SuccessCount int       `datastore:"success_count" json:"successCount"`
+	FailureCount int       `datastore:"failure_count" json:"failureCount"`
 }
 
 // SubscriptionResponse is returned by all subscription-creation endpoints.
@@ -501,6 +511,132 @@ func handleGC(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]int{"deleted": deleted})
 }
 
+func recomputeJobSummary(ctx context.Context, jobID string) error {
+	var job Job
+	jobKey := datastore.NameKey(JobCollection, jobID, nil)
+	if err := dsClient.Get(ctx, jobKey, &job); err != nil {
+		return fmt.Errorf("get job %q: %w", jobID, err)
+	}
+
+	dq := datastore.NewQuery(TaskCollection).FilterField("job_id", "=", jobID)
+	var tasks []Task
+	if _, err := dsClient.GetAll(ctx, dq, &tasks); err != nil {
+		return fmt.Errorf("get tasks for job %q: %w", jobID, err)
+	}
+
+	summary := JobSummary{
+		JobID:      jobID,
+		SubmitTime: job.SubmitTime,
+		Expiry:     time.Now().Add(7 * 24 * time.Hour),
+		TaskCount:  len(tasks),
+	}
+	for _, t := range tasks {
+		if t.Status == "complete" && t.ExitCode == "0" {
+			summary.SuccessCount++
+		} else if t.Status == "complete" || t.Status == "failed" {
+			summary.FailureCount++
+		}
+	}
+
+	summaryKey := datastore.NameKey(SummaryCollection, jobID, nil)
+	_, err := dsClient.Put(ctx, summaryKey, &summary)
+	return err
+}
+
+func handleJobsSummary(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	dq := datastore.NewQuery(SummaryCollection).Order("submit_time")
+	if s := r.URL.Query().Get("after"); s != "" {
+		t, err := parseTimestamp(s)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "BAD_REQUEST", fmt.Sprintf("invalid timestamp: %q", s))
+			return
+		}
+		dq = dq.FilterField("submit_time", ">", t)
+	}
+	if s := r.URL.Query().Get("before"); s != "" {
+		t, err := parseTimestamp(s)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "BAD_REQUEST", fmt.Sprintf("invalid timestamp: %q", s))
+			return
+		}
+		dq = dq.FilterField("submit_time", "<=", t)
+	}
+	summaries := make([]JobSummary, 0)
+	if _, err := dsClient.GetAll(ctx, dq, &summaries); err != nil {
+		log.Printf("Datastore query error for summaries: %v", err)
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "datastore query failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, summaries)
+}
+
+func startSummaryUpdater(ctx context.Context) {
+	subName := "sparkles-dashboard-summaries"
+	fullSubName := fmt.Sprintf("projects/%s/subscriptions/%s", gProjectID, subName)
+	fullTopicName := fmt.Sprintf("projects/%s/topics/%s", gProjectID, topicLifecycle)
+	ttl := durationpb.New(7 * 24 * time.Hour)
+	_, err := psClient.SubscriptionAdminClient.CreateSubscription(ctx, &pb.Subscription{
+		Name:               fullSubName,
+		Topic:              fullTopicName,
+		AckDeadlineSeconds: 60,
+		Filter:             `hasattr(attributes, "job_id")`,
+		ExpirationPolicy:   &pb.ExpirationPolicy{Ttl: ttl},
+	})
+	if err != nil {
+		log.Printf("Summary updater: could not create subscription (may already exist): %v", err)
+	}
+
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
+			resp, err := psClient.SubscriptionAdminClient.Pull(ctx, &pb.PullRequest{
+				Subscription: fullSubName,
+				MaxMessages:  100,
+			})
+			if err != nil {
+				if ctx.Err() != nil {
+					return
+				}
+				log.Printf("Summary updater: pull error: %v", err)
+				time.Sleep(5 * time.Second)
+				continue
+			}
+			if len(resp.ReceivedMessages) == 0 {
+				time.Sleep(1 * time.Second)
+				continue
+			}
+
+			jobIDs := make(map[string]struct{})
+			ackIDs := make([]string, 0, len(resp.ReceivedMessages))
+			for _, m := range resp.ReceivedMessages {
+				ackIDs = append(ackIDs, m.AckId)
+				if jobID := m.Message.Attributes["job_id"]; jobID != "" {
+					jobIDs[jobID] = struct{}{}
+				}
+			}
+
+			if err := psClient.SubscriptionAdminClient.Acknowledge(ctx, &pb.AcknowledgeRequest{
+				Subscription: fullSubName,
+				AckIds:       ackIDs,
+			}); err != nil {
+				log.Printf("Summary updater: acknowledge error: %v", err)
+			}
+
+			for jobID := range jobIDs {
+				if err := recomputeJobSummary(ctx, jobID); err != nil {
+					log.Printf("Summary updater: failed to recompute summary for job %q: %v", jobID, err)
+				}
+			}
+		}
+	}()
+}
+
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -550,7 +686,10 @@ func main() {
 		log.Fatalf("Failed to create IAM credentials service: %v", err)
 	}
 
+	startSummaryUpdater(ctx)
+
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /jobs/summary", handleJobsSummary)
 	mux.HandleFunc("GET /api/v1/events", handleEvents)
 	mux.HandleFunc("GET /api/v1/task/{task_id}", handleTask)
 	mux.HandleFunc("GET /api/v1/task/{task_id}/log", handleTaskLog)

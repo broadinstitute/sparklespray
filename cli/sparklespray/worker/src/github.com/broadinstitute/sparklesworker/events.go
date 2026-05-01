@@ -67,10 +67,18 @@ func (ew *EventWriter) writeEvent(ctx context.Context, props datastore.PropertyL
 	}
 
 	if eventType != "" && ew.psClient != nil {
+		attrs := map[string]string{"type": eventType}
+		for _, p := range props {
+			if p.Name == "job_id" || p.Name == "task_id" {
+				if v, ok := p.Value.(string); ok && v != "" {
+					attrs[p.Name] = v
+				}
+			}
+		}
 		publisher := ew.psClient.Publisher(TopicLifecycle)
 		defer publisher.Stop()
 		result := publisher.Publish(ctx, &pubsub.Message{
-			Attributes: map[string]string{"type": eventType},
+			Attributes: attrs,
 		})
 		if _, err := result.Get(ctx); err != nil {
 			return fmt.Errorf("writeEvent failed in publish.Get(): %s", err)
