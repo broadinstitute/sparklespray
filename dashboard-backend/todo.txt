@@ -1,0 +1,50 @@
+Changes necessary to get things to work with real sparkles
+- update worker to publish events (Write to datastore and pubsub)
+- update worker to listen to control-in pubsub 
+- figure out permission issue with the publish service account
+- figure out a way for monitor to know service account (store sparkles config in datastore?)
+- update setup to configure service account, service account impersonation and pubsub topics
+- add option so we don't _need_ to rely on sparkles creating a service account:
+   - Add an option to the config to use the default service account
+   - Add a flag to setup to perform grants on an existing service account
+
+(x) - fix pubsub topic names to be consistent
+(x) - add volume usage to metrics published
+
+Write a test which:
+1. creates a google project
+1. runs sparkles setup
+2. deletes google project
+
+
+-----
+
+sparkles setup
+   [--service-account <name>] 
+   [--worker-docker-image path] 
+   [--dryrun]
+
+create sparkles-dashboard-user service account
+create datastore database
+
+if docker image is not specified:
+  enable artifact registry
+  create docker registry named "sparkles"
+  build docker image and push
+
+require that a bucket name be specified
+if bucket is not specified:
+  create bucket named ???
+
+
+Sparkles project config can contain:
+dashboard_user_service_account=...
+url_prefix=gs://sparkles-20260520
+sparklesworker_image=us-central1-docker.pkg.dev/test-sparkles-datastore/sparkles/sparklesworker
+default_region=...
+
+(and others like: aether root)
+goal: eliminate .sparkles config file
+
+# change prep-image to do full build of worker from scratch
+# stop distributing sparklesworker binary.

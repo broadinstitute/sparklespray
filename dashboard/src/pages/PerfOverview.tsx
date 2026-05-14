@@ -258,26 +258,24 @@ function DrillDown({ metric }: { metric: MetricDef }) {
 
 export default function PerfOverview() {
   const { jobId } = useParams<{ jobId: string }>();
-  const { addEventListener } = useEvents();
+  const { addJobEventListener } = useEvents();
   const [localEvents, setLocalEvents] = useState<AnyEvent[]>([]);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
 
   useEffect(() => {
     if (!jobId) return;
-    return addEventListener((newEvents) => {
+    return addJobEventListener(jobId, (newEvents) => {
       const relevant = newEvents.filter(
         (e) =>
-          "job_id" in e &&
-          (e as any).job_id === jobId &&
-          (e.type === "task_claimed" ||
-            e.type === "task_exec_started" ||
-            e.type === "task_exec_complete" ||
-            e.type === "task_complete")
+          e.type === "task_claimed" ||
+          e.type === "task_exec_started" ||
+          e.type === "task_exec_complete" ||
+          e.type === "task_complete"
       );
       if (relevant.length > 0)
         setLocalEvents((prev) => mergeEvents(prev, relevant));
     });
-  }, [addEventListener, jobId]);
+  }, [addJobEventListener, jobId]);
 
   const perf = useMemo(() => computeJobPerf(localEvents, jobId ?? ""), [
     localEvents,

@@ -1,16 +1,12 @@
 import type {
   AnyEvent,
   AnyTaskEvent,
-  JobStartedEvent,
+  BackendJobSummary,
   TaskCompleteEvent,
   TaskExecCompleteEvent,
 } from "../types";
 
 export function getJobTaskCount(events: AnyEvent[], jobId: string): number {
-  const started = events.find(
-    (e) => e.type === "job_started" && (e as JobStartedEvent).job_id === jobId
-  );
-  if (started) return (started as JobStartedEvent).task_count;
   const ids = new Set(
     events
       .filter((e) => "task_id" in e && (e as any).job_id === jobId)
@@ -30,13 +26,9 @@ export interface JobSummary {
   startTime: Date;
 }
 
-export function getJobs(events: AnyEvent[]): JobSummary[] {
-  return events
-    .filter((e) => e.type === "job_started")
-    .map((e) => ({
-      jobId: (e as JobStartedEvent).job_id,
-      startTime: new Date(e.timestamp),
-    }))
+export function getJobs(jobs: BackendJobSummary[]): JobSummary[] {
+  return jobs
+    .map((j) => ({ jobId: j.jobID, startTime: new Date(j.submitTime) }))
     .sort((a, b) => b.startTime.getTime() - a.startTime.getTime());
 }
 
@@ -45,14 +37,12 @@ export interface ClusterSummary {
   startTime: Date;
 }
 
-export function getClusters(events: AnyEvent[]): ClusterSummary[] {
+export function getClusters(jobs: BackendJobSummary[]): ClusterSummary[] {
   const earliest = new Map<string, Date>();
-  for (const e of events) {
-    if (e.type !== "job_started") continue;
-    const je = e as JobStartedEvent;
-    const t = new Date(e.timestamp);
-    const prev = earliest.get(je.cluster_id);
-    if (!prev || t < prev) earliest.set(je.cluster_id, t);
+  for (const j of jobs) {
+    const t = new Date(j.submitTime);
+    const prev = earliest.get(j.clusterId);
+    if (!prev || t < prev) earliest.set(j.clusterId, t);
   }
   return Array.from(earliest.entries())
     .map(([clusterId, startTime]) => ({ clusterId, startTime }))

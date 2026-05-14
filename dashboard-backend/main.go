@@ -107,7 +107,8 @@ type Task struct {
 
 type JobSummary struct {
 	JobID        string    `datastore:"job_id"        json:"jobID"`
-	SubmitTime   time.Time `datastore:"submit_time"   json:"-"`
+	SubmitTime   time.Time `datastore:"submit_time"   json:"submitTime"`
+	ClusterID    string    `datastore:"cluster_id"    json:"clusterId"`
 	Expiry       time.Time `datastore:"expiry"        json:"-"`
 	TaskCount    int       `datastore:"task_count"    json:"taskCount"`
 	SuccessCount int       `datastore:"success_count" json:"successCount"`
@@ -375,6 +376,12 @@ func handleEvents(w http.ResponseWriter, r *http.Request) {
 		}
 		dq = dq.FilterField("timestamp", "<=", t)
 	}
+	if jobID := q.Get("job_id"); jobID != "" {
+		dq = dq.FilterField("job_id", "=", jobID)
+	}
+	if clusterID := q.Get("cluster_id"); clusterID != "" {
+		dq = dq.FilterField("cluster_id", "=", clusterID)
+	}
 	if ts := q.Get("types"); ts != "" {
 		var types []any
 		for _, t := range strings.Split(ts, ",") {
@@ -527,6 +534,7 @@ func recomputeJobSummary(ctx context.Context, jobID string) error {
 	summary := JobSummary{
 		JobID:      jobID,
 		SubmitTime: job.SubmitTime,
+		ClusterID:  job.ClusterID,
 		Expiry:     time.Now().Add(7 * 24 * time.Hour),
 		TaskCount:  len(tasks),
 	}

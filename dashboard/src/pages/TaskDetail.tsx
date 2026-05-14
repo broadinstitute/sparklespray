@@ -23,7 +23,7 @@ const STATUS_COLORS: Record<string, { bg: string; text: string }> = {
 export default function TaskDetail() {
   const { jobId, taskId } = useParams<{ jobId: string; taskId: string }>();
   const location = useLocation();
-  const { addEventListener } = useEvents();
+  const { addJobEventListener } = useEvents();
   const [localEvents, setLocalEvents] = useState<AnyEvent[]>([]);
   const [taskInfo, setTaskInfo] = useState<{
     command: string;
@@ -40,17 +40,14 @@ export default function TaskDetail() {
 
   useEffect(() => {
     if (!jobId || !taskId) return;
-    return addEventListener((newEvents) => {
+    return addJobEventListener(jobId, (newEvents) => {
       const relevant = newEvents.filter(
-        (e) =>
-          "task_id" in e &&
-          (e as any).task_id === taskId &&
-          (e as any).job_id === jobId
+        (e) => "task_id" in e && (e as any).task_id === taskId
       );
       if (relevant.length > 0)
         setLocalEvents((prev) => mergeEvents(prev, relevant));
     });
-  }, [addEventListener, jobId, taskId]);
+  }, [addJobEventListener, jobId, taskId]);
 
   useEffect(() => {
     if (!taskId) return;

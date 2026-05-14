@@ -106,6 +106,15 @@ export type AnyEvent =
   | JobKilledEvent
   | AnyTaskEvent;
 
+export interface BackendJobSummary {
+  jobID: string;
+  submitTime: string;
+  clusterId: string;
+  taskCount: number;
+  successCount: number;
+  failureCount: number;
+}
+
 export interface JobDetail {
   job_id: string;
   cluster_id: string;

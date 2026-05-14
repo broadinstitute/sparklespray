@@ -1,31 +1,58 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useParams } from "react-router-dom";
-import { useEvents, mergeEvents } from "../data/EventProvider";
+import { mergeEvents } from "../data/EventProvider";
 import { computeClusterTimeSeries } from "../data/clusterTimeSeries";
 import type { AnyEvent } from "../types";
 import MultiLineChart from "../components/MultiLineChart";
 
+const CLUSTER_EVENT_TYPES =
+  "worker_started,worker_stopped,cluster_started,cluster_stopped";
+const POLL_MS = 5_000;
+const PAGE_LIMIT = 1000;
+
 export default function ClusterDetail() {
   const { clusterId } = useParams<{ clusterId: string }>();
-  const { addEventListener } = useEvents();
   const [localEvents, setLocalEvents] = useState<AnyEvent[]>([]);
+  const cursorRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!clusterId) return;
-    return addEventListener((newEvents) => {
-      const relevant = newEvents.filter(
-        (e) =>
-          "cluster_id" in e &&
-          (e as any).cluster_id === clusterId &&
-          (e.type === "worker_started" ||
-            e.type === "worker_stopped" ||
-            e.type === "cluster_started" ||
-            e.type === "cluster_stopped")
-      );
-      if (relevant.length > 0)
-        setLocalEvents((prev) => mergeEvents(prev, relevant));
-    });
-  }, [addEventListener, clusterId]);
+    let cancelled = false;
+
+    async function poll() {
+      while (!cancelled) {
+        try {
+          const params = new URLSearchParams({
+            cluster_id: clusterId!,
+            types: CLUSTER_EVENT_TYPES,
+            limit: String(PAGE_LIMIT),
+          });
+          if (cursorRef.current) params.set("after", cursorRef.current);
+
+          const res = await fetch(`/api/v1/events?${params}`);
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const data: {
+            events: AnyEvent[];
+            next_after?: string;
+          } = await res.json();
+
+          if (data.events.length > 0) {
+            setLocalEvents((prev) => mergeEvents(prev, data.events));
+            if (data.next_after) cursorRef.current = data.next_after;
+            if (data.events.length >= PAGE_LIMIT) continue;
+          }
+        } catch (err) {
+          console.error("[ClusterDetail] poll error:", err);
+        }
+        await new Promise<void>((r) => setTimeout(r, POLL_MS));
+      }
+    }
+
+    poll();
+    return () => {
+      cancelled = true;
+    };
+  }, [clusterId]);
 
   const { counts, rates } = useMemo(
     () =>

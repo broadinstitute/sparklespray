@@ -41,21 +41,17 @@ function StatusBadge({ status }: { status: TaskStatus }) {
 export default function JobDetail() {
   const { jobId } = useParams<{ jobId: string }>();
   const location = useLocation();
-  const { addEventListener } = useEvents();
+  const { addJobEventListener } = useEvents();
   const [localEvents, setLocalEvents] = useState<AnyEvent[]>([]);
 
   const isTasksTab = location.pathname.endsWith("/tasks");
 
   useEffect(() => {
     if (!jobId) return;
-    return addEventListener((newEvents) => {
-      const relevant = newEvents.filter(
-        (e) => "job_id" in e && (e as any).job_id === jobId
-      );
-      if (relevant.length > 0)
-        setLocalEvents((prev) => mergeEvents(prev, relevant));
-    });
-  }, [addEventListener, jobId]);
+    return addJobEventListener(jobId, (newEvents) =>
+      setLocalEvents((prev) => mergeEvents(prev, newEvents))
+    );
+  }, [addJobEventListener, jobId]);
 
   const tasks = useMemo(() => (jobId ? getJobTasks(localEvents, jobId) : []), [
     localEvents,

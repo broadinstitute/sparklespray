@@ -1,8 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { useEvents, mergeEvents } from "../data/EventProvider";
+import { useEvents } from "../data/EventProvider";
 import { getJobs, getClusters } from "../data/events";
-import type { AnyEvent } from "../types";
 
 interface BreadcrumbSegment {
   label: string;
@@ -199,29 +198,22 @@ function CommandPalette({
 
 export default function NavBar() {
   const location = useLocation();
-  const { addEventListener } = useEvents();
-  const [allEvents, setAllEvents] = useState<AnyEvent[]>([]);
+  const { jobs } = useEvents();
   const [paletteOpen, setPaletteOpen] = useState(false);
 
-  useEffect(() => {
-    return addEventListener((newEvents) =>
-      setAllEvents((prev) => mergeEvents(prev, newEvents))
-    );
-  }, [addEventListener]);
-
   const entries = useMemo<PaletteEntry[]>(() => {
-    const jobs = getJobs(allEvents).map((j) => ({
+    const jobEntries = getJobs(jobs).map((j) => ({
       label: j.jobId,
       href: `/jobs/${j.jobId}`,
       kind: "job" as const,
     }));
-    const clusters = getClusters(allEvents).map((c) => ({
+    const clusterEntries = getClusters(jobs).map((c) => ({
       label: c.clusterId,
       href: `/clusters/${c.clusterId}`,
       kind: "cluster" as const,
     }));
-    return [...jobs, ...clusters];
-  }, [allEvents]);
+    return [...jobEntries, ...clusterEntries];
+  }, [jobs]);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {

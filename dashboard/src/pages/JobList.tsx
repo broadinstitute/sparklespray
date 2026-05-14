@@ -1,9 +1,8 @@
-import { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import { useState, useMemo, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { getJobs, getClusters, getJobTaskStats } from "../data/events";
+import { getClusters } from "../data/events";
 import type { JobTaskStats } from "../data/events";
-import { useEvents, mergeEvents } from "../data/EventProvider";
-import type { AnyEvent } from "../types";
+import { useEvents } from "../data/EventProvider";
 
 const TIME_PRESETS = [
   { label: "Last day", hours: 24 },
@@ -598,8 +597,7 @@ function formatTimestamp(d: Date): string {
 
 export default function JobList() {
   const navigate = useNavigate();
-  const { addEventListener, jobCache } = useEvents();
-  const [allEvents, setAllEvents] = useState<AnyEvent[]>([]);
+  const { jobs, jobCache } = useEvents();
   const [search, setSearch] = useState("");
   const [timePreset, setTimePreset] = useState(0);
   const [hiddenLabels, setHiddenLabels] = useState<Set<string>>(
@@ -607,12 +605,6 @@ export default function JobList() {
   );
   const [showLabelPanel, setShowLabelPanel] = useState(false);
   const labelWrapRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    return addEventListener((newEvents) =>
-      setAllEvents((prev) => mergeEvents(prev, newEvents))
-    );
-  }, [addEventListener]);
 
   useEffect(() => {
     if (!showLabelPanel) return;
@@ -656,12 +648,19 @@ export default function JobList() {
     [knownLabelKeys, hiddenLabels]
   );
 
-  const jobs = useMemo(() => getJobs(allEvents), [allEvents]);
-  const clusters = useMemo(() => getClusters(allEvents), [allEvents]);
+  const clusters = useMemo(() => getClusters(jobs), [jobs]);
   const jobsWithStats = useMemo(
     () =>
-      jobs.map((j) => ({ ...j, stats: getJobTaskStats(allEvents, j.jobId) })),
-    [jobs, allEvents]
+      jobs.map((j) => ({
+        jobID: j.jobID,
+        submitTime: new Date(j.submitTime),
+        stats: {
+          total: j.taskCount,
+          success: j.successCount,
+          failure: j.failureCount,
+        },
+      })),
+    [jobs]
   );
 
   const filteredJobs = useMemo(() => {
@@ -669,11 +668,11 @@ export default function JobList() {
     const cutoffMs = now - TIME_PRESETS[timePreset].hours * 3600 * 1000;
     const q = search.trim().toLowerCase();
 
-    return jobsWithStats.filter(({ jobId, startTime }) => {
-      if (startTime.getTime() < cutoffMs) return false;
+    return jobsWithStats.filter(({ jobID, submitTime }) => {
+      if (submitTime.getTime() < cutoffMs) return false;
       if (!q) return true;
-      if (jobId.toLowerCase().includes(q)) return true;
-      const meta = jobCache[jobId]?.metadata;
+      if (jobID.toLowerCase().includes(q)) return true;
+      const meta = jobCache[jobID]?.metadata;
       if (!meta) return false;
       return Object.entries(meta).some(
         ([k, v]) =>
@@ -776,26 +775,26 @@ export default function JobList() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredJobs.map(({ jobId, startTime, stats }, i) => (
+                  {filteredJobs.map(({ jobID, submitTime, stats }, i) => (
                     <tr
-                      key={jobId}
+                      key={jobID}
                       className="jl-tr"
-                      onClick={() => navigate(`/jobs/${jobId}`)}
+                      onClick={() => navigate(`/jobs/${jobID}`)}
                     >
                       <td className="jl-td jl-td-index">
                         {String(i + 1).padStart(2, "0")}
                       </td>
                       <td className="jl-td">
-                        <div className="jl-id">{jobId}</div>
+                        <div className="jl-id">{jobID}</div>
                         <LabelChips
-                          metadata={jobCache[jobId]?.metadata}
+                          metadata={jobCache[jobID]?.metadata}
                           search={search}
                           hiddenLabels={hiddenLabels}
                         />
                       </td>
                       <StatCell stats={stats} />
                       <td className="jl-td jl-td-time">
-                        {formatTimestamp(startTime)}
+                        {formatTimestamp(submitTime)}
                       </td>
                     </tr>
                   ))}
