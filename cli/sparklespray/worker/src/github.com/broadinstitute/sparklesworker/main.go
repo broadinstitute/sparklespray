@@ -272,6 +272,7 @@ func consume(c *cli.Context) error {
 	var owner string
 	var externalIP string
 	var machineType string
+	var zone string
 	if !isLocalRun {
 		log.Printf("Querying metadata to get host instance name")
 		instanceName, err := GetInstanceName()
@@ -282,7 +283,7 @@ func consume(c *cli.Context) error {
 			log.Printf("Got instance name: %s", instanceName)
 		}
 
-		zone, err := GetInstanceZone()
+		zone, err = GetInstanceZone()
 		if err != nil {
 			log.Printf("GetInstanceZone failed: %v", err)
 			return err
@@ -336,7 +337,7 @@ func consume(c *cli.Context) error {
 	eventWriter := NewEventWriter(dsClient, psClient, cluster)
 
 	// Register this cluster in Datastore.
-	if err := eventWriter.WriteCluster(ctx, machineType); err != nil {
+	if err := eventWriter.WriteCluster(ctx, machineType, zone); err != nil {
 		log.Printf("WriteCluster failed: %v", err)
 		return err
 	}

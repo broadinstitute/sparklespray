@@ -14,10 +14,15 @@ import (
 	"strings"
 	"time"
 
+	batch "cloud.google.com/go/batch/apiv1"
+	batchpb "cloud.google.com/go/batch/apiv1/batchpb"
+	compute "cloud.google.com/go/compute/apiv1"
+	computepb "cloud.google.com/go/compute/apiv1/computepb"
 	"cloud.google.com/go/datastore"
 	"cloud.google.com/go/pubsub/v2"
 	pb "cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
 	iamcredentials "google.golang.org/api/iamcredentials/v1"
+	"google.golang.org/api/iterator"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 
@@ -26,6 +31,7 @@ const ClusterCollection = "SparklesV6Cluster"
 const JobCollection = "SparklesV6Job"
 const TaskCollection = "SparklesV6Task"
 const SummaryCollection = "SparklesV6JobSummary"
+const ClusterStatusCollection = "SparklesV6ClusterStatus"
 const DefaultLimit = 1000
 const MaxLimit = 10000
 
@@ -43,9 +49,38 @@ var gProjectID string
 type Event map[string]any
 
 type Cluster struct {
-	ClusterID   string    `datastore:"cluster_id" json:"cluster_id"`
+	ClusterID   string    `datastore:"cluster_id"   json:"cluster_id"`
 	MachineType string    `datastore:"machine_type" json:"machine_type"`
-	CreatedAt   time.Time `datastore:"created_at" json:"created_at"`
+	CreatedAt   time.Time `datastore:"created_at"   json:"created_at"`
+	Region      string    `datastore:"region"       json:"region"`
+	LastUpdated time.Time `datastore:"last_updated" json:"last_updated"`
+	Expiry      time.Time `datastore:"expiry"       json:"-"`
+}
+
+type ClusterStatus struct {
+	ClusterID                   string    `datastore:"cluster_id"                     json:"clusterId"`
+	LastUpdate                  time.Time `datastore:"last_update"                    json:"lastUpdate"`
+	SubmittedWorkerRequests     int       `datastore:"submitted_worker_requests"      json:"submittedWorkerRequests"`
+	ShortFailedWorkerRequests   int       `datastore:"short_failed_worker_requests"   json:"shortFailedWorkerRequests"`
+	OtherFailedWorkerRequests   int       `datastore:"other_failed_worker_requests"   json:"otherFailedWorkerRequests"`
+	CompletedWorkerRequests     int       `datastore:"completed_worker_requests"      json:"completedWorkerRequests"`
+	SeenCompletions             []string  `datastore:"seen_completions,noindex"       json:"seenCompletions"`
+	InstanceInUseCount          int       `datastore:"instance_in_use_count"          json:"instanceInUseCount"`
+	OrphanedTaskCount           int       `datastore:"orphaned_task_count"            json:"orphanedTaskCount"`
+	IdleInstanceCount           int       `datastore:"idle_instance_count"            json:"idleInstanceCount"`
+	RunningTaskCount            int       `datastore:"running_task_count"             json:"runningTaskCount"`
+	PreemptableInstanceCount    int       `datastore:"preemptable_instance_count"     json:"preemptableInstanceCount"`
+	NonPreemptableInstanceCount int       `datastore:"non_preemptable_instance_count" json:"nonPreemptableInstanceCount"`
+	Expiry                      time.Time `datastore:"expiry"                         json:"-"`
+}
+
+type ClusterMonitor struct {
+	projectID       string
+	dsClient        *datastore.Client
+	instancesClient *compute.InstancesClient
+	zonesClient     *compute.ZonesClient
+	batchClient     *batch.Client
+	zonesCache      map[string][]string
 }
 
 type Job struct {
@@ -645,6 +680,236 @@ func startSummaryUpdater(ctx context.Context) {
 	}()
 }
 
+func isBatchJobTerminal(j *batchpb.Job) bool {
+	s := j.GetStatus().GetState()
+	return s == batchpb.JobStatus_SUCCEEDED ||
+		s == batchpb.JobStatus_FAILED ||
+		s == batchpb.JobStatus_CANCELLED
+}
+
+func (m *ClusterMonitor) zonesForRegion(ctx context.Context, region string) ([]string, error) {
+	if zones, ok := m.zonesCache[region]; ok {
+		return zones, nil
+	}
+	zonesFilter := fmt.Sprintf(`name:"%s-*"`, region)
+	it := m.zonesClient.List(ctx, &computepb.ListZonesRequest{
+		Project: m.projectID,
+		Filter:  &zonesFilter,
+	})
+	var zones []string
+	for {
+		z, err := it.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("list zones for region %q: %w", region, err)
+		}
+		zones = append(zones, z.GetName())
+	}
+	m.zonesCache[region] = zones
+	return zones, nil
+}
+
+func (m *ClusterMonitor) poll(ctx context.Context, cluster Cluster) error {
+	var status ClusterStatus
+	key := datastore.NameKey(ClusterStatusCollection, cluster.ClusterID, nil)
+	err := m.dsClient.Get(ctx, key, &status)
+	if err == datastore.ErrNoSuchEntity {
+		status = ClusterStatus{ClusterID: cluster.ClusterID}
+	} else if err != nil {
+		return fmt.Errorf("get ClusterStatus for %q: %w", cluster.ClusterID, err)
+	}
+
+	// Fetch tasks for this cluster.
+	var tasks []Task
+	dq := datastore.NewQuery(TaskCollection).FilterField("cluster_id", "=", cluster.ClusterID)
+	if _, err := m.dsClient.GetAll(ctx, dq, &tasks); err != nil {
+		return fmt.Errorf("query tasks for %q: %w", cluster.ClusterID, err)
+	}
+
+	// Fetch running GCE instances per zone and Cloud Batch jobs.
+	// Skipped for local clusters, which have no real region or GCP resources.
+	vmNames := make(map[string]bool) // "zone/instanceName" → isPreemptable
+	var batchJobs []*batchpb.Job
+	if cluster.Region != "local" {
+		zones, err := m.zonesForRegion(ctx, cluster.Region)
+		if err != nil {
+			return err
+		}
+		instanceFilter := fmt.Sprintf(`labels.sparkles-cluster="%s"`, cluster.ClusterID)
+		for _, zone := range zones {
+			it := m.instancesClient.List(ctx, &computepb.ListInstancesRequest{
+				Project: m.projectID,
+				Zone:    zone,
+				Filter:  &instanceFilter,
+			})
+			for {
+				inst, err := it.Next()
+				if err == iterator.Done {
+					break
+				}
+				if err != nil {
+					return fmt.Errorf("list instances zone %q: %w", zone, err)
+				}
+				isSpot := inst.GetScheduling().GetProvisioningModel() == "SPOT"
+				vmNames[zone+"/"+inst.GetName()] = isSpot
+			}
+		}
+
+		parent := fmt.Sprintf("projects/%s/locations/%s", m.projectID, cluster.Region)
+		batchFilter := fmt.Sprintf(`labels.sparkles-cluster = "%s"`, cluster.ClusterID)
+		bit := m.batchClient.ListJobs(ctx, &batchpb.ListJobsRequest{
+			Parent: parent,
+			Filter: batchFilter,
+		})
+		for {
+			job, err := bit.Next()
+			if err == iterator.Done {
+				break
+			}
+			if err != nil {
+				return fmt.Errorf("list batch jobs: %w", err)
+			}
+			batchJobs = append(batchJobs, job)
+		}
+	}
+	status.SubmittedWorkerRequests = len(batchJobs)
+
+	// Identify new completions.
+	allBatchJobNames := make(map[string]struct{}, len(batchJobs))
+	for _, j := range batchJobs {
+		allBatchJobNames[j.GetName()] = struct{}{}
+	}
+	seenSet := make(map[string]struct{}, len(status.SeenCompletions))
+	for _, id := range status.SeenCompletions {
+		seenSet[id] = struct{}{}
+	}
+	var newCompletions []*batchpb.Job
+	for _, j := range batchJobs {
+		if !isBatchJobTerminal(j) {
+			continue
+		}
+		if _, seen := seenSet[j.GetName()]; seen {
+			continue
+		}
+		newCompletions = append(newCompletions, j)
+		seenSet[j.GetName()] = struct{}{}
+	}
+	// Prune IDs no longer present in the live query, then append new ones.
+	kept := status.SeenCompletions[:0]
+	for _, id := range status.SeenCompletions {
+		if _, exists := allBatchJobNames[id]; exists {
+			kept = append(kept, id)
+		}
+	}
+	for _, j := range newCompletions {
+		kept = append(kept, j.GetName())
+	}
+	status.SeenCompletions = kept
+
+	// Classify new completions.
+	for _, j := range newCompletions {
+		runtime := j.GetStatus().GetRunDuration().AsDuration()
+		isShort := runtime < 10*time.Second
+		isSuccess := j.GetStatus().GetState() == batchpb.JobStatus_SUCCEEDED
+		if isShort {
+			status.ShortFailedWorkerRequests++
+		} else if isSuccess {
+			status.CompletedWorkerRequests++
+		} else {
+			status.OtherFailedWorkerRequests++
+		}
+	}
+
+	// Match VMs with claimed tasks.
+	claimedByOwner := make(map[string]*Task)
+	for i := range tasks {
+		if tasks[i].Status == "claimed" {
+			claimedByOwner[tasks[i].Owner] = &tasks[i]
+		}
+	}
+
+	// Compute instance/task counts.
+	status.InstanceInUseCount = 0
+	status.IdleInstanceCount = 0
+	status.PreemptableInstanceCount = 0
+	status.NonPreemptableInstanceCount = 0
+	for vmKey, isSpot := range vmNames {
+		if isSpot {
+			status.PreemptableInstanceCount++
+		} else {
+			status.NonPreemptableInstanceCount++
+		}
+		if _, hasClaimed := claimedByOwner[vmKey]; hasClaimed {
+			status.InstanceInUseCount++
+		} else {
+			status.IdleInstanceCount++
+		}
+	}
+	status.RunningTaskCount = len(claimedByOwner)
+	status.OrphanedTaskCount = 0
+	for owner := range claimedByOwner {
+		if _, alive := vmNames[owner]; !alive {
+			status.OrphanedTaskCount++
+		}
+	}
+
+	status.LastUpdate = time.Now()
+	status.Expiry = status.LastUpdate.Add(7 * 24 * time.Hour)
+	if _, err := m.dsClient.Put(ctx, key, &status); err != nil {
+		return fmt.Errorf("put ClusterStatus for %q: %w", cluster.ClusterID, err)
+	}
+	return nil
+}
+
+func (m *ClusterMonitor) start(ctx context.Context) {
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
+			cutoff := time.Now().Add(-24 * time.Hour)
+			dq := datastore.NewQuery(ClusterCollection).FilterField("last_updated", ">", cutoff)
+			var clusters []Cluster
+			if _, err := m.dsClient.GetAll(ctx, dq, &clusters); err != nil {
+				log.Printf("ClusterHealthMonitor: failed to list active clusters: %v", err)
+			} else {
+				for _, c := range clusters {
+					if err := m.poll(ctx, c); err != nil {
+						log.Printf("ClusterHealthMonitor: poll(%q) error: %v", c.ClusterID, err)
+					}
+				}
+			}
+
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(60 * time.Second):
+			}
+		}
+	}()
+}
+
+func handleClusterStatus(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	clusterID := r.PathValue("cluster_id")
+	var status ClusterStatus
+	key := datastore.NameKey(ClusterStatusCollection, clusterID, nil)
+	if err := dsClient.Get(ctx, key, &status); errors.Is(err, datastore.ErrNoSuchEntity) {
+		writeError(w, http.StatusNotFound, "NOT_FOUND", "no status for cluster")
+		return
+	} else if err != nil {
+		log.Printf("Datastore get error for cluster status %q: %v", clusterID, err)
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "datastore get failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, status)
+}
+
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -694,7 +959,35 @@ func main() {
 		log.Fatalf("Failed to create IAM credentials service: %v", err)
 	}
 
+	instancesClient, err := compute.NewInstancesRESTClient(ctx)
+	if err != nil {
+		log.Fatalf("Failed to create Compute instances client: %v", err)
+	}
+	defer instancesClient.Close()
+
+	zonesClient, err := compute.NewZonesRESTClient(ctx)
+	if err != nil {
+		log.Fatalf("Failed to create Compute zones client: %v", err)
+	}
+	defer zonesClient.Close()
+
+	batchClient, err := batch.NewClient(ctx)
+	if err != nil {
+		log.Fatalf("Failed to create Batch client: %v", err)
+	}
+	defer batchClient.Close()
+
+	monitor := &ClusterMonitor{
+		projectID:       *projectID,
+		dsClient:        dsClient,
+		instancesClient: instancesClient,
+		zonesClient:     zonesClient,
+		batchClient:     batchClient,
+		zonesCache:      make(map[string][]string),
+	}
+
 	startSummaryUpdater(ctx)
+	monitor.start(ctx)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /jobs/summary", handleJobsSummary)
@@ -703,6 +996,7 @@ func main() {
 	mux.HandleFunc("GET /api/v1/task/{task_id}/log", handleTaskLog)
 	mux.HandleFunc("GET /api/v1/task/{task_id}/metrics", handleTaskMetrics)
 	mux.HandleFunc("GET /api/v1/cluster/{cluster_id}", handleCluster)
+	mux.HandleFunc("GET /api/v1/cluster/{cluster_id}/status", handleClusterStatus)
 	mux.HandleFunc("GET /api/v1/job/{job_id}", handleJob)
 	mux.HandleFunc("POST /api/v1/subscription", handleCreateSubscription)
 	mux.HandleFunc("POST /api/v1/subscription/{subscription_id}/unsubscribe", handleUnsubscribe)

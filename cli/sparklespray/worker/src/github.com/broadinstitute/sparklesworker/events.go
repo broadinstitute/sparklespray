@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"cloud.google.com/go/datastore"
@@ -20,6 +21,9 @@ type Cluster struct {
 	ClusterID   string    `datastore:"cluster_id"`
 	MachineType string    `datastore:"machine_type"`
 	CreatedAt   time.Time `datastore:"created_at"`
+	Region      string    `datastore:"region"`
+	LastUpdated time.Time `datastore:"last_updated"`
+	Expiry      time.Time `datastore:"expiry"`
 }
 
 // EventWriter writes lifecycle events to Datastore and notifies via Pub/Sub.
@@ -34,11 +38,20 @@ func NewEventWriter(dsClient *datastore.Client, psClient *pubsub.Client, cluster
 	return &EventWriter{dsClient: dsClient, psClient: psClient, clusterID: clusterID}
 }
 
-func (ew *EventWriter) WriteCluster(ctx context.Context, machineType string) error {
+func (ew *EventWriter) WriteCluster(ctx context.Context, machineType, zone string) error {
+	now := time.Now().UTC()
+	region := "local"
+	if zone != "" {
+		parts := strings.Split(zone, "-")
+		region = strings.Join(parts[:len(parts)-1], "-")
+	}
 	c := &Cluster{
 		ClusterID:   ew.clusterID,
 		MachineType: machineType,
-		CreatedAt:   time.Now().UTC(),
+		CreatedAt:   now,
+		Region:      region,
+		LastUpdated: now,
+		Expiry:      now.Add(7 * 24 * time.Hour),
 	}
 	key := datastore.NameKey(ClusterCollection, ew.clusterID, nil)
 	_, err := ew.dsClient.Put(ctx, key, c)
