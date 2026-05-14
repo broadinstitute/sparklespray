@@ -525,15 +525,13 @@ func handleJob(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, &job)
 }
 
-func handleGC(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	now := time.Now()
-	q := datastore.NewQuery(EventCollection).FilterField("expiry", "<=", now).KeysOnly()
+// gcCollection deletes all entities in the given collection whose expiry field is <= now.
+// Returns the number of entities deleted.
+func gcCollection(ctx context.Context, collection string) (int, error) {
+	q := datastore.NewQuery(collection).FilterField("expiry", "<=", time.Now()).KeysOnly()
 	keys, err := dsClient.GetAll(ctx, q, nil)
 	if err != nil {
-		log.Printf("GC query error: %v", err)
-		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "gc query failed")
-		return
+		return 0, fmt.Errorf("gc query %q: %w", collection, err)
 	}
 	const batchSize = 500
 	deleted := 0
@@ -543,14 +541,58 @@ func handleGC(w http.ResponseWriter, r *http.Request) {
 			end = len(keys)
 		}
 		if err := dsClient.DeleteMulti(ctx, keys[i:end]); err != nil {
-			log.Printf("GC delete error: %v", err)
-			writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "gc delete failed")
-			return
+			return deleted, fmt.Errorf("gc delete %q: %w", collection, err)
 		}
 		deleted += end - i
 	}
-	log.Printf("GC deleted %d expired events", deleted)
-	writeJSON(w, http.StatusOK, map[string]int{"deleted": deleted})
+	return deleted, nil
+}
+
+var gcCollections = []string{
+	EventCollection,
+	ClusterCollection,
+	ClusterStatusCollection,
+	SummaryCollection,
+}
+
+func handleGC(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	totalDeleted := 0
+	for _, col := range gcCollections {
+		n, err := gcCollection(ctx, col)
+		totalDeleted += n
+		if err != nil {
+			log.Printf("GC error: %v", err)
+			writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "gc failed")
+			return
+		}
+	}
+	log.Printf("GC deleted %d expired entities", totalDeleted)
+	writeJSON(w, http.StatusOK, map[string]int{"deleted": totalDeleted})
+}
+
+func startGCWorker(ctx context.Context) {
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(15 * time.Minute):
+			}
+
+			totalDeleted := 0
+			for _, col := range gcCollections {
+				n, err := gcCollection(ctx, col)
+				totalDeleted += n
+				if err != nil {
+					log.Printf("GC worker error: %v", err)
+				}
+			}
+			if totalDeleted > 0 {
+				log.Printf("GC worker deleted %d expired entities", totalDeleted)
+			}
+		}
+	}()
 }
 
 func recomputeJobSummary(ctx context.Context, jobID string) error {
@@ -988,6 +1030,7 @@ func main() {
 
 	startSummaryUpdater(ctx)
 	monitor.start(ctx)
+	startGCWorker(ctx)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /jobs/summary", handleJobsSummary)
