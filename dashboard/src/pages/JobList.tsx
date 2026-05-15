@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, useCallback } from "react";
+import { useState, useMemo, useRef, useCallback, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { getClusters } from "../data/events";
 import type { JobTaskStats } from "../data/events";
@@ -585,13 +585,18 @@ function LabelVisibilityPanel({
   );
 }
 
+const LOCAL_TZ =
+  new Intl.DateTimeFormat("en", { timeZoneName: "short" })
+    .formatToParts(new Date())
+    .find((p) => p.type === "timeZoneName")?.value ?? "";
+
 function formatTimestamp(d: Date): string {
   const pad = (n: number, w = 2) => String(n).padStart(w, "0");
   return (
-    `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}` +
-    ` ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(
-      d.getUTCSeconds()
-    )} UTC`
+    `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` +
+    ` ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(
+      d.getSeconds()
+    )} ${LOCAL_TZ}`
   );
 }
 
@@ -771,7 +776,7 @@ export default function JobList() {
                     <th className="jl-th jl-th-index" />
                     <th className="jl-th">Identifier</th>
                     <th className="jl-th jl-th-stats">tasks / ok / fail</th>
-                    <th className="jl-th jl-th-time">Start Time (UTC)</th>
+                    <th className="jl-th jl-th-time">Start Time (local)</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -817,7 +822,7 @@ export default function JobList() {
                   <tr>
                     <th className="jl-th jl-th-index" />
                     <th className="jl-th">Cluster ID</th>
-                    <th className="jl-th jl-th-time">Start Time (UTC)</th>
+                    <th className="jl-th jl-th-time">Start Time (local)</th>
                   </tr>
                 </thead>
                 <tbody>

@@ -11,3 +11,10 @@ indexes:
     properties:
       - name: job_id
       - name: last_updated
+
+  # Required for dashboard-backend event queries
+  # Query: job_id = X ORDER BY timestamp
+  - kind: SparklesV6Event
+    properties:
+      - name: job_id
+      - name: timestamp

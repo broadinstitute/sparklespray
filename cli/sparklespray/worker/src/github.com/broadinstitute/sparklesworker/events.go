@@ -42,6 +42,10 @@ func (ew *EventWriter) WriteCluster(ctx context.Context, machineType, zone strin
 	now := time.Now().UTC()
 	region := "local"
 	if zone != "" {
+		// Metadata service returns full path e.g. "projects/PROJECT/zones/us-central1-a"
+		if idx := strings.LastIndex(zone, "/"); idx >= 0 {
+			zone = zone[idx+1:]
+		}
 		parts := strings.Split(zone, "-")
 		region = strings.Join(parts[:len(parts)-1], "-")
 	}

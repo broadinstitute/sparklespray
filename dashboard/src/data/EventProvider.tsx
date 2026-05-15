@@ -46,23 +46,6 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
 
   const pendingJobFetchesRef = useRef<Set<string>>(new Set());
 
-  // GC every hour.
-  useEffect(() => {
-    async function gc() {
-      try {
-        const data = await fetch("/gc", { method: "POST" }).then((r) =>
-          r.json()
-        );
-        console.log("[EventProvider] GC completed:", data);
-      } catch (err) {
-        console.warn("[EventProvider] GC failed:", err);
-      }
-    }
-    gc();
-    const id = setInterval(gc, 60 * 60 * 1000);
-    return () => clearInterval(id);
-  }, []);
-
   // Jobs polling — replaces the old global event stream.
   useEffect(() => {
     let cancelled = false;
@@ -70,7 +53,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     async function pollJobs() {
       while (!cancelled) {
         try {
-          const res = await fetch("/jobs/summary");
+          const res = await fetch("/api/v1/jobs/summary");
           if (res.ok) {
             const data: BackendJobSummary[] = await res.json();
             setJobs(data);
