@@ -123,3 +123,25 @@ export interface JobDetail {
   task_count: number;
   metadata?: Record<string, string>;
 }
+
+export interface ClusterStatus {
+  clusterId: string;
+  lastUpdate: string;
+  submittedWorkerRequests: number;
+  shortFailedWorkerRequests: number;
+  otherFailedWorkerRequests: number;
+  completedWorkerRequests: number;
+  instanceInUseCount: number;
+  orphanedTaskCount: number;
+  idleInstanceCount: number;
+  runningTaskCount: number;
+  preemptableInstanceCount: number;
+  nonPreemptableInstanceCount: number;
+}
+
+export interface ClusterInfo {
+  cluster_id: string;
+  machine_type: string;
+  created_at: string;
+  region: string;
+}

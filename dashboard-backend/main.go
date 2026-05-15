@@ -954,6 +954,28 @@ func handleClusterStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, status)
 }
 
+func handleClusters(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	clusters := make([]Cluster, 0)
+	if _, err := dsClient.GetAll(ctx, datastore.NewQuery(ClusterCollection), &clusters); err != nil {
+		log.Printf("Datastore query error for clusters: %v", err)
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "datastore query failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, clusters)
+}
+
+func handleClusterStatuses(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	statuses := make([]ClusterStatus, 0)
+	if _, err := dsClient.GetAll(ctx, datastore.NewQuery(ClusterStatusCollection), &statuses); err != nil {
+		log.Printf("Datastore query error for cluster statuses: %v", err)
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "datastore query failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, statuses)
+}
+
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -1059,6 +1081,8 @@ func main() {
 	mux.HandleFunc("GET /api/v1/task/{task_id}/metrics", handleTaskMetrics)
 	mux.HandleFunc("GET /api/v1/cluster/{cluster_id}", handleCluster)
 	mux.HandleFunc("GET /api/v1/cluster/{cluster_id}/status", handleClusterStatus)
+	mux.HandleFunc("GET /api/v1/clusters", handleClusters)
+	mux.HandleFunc("GET /api/v1/clusters/summary", handleClusterStatuses)
 	mux.HandleFunc("GET /api/v1/job/{job_id}", handleJob)
 	mux.HandleFunc("POST /api/v1/subscription", handleCreateSubscription)
 	mux.HandleFunc("POST /api/v1/subscription/{subscription_id}/unsubscribe", handleUnsubscribe)

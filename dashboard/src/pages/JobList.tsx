@@ -1,8 +1,9 @@
 import { useState, useMemo, useRef, useCallback, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { getClusters } from "../data/events";
-import type { JobTaskStats } from "../data/events";
 import { useEvents } from "../data/EventProvider";
+import type { BackendJobSummary, ClusterStatus, ClusterInfo } from "../types";
+
+// ── Constants ────────────────────────────────────────────────────────────────
 
 const TIME_PRESETS = [
   { label: "Last day", hours: 24 },
@@ -10,24 +11,24 @@ const TIME_PRESETS = [
   { label: "All time", hours: 24 * 365 * 10 },
 ];
 
-const DEFAULT_HIDDEN_LABELS = new Set([
+const SYSTEM_LABEL_KEYS = new Set([
   "UUID",
   "job-env-sha256",
   "job-spec-sha256",
 ]);
 
+// ── Colors ───────────────────────────────────────────────────────────────────
+
 const LABEL_HUES = [145, 250, 60, 320, 200, 30, 280, 170];
-const hueCache = new Map<string, number>();
-let hueIndex = 0;
-
+const labelHueCache = new Map<string, number>();
+let labelHueIndex = 0;
 function getLabelHue(value: string): number {
-  if (!hueCache.has(value)) {
-    hueCache.set(value, LABEL_HUES[hueIndex % LABEL_HUES.length]);
-    hueIndex++;
+  if (!labelHueCache.has(value)) {
+    labelHueCache.set(value, LABEL_HUES[labelHueIndex % LABEL_HUES.length]);
+    labelHueIndex++;
   }
-  return hueCache.get(value)!;
+  return labelHueCache.get(value)!;
 }
-
 function labelColors(value: string) {
   const h = getLabelHue(value);
   return {
@@ -37,6 +38,1378 @@ function labelColors(value: string) {
   };
 }
 
+const POOL_HUES = [30, 80, 350, 240, 170, 300, 120, 200];
+const poolHueCache = new Map<string, number>();
+let poolHueIndex = 0;
+function workerPoolColor(id: string) {
+  if (!poolHueCache.has(id)) {
+    poolHueCache.set(id, POOL_HUES[poolHueIndex % POOL_HUES.length]);
+    poolHueIndex++;
+  }
+  const h = poolHueCache.get(id)!;
+  return {
+    bg: `oklch(94% 0.05 ${h})`,
+    border: `oklch(72% 0.10 ${h})`,
+    text: `oklch(38% 0.12 ${h})`,
+  };
+}
+
+const C_OK = "oklch(45% 0.14 145)";
+const C_OK_SOFT = "oklch(72% 0.12 145)";
+const C_WARN = "oklch(55% 0.16 70)";
+const C_BAD = "oklch(48% 0.20 25)";
+const C_BAD_SOFT = "oklch(72% 0.16 25)";
+const MONO = "'JetBrains Mono', 'Courier New', monospace";
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+function relTime(dateStr: string): string {
+  const s = Math.max(
+    0,
+    Math.round((Date.now() - new Date(dateStr).getTime()) / 1000)
+  );
+  if (s < 60) return `${s}s ago`;
+  if (s < 3600) return `${Math.round(s / 60)}m ago`;
+  return `${Math.round(s / 3600)}h ago`;
+}
+
+const LOCAL_TZ =
+  new Intl.DateTimeFormat("en", { timeZoneName: "short" })
+    .formatToParts(new Date())
+    .find((p) => p.type === "timeZoneName")?.value ?? "";
+
+function formatTimestamp(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return (
+    `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` +
+    ` ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(
+      d.getSeconds()
+    )} ${LOCAL_TZ}`
+  );
+}
+
+// ── useWorkerPools hook ───────────────────────────────────────────────────────
+
+interface WorkerPool {
+  status: ClusterStatus;
+  machineType: string;
+  jobs: BackendJobSummary[];
+}
+
+function useWorkerPools(jobs: BackendJobSummary[]): WorkerPool[] {
+  const [statuses, setStatuses] = useState<ClusterStatus[]>([]);
+  const [infos, setInfos] = useState<ClusterInfo[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function poll() {
+      while (!cancelled) {
+        try {
+          const [sr, ir] = await Promise.all([
+            fetch("/api/v1/clusters/summary"),
+            fetch("/api/v1/clusters"),
+          ]);
+          if (sr.ok) setStatuses(await sr.json());
+          if (ir.ok) setInfos(await ir.json());
+        } catch {
+          // network errors are transient; just retry
+        }
+        await new Promise((r) => setTimeout(r, 30_000));
+      }
+    }
+    poll();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return useMemo(() => {
+    const infoMap = new Map(infos.map((c) => [c.cluster_id, c]));
+    return statuses.map((s) => ({
+      status: s,
+      machineType: infoMap.get(s.clusterId)?.machine_type ?? "",
+      jobs: jobs.filter((j) => j.clusterId === s.clusterId),
+    }));
+  }, [statuses, infos, jobs]);
+}
+
+// ── Proportion bar ────────────────────────────────────────────────────────────
+
+function ProportionBar({
+  segments,
+  height = 10,
+  emptyLabel = "no workers",
+}: {
+  segments: { value: number; color: string; title: string }[];
+  height?: number;
+  emptyLabel?: string;
+}) {
+  const total = segments.reduce((s, x) => s + x.value, 0);
+  if (total === 0) {
+    return (
+      <div
+        style={{
+          height,
+          background: "#f3f3f3",
+          border: "1px solid #e5e5e5",
+          borderRadius: 2,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontSize: 11,
+          color: "#bbb",
+          fontFamily: MONO,
+          letterSpacing: 1,
+        }}
+      >
+        {emptyLabel}
+      </div>
+    );
+  }
+  return (
+    <div
+      style={{
+        display: "flex",
+        height,
+        borderRadius: 2,
+        overflow: "hidden",
+        background: "#f3f3f3",
+        border: "1px solid #e5e5e5",
+      }}
+    >
+      {segments.map((seg, i) =>
+        seg.value > 0 ? (
+          <div
+            key={i}
+            title={seg.title}
+            style={{
+              width: `${(seg.value / total) * 100}%`,
+              background: seg.color,
+            }}
+          />
+        ) : null
+      )}
+    </div>
+  );
+}
+
+function MiniBar({
+  value,
+  max,
+  color,
+}: {
+  value: number;
+  max: number;
+  color: string;
+}) {
+  const pct = max > 0 ? Math.max(2, (value / max) * 100) : 0;
+  return (
+    <div
+      style={{
+        flex: 1,
+        height: 4,
+        background: "#f0f0f0",
+        borderRadius: 1,
+        overflow: "hidden",
+        minWidth: 30,
+      }}
+    >
+      <div
+        style={{
+          width: `${pct}%`,
+          height: "100%",
+          background: value > 0 ? color : "transparent",
+        }}
+      />
+    </div>
+  );
+}
+
+function BreakdownRow({
+  label,
+  value,
+  max,
+  color,
+  textColor,
+  emphasize,
+}: {
+  label: string;
+  value: number;
+  max: number;
+  color: string;
+  textColor: string;
+  emphasize?: boolean;
+}) {
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "78px 32px 1fr",
+        alignItems: "center",
+        gap: 8,
+        fontFamily: MONO,
+        fontSize: 12,
+      }}
+    >
+      <span style={{ color: "#888" }}>{label}</span>
+      <span
+        style={{
+          textAlign: "right",
+          color: textColor,
+          fontWeight: emphasize ? 700 : 400,
+        }}
+      >
+        {value}
+      </span>
+      <MiniBar value={value} max={max} color={color} />
+    </div>
+  );
+}
+
+// ── Worker pool card ──────────────────────────────────────────────────────────
+
+function WorkerPoolCard({ pool }: { pool: WorkerPool }) {
+  const col = workerPoolColor(pool.status.clusterId);
+  const s = pool.status;
+
+  const totalWorkers =
+    s.preemptableInstanceCount + s.nonPreemptableInstanceCount;
+  const totalFailed = s.shortFailedWorkerRequests + s.otherFailedWorkerRequests;
+  const reqBarMax = Math.max(
+    s.submittedWorkerRequests,
+    s.completedWorkerRequests + totalFailed,
+    1
+  );
+  const idleColor = s.idleInstanceCount > 0 ? C_WARN : "#bbb";
+
+  return (
+    <div
+      style={{
+        background: "white",
+        border: "1.5px solid #ddd",
+        borderRadius: 4,
+        overflow: "hidden",
+      }}
+    >
+      {/* Header */}
+      <div
+        style={{
+          padding: "8px 10px",
+          background: col.bg,
+          borderBottom: `1px solid ${col.border}`,
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+        }}
+      >
+        <span
+          style={{
+            width: 8,
+            height: 8,
+            borderRadius: "50%",
+            background: col.border,
+            flexShrink: 0,
+          }}
+        />
+        <span
+          style={{
+            fontSize: 13,
+            fontWeight: 700,
+            fontFamily: MONO,
+            color: col.text,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+            flex: 1,
+          }}
+        >
+          {s.clusterId}
+        </span>
+        {pool.machineType && (
+          <span
+            style={{
+              fontSize: 11,
+              fontFamily: MONO,
+              color: col.text,
+              opacity: 0.75,
+              flexShrink: 0,
+            }}
+          >
+            {pool.machineType}
+          </span>
+        )}
+      </div>
+
+      {/* Alert: short-failed workers */}
+      {s.shortFailedWorkerRequests > 0 && (
+        <div
+          style={{
+            padding: "7px 10px",
+            background: "oklch(97% 0.04 25)",
+            borderBottom: `1px solid ${C_BAD_SOFT}`,
+            fontSize: 12,
+            fontFamily: MONO,
+            color: "#553",
+            lineHeight: 1.45,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+            <span style={{ color: C_BAD, fontWeight: 700, flexShrink: 0 }}>
+              ⚠
+            </span>
+            <div>
+              <span style={{ color: C_BAD, fontWeight: 700 }}>
+                {s.shortFailedWorkerRequests} workers
+              </span>
+              <span style={{ color: "#555" }}>
+                {" "}
+                failed quickly. A misconfiguration may be preventing workers
+                from starting.{" "}
+              </span>
+              <a
+                href={`/clusters/${s.clusterId}`}
+                style={{
+                  color: C_BAD,
+                  fontWeight: 700,
+                  textDecoration: "underline",
+                  textUnderlineOffset: 2,
+                }}
+              >
+                View the worker pool's page
+              </a>
+              <span style={{ color: "#555" }}> to see details.</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div style={{ padding: "10px 12px 12px" }}>
+        {/* Top stats */}
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1fr 1fr 1fr",
+            gap: 8,
+            marginBottom: 10,
+          }}
+        >
+          {[
+            {
+              value: s.runningTaskCount,
+              label: "RUNNING TASKS",
+              color: s.runningTaskCount > 0 ? C_OK : "#bbb",
+            },
+            {
+              value: s.instanceInUseCount,
+              label: "WORKERS IN USE",
+              color: s.instanceInUseCount > 0 ? "#222" : "#bbb",
+            },
+            {
+              value: s.idleInstanceCount,
+              label: "WORKERS IDLE",
+              color: idleColor,
+            },
+          ].map(({ value, label, color }) => (
+            <div
+              key={label}
+              style={{ display: "flex", flexDirection: "column" }}
+            >
+              <span
+                style={{
+                  fontSize: 18,
+                  lineHeight: 1,
+                  fontFamily: MONO,
+                  fontWeight: 700,
+                  color,
+                }}
+              >
+                {value}
+              </span>
+              <span
+                style={{
+                  fontSize: 10,
+                  letterSpacing: 1.2,
+                  color: "#999",
+                  fontFamily: MONO,
+                  marginTop: 3,
+                }}
+              >
+                {label}
+              </span>
+            </div>
+          ))}
+        </div>
+
+        {/* Workers bars */}
+        <div>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              marginBottom: 4,
+            }}
+          >
+            <span
+              style={{
+                fontSize: 10,
+                letterSpacing: 1.5,
+                color: "#999",
+                fontFamily: MONO,
+              }}
+            >
+              WORKERS
+            </span>
+            <span style={{ fontSize: 11, fontFamily: MONO, color: "#888" }}>
+              <span style={{ color: "#222", fontWeight: 700 }}>
+                {totalWorkers}
+              </span>{" "}
+              total
+            </span>
+          </div>
+
+          <ProportionBar
+            segments={[
+              {
+                value: s.instanceInUseCount,
+                color: C_OK_SOFT,
+                title: `${s.instanceInUseCount} in use`,
+              },
+              {
+                value: s.idleInstanceCount,
+                color: "oklch(90% 0.03 70)",
+                title: `${s.idleInstanceCount} idle`,
+              },
+            ]}
+          />
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              marginTop: 3,
+              fontSize: 11,
+              fontFamily: MONO,
+              color: "#777",
+            }}
+          >
+            <span>
+              <ColorSwatch color={C_OK_SOFT} />
+              <span style={{ color: "#222", fontWeight: 700 }}>
+                {s.instanceInUseCount}
+              </span>{" "}
+              in use
+            </span>
+            <span>
+              <ColorSwatch color="oklch(90% 0.03 70)" />
+              <span
+                style={{
+                  color: s.idleInstanceCount > 0 ? "#222" : "#bbb",
+                  fontWeight: 700,
+                }}
+              >
+                {s.idleInstanceCount}
+              </span>{" "}
+              idle
+            </span>
+          </div>
+
+          <div style={{ height: 6 }} />
+          <ProportionBar
+            segments={[
+              {
+                value: s.preemptableInstanceCount,
+                color: "oklch(72% 0.10 240)",
+                title: `${s.preemptableInstanceCount} preemptable`,
+              },
+              {
+                value: s.nonPreemptableInstanceCount,
+                color: "oklch(50% 0.13 240)",
+                title: `${s.nonPreemptableInstanceCount} non-preemptable`,
+              },
+            ]}
+            emptyLabel="no workers"
+          />
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              marginTop: 3,
+              fontSize: 11,
+              fontFamily: MONO,
+              color: "#777",
+            }}
+          >
+            <span>
+              <ColorSwatch color="oklch(72% 0.10 240)" />
+              <span style={{ color: "#222", fontWeight: 700 }}>
+                {s.preemptableInstanceCount}
+              </span>{" "}
+              preemptable
+            </span>
+            <span>
+              <ColorSwatch color="oklch(50% 0.13 240)" />
+              <span
+                style={{
+                  color: s.nonPreemptableInstanceCount > 0 ? "#222" : "#bbb",
+                  fontWeight: 700,
+                }}
+              >
+                {s.nonPreemptableInstanceCount}
+              </span>{" "}
+              non-preemptable
+            </span>
+          </div>
+        </div>
+
+        {/* Orphaned tasks */}
+        {s.orphanedTaskCount > 0 && (
+          <div
+            style={{
+              marginTop: 10,
+              padding: "5px 8px",
+              border: `1px solid ${C_BAD_SOFT}`,
+              borderRadius: 2,
+              background: "oklch(97% 0.04 25)",
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              fontSize: 12,
+              fontFamily: MONO,
+            }}
+          >
+            <span style={{ color: C_BAD, fontWeight: 700 }}>
+              {s.orphanedTaskCount}
+            </span>
+            <span style={{ color: "#666" }}>
+              orphaned task{s.orphanedTaskCount !== 1 ? "s" : ""}
+            </span>
+          </div>
+        )}
+
+        {/* Worker requests */}
+        <div
+          style={{ marginTop: 12, borderTop: "1px dashed #eee", paddingTop: 8 }}
+        >
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              marginBottom: 6,
+            }}
+          >
+            <span
+              style={{
+                fontSize: 10,
+                letterSpacing: 1.5,
+                color: "#999",
+                fontFamily: MONO,
+              }}
+            >
+              WORKER REQUESTS
+            </span>
+            <span style={{ fontSize: 11, fontFamily: MONO, color: "#888" }}>
+              <span style={{ color: "#222", fontWeight: 700 }}>
+                {s.submittedWorkerRequests}
+              </span>{" "}
+              submitted
+            </span>
+          </div>
+          <div style={{ display: "grid", rowGap: 3 }}>
+            <BreakdownRow
+              label="completed"
+              value={s.completedWorkerRequests}
+              max={reqBarMax}
+              color={C_OK}
+              textColor="#444"
+            />
+            <BreakdownRow
+              label="failed"
+              value={totalFailed}
+              max={reqBarMax}
+              color={C_BAD}
+              textColor={totalFailed > 0 ? C_BAD : "#aaa"}
+              emphasize={totalFailed > 0}
+            />
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div
+          style={{
+            marginTop: 10,
+            paddingTop: 6,
+            borderTop: "1px solid #f0f0f0",
+            display: "flex",
+            justifyContent: "space-between",
+            fontSize: 10,
+            fontFamily: MONO,
+            color: "#aaa",
+          }}
+        >
+          <span>
+            {pool.jobs.length} job{pool.jobs.length !== 1 ? "s" : ""}
+          </span>
+          <span
+            style={
+              Date.now() - new Date(s.lastUpdate).getTime() > 5 * 60_000
+                ? { color: C_BAD }
+                : undefined
+            }
+          >
+            updated {relTime(s.lastUpdate)}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ColorSwatch({ color }: { color: string }) {
+  return (
+    <span
+      style={{
+        display: "inline-block",
+        width: 7,
+        height: 7,
+        background: color,
+        borderRadius: 1,
+        verticalAlign: "middle",
+        marginRight: 4,
+      }}
+    />
+  );
+}
+
+// ── Worker pools sidebar ──────────────────────────────────────────────────────
+
+function WorkerPoolsSidebar({ workerPools }: { workerPools: WorkerPool[] }) {
+  return (
+    <div>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "baseline",
+          justifyContent: "space-between",
+          marginBottom: 8,
+        }}
+      >
+        <span
+          style={{
+            fontSize: 11,
+            letterSpacing: 2,
+            color: "#888",
+            fontFamily: MONO,
+          }}
+        >
+          WORKER POOLS
+        </span>
+        <span style={{ fontSize: 11, color: "#bbb", fontFamily: MONO }}>
+          {workerPools.length} active
+        </span>
+      </div>
+      {workerPools.length === 0 ? (
+        <div
+          style={{
+            padding: "16px 12px",
+            background: "#fafafa",
+            border: "1px dashed #ddd",
+            borderRadius: 6,
+            fontSize: 12,
+            color: "#aaa",
+            lineHeight: 1.5,
+          }}
+        >
+          No worker pools.
+          <br />
+          Worker pools will be automatically created when jobs need workers to
+          run tasks.
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {workerPools.map((p) => (
+            <WorkerPoolCard key={p.status.clusterId} pool={p} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Facet key button with popover ─────────────────────────────────────────────
+
+function FacetKeyButton({
+  k,
+  values,
+  selected,
+  onToggle,
+  onClear,
+}: {
+  k: string;
+  values: { value: string; count: number }[];
+  selected: Set<string>;
+  onToggle: (v: string) => void;
+  onClear: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onDoc(e: MouseEvent) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node))
+        setOpen(false);
+    }
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+
+  const selectedArr = Array.from(selected);
+  const hasSelection = selectedArr.length > 0;
+
+  const q = query.trim().toLowerCase();
+  const visible = values
+    .filter(({ value }) => !q || value.toLowerCase().includes(q))
+    .sort((a, b) => {
+      const aSel = selected.has(a.value);
+      const bSel = selected.has(b.value);
+      if (aSel !== bSel) return aSel ? -1 : 1;
+      return b.count - a.count;
+    });
+
+  return (
+    <div
+      ref={wrapRef}
+      style={{
+        position: "relative",
+        display: "inline-flex",
+        alignItems: "center",
+      }}
+    >
+      <button
+        onClick={() => setOpen((o) => !o)}
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 5,
+          border: `1.5px solid ${hasSelection ? "#333" : "#ccc"}`,
+          borderRadius: 3,
+          padding: "3px 8px",
+          fontSize: "0.68rem",
+          fontFamily: MONO,
+          background: "white",
+          color: "#222",
+          cursor: "pointer",
+          maxWidth: 260,
+        }}
+      >
+        <span style={{ color: "#888" }}>{k}</span>
+        {hasSelection && (
+          <>
+            <span style={{ color: "#ccc" }}>:</span>
+            <span
+              style={{
+                display: "inline-flex",
+                gap: 3,
+                alignItems: "center",
+                overflow: "hidden",
+              }}
+            >
+              {selectedArr.slice(0, 2).map((v) => {
+                const c = labelColors(v);
+                return (
+                  <span
+                    key={v}
+                    style={{
+                      background: c.bg,
+                      color: c.text,
+                      border: `1px solid ${c.border}`,
+                      borderRadius: 2,
+                      padding: "0 4px",
+                      fontSize: "0.6rem",
+                      fontWeight: 600,
+                    }}
+                  >
+                    {v}
+                  </span>
+                );
+              })}
+              {selectedArr.length > 2 && (
+                <span style={{ color: "#888", fontSize: "0.6rem" }}>
+                  +{selectedArr.length - 2}
+                </span>
+              )}
+            </span>
+          </>
+        )}
+        <span style={{ color: "#bbb", fontSize: "0.6rem" }}>▾</span>
+      </button>
+
+      {hasSelection && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onClear();
+          }}
+          style={{
+            marginLeft: 2,
+            fontFamily: MONO,
+            fontSize: "0.68rem",
+            color: "#aaa",
+            background: "none",
+            border: "none",
+            cursor: "pointer",
+            padding: "0 3px",
+          }}
+        >
+          ✕
+        </button>
+      )}
+
+      {open && (
+        <div
+          style={{
+            position: "absolute",
+            top: "calc(100% + 4px)",
+            left: 0,
+            background: "white",
+            border: "1.5px solid #333",
+            borderRadius: 4,
+            boxShadow: "0 4px 16px rgba(0,0,0,0.12)",
+            width: 240,
+            zIndex: 200,
+            fontFamily: MONO,
+          }}
+        >
+          <div
+            style={{
+              padding: "7px 10px",
+              borderBottom: "1px solid #eee",
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+            }}
+          >
+            <span
+              style={{ fontSize: "0.58rem", letterSpacing: 1.5, color: "#aaa" }}
+            >
+              FILTER
+            </span>
+            <span
+              style={{ fontSize: "0.72rem", color: "#333", fontWeight: 600 }}
+            >
+              {k}
+            </span>
+            <span style={{ flex: 1 }} />
+            <span style={{ fontSize: "0.6rem", color: "#aaa" }}>
+              {values.length} value{values.length !== 1 ? "s" : ""}
+            </span>
+          </div>
+          <div style={{ padding: 8, borderBottom: "1px solid #eee" }}>
+            <input
+              autoFocus
+              placeholder={`search ${k} values…`}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              style={{
+                fontFamily: MONO,
+                fontSize: "0.68rem",
+                border: "1.5px solid #333",
+                borderRadius: 3,
+                padding: "4px 8px",
+                outline: "none",
+                background: "white",
+                color: "#111",
+                width: "100%",
+                boxSizing: "border-box",
+              }}
+            />
+          </div>
+          <div style={{ maxHeight: 200, overflowY: "auto" }}>
+            {visible.length === 0 ? (
+              <div
+                style={{
+                  padding: 12,
+                  textAlign: "center",
+                  color: "#bbb",
+                  fontSize: "0.68rem",
+                }}
+              >
+                no matches
+              </div>
+            ) : (
+              visible.map(({ value, count }) => {
+                const isSel = selected.has(value);
+                const disabled = count === 0 && !isSel;
+                const c = labelColors(value);
+                return (
+                  <button
+                    key={value}
+                    onClick={() => onToggle(value)}
+                    disabled={disabled}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      width: "100%",
+                      padding: "5px 10px",
+                      border: "none",
+                      borderBottom: "1px solid #f5f5f5",
+                      background: isSel ? "oklch(96% 0.02 90)" : "white",
+                      cursor: disabled ? "not-allowed" : "pointer",
+                      opacity: disabled ? 0.4 : 1,
+                      textAlign: "left",
+                      fontFamily: MONO,
+                      fontSize: "0.68rem",
+                      boxSizing: "border-box",
+                    }}
+                  >
+                    <span
+                      style={{
+                        width: 12,
+                        height: 12,
+                        flexShrink: 0,
+                        border: `1.5px solid ${isSel ? "#222" : "#ccc"}`,
+                        borderRadius: 2,
+                        background: isSel ? "#222" : "white",
+                        color: "white",
+                        fontSize: "0.55rem",
+                        lineHeight: "10px",
+                        textAlign: "center",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                    >
+                      {isSel ? "✓" : ""}
+                    </span>
+                    <span style={{ flex: 1, color: c.text, fontWeight: 600 }}>
+                      {value}
+                    </span>
+                    <span style={{ fontSize: "0.6rem", color: "#aaa" }}>
+                      {count}
+                    </span>
+                  </button>
+                );
+              })
+            )}
+          </div>
+          {hasSelection && (
+            <div
+              style={{
+                padding: 6,
+                borderTop: "1px solid #eee",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+              }}
+            >
+              <button
+                onClick={onClear}
+                style={{
+                  fontFamily: MONO,
+                  fontSize: "0.6rem",
+                  color: "#888",
+                  background: "none",
+                  border: "none",
+                  padding: "2px 6px",
+                  cursor: "pointer",
+                }}
+              >
+                clear
+              </button>
+              <span style={{ fontSize: "0.6rem", color: "#aaa" }}>
+                {selectedArr.length} selected
+              </span>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Label chips (per-row) ─────────────────────────────────────────────────────
+
+function LabelChips({
+  metadata,
+  search,
+  facets,
+  onToggleFacet,
+}: {
+  metadata: Record<string, string> | undefined;
+  search: string;
+  facets: Record<string, Set<string>>;
+  onToggleFacet: (k: string, v: string) => void;
+}) {
+  if (!metadata) return null;
+  const entries = Object.entries(metadata).filter(
+    ([k]) => !SYSTEM_LABEL_KEYS.has(k)
+  );
+  if (entries.length === 0) return null;
+  const q = search.trim().toLowerCase();
+
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 5 }}>
+      {entries.map(([k, v]) => {
+        const c = labelColors(v);
+        const isMatch =
+          q &&
+          (k.toLowerCase().includes(q) ||
+            v.toLowerCase().includes(q) ||
+            `${k}=${v}`.toLowerCase().includes(q));
+        const active = facets[k]?.has(v);
+        return (
+          <button
+            key={k}
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleFacet(k, v);
+            }}
+            title={active ? `Remove filter ${k}=${v}` : `Filter by ${k}=${v}`}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 1,
+              border: `1.5px solid ${
+                active ? c.text : isMatch ? c.text : c.border
+              }`,
+              borderRadius: 3,
+              padding: "1px 7px",
+              fontSize: "0.62rem",
+              fontFamily: MONO,
+              background: active ? c.text : c.bg,
+              color: active ? "white" : c.text,
+              lineHeight: 1.6,
+              boxShadow:
+                isMatch && !active ? `0 0 0 1.5px ${c.border}` : "none",
+              cursor: "pointer",
+              transition: "all 0.1s",
+            }}
+          >
+            <span style={{ opacity: active ? 0.85 : 0.7 }}>{k}</span>
+            <span
+              style={{
+                opacity: active ? 0.6 : 1,
+                color: active ? "white" : c.border,
+                margin: "0 2px",
+              }}
+            >
+              =
+            </span>
+            <span style={{ fontWeight: 700 }}>{v}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── Main component ────────────────────────────────────────────────────────────
+
+export default function JobList() {
+  const navigate = useNavigate();
+  const { jobs, jobCache } = useEvents();
+  const [search, setSearch] = useState("");
+  const [timePreset, setTimePreset] = useState(0);
+  const [facets, setFacets] = useState<Record<string, Set<string>>>({});
+
+  const workerPools = useWorkerPools(jobs);
+
+  // ── Facet helpers ──────────────────────────────────────────────────────────
+
+  const toggleFacet = useCallback((k: string, v: string) => {
+    setFacets((prev) => {
+      const cur = new Set(prev[k] ?? []);
+      if (cur.has(v)) cur.delete(v);
+      else cur.add(v);
+      const next = { ...prev };
+      if (cur.size === 0) delete next[k];
+      else next[k] = cur;
+      return next;
+    });
+  }, []);
+
+  const clearFacet = useCallback((k: string) => {
+    setFacets((prev) => {
+      const next = { ...prev };
+      delete next[k];
+      return next;
+    });
+  }, []);
+
+  const clearAllFacets = useCallback(() => setFacets({}), []);
+
+  const activeFacetCount = useMemo(
+    () => Object.values(facets).reduce((n, s) => n + s.size, 0),
+    [facets]
+  );
+
+  // ── Filtering ──────────────────────────────────────────────────────────────
+
+  const jobsWithMeta = useMemo(
+    () =>
+      jobs.map((j) => ({
+        ...j,
+        submitDate: new Date(j.submitTime),
+        metadata: jobCache[j.jobID]?.metadata,
+      })),
+    [jobs, jobCache]
+  );
+
+  // Stage 1: time filter
+  const timeFiltered = useMemo(() => {
+    const cutoffMs = Date.now() - TIME_PRESETS[timePreset].hours * 3600 * 1000;
+    return jobsWithMeta.filter((j) => j.submitDate.getTime() >= cutoffMs);
+  }, [jobsWithMeta, timePreset]);
+
+  // Stage 2: search filter
+  const searchFiltered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return timeFiltered;
+    return timeFiltered.filter((j) => {
+      if (j.jobID.toLowerCase().includes(q)) return true;
+      if (!j.metadata) return false;
+      return Object.entries(j.metadata).some(
+        ([k, v]) =>
+          k.toLowerCase().includes(q) ||
+          v.toLowerCase().includes(q) ||
+          `${k}=${v}`.toLowerCase().includes(q)
+      );
+    });
+  }, [timeFiltered, search]);
+
+  // Helper: does a job match all facets except one key?
+  function matchesFacetsExcept(
+    meta: Record<string, string> | undefined,
+    exceptKey: string | null
+  ) {
+    return Object.entries(facets).every(([k, vs]) => {
+      if (k === exceptKey) return true;
+      return meta ? vs.has(meta[k] ?? "") : false;
+    });
+  }
+
+  // Stage 3: facet filter
+  const filteredJobs = useMemo(
+    () => searchFiltered.filter((j) => matchesFacetsExcept(j.metadata, null)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [searchFiltered, facets]
+  );
+
+  // Build facet index: for each (key, value) compute how many jobs would remain
+  // if that value were toggled (OR within key, AND across keys).
+  const facetIndex = useMemo(() => {
+    const index: Record<string, Record<string, number>> = {};
+    for (const j of searchFiltered) {
+      if (!j.metadata) continue;
+      for (const k of Object.keys(j.metadata)) {
+        if (SYSTEM_LABEL_KEYS.has(k)) continue;
+        if (!index[k]) index[k] = {};
+        const v = j.metadata[k];
+        if (!index[k][v]) index[k][v] = 0;
+      }
+    }
+    for (const k of Object.keys(index)) {
+      const peers = searchFiltered.filter((j) =>
+        matchesFacetsExcept(j.metadata, k)
+      );
+      for (const v of Object.keys(index[k])) {
+        index[k][v] = peers.filter((j) => j.metadata?.[k] === v).length;
+      }
+    }
+    return index;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchFiltered, facets]);
+
+  const facetKeys = useMemo(() => Object.keys(facetIndex).sort(), [facetIndex]);
+
+  return (
+    <>
+      <style>{styles}</style>
+      <div className="jl-root">
+        <div className="jl-layout">
+          {/* ── Main content ── */}
+          <div className="jl-main">
+            <h1 className="jl-page-title">sparkles</h1>
+
+            {/* Filter bar */}
+            <div className="jl-filter-bar">
+              <div className="jl-filter-search">
+                <span className="jl-filter-label">Search</span>
+                <input
+                  type="text"
+                  className="jl-search-input"
+                  placeholder="id, label key, value, or key=value…"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                />
+                {search && (
+                  <button
+                    className="jl-search-clear"
+                    onClick={() => setSearch("")}
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+
+              <div className="jl-filter-divider" />
+
+              <div className="jl-filter-time">
+                <span className="jl-filter-label">Time</span>
+                <div className="jl-time-presets">
+                  {TIME_PRESETS.map((p, i) => (
+                    <button
+                      key={i}
+                      className={`jl-time-preset${
+                        timePreset === i ? " active" : ""
+                      }`}
+                      onClick={() => setTimePreset(i)}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Facet bar */}
+            {facetKeys.length > 0 && (
+              <div className="jl-facet-bar">
+                <span className="jl-filter-label" style={{ flexShrink: 0 }}>
+                  Filter by
+                </span>
+                {facetKeys.map((k) => (
+                  <FacetKeyButton
+                    key={k}
+                    k={k}
+                    values={Object.entries(
+                      facetIndex[k]
+                    ).map(([value, count]) => ({ value, count }))}
+                    selected={facets[k] ?? new Set()}
+                    onToggle={(v) => toggleFacet(k, v)}
+                    onClear={() => clearFacet(k)}
+                  />
+                ))}
+                {activeFacetCount > 0 && (
+                  <button onClick={clearAllFacets} className="jl-facet-clear">
+                    clear {activeFacetCount} filter
+                    {activeFacetCount !== 1 ? "s" : ""}
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* Jobs section */}
+            <section className="jl-section">
+              <h2 className="jl-section-title">Jobs</h2>
+              <p className="jl-subtitle">
+                {filteredJobs.length} job{filteredJobs.length !== 1 ? "s" : ""}{" "}
+                found
+              </p>
+              <div className="jl-divider" />
+              {filteredJobs.length === 0 ? (
+                <div className="jl-empty">no jobs found</div>
+              ) : (
+                <table className="jl-table">
+                  <thead>
+                    <tr>
+                      <th className="jl-th jl-th-index" />
+                      <th className="jl-th">Identifier</th>
+                      <th className="jl-th jl-th-pool">Worker Pool</th>
+                      <th className="jl-th jl-th-stats">tasks / ok / fail</th>
+                      <th className="jl-th jl-th-time">Start Time (local)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredJobs.map(
+                      ({ jobID, submitDate, clusterId, metadata }, i) => {
+                        const cc = clusterId
+                          ? workerPoolColor(clusterId)
+                          : null;
+                        return (
+                          <tr
+                            key={jobID}
+                            className="jl-tr"
+                            onClick={() => navigate(`/jobs/${jobID}`)}
+                          >
+                            <td className="jl-td jl-td-index">
+                              {String(i + 1).padStart(2, "0")}
+                            </td>
+                            <td className="jl-td">
+                              <div className="jl-id">{jobID}</div>
+                              <LabelChips
+                                metadata={metadata}
+                                search={search}
+                                facets={facets}
+                                onToggleFacet={toggleFacet}
+                              />
+                            </td>
+                            <td className="jl-td jl-td-pool">
+                              {clusterId && cc ? (
+                                <span className="jl-pool-cell">
+                                  <span
+                                    className="jl-pool-swatch"
+                                    style={{
+                                      background: cc.bg,
+                                      border: `1.5px solid ${cc.border}`,
+                                    }}
+                                  />
+                                  <span
+                                    style={{
+                                      color: cc.text,
+                                      overflow: "hidden",
+                                      textOverflow: "ellipsis",
+                                      whiteSpace: "nowrap",
+                                    }}
+                                  >
+                                    {clusterId}
+                                  </span>
+                                </span>
+                              ) : (
+                                <span className="jl-pool-empty">—</span>
+                              )}
+                            </td>
+                            <td className="jl-td jl-td-stats">
+                              <JobStatsChip
+                                job={jobs.find((j) => j.jobID === jobID)!}
+                              />
+                            </td>
+                            <td className="jl-td jl-td-time">
+                              {formatTimestamp(submitDate)}
+                            </td>
+                          </tr>
+                        );
+                      }
+                    )}
+                  </tbody>
+                </table>
+              )}
+            </section>
+
+            <div className="jl-footer">◆ sparkles dashboard</div>
+          </div>
+
+          {/* ── Sidebar ── */}
+          <div className="jl-sidebar">
+            <WorkerPoolsSidebar workerPools={workerPools} />
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function JobStatsChip({ job }: { job: BackendJobSummary }) {
+  const { taskCount: total, successCount: ok, failureCount: fail } = job;
+  let cls = "jl-chip";
+  if (fail > 0) cls += " jl-chip-red";
+  else if (total > 0 && total === ok) cls += " jl-chip-green";
+  return <span className={cls}>{`${total} / ${ok} / ${fail}`}</span>;
+}
+
+// ── Styles ────────────────────────────────────────────────────────────────────
+
 const styles = `
   @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&display=swap');
 
@@ -45,20 +1418,32 @@ const styles = `
     background: #fff;
     color: #333;
     font-family: 'JetBrains Mono', 'Courier New', monospace;
-    padding: 3rem 2rem;
+    padding: 2rem;
     box-sizing: border-box;
   }
 
-  .jl-inner {
-    max-width: 860px;
-    margin: 0 auto;
+  .jl-layout {
+    display: flex;
+    gap: 20px;
+    align-items: flex-start;
+  }
+
+  .jl-main {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .jl-sidebar {
+    width: 300px;
+    flex-shrink: 0;
+    padding-top: 4.5rem; /* align below page title */
   }
 
   .jl-page-title {
     font-size: 2rem;
     font-weight: 700;
     color: #111;
-    margin: 0 0 2.5rem 0;
+    margin: 0 0 1.5rem 0;
     letter-spacing: -0.03em;
   }
 
@@ -68,10 +1453,11 @@ const styles = `
     display: flex;
     align-items: center;
     gap: 12px;
-    margin-bottom: 2rem;
-    padding: 10px 12px;
+    margin-bottom: 0;
+    padding: 8px 12px;
     border: 1px solid #e8e8e8;
-    border-radius: 4px;
+    border-bottom: none;
+    border-radius: 4px 4px 0 0;
     background: #fafafa;
   }
 
@@ -89,6 +1475,7 @@ const styles = `
     text-transform: uppercase;
     color: #aaa;
     flex-shrink: 0;
+    font-family: 'JetBrains Mono', 'Courier New', monospace;
   }
 
   .jl-search-input {
@@ -155,130 +1542,32 @@ const styles = `
   .jl-time-preset:last-child { border-right: none; }
   .jl-time-preset.active { background: #111; color: white; }
 
-  /* ── Label visibility dropdown ───────────────────── */
+  /* ── Facet bar ───────────────────────────────────── */
 
-  .jl-labels-wrap {
-    position: relative;
-    flex-shrink: 0;
-  }
-
-  .jl-labels-btn {
-    font-family: 'JetBrains Mono', 'Courier New', monospace;
-    font-size: 0.68rem;
-    padding: 3px 9px;
-    border: 1.5px solid #ccc;
-    border-radius: 3px;
-    background: white;
-    color: #555;
-    cursor: pointer;
-    white-space: nowrap;
-    transition: border-color 0.1s, color 0.1s;
-  }
-
-  .jl-labels-btn:hover { border-color: #999; color: #111; }
-  .jl-labels-btn.has-hidden { border-color: #bbb; background: #f5f5f5; }
-
-  .jl-labels-badge {
-    display: inline-block;
-    margin-left: 4px;
-    background: #888;
-    color: white;
-    font-size: 0.55rem;
-    border-radius: 8px;
-    padding: 0 5px;
-    vertical-align: middle;
-    line-height: 1.6;
-  }
-
-  .jl-labels-panel {
-    position: absolute;
-    top: calc(100% + 6px);
-    right: 0;
-    background: white;
-    border: 1.5px solid #ccc;
-    border-radius: 4px;
-    min-width: 220px;
-    z-index: 200;
-    box-shadow: 0 4px 16px rgba(0,0,0,0.10);
-    overflow: hidden;
-  }
-
-  .jl-labels-panel-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 8px 12px 6px;
-    border-bottom: 1px solid #f0f0f0;
-  }
-
-  .jl-labels-panel-title {
-    font-size: 0.58rem;
-    letter-spacing: 0.18em;
-    text-transform: uppercase;
-    color: #aaa;
-  }
-
-  .jl-labels-reset {
-    font-family: 'JetBrains Mono', 'Courier New', monospace;
-    font-size: 0.6rem;
-    color: #aaa;
-    background: none;
-    border: none;
-    cursor: pointer;
-    padding: 0;
-    text-decoration: underline;
-    text-underline-offset: 2px;
-  }
-
-  .jl-labels-reset:hover { color: #333; }
-
-  .jl-labels-empty {
-    padding: 12px;
-    font-size: 0.68rem;
-    color: #bbb;
-    text-align: center;
-  }
-
-  .jl-labels-list {
-    padding: 4px 0;
-    max-height: 260px;
-    overflow-y: auto;
-  }
-
-  .jl-labels-row {
+  .jl-facet-bar {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 5px 12px;
+    flex-wrap: wrap;
+    padding: 8px 12px;
+    border: 1px solid #e8e8e8;
+    border-bottom: none;
+    background: #f5f5f2;
+    margin-bottom: 1.5rem;
+    border-radius: 0 0 4px 4px;
+    border-top: 1px dashed #e0e0e0;
+  }
+
+  .jl-facet-clear {
+    margin-left: auto;
+    font-family: 'JetBrains Mono', 'Courier New', monospace;
+    font-size: 0.68rem;
+    color: #888;
+    background: none;
+    border: 1px dashed #bbb;
+    border-radius: 3px;
+    padding: 2px 8px;
     cursor: pointer;
-    user-select: none;
-    transition: background 0.08s;
-  }
-
-  .jl-labels-row:hover { background: #f7f7f7; }
-
-  .jl-labels-check {
-    width: 13px;
-    height: 13px;
-    border: 1.5px solid #ccc;
-    border-radius: 2px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-    font-size: 0.6rem;
-    color: white;
-    transition: background 0.1s, border-color 0.1s;
-    background: white;
-  }
-
-  .jl-labels-check.checked { background: #222; border-color: #222; }
-
-  .jl-labels-key { font-size: 0.72rem; color: #333; flex: 1; }
-  .jl-labels-key.hidden-label {
-    color: #bbb;
-    text-decoration: line-through;
-    text-decoration-color: #ccc;
   }
 
   /* ── Section chrome ──────────────────────────────── */
@@ -306,12 +1595,6 @@ const styles = `
     margin-bottom: 0;
   }
 
-  .jl-divider-green {
-    height: 1px;
-    background: linear-gradient(90deg, #1b5e2044, #1b5e2011 60%, transparent);
-    margin-bottom: 0;
-  }
-
   /* ── Table ───────────────────────────────────────── */
 
   .jl-table {
@@ -331,9 +1614,10 @@ const styles = `
     border-bottom: 1px solid #f0f0f0;
   }
 
-  .jl-th-stats { text-align: right; width: 9rem; }
-  .jl-th-time  { text-align: right; width: 15rem; }
-  .jl-th-index { width: 2.5rem; }
+  .jl-th-stats { text-align: right; width: 8rem; }
+  .jl-th-time  { text-align: right; width: 14rem; }
+  .jl-th-index { width: 2.2rem; }
+  .jl-th-pool  { width: 9rem; }
 
   .jl-tr { cursor: pointer; }
 
@@ -347,10 +1631,6 @@ const styles = `
   .jl-tr:hover .jl-td { background: #f0f5ff; }
   .jl-tr:hover .jl-id  { color: #1565c0; }
 
-  .jl-tr-cluster:hover .jl-td { background: #f1f8f1; }
-  .jl-tr-cluster:hover .jl-id  { color: #2e7d32; }
-
-  /* 2px accent bar via left border on the index cell */
   .jl-td-index {
     font-size: 0.65rem;
     color: #ccc;
@@ -360,8 +1640,7 @@ const styles = `
     transition: background 0.12s, border-color 0.15s;
   }
 
-  .jl-tr:hover        .jl-td-index { border-left-color: #1565c0; }
-  .jl-tr-cluster:hover .jl-td-index { border-left-color: #2e7d32; }
+  .jl-tr:hover .jl-td-index { border-left-color: #1565c0; }
 
   .jl-id {
     font-size: 0.82rem;
@@ -387,41 +1666,35 @@ const styles = `
     padding-top: 0.68rem;
   }
 
-  .jl-stat-total { color: #999; }
-  .jl-stat-sep   { color: #ddd; margin: 0 3px; }
-  .jl-stat-ok    { color: oklch(45% 0.14 145); }
-  .jl-stat-fail-zero { color: #ddd; }
-  .jl-stat-fail-nonzero { color: oklch(45% 0.18 25); }
-
-  /* ── Label chips ─────────────────────────────────── */
-
-  .jl-label-chips {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px;
-    margin-top: 5px;
+  .jl-td-pool {
+    padding-top: 0.68rem;
+    overflow: hidden;
   }
 
-  .jl-label-chip {
+  .jl-pool-cell {
     display: inline-flex;
     align-items: center;
-    gap: 1px;
-    border-radius: 3px;
-    padding: 1px 7px;
-    font-size: 0.65rem;
-    line-height: 1.6;
-    white-space: nowrap;
-    border-width: 1.5px;
-    border-style: solid;
-    transition: box-shadow 0.1s;
+    gap: 5px;
+    font-size: 0.68rem;
+    font-family: 'JetBrains Mono', 'Courier New', monospace;
+    font-weight: 600;
+    max-width: 100%;
+    overflow: hidden;
   }
 
-  .jl-label-chip-key { opacity: 0.7; }
-  .jl-label-chip-eq  { margin: 0 2px; }
-  .jl-label-chip-val { font-weight: 700; }
+  .jl-pool-swatch {
+    width: 9px;
+    height: 9px;
+    border-radius: 2px;
+    flex-shrink: 0;
+  }
 
-  /* ── Misc ────────────────────────────────────────── */
+  .jl-pool-empty {
+    font-size: 0.72rem;
+    color: #ccc;
+  }
 
+  /* ── Label chips ─────────────────────────────────── */
 
   .jl-chip {
     font-size: 0.68rem;
@@ -435,16 +1708,9 @@ const styles = `
     margin: 0 0.5rem;
   }
 
-  .jl-chip-green {
-    background: #e8f5e9;
-    color: #2e7d32;
-  }
+  .jl-chip-green { background: #e8f5e9; color: #2e7d32; }
+  .jl-chip-red   { background: #ffebee; color: #b71c1c; }
 
-  .jl-chip-red {
-    background: #ffebee;
-    color: #b71c1c;
-  }
-    
   .jl-empty {
     font-size: 0.75rem;
     color: #ccc;
@@ -461,396 +1727,3 @@ const styles = `
     text-align: right;
   }
 `;
-
-function JobChip({ stats }: { stats: JobTaskStats }) {
-  const label = `${stats.total} / ${stats.success} / ${stats.failure}`;
-  let cls = "jl-chip";
-  if (stats.failure > 0) cls += " jl-chip-red";
-  else if (stats.total > 0 && stats.total === stats.success)
-    cls += " jl-chip-green";
-  return <span className={cls}>{label}</span>;
-}
-
-function StatCell({ stats }: { stats: JobTaskStats }) {
-  return (
-    <td className="jl-td jl-td-stats">
-      <JobChip stats={stats} />
-    </td>
-  );
-}
-
-function LabelChips({
-  metadata,
-  search,
-  hiddenLabels,
-}: {
-  metadata: Record<string, string> | undefined;
-  search: string;
-  hiddenLabels: Set<string>;
-}) {
-  if (!metadata) return null;
-  const entries = Object.entries(metadata).filter(
-    ([k]) => !hiddenLabels.has(k)
-  );
-  if (entries.length === 0) return null;
-
-  const q = search.trim().toLowerCase();
-
-  return (
-    <div className="jl-label-chips">
-      {entries.map(([k, v]) => {
-        const c = labelColors(v);
-        const isMatch =
-          q &&
-          (k.toLowerCase().includes(q) ||
-            v.toLowerCase().includes(q) ||
-            `${k}=${v}`.toLowerCase().includes(q));
-        return (
-          <span
-            key={k}
-            className="jl-label-chip"
-            style={{
-              background: c.bg,
-              borderColor: isMatch ? c.text : c.border,
-              boxShadow: isMatch ? `0 0 0 1.5px ${c.border}` : "none",
-            }}
-          >
-            <span className="jl-label-chip-key" style={{ color: c.text }}>
-              {k}
-            </span>
-            <span className="jl-label-chip-eq" style={{ color: c.border }}>
-              =
-            </span>
-            <span className="jl-label-chip-val" style={{ color: c.text }}>
-              {v}
-            </span>
-          </span>
-        );
-      })}
-    </div>
-  );
-}
-
-function LabelVisibilityPanel({
-  knownKeys,
-  hiddenLabels,
-  onToggle,
-  onReset,
-}: {
-  knownKeys: string[];
-  hiddenLabels: Set<string>;
-  onToggle: (key: string) => void;
-  onReset: () => void;
-}) {
-  const isDefault =
-    hiddenLabels.size === DEFAULT_HIDDEN_LABELS.size &&
-    [...DEFAULT_HIDDEN_LABELS].every((k) => hiddenLabels.has(k));
-
-  return (
-    <div className="jl-labels-panel">
-      <div className="jl-labels-panel-header">
-        <span className="jl-labels-panel-title">Label visibility</span>
-        {!isDefault && (
-          <button className="jl-labels-reset" onClick={onReset}>
-            reset
-          </button>
-        )}
-      </div>
-      {knownKeys.length === 0 ? (
-        <div className="jl-labels-empty">no labels seen yet</div>
-      ) : (
-        <div className="jl-labels-list">
-          {knownKeys.map((k) => {
-            const visible = !hiddenLabels.has(k);
-            return (
-              <div
-                key={k}
-                className="jl-labels-row"
-                onClick={() => onToggle(k)}
-              >
-                <div className={`jl-labels-check${visible ? " checked" : ""}`}>
-                  {visible && "✓"}
-                </div>
-                <span
-                  className={`jl-labels-key${visible ? "" : " hidden-label"}`}
-                >
-                  {k}
-                </span>
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
-
-const LOCAL_TZ =
-  new Intl.DateTimeFormat("en", { timeZoneName: "short" })
-    .formatToParts(new Date())
-    .find((p) => p.type === "timeZoneName")?.value ?? "";
-
-function formatTimestamp(d: Date): string {
-  const pad = (n: number, w = 2) => String(n).padStart(w, "0");
-  return (
-    `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` +
-    ` ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(
-      d.getSeconds()
-    )} ${LOCAL_TZ}`
-  );
-}
-
-export default function JobList() {
-  const navigate = useNavigate();
-  const { jobs, jobCache } = useEvents();
-  const [search, setSearch] = useState("");
-  const [timePreset, setTimePreset] = useState(0);
-  const [hiddenLabels, setHiddenLabels] = useState<Set<string>>(
-    new Set(DEFAULT_HIDDEN_LABELS)
-  );
-  const [showLabelPanel, setShowLabelPanel] = useState(false);
-  const labelWrapRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!showLabelPanel) return;
-    function handleClick(e: MouseEvent) {
-      if (
-        labelWrapRef.current &&
-        !labelWrapRef.current.contains(e.target as Node)
-      ) {
-        setShowLabelPanel(false);
-      }
-    }
-    document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, [showLabelPanel]);
-
-  const toggleLabel = useCallback((key: string) => {
-    setHiddenLabels((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  }, []);
-
-  const resetLabels = useCallback(() => {
-    setHiddenLabels(new Set(DEFAULT_HIDDEN_LABELS));
-  }, []);
-
-  const knownLabelKeys = useMemo(() => {
-    const keys = new Set<string>();
-    for (const job of Object.values(jobCache)) {
-      if (job.metadata) {
-        for (const k of Object.keys(job.metadata)) keys.add(k);
-      }
-    }
-    return Array.from(keys).sort();
-  }, [jobCache]);
-
-  const hiddenCount = useMemo(
-    () => knownLabelKeys.filter((k) => hiddenLabels.has(k)).length,
-    [knownLabelKeys, hiddenLabels]
-  );
-
-  const clusters = useMemo(() => getClusters(jobs), [jobs]);
-  const jobsWithStats = useMemo(
-    () =>
-      jobs.map((j) => ({
-        jobID: j.jobID,
-        submitTime: new Date(j.submitTime),
-        stats: {
-          total: j.taskCount,
-          success: j.successCount,
-          failure: j.failureCount,
-        },
-      })),
-    [jobs]
-  );
-
-  const filteredJobs = useMemo(() => {
-    const now = Date.now();
-    const cutoffMs = now - TIME_PRESETS[timePreset].hours * 3600 * 1000;
-    const q = search.trim().toLowerCase();
-
-    return jobsWithStats.filter(({ jobID, submitTime }) => {
-      if (submitTime.getTime() < cutoffMs) return false;
-      if (!q) return true;
-      if (jobID.toLowerCase().includes(q)) return true;
-      const meta = jobCache[jobID]?.metadata;
-      if (!meta) return false;
-      return Object.entries(meta).some(
-        ([k, v]) =>
-          k.toLowerCase().includes(q) ||
-          v.toLowerCase().includes(q) ||
-          `${k}=${v}`.toLowerCase().includes(q)
-      );
-    });
-  }, [jobsWithStats, jobCache, timePreset, search]);
-
-  return (
-    <>
-      <style>{styles}</style>
-      <div className="jl-root">
-        <div className="jl-inner">
-          <h1 className="jl-page-title">sparkles</h1>
-
-          <div className="jl-filter-bar">
-            <div className="jl-filter-search">
-              <span className="jl-filter-label">Search</span>
-              <input
-                type="text"
-                className="jl-search-input"
-                placeholder="id, label key, value, or key=value…"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-              {search && (
-                <button
-                  className="jl-search-clear"
-                  onClick={() => setSearch("")}
-                >
-                  ✕
-                </button>
-              )}
-            </div>
-
-            <div className="jl-filter-divider" />
-
-            <div className="jl-filter-time">
-              <span className="jl-filter-label">Time</span>
-              <div className="jl-time-presets">
-                {TIME_PRESETS.map((p, i) => (
-                  <button
-                    key={i}
-                    className={`jl-time-preset${
-                      timePreset === i ? " active" : ""
-                    }`}
-                    onClick={() => setTimePreset(i)}
-                  >
-                    {p.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="jl-filter-divider" />
-
-            <div className="jl-labels-wrap" ref={labelWrapRef}>
-              <button
-                className={`jl-labels-btn${
-                  hiddenCount > 0 ? " has-hidden" : ""
-                }`}
-                onClick={() => setShowLabelPanel((v) => !v)}
-              >
-                Labels
-                {hiddenCount > 0 && (
-                  <span className="jl-labels-badge">{hiddenCount} hidden</span>
-                )}{" "}
-                ▾
-              </button>
-              {showLabelPanel && (
-                <LabelVisibilityPanel
-                  knownKeys={knownLabelKeys}
-                  hiddenLabels={hiddenLabels}
-                  onToggle={toggleLabel}
-                  onReset={resetLabels}
-                />
-              )}
-            </div>
-          </div>
-
-          <section className="jl-section">
-            <h2 className="jl-section-title">Jobs</h2>
-            <p className="jl-subtitle">
-              {filteredJobs.length} job{filteredJobs.length !== 1 ? "s" : ""}{" "}
-              found
-            </p>
-            <div className="jl-divider" />
-            {filteredJobs.length === 0 ? (
-              <div className="jl-empty">no jobs found</div>
-            ) : (
-              <table className="jl-table">
-                <thead>
-                  <tr>
-                    <th className="jl-th jl-th-index" />
-                    <th className="jl-th">Identifier</th>
-                    <th className="jl-th jl-th-stats">tasks / ok / fail</th>
-                    <th className="jl-th jl-th-time">Start Time (local)</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredJobs.map(({ jobID, submitTime, stats }, i) => (
-                    <tr
-                      key={jobID}
-                      className="jl-tr"
-                      onClick={() => navigate(`/jobs/${jobID}`)}
-                    >
-                      <td className="jl-td jl-td-index">
-                        {String(i + 1).padStart(2, "0")}
-                      </td>
-                      <td className="jl-td">
-                        <div className="jl-id">{jobID}</div>
-                        <LabelChips
-                          metadata={jobCache[jobID]?.metadata}
-                          search={search}
-                          hiddenLabels={hiddenLabels}
-                        />
-                      </td>
-                      <StatCell stats={stats} />
-                      <td className="jl-td jl-td-time">
-                        {formatTimestamp(submitTime)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </section>
-
-          <section className="jl-section">
-            <h2 className="jl-section-title">Clusters</h2>
-            <p className="jl-subtitle">
-              {clusters.length} cluster{clusters.length !== 1 ? "s" : ""} found
-            </p>
-            <div className="jl-divider-green" />
-            {clusters.length === 0 ? (
-              <div className="jl-empty">no clusters found</div>
-            ) : (
-              <table className="jl-table">
-                <thead>
-                  <tr>
-                    <th className="jl-th jl-th-index" />
-                    <th className="jl-th">Cluster ID</th>
-                    <th className="jl-th jl-th-time">Start Time (local)</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {clusters.map(({ clusterId, startTime }, i) => (
-                    <tr
-                      key={clusterId}
-                      className="jl-tr jl-tr-cluster"
-                      onClick={() => navigate(`/clusters/${clusterId}`)}
-                    >
-                      <td className="jl-td jl-td-index">
-                        {String(i + 1).padStart(2, "0")}
-                      </td>
-                      <td className="jl-td">
-                        <div className="jl-id">{clusterId}</div>
-                      </td>
-                      <td className="jl-td jl-td-time">
-                        {formatTimestamp(startTime)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </section>
-
-          <div className="jl-footer">◆ sparkles dashboard</div>
-        </div>
-      </div>
-    </>
-  );
-}

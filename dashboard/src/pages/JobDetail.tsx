@@ -91,8 +91,6 @@ export default function JobDetail() {
     return (
       <div
         style={{
-          maxWidth: 960,
-          margin: "0 auto",
           padding: "2rem",
           fontFamily: "monospace",
         }}
@@ -141,8 +139,6 @@ export default function JobDetail() {
   return (
     <div
       style={{
-        maxWidth: 960,
-        margin: "0 auto",
         padding: "2rem",
         fontFamily: "monospace",
       }}

@@ -299,8 +299,6 @@ export default function PerfOverview() {
     userCpuStats,
     systemCpuStats,
     cpuEffStats,
-    sharedMemStats,
-    unsharedMemStats,
     blockInputStats,
     blockOutputStats,
     downloadStats,
@@ -373,28 +371,6 @@ export default function PerfOverview() {
           stats: memStats,
           histData: makeHistogram(
             entries.map((e) => e.maxMemGb * 1024),
-            20
-          ),
-        },
-        {
-          key: "sharedMem",
-          label: "Shared Memory",
-          unit: "MB",
-          color: "#00695c",
-          stats: sharedMemStats,
-          histData: makeHistogram(
-            entries.map((e) => e.sharedMemoryBytes / 1e6),
-            20
-          ),
-        },
-        {
-          key: "unsharedMem",
-          label: "Unshared Memory",
-          unit: "MB",
-          color: "#2e7d32",
-          stats: unsharedMemStats,
-          histData: makeHistogram(
-            entries.map((e) => e.unsharedMemoryBytes / 1e6),
             20
           ),
         },
@@ -501,19 +477,27 @@ export default function PerfOverview() {
   return (
     <div
       style={{
-        maxWidth: 1100,
-        margin: "0 auto",
         padding: "2rem",
         fontFamily: "monospace",
       }}
     >
       {/* Header */}
       <div style={{ marginBottom: "1.5rem" }}>
+        <h1
+          style={{ margin: "0 0 1.5rem", fontSize: "1.3rem", fontWeight: 700 }}
+        >
+          {jobId}
+        </h1>
         <TabBar tabs={jobTabs} />
-        <div style={{ display: "flex", alignItems: "baseline", gap: "1rem" }}>
-          <h1 style={{ margin: 0, fontSize: "1.3rem", fontWeight: 700 }}>
-            Completed Task Metrics
-          </h1>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "baseline",
+            gap: "1rem",
+            marginTop: "1rem",
+          }}
+        >
+          <span style={{ fontWeight: 700 }}>Completed Task Metrics</span>
           <span style={{ color: "#aaa", fontSize: "0.82rem" }}>
             {entries.length} tasks
           </span>
@@ -536,7 +520,7 @@ export default function PerfOverview() {
           {/* Left: metric list */}
           <div
             style={{
-              width: 380,
+              width: 520,
               borderRight: "1px solid #e0e0e0",
               overflowY: "auto",
               flexShrink: 0,
