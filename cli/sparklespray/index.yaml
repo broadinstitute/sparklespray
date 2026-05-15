@@ -18,3 +18,11 @@ indexes:
     properties:
       - name: job_id
       - name: timestamp
+
+  # Required for dashboard-backend cluster event queries
+  # Query: cluster_id = X AND type = Y ORDER BY timestamp
+  - kind: SparklesV6Event
+    properties:
+      - name: cluster_id
+      - name: type
+      - name: timestamp

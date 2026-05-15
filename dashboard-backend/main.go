@@ -967,21 +967,32 @@ func corsMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+func loadSubscriberSA(ctx context.Context) (string, error) {
+	key := datastore.NameKey("SparklesV6ProjectConfig", "SparklesV6ProjectConfig", nil)
+	var props datastore.PropertyList
+	if err := dsClient.Get(ctx, key, &props); err != nil {
+		return "", fmt.Errorf("get SparklesV6ProjectConfig: %w", err)
+	}
+	for _, p := range props {
+		if p.Name == "dashboard_user_service_account" {
+			if v, ok := p.Value.(string); ok && v != "" {
+				return v, nil
+			}
+		}
+	}
+	return "", fmt.Errorf("dashboard_user_service_account not set in SparklesV6ProjectConfig")
+}
+
 func main() {
 	projectID := flag.String("project", "", "GCP project ID (required)")
 	addr := flag.String("addr", ":8080", "Listen address")
-	subSA := flag.String("subscriber-sa", "", "Service account email to impersonate for Pub/Sub subscriber tokens (required)")
 	flag.Parse()
 
 	if *projectID == "" {
 		log.Fatal("--project is required")
 	}
-	if *subSA == "" {
-		log.Fatal("--subscriber-sa is required")
-	}
 
 	gProjectID = *projectID
-	subscriberSA = *subSA
 
 	ctx := context.Background()
 	var err error
@@ -991,6 +1002,12 @@ func main() {
 		log.Fatalf("Failed to create Datastore client: %v", err)
 	}
 	defer dsClient.Close()
+
+	subscriberSA, err = loadSubscriberSA(ctx)
+	if err != nil {
+		log.Fatalf("Failed to load subscriber service account: %v", err)
+	}
+	log.Printf("Using subscriber SA: %s", subscriberSA)
 
 	psClient, err = pubsub.NewClient(ctx, *projectID)
 	if err != nil {
