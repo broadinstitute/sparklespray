@@ -3,9 +3,12 @@ import copy
 import json
 import os
 import re
+import uuid as _uuid_mod
+from datetime import timezone
 from typing import Any, Dict, List, Optional, Tuple
 from ..errors import UserError
 from google.cloud import datastore
+from google.cloud import pubsub_v1
 
 from pydantic import BaseModel
 from ..batch_api import ClusterAPI
@@ -169,6 +172,38 @@ from ..gcp_permissions import has_access_to_docker_image
 from ..reset import reset_orphaned_tasks
 
 
+def _publish_job_started_event(
+    datastore_client: datastore.Client,
+    project: str,
+    job_id: str,
+    cluster_id: str,
+    task_count: int,
+) -> None:
+    now = datetime.now(tz=timezone.utc)
+    event_id = str(_uuid_mod.uuid4())
+    expiry = datetime.fromtimestamp(now.timestamp() + 7 * 24 * 3600, tz=timezone.utc)
+
+    key = datastore_client.key("SparklesV6Event", event_id)
+    entity = datastore.Entity(key=key)
+    entity["event_id"] = event_id
+    entity["type"] = "job_started"
+    entity["job_id"] = job_id
+    entity["cluster_id"] = cluster_id
+    entity["task_count"] = task_count
+    entity["timestamp"] = now
+    entity["expiry"] = expiry
+    datastore_client.put(entity)
+
+    publisher = pubsub_v1.PublisherClient()
+    topic_path = publisher.topic_path(project, "sparkles-v6-events")
+    publisher.publish(
+        topic_path,
+        b"",
+        type="job_started",
+        job_id=job_id,
+    ).result()
+
+
 def submit(
     jq: JobQueue,
     io: IO,
@@ -222,6 +257,7 @@ def submit(
     task_spec_urls = []
     command_result_urls = []
     log_urls = []
+    commands = []
 
     # TODO: When len(tasks) is a fair size (>100) this starts taking a noticable amount of time.
     # Perhaps store tasks in a single blob?  Or do write with multiple requests in parallel?
@@ -230,6 +266,7 @@ def submit(
         task_spec_urls.append(url)
         command_result_urls.append(task["command_result_url"])
         log_urls.append(task["stdout_url"])
+        commands.append(json.dumps(task.get("command")))
 
     machine_specs = MachineSpec(
         service_account_email=config.service_account_email,
@@ -296,12 +333,20 @@ def submit(
 
     jq.submit(
         job_id,
-        list(zip(task_spec_urls, command_result_urls, log_urls)),
+        list(zip(task_spec_urls, command_result_urls, log_urls, commands)),
         pipeline_spec,
         metadata,
         cluster_name,
         config.target_node_count,
         max_preemptable_attempts,
+    )
+
+    _publish_job_started_event(
+        datastore_client,
+        config.project,
+        job_id,
+        cluster_name,
+        len(tasks),
     )
 
 

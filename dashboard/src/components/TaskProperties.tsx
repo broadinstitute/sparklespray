@@ -1,10 +1,41 @@
+import { useState } from "react";
 import type { TimingWindows } from "../data/events";
 
 interface Props {
   command: string;
   dockerImage: string;
+  logUrl: string;
   timings: TimingWindows;
   status: string;
+}
+
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = () => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  };
+  return (
+    <button
+      onClick={handleCopy}
+      title="Copy to clipboard"
+      style={{
+        marginLeft: 6,
+        padding: "2px 6px",
+        border: "1px solid #ccc",
+        borderRadius: 4,
+        background: "#fff",
+        cursor: "pointer",
+        fontSize: "0.75rem",
+        color: copied ? "#2e7d32" : "#555",
+        lineHeight: 1,
+      }}
+    >
+      {copied ? "✓" : "⎘"}
+    </button>
+  );
 }
 
 function formatDuration(ms: number): string {
@@ -36,6 +67,7 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
 export default function TaskProperties({
   command,
   dockerImage,
+  logUrl,
   timings,
   status,
 }: Props) {
@@ -107,6 +139,52 @@ export default function TaskProperties({
               </code>
             }
           />
+          {logUrl && (
+            <Row
+              label="Output folder"
+              value={(() => {
+                const outputPath = logUrl.replace(/\/[^/]+$/, "");
+                const href = outputPath.replace(
+                  /^gs:\/\/([^/]+)\/(.+)$/,
+                  "https://console.cloud.google.com/storage/browser/$1/$2"
+                );
+                return (
+                  <span style={{ display: "flex", alignItems: "center" }}>
+                    <a
+                      href={href}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{ wordBreak: "break-all" }}
+                    >
+                      {outputPath}
+                    </a>
+                    <CopyButton text={outputPath} />
+                  </span>
+                );
+              })()}
+            />
+          )}
+          {logUrl && (
+            <Row
+              label="Output log"
+              value={
+                <span style={{ display: "flex", alignItems: "center" }}>
+                  <a
+                    href={logUrl.replace(
+                      /^gs:\/\/([^/]+)\/(.+)$/,
+                      "https://storage.cloud.google.com/$1/$2"
+                    )}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{ wordBreak: "break-all" }}
+                  >
+                    {logUrl}
+                  </a>
+                  <CopyButton text={logUrl} />
+                </span>
+              }
+            />
+          )}
           <Row label="Status" value={status} />
           {exitCode !== undefined && (
             <Row

@@ -23,6 +23,8 @@ import (
 	pb "cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
 	iamcredentials "google.golang.org/api/iamcredentials/v1"
 	"google.golang.org/api/iterator"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 
@@ -665,11 +667,11 @@ func startSummaryUpdater(ctx context.Context) {
 		Name:               fullSubName,
 		Topic:              fullTopicName,
 		AckDeadlineSeconds: 60,
-		Filter:             `hasattr(attributes, "job_id")`,
+		Filter:             `attributes:job_id`,
 		ExpirationPolicy:   &pb.ExpirationPolicy{Ttl: ttl},
 	})
-	if err != nil {
-		log.Printf("Summary updater: could not create subscription (may already exist): %v", err)
+	if err != nil && status.Code(err) != codes.AlreadyExists {
+		log.Printf("Summary updater: could not create subscription: %v", err)
 	}
 
 	go func() {
@@ -811,7 +813,7 @@ func (m *ClusterMonitor) poll(ctx context.Context, cluster Cluster) error {
 				break
 			}
 			if err != nil {
-				return fmt.Errorf("list batch jobs: %w", err)
+				return fmt.Errorf("error listing batch jobs in %s where labels.sparkles-cluster=\"%s\": %w", parent, cluster.ClusterID, err)
 			}
 			batchJobs = append(batchJobs, job)
 		}
@@ -1033,7 +1035,7 @@ func main() {
 	startGCWorker(ctx)
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /jobs/summary", handleJobsSummary)
+	mux.HandleFunc("GET /api/v1/jobs/summary", handleJobsSummary)
 	mux.HandleFunc("GET /api/v1/events", handleEvents)
 	mux.HandleFunc("GET /api/v1/task/{task_id}", handleTask)
 	mux.HandleFunc("GET /api/v1/task/{task_id}/log", handleTaskLog)
@@ -1045,7 +1047,7 @@ func main() {
 	mux.HandleFunc("POST /api/v1/subscription/{subscription_id}/unsubscribe", handleUnsubscribe)
 	mux.HandleFunc("POST /api/v1/task/{task_id}/subscription", handleCreateTaskSubscription)
 	mux.HandleFunc("POST /api/v1/task/{task_id}/subscription/{subscription_id}/unsubscribe", handleTaskUnsubscribe)
-	mux.HandleFunc("POST /gc", handleGC)
+	//	mux.HandleFunc("POST /gc", handleGC)
 
 	log.Printf("Listening on %s", *addr)
 	if err := http.ListenAndServe(*addr, corsMiddleware(mux)); err != nil && !errors.Is(err, http.ErrServerClosed) {

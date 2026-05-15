@@ -9,6 +9,16 @@ from sparklespray.config import Config
 from .factories import DatastoreClientSimulator, MockIO
 
 
+@pytest.fixture(autouse=True)
+def mock_pubsub_publisher():
+    with patch("sparklespray.commands.submit.pubsub_v1.PublisherClient") as mock:
+        mock.return_value.topic_path.return_value = (
+            "projects/test/topics/sparkles-v6-events"
+        )
+        mock.return_value.publish.return_value.result.return_value = None
+        yield mock
+
+
 @pytest.fixture
 def mock_io():
     return MockIO()

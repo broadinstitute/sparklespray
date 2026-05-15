@@ -51,6 +51,7 @@ class Task(object):
     command_result_url: str
     cluster_id: str
     log_url: str
+    command: Optional[str] = None
     failure_reason: Optional[str] = None
     version: int = 1
     exit_code: Optional[str] = None
@@ -89,6 +90,7 @@ def task_to_entity(client, o: Task):
     entity["version"] = o.version
     entity["exit_code"] = o.exit_code
     entity["log_url"] = o.log_url
+    entity["command"] = o.command
     entity["last_updated"] = o.last_updated
     return entity
 
@@ -108,6 +110,7 @@ def entity_to_task(entity):
 
     return Task(
         log_url=entity.get("log_url"),
+        command=entity.get("command"),
         task_id=entity.key.name,
         task_index=entity["task_index"],
         job_id=entity["job_id"],

@@ -28,6 +28,7 @@ export default function TaskDetail() {
   const [taskInfo, setTaskInfo] = useState<{
     command: string;
     dockerImage: string;
+    logUrl: string;
   } | null>(null);
   const logBottomRef = useRef<HTMLDivElement>(null);
 
@@ -57,9 +58,12 @@ export default function TaskDetail() {
         setTaskInfo({
           command: d.command ?? "missing",
           dockerImage: d.docker_image ?? "missing",
+          logUrl: d.log_url ?? "",
         })
       )
-      .catch(() => setTaskInfo({ command: "missing", dockerImage: "missing" }));
+      .catch(() =>
+        setTaskInfo({ command: "missing", dockerImage: "missing", logUrl: "" })
+      );
   }, [taskId]);
 
   const taskEvents = useMemo(
@@ -146,6 +150,7 @@ export default function TaskDetail() {
   const statusStyle = STATUS_COLORS[status] ?? { bg: "#eee", text: "#333" };
   const command = taskInfo?.command ?? "…";
   const dockerImage = taskInfo?.dockerImage ?? "…";
+  const logUrl = taskInfo?.logUrl ?? "";
 
   return (
     <div
@@ -207,6 +212,7 @@ export default function TaskDetail() {
           <TaskProperties
             command={command}
             dockerImage={dockerImage}
+            logUrl={logUrl}
             timings={timings}
             status={status}
           />
