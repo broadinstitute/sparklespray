@@ -1,5 +1,6 @@
 import argparse
 import copy
+import getpass
 import json
 import os
 import re
@@ -339,6 +340,7 @@ def submit(
         cluster_name,
         config.target_node_count,
         max_preemptable_attempts,
+        docker_image=image,
     )
 
     _publish_job_started_event(
@@ -552,7 +554,8 @@ def submit_cmd(
     config: Config,
 ):
     metadata: Dict[str, str] = {
-        "UUID": str(uuid.uuid4())
+        "UUID": str(uuid.uuid4()),
+        "submitter": getpass.getuser(),
     }  # assign it a unique ID so we can recognize when a job has been resubmitted with the same name
     if args.label:
         for key, value in args.label:

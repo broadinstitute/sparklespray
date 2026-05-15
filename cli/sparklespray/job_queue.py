@@ -151,6 +151,7 @@ class JobQueue:
         cluster,
         target_node_count,
         max_preemptable_attempts,
+        docker_image: str = None,
     ):
         assert isinstance(sparkles_job_spec, str)
         now = time.time()
@@ -173,6 +174,7 @@ class JobQueue:
                 monitor_address=None,
                 log_url=log_url,
                 command=command,
+                docker_image=docker_image,
             )
             self.task_storage.insert(task, batch=batch)
             task_index += 1
