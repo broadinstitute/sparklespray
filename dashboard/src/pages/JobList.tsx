@@ -1113,7 +1113,12 @@ export default function JobList() {
   const [timePreset, setTimePreset] = useState(0);
   const [facets, setFacets] = useState<Record<string, Set<string>>>({});
 
-  const workerPools = useWorkerPools(jobs);
+  const workerPools = useWorkerPools(jobs).filter(
+    (p) =>
+      p.status.runningTaskCount > 0 ||
+      p.status.instanceInUseCount > 0 ||
+      p.status.idleInstanceCount > 0
+  );
 
   // ── Facet helpers ──────────────────────────────────────────────────────────
 
@@ -1191,7 +1196,10 @@ export default function JobList() {
 
   // Stage 3: facet filter
   const filteredJobs = useMemo(
-    () => searchFiltered.filter((j) => matchesFacetsExcept(j.metadata, null)),
+    () =>
+      searchFiltered
+        .filter((j) => matchesFacetsExcept(j.metadata, null))
+        .sort((a, b) => b.submitDate.getTime() - a.submitDate.getTime()),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [searchFiltered, facets]
   );

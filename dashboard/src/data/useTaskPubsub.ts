@@ -46,8 +46,34 @@ interface LogStreamUpdate {
 
 const GB = 1_073_741_824;
 
-function toResourceDataPoint(msg: ResourceUsageUpdate): ResourceDataPoint {
+interface RawCpuSnapshot {
+  time: number;
+  cpuUser: number;
+  cpuSystem: number;
+  cpuIdle: number;
+  cpuIowait: number;
+}
+
+function toResourceDataPoint(
+  msg: ResourceUsageUpdate,
+  prev: RawCpuSnapshot | null
+): ResourceDataPoint {
   const t = new Date(msg.timestamp).getTime();
+
+  let cpuUser = 0,
+    cpuSystem = 0,
+    cpuIdle = 0,
+    cpuIowait = 0;
+  if (prev !== null) {
+    const dt = (t - prev.time) / 1000; // seconds
+    if (dt > 0) {
+      cpuUser = Math.max(0, ((msg.cpu_user - prev.cpuUser) / dt) * 100);
+      cpuSystem = Math.max(0, ((msg.cpu_system - prev.cpuSystem) / dt) * 100);
+      cpuIdle = Math.max(0, ((msg.cpu_idle - prev.cpuIdle) / dt) * 100);
+      cpuIowait = Math.max(0, ((msg.cpu_iowait - prev.cpuIowait) / dt) * 100);
+    }
+  }
+
   return {
     time: t,
     label: new Date(t).toLocaleTimeString("en-US", {
@@ -60,10 +86,10 @@ function toResourceDataPoint(msg: ResourceUsageUpdate): ResourceDataPoint {
     totalDataGb: Math.round((msg.total_data / GB) * 100) / 100,
     totalSharedGb: Math.round((msg.total_shared / GB) * 100) / 100,
     totalResidentGb: Math.round((msg.total_resident / GB) * 100) / 100,
-    cpuUser: msg.cpu_user,
-    cpuSystem: msg.cpu_system,
-    cpuIdle: msg.cpu_idle,
-    cpuIowait: msg.cpu_iowait,
+    cpuUser: Math.round(cpuUser * 10) / 10,
+    cpuSystem: Math.round(cpuSystem * 10) / 10,
+    cpuIdle: Math.round(cpuIdle * 10) / 10,
+    cpuIowait: Math.round(cpuIowait * 10) / 10,
     memTotalGb: Math.round((msg.mem_total / GB) * 100) / 100,
     memAvailableGb: Math.round((msg.mem_available / GB) * 100) / 100,
     memFreeGb: Math.round((msg.mem_free / GB) * 100) / 100,
@@ -123,6 +149,7 @@ export function useTaskPubsub(
   const [error, setError] = useState<string | null>(null);
   const credsRef = useRef<SubscriptionCreds | null>(null);
   const cancelledRef = useRef(false);
+  const lastRawCpuRef = useRef<RawCpuSnapshot | null>(null);
 
   useEffect(() => {
     if (!isActive) return;
@@ -168,9 +195,19 @@ export function useTaskPubsub(
             try {
               const payload = JSON.parse(atob(m.message.data));
               if (payload.type === "metric_update") {
-                newMetrics.push(
-                  toResourceDataPoint(payload as ResourceUsageUpdate)
-                );
+                const raw = payload as ResourceUsageUpdate;
+                const prev = lastRawCpuRef.current;
+                lastRawCpuRef.current = {
+                  time: new Date(raw.timestamp).getTime(),
+                  cpuUser: raw.cpu_user,
+                  cpuSystem: raw.cpu_system,
+                  cpuIdle: raw.cpu_idle,
+                  cpuIowait: raw.cpu_iowait,
+                };
+                // Skip the first point — no previous snapshot to diff against
+                if (prev !== null) {
+                  newMetrics.push(toResourceDataPoint(raw, prev));
+                }
               } else if (payload.type === "log_update") {
                 const lu = payload as LogStreamUpdate;
                 const ts = new Date(lu.timestamp).toLocaleTimeString("en-US", {
@@ -231,6 +268,7 @@ export function useTaskPubsub(
     setResourceData([]);
     setLogContent("");
     setError(null);
+    lastRawCpuRef.current = null;
   }, [taskId]);
 
   return { resourceData, logContent, error };

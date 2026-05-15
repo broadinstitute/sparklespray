@@ -4,7 +4,7 @@ import { getJobTasks, getJobTaskCount, extractTimings } from "../data/events";
 import type { TaskStatus } from "../data/events";
 import { computeJobTimeSeries } from "../data/jobTimeSeries";
 import { useEvents, mergeEvents } from "../data/EventProvider";
-import type { AnyEvent } from "../types";
+import type { AnyEvent, JobDetail } from "../types";
 import MultiLineChart from "../components/MultiLineChart";
 import TabBar from "../components/TabBar";
 
@@ -18,6 +18,187 @@ const STATUS_COLORS: Record<TaskStatus, { bg: string; text: string }> = {
   failed: { bg: "#ffebee", text: "#b71c1c" },
   killed: { bg: "#eeeeee", text: "#555555" },
 };
+
+const HIDDEN_LABEL_KEYS = new Set([
+  "UUID",
+  "job-env-sha256",
+  "job-spec-sha256",
+]);
+
+const MONO = "'JetBrains Mono', 'Courier New', monospace";
+
+function DetailRow({
+  label,
+  value,
+}: {
+  label: string;
+  value: React.ReactNode;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        justifyContent: "space-between",
+        gap: "1rem",
+        padding: "5px 0",
+        borderBottom: "1px solid #f0f0f0",
+        fontSize: "0.8rem",
+        fontFamily: MONO,
+      }}
+    >
+      <span style={{ color: "#999", flexShrink: 0 }}>{label}</span>
+      <span
+        style={{ color: "#222", textAlign: "right", wordBreak: "break-all" }}
+      >
+        {value}
+      </span>
+    </div>
+  );
+}
+
+interface JobDetailsPanelProps {
+  jobDetail: JobDetail | undefined;
+  statusCounts: Partial<Record<TaskStatus, number>>;
+  statusOrder: TaskStatus[];
+  ratePerMin: number;
+  etaDate: Date | null;
+  totalTasks: number;
+  doneTasks: number;
+}
+
+function SectionHeader({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      style={{
+        fontSize: 10,
+        letterSpacing: 2,
+        color: "#aaa",
+        fontFamily: MONO,
+        marginTop: 12,
+        marginBottom: 6,
+        textTransform: "uppercase",
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function JobDetailsPanel({
+  jobDetail,
+  statusCounts,
+  statusOrder,
+  ratePerMin,
+  etaDate,
+  totalTasks,
+  doneTasks,
+}: JobDetailsPanelProps) {
+  const dash = <span style={{ color: "#ccc" }}>—</span>;
+  const labels = jobDetail?.metadata
+    ? Object.entries(jobDetail.metadata).filter(
+        ([k]) => !HIDDEN_LABEL_KEYS.has(k)
+      )
+    : [];
+  const clusterId = jobDetail?.cluster_id;
+
+  return (
+    <div
+      style={{
+        width: 280,
+        flexShrink: 0,
+        background: "#f8f9fa",
+        border: "1px solid #e0e0e0",
+        borderRadius: 8,
+        padding: "0.75rem 1rem",
+      }}
+    >
+      <SectionHeader>Status</SectionHeader>
+      {statusOrder.map((s) =>
+        statusCounts[s] ? (
+          <DetailRow
+            key={s}
+            label={s}
+            value={
+              <span
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  justifyContent: "flex-end",
+                }}
+              >
+                <StatusBadge status={s} />
+                <span style={{ color: "#555" }}>{statusCounts[s]}</span>
+              </span>
+            }
+          />
+        ) : null
+      )}
+      {ratePerMin > 0 && (
+        <>
+          <DetailRow
+            label="rate"
+            value={`${ratePerMin.toFixed(2)} tasks/min`}
+          />
+          {etaDate && doneTasks < totalTasks && (
+            <DetailRow
+              label="ETA"
+              value={etaDate.toLocaleTimeString("en-US", {
+                hour: "2-digit",
+                minute: "2-digit",
+                second: "2-digit",
+              })}
+            />
+          )}
+        </>
+      )}
+
+      <SectionHeader>Job Details</SectionHeader>
+      <DetailRow
+        label="submitted"
+        value={
+          jobDetail ? new Date(jobDetail.submit_time).toLocaleString() : dash
+        }
+      />
+      <DetailRow
+        label="tasks"
+        value={jobDetail ? jobDetail.task_count : dash}
+      />
+      <DetailRow
+        label="max workers to start"
+        value={jobDetail ? jobDetail.target_node_count : dash}
+      />
+      <DetailRow
+        label="max preemptable"
+        value={jobDetail ? jobDetail.max_preemptable_attempts : dash}
+      />
+      <DetailRow
+        label="cluster"
+        value={
+          clusterId ? (
+            <Link
+              to={`/clusters/${clusterId}`}
+              style={{ color: "#1565c0", textDecoration: "none" }}
+            >
+              {clusterId}
+            </Link>
+          ) : (
+            dash
+          )
+        }
+      />
+
+      {labels.length > 0 && (
+        <>
+          <SectionHeader>Labels</SectionHeader>
+          {labels.map(([k, v]) => (
+            <DetailRow key={k} label={k} value={v} />
+          ))}
+        </>
+      )}
+    </div>
+  );
+}
 
 function StatusBadge({ status }: { status: TaskStatus }) {
   const { bg, text } = STATUS_COLORS[status];
@@ -41,7 +222,7 @@ function StatusBadge({ status }: { status: TaskStatus }) {
 export default function JobDetail() {
   const { jobId } = useParams<{ jobId: string }>();
   const location = useLocation();
-  const { addJobEventListener } = useEvents();
+  const { addJobEventListener, jobCache } = useEvents();
   const [localEvents, setLocalEvents] = useState<AnyEvent[]>([]);
 
   const isTasksTab = location.pathname.endsWith("/tasks");
@@ -89,19 +270,42 @@ export default function JobDetail() {
 
   if (tasks.length === 0) {
     return (
-      <div
-        style={{
-          padding: "2rem",
-          fontFamily: "monospace",
-        }}
-      >
+      <div style={{ padding: "2rem", fontFamily: "monospace" }}>
         <h1
           style={{ margin: "0 0 1.5rem", fontSize: "1.3rem", fontWeight: 700 }}
         >
           {jobId}
         </h1>
         <TabBar tabs={jobTabs} />
-        <p style={{ marginTop: "1rem", color: "#888" }}>Waiting for tasks…</p>
+        <div
+          style={{
+            display: "flex",
+            gap: "1.5rem",
+            alignItems: "flex-start",
+            marginTop: "1rem",
+          }}
+        >
+          <JobDetailsPanel
+            jobDetail={jobCache[jobId]}
+            statusCounts={{}}
+            statusOrder={[]}
+            ratePerMin={0}
+            etaDate={null}
+            totalTasks={0}
+            doneTasks={0}
+          />
+          <div
+            style={{
+              flex: 1,
+              minWidth: 0,
+              color: "#888",
+              fontFamily: "monospace",
+              paddingTop: "0.5rem",
+            }}
+          >
+            Waiting for tasks…
+          </div>
+        </div>
       </div>
     );
   }
@@ -152,108 +356,67 @@ export default function JobDetail() {
 
       {/* Overview tab */}
       {!isTasksTab && (
-        <>
-          {/* Status summary */}
-          <div
-            style={{
-              display: "flex",
-              flexWrap: "wrap",
-              gap: "0.75rem",
-              background: "#f8f9fa",
-              border: "1px solid #e0e0e0",
-              borderRadius: 8,
-              padding: "1rem 1.5rem",
-              marginBottom: "1.5rem",
-            }}
-          >
-            <span style={{ color: "#888", alignSelf: "center" }}>
-              {tasks.length} tasks
-            </span>
-            {statusOrder.map((s) =>
-              statusCounts[s] ? (
-                <span
-                  key={s}
-                  style={{ display: "flex", alignItems: "center", gap: 6 }}
-                >
-                  <StatusBadge status={s} />
-                  <span style={{ color: "#555", fontSize: "0.85rem" }}>
-                    {statusCounts[s]}
-                  </span>
-                </span>
-              ) : null
-            )}
-            {ratePerMin > 0 && (
-              <span
+        <div
+          style={{ display: "flex", gap: "1.5rem", alignItems: "flex-start" }}
+        >
+          {/* Left: job details + status */}
+          <JobDetailsPanel
+            jobDetail={jobId ? jobCache[jobId] : undefined}
+            statusCounts={statusCounts}
+            statusOrder={statusOrder}
+            ratePerMin={ratePerMin}
+            etaDate={etaDate}
+            totalTasks={totalTasks}
+            doneTasks={doneTasks}
+          />
+
+          {/* Right: charts */}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            {/* Time-series charts */}
+            {counts.length > 0 && (
+              <div
                 style={{
-                  marginLeft: "auto",
-                  color: "#555",
-                  fontSize: "0.85rem",
-                  display: "flex",
-                  gap: "1.25rem",
+                  background: "#f8f9fa",
+                  border: "1px solid #e0e0e0",
+                  borderRadius: 8,
+                  padding: "1rem 1.5rem",
+                  marginBottom: "1.5rem",
                 }}
               >
-                <span>
-                  <span style={{ color: "#888" }}>rate </span>
-                  {ratePerMin.toFixed(2)} tasks/min
-                </span>
-                {etaDate && doneTasks < totalTasks && (
-                  <span>
-                    <span style={{ color: "#888" }}>ETA </span>
-                    {etaDate.toLocaleTimeString("en-US", {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                      second: "2-digit",
-                    })}
-                  </span>
-                )}
-              </span>
+                <MultiLineChart
+                  data={counts}
+                  title="Tasks in Queue"
+                  yLabel="tasks"
+                  stacked
+                  series={[
+                    { key: "pending", label: "Pending", color: "#1565c0" },
+                    { key: "running", label: "Running", color: "#e65100" },
+                  ]}
+                />
+                <div style={{ height: "1.25rem" }} />
+                <MultiLineChart
+                  data={rates}
+                  title="Completion Rate"
+                  yLabel="tasks/min"
+                  series={[
+                    {
+                      key: "completedSuccess",
+                      label: "Completed (success)",
+                      color: "#2e7d32",
+                    },
+                    {
+                      key: "completedError",
+                      label: "Completed (error)",
+                      color: "#f44336",
+                    },
+                    { key: "orphaned", label: "Orphaned", color: "#f59e0b" },
+                    { key: "failed", label: "Failed", color: "#b71c1c" },
+                  ]}
+                />
+              </div>
             )}
           </div>
-
-          {/* Time-series charts */}
-          {counts.length > 0 && (
-            <div
-              style={{
-                background: "#f8f9fa",
-                border: "1px solid #e0e0e0",
-                borderRadius: 8,
-                padding: "1rem 1.5rem",
-                marginBottom: "1.5rem",
-              }}
-            >
-              <MultiLineChart
-                data={counts}
-                title="Tasks in Queue"
-                yLabel="tasks"
-                stacked
-                series={[
-                  { key: "pending", label: "Pending", color: "#1565c0" },
-                  { key: "running", label: "Running", color: "#e65100" },
-                ]}
-              />
-              <div style={{ height: "1.25rem" }} />
-              <MultiLineChart
-                data={rates}
-                title="Completion Rate"
-                yLabel="tasks/min"
-                series={[
-                  {
-                    key: "completedSuccess",
-                    label: "Completed (success)",
-                    color: "#2e7d32",
-                  },
-                  {
-                    key: "completedError",
-                    label: "Completed (error)",
-                    color: "#f44336",
-                  },
-                  { key: "orphaned", label: "Orphaned", color: "#f59e0b" },
-                  { key: "failed", label: "Failed", color: "#b71c1c" },
-                ]}
-              />
-            </div>
-          )}
-        </>
+        </div>
       )}
 
       {/* Tasks tab */}

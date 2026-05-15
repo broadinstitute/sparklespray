@@ -121,6 +121,8 @@ export interface JobDetail {
   status: string;
   submit_time: string;
   task_count: number;
+  max_preemptable_attempts: number;
+  target_node_count: number;
   metadata?: Record<string, string>;
 }
 

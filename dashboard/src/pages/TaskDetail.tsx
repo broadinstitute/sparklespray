@@ -230,8 +230,8 @@ export default function TaskDetail() {
         >
           <MultiLineChart
             data={resourceData}
-            title="CPU Breakdown"
-            yLabel="%"
+            title="CPU Breakdown (% of one core)"
+            yLabel="%/core"
             stacked
             series={[
               { key: "cpuUser", label: "user", color: "#1976d2" },
