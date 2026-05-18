@@ -1,6 +1,7 @@
 package sparklesworker
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"time"
@@ -133,12 +134,20 @@ func ConsumerRunLoop(ctx context.Context, queue Queue, sleepUntilNotify func(sle
 		if !jobKilled {
 			retcode, err := executor(claimed.TaskID, claimed.Args)
 			if err != nil {
-				log.Printf("Got error executing task %s: %v, marking task as failed", claimed.TaskID, err)
-
-				_, err = updateTaskFailed(ctx, queue, claimed.TaskID, err.Error())
-				if err != nil {
-					log.Printf("Got error updating task %s failed: %v", claimed.TaskID, err)
-					return err
+				if errors.Is(err, context.Canceled) {
+					log.Printf("Task %s was killed via cancel signal", claimed.TaskID)
+					_, err = updateTaskKilled(ctx, queue, claimed.TaskID)
+					if err != nil {
+						log.Printf("Got error updating task %s was killed: %v", claimed.TaskID, err)
+						return err
+					}
+				} else {
+					log.Printf("Got error executing task %s: %v, marking task as failed", claimed.TaskID, err)
+					_, err = updateTaskFailed(ctx, queue, claimed.TaskID, err.Error())
+					if err != nil {
+						log.Printf("Got error updating task %s failed: %v", claimed.TaskID, err)
+						return err
+					}
 				}
 			} else {
 				_, err = updateTaskCompleted(ctx, queue, claimed.TaskID, retcode)

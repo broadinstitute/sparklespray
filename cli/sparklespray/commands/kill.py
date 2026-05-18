@@ -1,9 +1,15 @@
+import json
+
+from google.cloud import pubsub_v1
+
 from ..job_queue import JobQueue
 from ..log import log
 from ..task_store import STATUS_PENDING, STATUS_KILLED, STATUS_CLAIMED
 from .. import txtui
 from .shared import _get_jobids_from_pattern
 from ..cluster_service import Cluster, create_cluster
+
+TOPIC_TASK_IN = "sparkles-v6-task-in"
 
 
 def kill(jq: JobQueue, config, datastore_client, cluster_api, job_id, keepcluster):
@@ -12,6 +18,13 @@ def kill(jq: JobQueue, config, datastore_client, cluster_api, job_id, keepcluste
     log.info("Marking %s as killed", job_id)
     ok, job = jq.kill_job(job_id)
     assert ok
+
+    # Notify any worker currently executing a task for this job so it can abort immediately.
+    pub = pubsub_v1.PublisherClient()
+    topic_path = pub.topic_path(config.project, TOPIC_TASK_IN)
+    msg = json.dumps({"type": "kill_job", "job_id": job_id}).encode()
+    pub.publish(topic_path, msg).result()
+
     if not keepcluster:
         cluster.stop_cluster()
         jq.reset(job_id, None, statuses_to_clear=[STATUS_CLAIMED])

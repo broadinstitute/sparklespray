@@ -364,9 +364,9 @@ func consume(c *cli.Context) error {
 
 	// Build execution hooks that write lifecycle events and register tasks for streaming.
 	hooks := &ExecutionHooks{
-		OnLogFileReady: func(taskID, logPath string) {
+		OnLogFileReady: func(taskID, logPath string, cancelFunc context.CancelFunc) {
 			if publisher != nil {
-				publisher.RegisterTask(taskID, logPath)
+				publisher.RegisterTask(taskID, logPath, cancelFunc)
 				go publisher.waitForStartPublishing(ctx, taskID)
 			}
 		},

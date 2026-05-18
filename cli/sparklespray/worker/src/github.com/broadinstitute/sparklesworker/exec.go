@@ -1,6 +1,7 @@
 package sparklesworker
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -80,7 +81,8 @@ const MaxUploadDelay = 30 * time.Second
 // ExecutionHooks lets callers observe task lifecycle events without coupling exec.go to specific backends.
 type ExecutionHooks struct {
 	// OnLogFileReady is called once the stdout log file path is established, before downloads begin.
-	OnLogFileReady func(taskID, logPath string)
+	// cancelFunc can be called to abort the running task (kills the subprocess).
+	OnLogFileReady func(taskID, logPath string, cancelFunc context.CancelFunc)
 	// OnExecStarted is called immediately before the task command is executed.
 	OnExecStarted func(taskID string)
 	// OnExecComplete is called immediately after the task command exits (before upload).
@@ -206,7 +208,7 @@ type ExecResult struct {
 	EndTime   time.Time
 }
 
-func execCommand(command string, workdir string, stdout *os.File) (*ExecResult, error) {
+func execCommand(ctx context.Context, command string, workdir string, stdout *os.File) (*ExecResult, error) {
 	attr := &os.ProcAttr{Dir: workdir, Env: nil, Files: []*os.File{nil, stdout, stdout}}
 	exePath := "/bin/sh"
 
@@ -216,12 +218,22 @@ func execCommand(command string, workdir string, stdout *os.File) (*ExecResult, 
 		return nil, err
 	}
 
+	waitDone := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			proc.Kill()
+		case <-waitDone:
+		}
+	}()
+
 	var procState *os.ProcessState
 	err = NotifyUntilComplete(func() error {
 		var err2 error
 		procState, err2 = proc.Wait()
 		return err2
 	})
+	close(waitDone)
 	endTime := time.Now()
 
 	if err != nil {
@@ -405,6 +417,9 @@ func getFilesWithMatchingMTimes(a map[string]time.Time, b map[string]time.Time) 
 }
 
 func executeTaskInDir(ioc IOClient, workdir string, taskId string, spec *TaskSpec, cachedir string, monitor *Monitor, hooks *ExecutionHooks) (string, error) {
+	taskCtx, cancelTask := context.WithCancel(context.Background())
+	defer cancelTask()
+
 	stdoutPath := path.Join(workdir, "stdout.txt")
 	execLifecycleScript("PreDownloadScript", workdir, spec.PreDownloadScript)
 
@@ -417,7 +432,7 @@ func executeTaskInDir(ioc IOClient, workdir string, taskId string, spec *TaskSpe
 		monitor.StartWatchingLog(taskId, stdoutPath)
 	}
 	if hooks != nil && hooks.OnLogFileReady != nil {
-		hooks.OnLogFileReady(taskId, stdoutPath)
+		hooks.OnLogFileReady(taskId, stdoutPath, cancelTask)
 	}
 
 	if len(spec.Downloads) > 0 {
@@ -452,9 +467,12 @@ func executeTaskInDir(ioc IOClient, workdir string, taskId string, spec *TaskSpe
 		hooks.OnExecStarted(taskId)
 	}
 
-	execResult, err := execCommand(spec.Command, cwdDir, stdout)
+	execResult, err := execCommand(taskCtx, spec.Command, cwdDir, stdout)
 	if err != nil {
 		return "", err
+	}
+	if taskCtx.Err() != nil {
+		return "", context.Canceled
 	}
 	retcode := execResult.Status
 

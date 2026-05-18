@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -65,10 +66,17 @@ type startPublishing struct {
 	TaskID string `json:"task_id"`
 }
 
+type killJob struct {
+	Type  string `json:"type"`
+	JobID string `json:"job_id"`
+}
+
 type taskEntry struct {
-	logPath  string
-	notifyCh chan string // receives req_id from start_publishing control messages
-	cancel   context.CancelFunc
+	logPath        string
+	notifyCh       chan string // receives req_id from start_publishing control messages
+	cancel         context.CancelFunc
+	jobID          string             // extracted from taskID at registration time
+	executorCancel context.CancelFunc // cancels the running subprocess
 }
 
 // PubSubPublisher manages metric/log streaming for running tasks via Pub/Sub.
@@ -95,12 +103,16 @@ func NewPubSubPublisher(psClient *pubsub.Client, projectID, tasksDir string, mon
 }
 
 // RegisterTask registers a task for metric/log streaming. Call before execution begins.
-func (p *PubSubPublisher) RegisterTask(taskID, logPath string) {
+// executorCancel, when called, will kill the running subprocess for this task.
+func (p *PubSubPublisher) RegisterTask(taskID, logPath string, executorCancel context.CancelFunc) {
+	jobID := strings.Split(taskID, ".")[0]
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.tasks[taskID] = &taskEntry{
-		logPath:  logPath,
-		notifyCh: make(chan string, 1),
+		logPath:        logPath,
+		notifyCh:       make(chan string, 1),
+		jobID:          jobID,
+		executorCancel: executorCancel,
 	}
 }
 
@@ -149,25 +161,46 @@ func (p *PubSubPublisher) ListenForControlMessages(ctx context.Context) {
 
 	sub := p.psClient.Subscriber(fullSubName)
 	if err := sub.Receive(ctx, func(ctx context.Context, msg *pubsub.Message) {
-		var cmd startPublishing
-		if err := json.Unmarshal(msg.Data, &cmd); err != nil || cmd.Type != "start_publishing" {
+		var envelope struct {
+			Type string `json:"type"`
+		}
+		if err := json.Unmarshal(msg.Data, &envelope); err != nil {
 			msg.Ack()
 			return
 		}
 		msg.Ack()
 
-		p.mu.Lock()
-		entry, ok := p.tasks[cmd.TaskID]
-		p.mu.Unlock()
+		switch envelope.Type {
+		case "start_publishing":
+			var cmd startPublishing
+			if err := json.Unmarshal(msg.Data, &cmd); err != nil {
+				return
+			}
+			p.mu.Lock()
+			entry, ok := p.tasks[cmd.TaskID]
+			p.mu.Unlock()
+			if !ok {
+				log.Printf("Received start_publishing for unknown task %s, ignoring", cmd.TaskID)
+				return
+			}
+			select {
+			case entry.notifyCh <- cmd.ReqID:
+			default:
+			}
 
-		if !ok {
-			log.Printf("Received start_publishing for unknown task %s, ignoring", cmd.TaskID)
-			return
-		}
-
-		select {
-		case entry.notifyCh <- cmd.ReqID:
-		default:
+		case "kill_job":
+			var cmd killJob
+			if err := json.Unmarshal(msg.Data, &cmd); err != nil {
+				return
+			}
+			log.Printf("Received kill_job for job %s, cancelling running task", cmd.JobID)
+			p.mu.Lock()
+			for _, entry := range p.tasks {
+				if entry.jobID == cmd.JobID && entry.executorCancel != nil {
+					entry.executorCancel()
+				}
+			}
+			p.mu.Unlock()
 		}
 	}); err != nil && ctx.Err() == nil {
 		log.Printf("Control message subscription error: %v", err)
