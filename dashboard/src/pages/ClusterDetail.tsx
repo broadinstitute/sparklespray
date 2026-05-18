@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, Link } from "react-router-dom";
 import { mergeEvents } from "../data/EventProvider";
 import { computeClusterTimeSeries } from "../data/clusterTimeSeries";
 import type { AnyEvent } from "../types";
@@ -93,10 +93,32 @@ export default function ClusterDetail() {
       }}
     >
       {/* Header */}
-      <div style={{ marginBottom: "1.5rem" }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          marginBottom: "1.5rem",
+        }}
+      >
         <h1 style={{ margin: 0, fontSize: "1.3rem", fontWeight: 700 }}>
           {clusterId}
         </h1>
+        <Link
+          to={`/clusters/${clusterId}/logs`}
+          style={{
+            fontSize: "0.8rem",
+            padding: "0.35rem 0.85rem",
+            border: "1px solid #c5cae9",
+            borderRadius: 6,
+            background: "#f5f5ff",
+            color: "#1a237e",
+            textDecoration: "none",
+            fontWeight: 500,
+          }}
+        >
+          View logs
+        </Link>
       </div>
 
       {/* Summary bar */}

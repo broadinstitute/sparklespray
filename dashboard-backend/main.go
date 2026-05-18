@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -23,6 +24,7 @@ import (
 	pb "cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
 	iamcredentials "google.golang.org/api/iamcredentials/v1"
 	"google.golang.org/api/iterator"
+	loggingv2 "google.golang.org/api/logging/v2"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/durationpb"
@@ -44,6 +46,8 @@ const topicTaskIn = "sparkles-v6-task-in"
 var dsClient *datastore.Client
 var psClient *pubsub.Client
 var iamSvc *iamcredentials.Service
+var batchClient *batch.Client
+var loggingSvc *loggingv2.Service
 var subscriberSA string
 var gProjectID string
 
@@ -491,6 +495,158 @@ func handleTaskLog(w http.ResponseWriter, r *http.Request) {
 func handleTaskMetrics(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	writeJSON(w, http.StatusOK, map[string]any{"metrics": []any{}, "next_after": now})
+}
+
+type LogSummaryEntry struct {
+	Source    string    `json:"source"`
+	Timestamp time.Time `json:"timestamp"`
+	JobID     string    `json:"jobId"`
+	Content   string    `json:"content"`
+}
+
+type BatchJobInfo struct {
+	State string `json:"state"`
+	URL   string `json:"url"`
+}
+
+type LogSummaryResponse struct {
+	Entries        []LogSummaryEntry `json:"entries"`
+	GoogleBatchJobs []BatchJobInfo   `json:"googleBatchJobs"`
+}
+
+func flattenLogEntry(e *loggingv2.LogEntry) string {
+	if e.TextPayload != "" {
+		return e.TextPayload
+	}
+	if e.JsonPayload != nil {
+		if b, err := e.JsonPayload.MarshalJSON(); err == nil {
+			return string(b)
+		}
+	}
+	if e.ProtoPayload != nil {
+		if b, err := e.ProtoPayload.MarshalJSON(); err == nil {
+			return string(b)
+		}
+	}
+	return ""
+}
+
+const logTimePaddingBefore = 5 * time.Minute
+const logTimePaddingAfter = 30 * time.Minute
+
+func handleClusterLogSummary(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	clusterID := r.PathValue("cluster_id")
+
+	var cluster Cluster
+	key := datastore.NameKey(ClusterCollection, clusterID, nil)
+	if err := dsClient.Get(ctx, key, &cluster); err != nil {
+		if errors.Is(err, datastore.ErrNoSuchEntity) {
+			writeError(w, http.StatusNotFound, "NOT_FOUND", fmt.Sprintf("cluster %q not found", clusterID))
+		} else {
+			log.Printf("Datastore get error for cluster %q: %v", clusterID, err)
+			writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "datastore get failed")
+		}
+		return
+	}
+
+	parent := fmt.Sprintf("projects/%s/locations/%s", gProjectID, cluster.Region)
+	batchFilter := fmt.Sprintf(`labels.sparkles-cluster = "%s"`, cluster.ClusterID)
+	bit := batchClient.ListJobs(ctx, &batchpb.ListJobsRequest{
+		Parent: parent,
+		Filter: batchFilter,
+	})
+
+	var entries []LogSummaryEntry
+	var batchJobInfos []BatchJobInfo
+
+	for {
+		job, err := bit.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			log.Printf("error listing batch jobs for cluster %q: %v", clusterID, err)
+			writeError(w, http.StatusInternalServerError, "BATCH_ERROR", "failed to list batch jobs")
+			return
+		}
+
+		jobName := job.GetName()
+
+		// jobName format: projects/{project}/locations/{region}/jobs/{jobShortName}
+		parts := strings.Split(jobName, "/")
+		jobRegion := ""
+		jobShortName := parts[len(parts)-1]
+		if len(parts) >= 4 {
+			jobRegion = parts[3]
+		}
+		consoleURL := fmt.Sprintf(
+			"https://console.cloud.google.com/batch/jobsDetail/regions/%s/jobs/%s/details?project=%s",
+			jobRegion, jobShortName, gProjectID,
+		)
+		batchJobInfos = append(batchJobInfos, BatchJobInfo{
+			State: job.GetStatus().GetState().String(),
+			URL:   consoleURL,
+		})
+
+		for _, event := range job.GetStatus().GetStatusEvents() {
+			entries = append(entries, LogSummaryEntry{
+				Source:    "batchapi",
+				Timestamp: event.GetEventTime().AsTime(),
+				JobID:     jobName,
+				Content:   event.GetDescription(),
+			})
+		}
+
+
+		createTime := job.GetCreateTime().AsTime()
+		updateTime := job.GetUpdateTime().AsTime()
+		from := createTime.Add(-logTimePaddingBefore).UTC().Format(time.RFC3339)
+		to := updateTime.Add(logTimePaddingAfter).UTC().Format(time.RFC3339)
+
+		logFilter := fmt.Sprintf(
+			`(logName="projects/%s/logs/batch_task_logs" OR logName="projects/%s/logs/batch_agent_logs") AND labels.job_uid="%s" AND timestamp>="%s" AND timestamp<="%s"`,
+			gProjectID, gProjectID, jobShortName, from, to,
+		)
+
+		req := &loggingv2.ListLogEntriesRequest{
+			ResourceNames: []string{fmt.Sprintf("projects/%s", gProjectID)},
+			Filter:        logFilter,
+			OrderBy:       "timestamp asc",
+		}
+		for {
+			resp, err := loggingSvc.Entries.List(req).Do()
+			if err != nil {
+				log.Printf("cloud logging query failed for job %q: %v", jobName, err)
+				break
+			}
+			for _, e := range resp.Entries {
+				t, _ := time.Parse(time.RFC3339Nano, e.Timestamp)
+				entries = append(entries, LogSummaryEntry{
+					Source:    "log",
+					Timestamp: t,
+					JobID:     jobName,
+					Content:   flattenLogEntry(e),
+				})
+			}
+			if resp.NextPageToken == "" {
+				break
+			}
+			req.PageToken = resp.NextPageToken
+		}
+	}
+
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].Timestamp.Before(entries[j].Timestamp)
+	})
+
+	if r.URL.Query().Has("download") {
+		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="cluster-%s-logs.json"`, clusterID))
+	}
+	writeJSON(w, http.StatusOK, LogSummaryResponse{
+		Entries:         entries,
+		GoogleBatchJobs: batchJobInfos,
+	})
 }
 
 func handleCluster(w http.ResponseWriter, r *http.Request) {
@@ -1054,11 +1210,16 @@ func main() {
 	}
 	defer zonesClient.Close()
 
-	batchClient, err := batch.NewClient(ctx)
+	batchClient, err = batch.NewClient(ctx)
 	if err != nil {
 		log.Fatalf("Failed to create Batch client: %v", err)
 	}
 	defer batchClient.Close()
+
+	loggingSvc, err = loggingv2.NewService(ctx)
+	if err != nil {
+		log.Fatalf("Failed to create Logging service: %v", err)
+	}
 
 	monitor := &ClusterMonitor{
 		projectID:       *projectID,
@@ -1080,6 +1241,7 @@ func main() {
 	mux.HandleFunc("GET /api/v1/task/{task_id}/log", handleTaskLog)
 	mux.HandleFunc("GET /api/v1/task/{task_id}/metrics", handleTaskMetrics)
 	mux.HandleFunc("GET /api/v1/cluster/{cluster_id}", handleCluster)
+	mux.HandleFunc("GET /api/v1/cluster/{cluster_id}/log-summary", handleClusterLogSummary)
 	mux.HandleFunc("GET /api/v1/cluster/{cluster_id}/status", handleClusterStatus)
 	mux.HandleFunc("GET /api/v1/clusters", handleClusters)
 	mux.HandleFunc("GET /api/v1/clusters/summary", handleClusterStatuses)

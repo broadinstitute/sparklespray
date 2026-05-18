@@ -5,6 +5,7 @@ import TaskDetail from "./pages/TaskDetail";
 import JobDetail from "./pages/JobDetail";
 import JobList from "./pages/JobList";
 import ClusterDetail from "./pages/ClusterDetail";
+import ClusterLogs from "./pages/ClusterLogs";
 import PerfOverview from "./pages/PerfOverview";
 import NotImplemented from "./pages/NotImplemented";
 
@@ -28,6 +29,7 @@ function AppRoutes() {
           />
           <Route path="/jobs/:jobId/summary" element={<PerfOverview />} />
           <Route path="/clusters/:clusterId" element={<ClusterDetail />} />
+          <Route path="/clusters/:clusterId/logs" element={<ClusterLogs />} />
           <Route path="*" element={<NotImplemented />} />
         </Routes>
       </div>
