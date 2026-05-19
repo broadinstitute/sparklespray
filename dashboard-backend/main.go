@@ -1072,15 +1072,38 @@ func (m *ClusterMonitor) start(ctx context.Context) {
 			default:
 			}
 
+			// Snapshot existing ClusterStatus keys before polling.
+			existingKeys, err := m.dsClient.GetAll(ctx, datastore.NewQuery(ClusterStatusCollection).KeysOnly(), &[]ClusterStatus{})
+			if err != nil {
+				log.Printf("ClusterHealthMonitor: failed to list existing cluster statuses: %v", err)
+				existingKeys = nil
+			}
+
 			cutoff := time.Now().Add(-24 * time.Hour)
 			dq := datastore.NewQuery(ClusterCollection).FilterField("last_updated", ">", cutoff)
 			var clusters []Cluster
 			if _, err := m.dsClient.GetAll(ctx, dq, &clusters); err != nil {
 				log.Printf("ClusterHealthMonitor: failed to list active clusters: %v", err)
 			} else {
+				polled := make(map[string]struct{}, len(clusters))
 				for _, c := range clusters {
 					if err := m.poll(ctx, c); err != nil {
 						log.Printf("ClusterHealthMonitor: poll(%q) error: %v", c.ClusterID, err)
+					} else {
+						polled[c.ClusterID] = struct{}{}
+					}
+				}
+
+				// Delete ClusterStatus records for clusters that were not polled.
+				var stale []*datastore.Key
+				for _, k := range existingKeys {
+					if _, active := polled[k.Name]; !active {
+						stale = append(stale, k)
+					}
+				}
+				if len(stale) > 0 {
+					if err := m.dsClient.DeleteMulti(ctx, stale); err != nil {
+						log.Printf("ClusterHealthMonitor: failed to delete stale cluster statuses: %v", err)
 					}
 				}
 			}

@@ -18,23 +18,19 @@ function CopyButton({ text }: { text: string }) {
     });
   };
   return (
-    <button
+    <span
       onClick={handleCopy}
       title="Copy to clipboard"
       style={{
-        marginLeft: 6,
-        padding: "2px 6px",
-        border: "1px solid #ccc",
-        borderRadius: 4,
-        background: "#fff",
+        marginLeft: 8,
         cursor: "pointer",
-        fontSize: "0.75rem",
-        color: copied ? "#2e7d32" : "#555",
-        lineHeight: 1,
+        fontSize: "1rem",
+        color: copied ? "#2e7d32" : "#444",
+        userSelect: "none",
       }}
     >
       {copied ? "✓" : "⎘"}
-    </button>
+    </span>
   );
 }
 
