@@ -366,8 +366,8 @@ func consume(c *cli.Context) error {
 	hooks := &ExecutionHooks{
 		OnLogFileReady: func(taskID, logPath string, cancelFunc context.CancelFunc) {
 			if publisher != nil {
-				publisher.RegisterTask(taskID, logPath, cancelFunc)
-				go publisher.waitForStartPublishing(ctx, taskID)
+				pubCtx := publisher.RegisterTask(ctx, taskID, logPath, cancelFunc)
+				go publisher.waitForStartPublishing(pubCtx, taskID)
 			}
 		},
 		OnExecStarted: func(taskID string) {

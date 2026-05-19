@@ -28,6 +28,7 @@ type VolumeUsage struct {
 
 type ResourceUsageUpdate struct {
 	Type                 string        `json:"type"`
+	UUID                 string        `json:"uuid"`
 	TaskID               string        `json:"task_id"`
 	Timestamp            time.Time     `json:"timestamp"`
 	ProcessCount         int32         `json:"process_count"`
@@ -49,6 +50,7 @@ type ResourceUsageUpdate struct {
 
 type LogStreamUpdate struct {
 	Type      string    `json:"type"`
+	UUID      string    `json:"uuid"`
 	Timestamp time.Time `json:"timestamp"`
 	TaskID    string    `json:"task_id"`
 	Content   string    `json:"content"`
@@ -104,16 +106,23 @@ func NewPubSubPublisher(psClient *pubsub.Client, projectID, tasksDir string, mon
 
 // RegisterTask registers a task for metric/log streaming. Call before execution begins.
 // executorCancel, when called, will kill the running subprocess for this task.
-func (p *PubSubPublisher) RegisterTask(taskID, logPath string, executorCancel context.CancelFunc) {
+func (p *PubSubPublisher) RegisterTask(ctx context.Context, taskID, logPath string, executorCancel context.CancelFunc) context.Context {
 	jobID := strings.Split(taskID, ".")[0]
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.tasks[taskID] = &taskEntry{
+
+	publisherCtx, cancelFn := context.WithCancel(ctx)
+
+	entry := &taskEntry{
 		logPath:        logPath,
 		notifyCh:       make(chan string, 1),
 		jobID:          jobID,
 		executorCancel: executorCancel,
+		cancel:         cancelFn,
 	}
+	p.tasks[taskID] = entry
+
+	return publisherCtx
 }
 
 // UnregisterTask removes the task and cancels any active metric publisher for it.
@@ -207,6 +216,8 @@ func (p *PubSubPublisher) ListenForControlMessages(ctx context.Context) {
 	}
 }
 
+const maxHistory = 10 * 60 / 15 // 10 minute history, assuming update every 15 seconds
+
 // waitForStartPublishing blocks until a start_publishing message arrives for taskID,
 // then starts metric/log goroutines. Runs for the duration of the task.
 func (p *PubSubPublisher) waitForStartPublishing(ctx context.Context, taskID string) {
@@ -217,27 +228,47 @@ func (p *PubSubPublisher) waitForStartPublishing(ctx context.Context, taskID str
 		return
 	}
 
-	select {
-	case <-ctx.Done():
-		return
-	case reqID := <-entry.notifyCh:
-		// Acknowledge the command
-		ack, _ := json.Marshal(commandAck{Type: "command_ack", ReqID: reqID, TaskID: taskID})
-		p.publish(ctx, TopicTaskOut, ack, map[string]string{"type": "command_ack", "task_id": taskID})
+	isPublishingMetrics := false
+	metricHistory := make([]*ResourceUsageUpdate, 0, maxHistory)
 
-		pubCtx, cancel := context.WithCancel(ctx)
-		p.mu.Lock()
-		if e, ok := p.tasks[taskID]; ok {
-			e.cancel = cancel
-		} else {
-			cancel()
-			p.mu.Unlock()
+	metricUpdateTicker := time.NewTicker(15 * time.Second)
+	defer metricUpdateTicker.Stop()
+
+	logUpdateTicker := time.NewTicker(1 * time.Second)
+	defer logUpdateTicker.Stop()
+
+	var offset int64
+
+	for {
+		select {
+		case <-logUpdateTicker.C:
+			update := p.pollLog(taskID, entry.logPath, &offset)
+			if update != nil && isPublishingMetrics {
+				p.publishLogUpdate(ctx, update)
+			}
+		case <-metricUpdateTicker.C:
+			update := p.pollMetrics(taskID)
+			metricHistory = append(metricHistory, update)
+			if len(metricHistory) > maxHistory {
+				copy(metricHistory[:len(metricHistory)-1], metricHistory[1:])
+				metricHistory = metricHistory[:len(metricHistory)-1]
+			}
+			if isPublishingMetrics {
+				p.publishMetricUpdate(ctx, update)
+			}
+		case <-ctx.Done():
 			return
-		}
-		p.mu.Unlock()
+		case reqID := <-entry.notifyCh:
+			// Acknowledge the command
+			ack, _ := json.Marshal(commandAck{Type: "command_ack", ReqID: reqID, TaskID: taskID})
+			p.publish(ctx, TopicTaskOut, ack, map[string]string{"type": "command_ack", "task_id": taskID})
 
-		go p.publishMetrics(pubCtx, taskID)
-		go p.publishLogs(pubCtx, taskID, entry.logPath)
+			isPublishingMetrics = true
+			for _, update := range metricHistory {
+				p.publishMetricUpdate(ctx, update)
+			}
+			offset = 0
+		}
 	}
 }
 
@@ -269,106 +300,89 @@ func getVolumeUsage(paths ...string) []VolumeUsage {
 	return volumes
 }
 
-func (p *PubSubPublisher) publishMetrics(ctx context.Context, taskID string) {
-	ticker := time.NewTicker(10 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			mem, _ := getMemoryUsage()
-			sysMem, _ := getSystemMemory()
-			cpu, _ := getCPUStats()
-			pressure := getMemoryPressure()
-
-			update := ResourceUsageUpdate{
-				Type:      "metric_update",
-				TaskID:    taskID,
-				Timestamp: time.Now().UTC(),
-				Volumes:   getVolumeUsage("/", p.tasksDir),
-			}
-			if mem != nil {
-				update.ProcessCount = int32(mem.procCount)
-				update.TotalMemory = mem.totalSize * PAGE_SIZE
-				update.TotalData = mem.totalData * PAGE_SIZE
-				update.TotalShared = mem.totalShared * PAGE_SIZE
-				update.TotalResident = mem.totalResident * PAGE_SIZE
-			}
-			if cpu != nil {
-				update.CpuUser = cpu.User
-				update.CpuSystem = cpu.System
-				update.CpuIdle = cpu.Idle
-				update.CpuIowait = cpu.Iowait
-			}
-			if sysMem != nil {
-				update.MemTotal = sysMem.Total
-				update.MemAvailable = sysMem.Available
-				update.MemFree = sysMem.Free
-			}
-			if pressure != nil {
-				update.MemPressureSomeAvg10 = pressure.SomeAvg10
-				update.MemPressureFullAvg10 = pressure.FullAvg10
-			}
-
-			data, err := json.Marshal(update)
-			if err != nil {
-				continue
-			}
-			go p.publish(ctx, TopicTaskOut, data, map[string]string{"type": "metric_update", "task_id": taskID})
-		}
+func (p *PubSubPublisher) pollLog(taskID string, logPath string, offset *int64) *LogStreamUpdate {
+	f, err := os.Open(logPath)
+	if err != nil {
+		return nil
 	}
+	info, err := f.Stat()
+	if err != nil {
+		f.Close()
+		return nil
+	}
+	size := info.Size()
+	if size <= *offset {
+		f.Close()
+		return nil
+	}
+	buf := make([]byte, size-*offset)
+	n, err := f.ReadAt(buf, *offset)
+	f.Close()
+	if n == 0 {
+		return nil
+	}
+	*offset += int64(n)
+
+	update := LogStreamUpdate{
+		Type:      "log_update",
+		UUID:      fmt.Sprintf("%s-%d", taskID, *offset),
+		Timestamp: time.Now().UTC(),
+		TaskID:    taskID,
+		Content:   string(buf[:n]),
+	}
+	return &update
 }
 
-func (p *PubSubPublisher) publishLogs(ctx context.Context, taskID, logPath string) {
-	ticker := time.NewTicker(1 * time.Second)
-	defer ticker.Stop()
+func (p *PubSubPublisher) pollMetrics(taskID string) *ResourceUsageUpdate {
+	mem, _ := getMemoryUsage()
+	sysMem, _ := getSystemMemory()
+	cpu, _ := getCPUStats()
+	pressure := getMemoryPressure()
 
-	var offset int64
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			f, err := os.Open(logPath)
-			if err != nil {
-				continue
-			}
-			info, err := f.Stat()
-			if err != nil {
-				f.Close()
-				continue
-			}
-			size := info.Size()
-			if size <= offset {
-				f.Close()
-				continue
-			}
-			buf := make([]byte, size-offset)
-			n, err := f.ReadAt(buf, offset)
-			f.Close()
-			if n == 0 {
-				continue
-			}
-			offset += int64(n)
-
-			update := LogStreamUpdate{
-				Type:      "log_update",
-				Timestamp: time.Now().UTC(),
-				TaskID:    taskID,
-				Content:   string(buf[:n]),
-			}
-			data, err := json.Marshal(update)
-			if err != nil {
-				continue
-			}
-			go p.publish(ctx, TopicTaskOut, data, map[string]string{"type": "log_update", "task_id": taskID})
-
-			if err != nil && err.Error() != "EOF" {
-				log.Printf("Error reading log for task %s: %v", taskID, err)
-			}
-		}
+	update := ResourceUsageUpdate{
+		Type:      "metric_update",
+		UUID:      uuid.New().String(),
+		TaskID:    taskID,
+		Timestamp: time.Now().UTC(),
+		Volumes:   getVolumeUsage("/", p.tasksDir),
 	}
+	if mem != nil {
+		update.ProcessCount = int32(mem.procCount)
+		update.TotalMemory = mem.totalSize * PAGE_SIZE
+		update.TotalData = mem.totalData * PAGE_SIZE
+		update.TotalShared = mem.totalShared * PAGE_SIZE
+		update.TotalResident = mem.totalResident * PAGE_SIZE
+	}
+	if cpu != nil {
+		update.CpuUser = cpu.User
+		update.CpuSystem = cpu.System
+		update.CpuIdle = cpu.Idle
+		update.CpuIowait = cpu.Iowait
+	}
+	if sysMem != nil {
+		update.MemTotal = sysMem.Total
+		update.MemAvailable = sysMem.Available
+		update.MemFree = sysMem.Free
+	}
+	if pressure != nil {
+		update.MemPressureSomeAvg10 = pressure.SomeAvg10
+		update.MemPressureFullAvg10 = pressure.FullAvg10
+	}
+	return &update
+
+}
+func (p *PubSubPublisher) publishMetricUpdate(ctx context.Context, update *ResourceUsageUpdate) {
+	data, err := json.Marshal(update)
+	if err != nil {
+		panic("Could not marshal update")
+	}
+	p.publish(ctx, TopicTaskOut, data, map[string]string{"type": "metric_update", "task_id": update.TaskID})
+}
+
+func (p *PubSubPublisher) publishLogUpdate(ctx context.Context, update *LogStreamUpdate) {
+	data, err := json.Marshal(update)
+	if err != nil {
+		panic("Could not marshal update")
+	}
+	p.publish(ctx, TopicTaskOut, data, map[string]string{"type": "log_update", "task_id": update.TaskID})
 }
