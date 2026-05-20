@@ -149,6 +149,7 @@ type Task struct {
 type JobSummary struct {
 	JobID        string    `datastore:"job_id"        json:"jobID"`
 	SubmitTime   time.Time `datastore:"submit_time"   json:"submitTime"`
+	LastUpdated  time.Time `datastore:"last_updated"  json:"lastUpdated"`
 	ClusterID    string    `datastore:"cluster_id"    json:"clusterId"`
 	Expiry       time.Time `datastore:"expiry"        json:"-"`
 	TaskCount    int       `datastore:"task_count"    json:"taskCount"`
@@ -766,12 +767,14 @@ func recomputeJobSummary(ctx context.Context, jobID string) error {
 		return fmt.Errorf("get tasks for job %q: %w", jobID, err)
 	}
 
+	now := time.Now()
 	summary := JobSummary{
-		JobID:      jobID,
-		SubmitTime: job.SubmitTime,
-		ClusterID:  job.ClusterID,
-		Expiry:     time.Now().Add(7 * 24 * time.Hour),
-		TaskCount:  len(tasks),
+		JobID:       jobID,
+		SubmitTime:  job.SubmitTime,
+		LastUpdated: now,
+		ClusterID:   job.ClusterID,
+		Expiry:      now.Add(7 * 24 * time.Hour),
+		TaskCount:   len(tasks),
 	}
 	for _, t := range tasks {
 		if t.Status == "complete" && t.ExitCode == "0" {

@@ -222,7 +222,7 @@ function StatusBadge({ status }: { status: TaskStatus }) {
 export default function JobDetail() {
   const { jobId } = useParams<{ jobId: string }>();
   const location = useLocation();
-  const { addJobEventListener, jobCache } = useEvents();
+  const { addJobEventListener, jobCache, jobs } = useEvents();
   const [localEvents, setLocalEvents] = useState<AnyEvent[]>([]);
 
   const isTasksTab = location.pathname.endsWith("/tasks");
@@ -238,12 +238,18 @@ export default function JobDetail() {
     localEvents,
     jobId,
   ]);
+  const jobSummaryLastUpdated = useMemo(() => {
+    const summary = jobs.find((j) => j.jobID === jobId);
+    return summary?.lastUpdated
+      ? new Date(summary.lastUpdated).getTime()
+      : undefined;
+  }, [jobs, jobId]);
   const { counts, rates } = useMemo(
     () =>
       jobId
-        ? computeJobTimeSeries(localEvents, jobId)
+        ? computeJobTimeSeries(localEvents, jobId, jobSummaryLastUpdated)
         : { counts: [], rates: [] },
-    [localEvents, jobId]
+    [localEvents, jobId, jobSummaryLastUpdated]
   );
   const totalTasks = useMemo(
     () => (jobId ? getJobTaskCount(localEvents, jobId) : 0),

@@ -43,6 +43,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   const jobCursorRef = useRef<Record<string, string | null>>({});
   const jobListenersRef = useRef<Record<string, Set<EventListener>>>({});
   const jobPollingRef = useRef<Record<string, boolean>>({});
+  const jobLoopGenRef = useRef<Record<string, number>>({});
 
   const pendingJobFetchesRef = useRef<Set<string>>(new Set());
 
@@ -103,9 +104,14 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
       // Start per-job polling loop if not already running.
       if (!jobPollingRef.current[jobId]) {
         jobPollingRef.current[jobId] = true;
+        const myGen = (jobLoopGenRef.current[jobId] =
+          (jobLoopGenRef.current[jobId] ?? 0) + 1);
 
         (async () => {
-          while (jobPollingRef.current[jobId]) {
+          while (
+            jobPollingRef.current[jobId] &&
+            jobLoopGenRef.current[jobId] === myGen
+          ) {
             try {
               const params = new URLSearchParams({
                 job_id: jobId,
@@ -167,8 +173,11 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
 
       return () => {
         jobListenersRef.current[jobId]?.delete(cb);
-        if (jobListenersRef.current[jobId]?.size === 0)
+        if (jobListenersRef.current[jobId]?.size === 0) {
           jobPollingRef.current[jobId] = false;
+          jobLoopGenRef.current[jobId] =
+            (jobLoopGenRef.current[jobId] ?? 0) + 1;
+        }
       };
     },
     []

@@ -35,7 +35,8 @@ const NUM_BUCKETS = 60;
 
 export function computeJobTimeSeries(
   events: AnyEvent[],
-  jobId: string
+  jobId: string,
+  maxTimeMs?: number
 ): { counts: CountPoint[]; rates: RatePoint[] } {
   const allJobEvents = events
     .filter((e) => "job_id" in e && (e as any).job_id === jobId)
@@ -46,9 +47,10 @@ export function computeJobTimeSeries(
   const totalTasks = getJobTaskCount(events, jobId);
 
   const minTime = new Date(allJobEvents[0].timestamp).getTime();
-  const maxTime = new Date(
-    allJobEvents[allJobEvents.length - 1].timestamp
-  ).getTime();
+  const maxTime = Math.max(
+    new Date(allJobEvents[allJobEvents.length - 1].timestamp).getTime(),
+    maxTimeMs ?? 0
+  );
 
   if (maxTime <= minTime) return { counts: [], rates: [] };
 

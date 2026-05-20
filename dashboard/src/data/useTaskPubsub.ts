@@ -16,6 +16,7 @@ interface VolumeUsageMsg {
 
 interface ResourceUsageUpdate {
   type: "metric_update";
+  uuid?: string;
   req_id: string;
   task_id: string;
   timestamp: string;
@@ -38,6 +39,7 @@ interface ResourceUsageUpdate {
 
 interface LogStreamUpdate {
   type: "log_update";
+  uuid?: string;
   req_id: string;
   task_id: string;
   timestamp: string;
@@ -150,6 +152,7 @@ export function useTaskPubsub(
   const credsRef = useRef<SubscriptionCreds | null>(null);
   const cancelledRef = useRef(false);
   const lastRawCpuRef = useRef<RawCpuSnapshot | null>(null);
+  const seenUuidsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     if (!isActive) return;
@@ -194,6 +197,11 @@ export function useTaskPubsub(
             ackIds.push(m.ackId);
             try {
               const payload = JSON.parse(atob(m.message.data));
+              const uuid: string | undefined = payload.uuid;
+              if (uuid !== undefined) {
+                if (seenUuidsRef.current.has(uuid)) continue;
+                seenUuidsRef.current.add(uuid);
+              }
               if (payload.type === "metric_update") {
                 const raw = payload as ResourceUsageUpdate;
                 const prev = lastRawCpuRef.current;
@@ -269,6 +277,7 @@ export function useTaskPubsub(
     setLogContent("");
     setError(null);
     lastRawCpuRef.current = null;
+    seenUuidsRef.current = new Set();
   }, [taskId]);
 
   return { resourceData, logContent, error };

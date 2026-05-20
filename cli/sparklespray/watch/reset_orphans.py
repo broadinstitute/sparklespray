@@ -103,6 +103,6 @@ class ResetOrphans(PeriodicTask):
                 print(f"Reseting {len(confidently_orphaned_task_ids)} orphaned tasks")
 
                 for task_id in confidently_orphaned_task_ids:
-                    self.jq.reset_task(task_id)
+                    self.jq.reset_orphaned_task(task_id)
 
         return NextPoll(self.seconds_between_modifications)

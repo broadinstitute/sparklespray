@@ -109,6 +109,7 @@ export type AnyEvent =
 export interface BackendJobSummary {
   jobID: string;
   submitTime: string;
+  lastUpdated: string;
   clusterId: string;
   taskCount: number;
   successCount: number;

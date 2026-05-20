@@ -1,5 +1,6 @@
 # Authorize server-to-server interactions from Google Compute Engine.
 from google.cloud import datastore
+from google.cloud import pubsub_v1
 
 import json
 from .task_store import (
@@ -142,6 +143,41 @@ class JobQueue:
         task = self.task_storage.get_task(task_id)
         self._reset_task(task, status, history_status=history_status)
 
+    def reset_orphaned_task(self, task_id: str):
+        task = self.task_storage.get_task(task_id)
+        self._reset_task(task, STATUS_PENDING, history_status="orphaned")
+        self._write_task_orphaned_event(
+            task.task_id, task.job_id, task.cluster_id or ""
+        )
+
+    def _write_task_orphaned_event(self, task_id: str, job_id: str, cluster_id: str):
+        now = datetime.now(tz=timezone.utc)
+        event_id = str(uuid.uuid4())
+        key = self.client.key("SparklesV6Event", event_id)
+        entity = datastore.Entity(key=key)
+        entity.update(
+            {
+                "event_id": event_id,
+                "type": "task_orphaned",
+                "task_id": task_id,
+                "job_id": job_id,
+                "cluster_id": cluster_id,
+                "timestamp": now,
+                "expiry": now + timedelta(days=7),
+            }
+        )
+        self.client.put(entity)
+
+        publisher = pubsub_v1.PublisherClient()
+        topic_path = publisher.topic_path(self.client.project, "sparkles-v6-events")
+        publisher.publish(
+            topic_path,
+            b"",
+            type="task_orphaned",
+            task_id=task_id,
+            job_id=job_id,
+        ).result()
+
     def submit(
         self,
         job_id,
@@ -235,6 +271,16 @@ class JobQueue:
 
         self.task_storage.delete(job_id, batch=batch)
         self.job_storage.delete(job_id, batch=batch)
-        #        log.info(f"in delete_job flushing batch: {batch}")
+
+        self._delete_entities_by_job_id("SparklesV6Event", job_id, batch)
+        self._delete_entities_by_job_id("SparklesV6NodeReq", job_id, batch)
+        batch.delete(self.client.key("SparklesV6JobSummary", job_id))
 
         batch.flush()
+
+    def _delete_entities_by_job_id(self, kind: str, job_id: str, batch: Batch) -> None:
+        query = self.client.query(kind=kind)
+        query.add_filter("job_id", "=", job_id)
+        query.keys_only()
+        for entity in query.fetch():
+            batch.delete(entity.key)
