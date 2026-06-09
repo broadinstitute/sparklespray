@@ -358,7 +358,7 @@ func consume(c *cli.Context) error {
 	// Set up Pub/Sub metric streaming publisher.
 	var publisher *PubSubPublisher
 	if psClient != nil {
-		publisher = NewPubSubPublisher(psClient, projectID, tasksDir, monitor)
+		publisher = NewPubSubPublisher(psClient, dsClient, projectID, tasksDir, monitor)
 		go publisher.ListenForControlMessages(ctx)
 	}
 

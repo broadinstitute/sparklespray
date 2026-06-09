@@ -15,3 +15,11 @@ Resubmitting with same name kills cluster ... but does not wait causing one job 
 5. Job cancellation
 6. Simulate memory exhaustion
 7. Migrate API to firestore
+
+When running 5 tasks, the plot shows the task count as 1 until 2nd task starts and then it's 2, etc.
+Timeline is appears to be rendered from job start until last event, but we really want present time.
+There's something super weird with cpu time. Sometimes it's reported as zero?
+
+Merge process memory and system memory sections. For system memory report total, availible and resident sizes. Drop process count plot
+
+Log is not updating.

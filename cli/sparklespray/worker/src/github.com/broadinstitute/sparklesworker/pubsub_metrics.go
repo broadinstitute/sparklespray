@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"cloud.google.com/go/datastore"
 	pubsub "cloud.google.com/go/pubsub/v2"
 	pb "cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
 	"github.com/google/uuid"
@@ -19,6 +20,8 @@ import (
 
 const TopicTaskOut = "sparkles-v6-task-out"
 const TopicTaskIn = "sparkles-v6-task-in"
+const MetricCollection = "SparklesV6TaskMetric"
+const LogCollection = "SparklesV6TaskLog"
 
 type VolumeUsage struct {
 	Location string  `json:"location"`
@@ -28,7 +31,6 @@ type VolumeUsage struct {
 
 type ResourceUsageUpdate struct {
 	Type                 string        `json:"type"`
-	UUID                 string        `json:"uuid"`
 	TaskID               string        `json:"task_id"`
 	Timestamp            time.Time     `json:"timestamp"`
 	ProcessCount         int32         `json:"process_count"`
@@ -50,10 +52,39 @@ type ResourceUsageUpdate struct {
 
 type LogStreamUpdate struct {
 	Type      string    `json:"type"`
-	UUID      string    `json:"uuid"`
 	Timestamp time.Time `json:"timestamp"`
 	TaskID    string    `json:"task_id"`
 	Content   string    `json:"content"`
+}
+
+// taskMetricRecord is the datastore representation of a ResourceUsageUpdate.
+type taskMetricRecord struct {
+	TaskID               string    `datastore:"task_id"`
+	Timestamp            time.Time `datastore:"timestamp"`
+	VolumesJSON          string    `datastore:"volumes_json,noindex"`
+	ProcessCount         int32     `datastore:"process_count,noindex"`
+	TotalMemory          int64     `datastore:"total_memory,noindex"`
+	TotalData            int64     `datastore:"total_data,noindex"`
+	TotalShared          int64     `datastore:"total_shared,noindex"`
+	TotalResident        int64     `datastore:"total_resident,noindex"`
+	CpuUser              int64     `datastore:"cpu_user,noindex"`
+	CpuSystem            int64     `datastore:"cpu_system,noindex"`
+	CpuIdle              int64     `datastore:"cpu_idle,noindex"`
+	CpuIowait            int64     `datastore:"cpu_iowait,noindex"`
+	MemTotal             int64     `datastore:"mem_total,noindex"`
+	MemAvailable         int64     `datastore:"mem_available,noindex"`
+	MemFree              int64     `datastore:"mem_free,noindex"`
+	MemPressureSomeAvg10 int32     `datastore:"mem_pressure_some_avg10,noindex"`
+	MemPressureFullAvg10 int32     `datastore:"mem_pressure_full_avg10,noindex"`
+	Expiry               time.Time `datastore:"expiry"`
+}
+
+// taskLogRecord is the datastore representation of a LogStreamUpdate.
+type taskLogRecord struct {
+	TaskID    string    `datastore:"task_id"`
+	Timestamp time.Time `datastore:"timestamp"`
+	Content   string    `datastore:"content,noindex"`
+	Expiry    time.Time `datastore:"expiry"`
 }
 
 type commandAck struct {
@@ -81,11 +112,12 @@ type taskEntry struct {
 	executorCancel context.CancelFunc // cancels the running subprocess
 }
 
-// PubSubPublisher manages metric/log streaming for running tasks via Pub/Sub.
-// It subscribes to sparkles-task-in for start_publishing commands and publishes
-// metric_update and log_update messages to sparkles-task-out.
+// PubSubPublisher manages metric/log streaming for running tasks.
+// It subscribes to sparkles-task-in for start_publishing commands and writes
+// metric and log records to Datastore collections.
 type PubSubPublisher struct {
 	psClient  *pubsub.Client
+	dsClient  *datastore.Client
 	projectID string
 	tasksDir  string // used for disk volume reporting
 	monitor   *Monitor
@@ -94,9 +126,10 @@ type PubSubPublisher struct {
 	tasks map[string]*taskEntry
 }
 
-func NewPubSubPublisher(psClient *pubsub.Client, projectID, tasksDir string, monitor *Monitor) *PubSubPublisher {
+func NewPubSubPublisher(psClient *pubsub.Client, dsClient *datastore.Client, projectID, tasksDir string, monitor *Monitor) *PubSubPublisher {
 	return &PubSubPublisher{
 		psClient:  psClient,
+		dsClient:  dsClient,
 		projectID: projectID,
 		tasksDir:  tasksDir,
 		monitor:   monitor,
@@ -267,6 +300,7 @@ func (p *PubSubPublisher) waitForStartPublishing(ctx context.Context, taskID str
 			for _, update := range metricHistory {
 				p.publishMetricUpdate(ctx, update)
 			}
+			metricHistory = metricHistory[:0]
 			offset = 0
 		}
 	}
@@ -325,7 +359,6 @@ func (p *PubSubPublisher) pollLog(taskID string, logPath string, offset *int64) 
 
 	update := LogStreamUpdate{
 		Type:      "log_update",
-		UUID:      fmt.Sprintf("%s-%d", taskID, *offset),
 		Timestamp: time.Now().UTC(),
 		TaskID:    taskID,
 		Content:   string(buf[:n]),
@@ -340,9 +373,8 @@ func (p *PubSubPublisher) pollMetrics(taskID string) *ResourceUsageUpdate {
 	pressure := getMemoryPressure()
 
 	update := ResourceUsageUpdate{
-		Type:      "metric_update",
-		UUID:      uuid.New().String(),
-		TaskID:    taskID,
+		Type:   "metric_update",
+		TaskID: taskID,
 		Timestamp: time.Now().UTC(),
 		Volumes:   getVolumeUsage("/", p.tasksDir),
 	}
@@ -372,17 +404,43 @@ func (p *PubSubPublisher) pollMetrics(taskID string) *ResourceUsageUpdate {
 
 }
 func (p *PubSubPublisher) publishMetricUpdate(ctx context.Context, update *ResourceUsageUpdate) {
-	data, err := json.Marshal(update)
-	if err != nil {
-		panic("Could not marshal update")
+	volJSON, _ := json.Marshal(update.Volumes)
+	expiry := update.Timestamp.Add(EventExpiry)
+	rec := &taskMetricRecord{
+		TaskID:               update.TaskID,
+		Timestamp:            update.Timestamp,
+		VolumesJSON:          string(volJSON),
+		ProcessCount:         update.ProcessCount,
+		TotalMemory:          update.TotalMemory,
+		TotalData:            update.TotalData,
+		TotalShared:          update.TotalShared,
+		TotalResident:        update.TotalResident,
+		CpuUser:              update.CpuUser,
+		CpuSystem:            update.CpuSystem,
+		CpuIdle:              update.CpuIdle,
+		CpuIowait:            update.CpuIowait,
+		MemTotal:             update.MemTotal,
+		MemAvailable:         update.MemAvailable,
+		MemFree:              update.MemFree,
+		MemPressureSomeAvg10: update.MemPressureSomeAvg10,
+		MemPressureFullAvg10: update.MemPressureFullAvg10,
+		Expiry:               expiry,
 	}
-	p.publish(ctx, TopicTaskOut, data, map[string]string{"type": "metric_update", "task_id": update.TaskID})
+	key := datastore.IncompleteKey(MetricCollection, nil)
+	if _, err := p.dsClient.Put(ctx, key, rec); err != nil && ctx.Err() == nil {
+		log.Printf("ERROR writing metric to datastore for task %s: %v", update.TaskID, err)
+	}
 }
 
 func (p *PubSubPublisher) publishLogUpdate(ctx context.Context, update *LogStreamUpdate) {
-	data, err := json.Marshal(update)
-	if err != nil {
-		panic("Could not marshal update")
+	rec := &taskLogRecord{
+		TaskID:    update.TaskID,
+		Timestamp: update.Timestamp,
+		Content:   update.Content,
+		Expiry:    update.Timestamp.Add(EventExpiry),
 	}
-	p.publish(ctx, TopicTaskOut, data, map[string]string{"type": "log_update", "task_id": update.TaskID})
+	key := datastore.IncompleteKey(LogCollection, nil)
+	if _, err := p.dsClient.Put(ctx, key, rec); err != nil && ctx.Err() == nil {
+		log.Printf("ERROR writing log to datastore for task %s: %v", update.TaskID, err)
+	}
 }

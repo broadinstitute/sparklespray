@@ -24,6 +24,8 @@ const EventCollection = "SparklesV6Event"
 const ClusterCollection = "SparklesV6Cluster"
 const JobCollection = "SparklesV6Job"
 const TaskCollection = "SparklesV6Task"
+const MetricCollection = "SparklesV6TaskMetric"
+const LogCollection = "SparklesV6TaskLog"
 const EventExpiry = 7 * 24 * time.Hour
 
 const TopicLifecycle = "sparkles-v6-events"
@@ -110,32 +112,58 @@ type VolumeUsage struct {
 
 type ResourceUsageUpdate struct {
 	Type                 string        `json:"type"`
-	ReqID                string        `json:"req_id"` // todo: remove this
 	TaskID               string        `json:"task_id"`
 	Timestamp            time.Time     `json:"timestamp"`
 	ProcessCount         int32         `json:"process_count"`
 	Volumes              []VolumeUsage `json:"volumes,omitempty"`
-	TotalMemory          int64     `json:"total_memory"`
-	TotalData            int64     `json:"total_data"`
-	TotalShared          int64     `json:"total_shared"`
-	TotalResident        int64     `json:"total_resident"`
-	CpuUser              int64     `json:"cpu_user"`
-	CpuSystem            int64     `json:"cpu_system"`
-	CpuIdle              int64     `json:"cpu_idle"`
-	CpuIowait            int64     `json:"cpu_iowait"`
-	MemTotal             int64     `json:"mem_total"`
-	MemAvailable         int64     `json:"mem_available"`
-	MemFree              int64     `json:"mem_free"`
-	MemPressureSomeAvg10 int32     `json:"mem_pressure_some_avg10"`
-	MemPressureFullAvg10 int32     `json:"mem_pressure_full_avg10"`
+	TotalMemory          int64         `json:"total_memory"`
+	TotalData            int64         `json:"total_data"`
+	TotalShared          int64         `json:"total_shared"`
+	TotalResident        int64         `json:"total_resident"`
+	CpuUser              int64         `json:"cpu_user"`
+	CpuSystem            int64         `json:"cpu_system"`
+	CpuIdle              int64         `json:"cpu_idle"`
+	CpuIowait            int64         `json:"cpu_iowait"`
+	MemTotal             int64         `json:"mem_total"`
+	MemAvailable         int64         `json:"mem_available"`
+	MemFree              int64         `json:"mem_free"`
+	MemPressureSomeAvg10 int32         `json:"mem_pressure_some_avg10"`
+	MemPressureFullAvg10 int32         `json:"mem_pressure_full_avg10"`
 }
 
 type LogStreamUpdate struct {
 	Type      string    `json:"type"`
-	ReqID     string    `json:"req_id"` // todo: remove this
 	Timestamp time.Time `json:"timestamp"`
 	TaskID    string    `json:"task_id"`
 	Content   string    `json:"content"`
+}
+
+type taskMetricRecord struct {
+	TaskID               string    `datastore:"task_id"`
+	Timestamp            time.Time `datastore:"timestamp"`
+	VolumesJSON          string    `datastore:"volumes_json,noindex"`
+	ProcessCount         int32     `datastore:"process_count,noindex"`
+	TotalMemory          int64     `datastore:"total_memory,noindex"`
+	TotalData            int64     `datastore:"total_data,noindex"`
+	TotalShared          int64     `datastore:"total_shared,noindex"`
+	TotalResident        int64     `datastore:"total_resident,noindex"`
+	CpuUser              int64     `datastore:"cpu_user,noindex"`
+	CpuSystem            int64     `datastore:"cpu_system,noindex"`
+	CpuIdle              int64     `datastore:"cpu_idle,noindex"`
+	CpuIowait            int64     `datastore:"cpu_iowait,noindex"`
+	MemTotal             int64     `datastore:"mem_total,noindex"`
+	MemAvailable         int64     `datastore:"mem_available,noindex"`
+	MemFree              int64     `datastore:"mem_free,noindex"`
+	MemPressureSomeAvg10 int32     `datastore:"mem_pressure_some_avg10,noindex"`
+	MemPressureFullAvg10 int32     `datastore:"mem_pressure_full_avg10,noindex"`
+	Expiry               time.Time `datastore:"expiry"`
+}
+
+type taskLogRecord struct {
+	TaskID    string    `datastore:"task_id"`
+	Timestamp time.Time `datastore:"timestamp"`
+	Content   string    `datastore:"content,noindex"`
+	Expiry    time.Time `datastore:"expiry"`
 }
 
 type StartPublishing struct {
@@ -339,8 +367,8 @@ func jitter(d time.Duration) time.Duration {
 	return time.Duration(float64(d) * (0.5 + rand.Float64()))
 }
 
-// publishTaskMetrics publishes metric_update and log_update messages to sparkles-task-out
-// until ctx is cancelled. reqID is used in all messages.
+// publishTaskMetrics writes metric_update and log_update records to Datastore
+// until ctx is cancelled.
 func publishTaskMetrics(ctx context.Context, taskID string) {
 	metricTicker := time.NewTicker(10 * time.Second)
 	logTicker := time.NewTicker(time.Duration(3+rand.Intn(5)) * time.Second)
@@ -354,17 +382,19 @@ func publishTaskMetrics(ctx context.Context, taskID string) {
 		case <-ctx.Done():
 			return
 		case <-metricTicker.C:
+			now := time.Now().UTC()
 			totalMem := int64(1+rand.Intn(8)) * 1024 * 1024 * 1024
 			free := totalMem / int64(2+rand.Intn(4))
-			update := ResourceUsageUpdate{
-				Type:      "metric_update",
-				TaskID:    taskID,
-				Timestamp: time.Now().UTC(),
-				Volumes: []VolumeUsage{
-					{Location: "/mnt/disk1", TotalGB: 100, UsedGB: 10 + float64(rand.Intn(80))},
-					{Location: "/", TotalGB: 50, UsedGB: 5 + float64(rand.Intn(40))},
-				},
-				ProcessCount: int32(1 + rand.Intn(8)),
+			volumes := []VolumeUsage{
+				{Location: "/mnt/disk1", TotalGB: 100, UsedGB: 10 + float64(rand.Intn(80))},
+				{Location: "/", TotalGB: 50, UsedGB: 5 + float64(rand.Intn(40))},
+			}
+			volJSON, _ := json.Marshal(volumes)
+			rec := &taskMetricRecord{
+				TaskID:               taskID,
+				Timestamp:            now,
+				VolumesJSON:          string(volJSON),
+				ProcessCount:         int32(1 + rand.Intn(8)),
 				TotalMemory:          totalMem,
 				TotalData:            totalMem - free - int64(rand.Intn(100*1024*1024)),
 				TotalShared:          int64(rand.Intn(50 * 1024 * 1024)),
@@ -378,25 +408,30 @@ func publishTaskMetrics(ctx context.Context, taskID string) {
 				MemFree:              free / 2,
 				MemPressureSomeAvg10: int32(rand.Intn(30)),
 				MemPressureFullAvg10: int32(rand.Intn(5)),
+				Expiry:               now.Add(EventExpiry),
 			}
-			data, _ := json.Marshal(update)
-			log.Printf("Writing task %s metrics to topic", taskID)
-			go publishToTopic(ctx, TopicTaskOut, data, map[string]string{"type": "metric_update", "task_id": taskID})
+			log.Printf("Writing task %s metrics to datastore", taskID)
+			key := datastore.IncompleteKey(MetricCollection, nil)
+			if _, err := dsClient.Put(ctx, key, rec); err != nil && ctx.Err() == nil {
+				log.Printf("ERROR writing metric to datastore for task %s: %v", taskID, err)
+			}
 
 		case t := <-logTicker.C:
 			elapsed := int(t.Sub(lastLog).Seconds())
 			lastLog = t
 			content := fmt.Sprintf("%d seconds since last update to the log.\nThe time is now %s\n",
 				elapsed, t.UTC().Format(time.RFC3339))
-			update := LogStreamUpdate{
-				Type:      "log_update",
-				Timestamp: time.Now().UTC(),
+			rec := &taskLogRecord{
 				TaskID:    taskID,
+				Timestamp: t.UTC(),
 				Content:   content,
+				Expiry:    t.UTC().Add(EventExpiry),
 			}
-			data, _ := json.Marshal(update)
-			log.Printf("Writing log %s metrics to topic", taskID)
-			go publishToTopic(ctx, TopicTaskOut, data, map[string]string{"type": "log_update", "task_id": taskID})
+			log.Printf("Writing log %s to datastore", taskID)
+			key := datastore.IncompleteKey(LogCollection, nil)
+			if _, err := dsClient.Put(ctx, key, rec); err != nil && ctx.Err() == nil {
+				log.Printf("ERROR writing log to datastore for task %s: %v", taskID, err)
+			}
 
 			logTicker.Reset(time.Duration(3+rand.Intn(5)) * time.Second)
 		}

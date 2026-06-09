@@ -35,7 +35,11 @@ const ClusterCollection = "SparklesV6Cluster"
 const JobCollection = "SparklesV6Job"
 const TaskCollection = "SparklesV6Task"
 const SummaryCollection = "SparklesV6JobSummary"
+const SummaryHistoryCollection = "SparklesV6JobSummaryHistory"
 const ClusterStatusCollection = "SparklesV6ClusterStatus"
+const MetricCollection = "SparklesV6TaskMetric"
+const LogCollection = "SparklesV6TaskLog"
+const EventExpiry = 7 * 24 * time.Hour
 const DefaultLimit = 1000
 const MaxLimit = 10000
 
@@ -152,9 +156,69 @@ type JobSummary struct {
 	LastUpdated  time.Time `datastore:"last_updated"  json:"lastUpdated"`
 	ClusterID    string    `datastore:"cluster_id"    json:"clusterId"`
 	Expiry       time.Time `datastore:"expiry"        json:"-"`
-	TaskCount    int       `datastore:"task_count"    json:"taskCount"`
-	SuccessCount int       `datastore:"success_count" json:"successCount"`
-	FailureCount int       `datastore:"failure_count" json:"failureCount"`
+	TaskCount     int       `datastore:"task_count"     json:"taskCount"`
+	PendingCount  int       `datastore:"pending_count"  json:"pendingCount"`
+	RunningCount  int       `datastore:"running_count"  json:"runningCount"`
+	SuccessCount  int       `datastore:"success_count"  json:"successCount"`
+	FailureCount  int       `datastore:"failure_count"  json:"failureCount"`
+	OrphanedCount int       `datastore:"orphaned_count" json:"orphanedCount"`
+}
+
+type JobSummaryHistory struct {
+	JobID         string    `datastore:"job_id"         json:"jobID"`
+	Timestamp     time.Time `datastore:"timestamp"      json:"timestamp"`
+	Expiry        time.Time `datastore:"expiry"         json:"-"`
+	TaskCount     int       `datastore:"task_count"     json:"taskCount"`
+	PendingCount  int       `datastore:"pending_count"  json:"pendingCount"`
+	RunningCount  int       `datastore:"running_count"  json:"runningCount"`
+	SuccessCount  int       `datastore:"success_count"  json:"successCount"`
+	FailureCount  int       `datastore:"failure_count"  json:"failureCount"`
+	OrphanedCount int       `datastore:"orphaned_count" json:"orphanedCount"`
+}
+
+type TaskMetric struct {
+	TaskID               string    `datastore:"task_id"                          json:"task_id"`
+	Timestamp            time.Time `datastore:"timestamp"                        json:"timestamp"`
+	VolumesJSON          string    `datastore:"volumes_json,noindex"             json:"-"`
+	ProcessCount         int32     `datastore:"process_count,noindex"            json:"process_count"`
+	TotalMemory          int64     `datastore:"total_memory,noindex"             json:"total_memory"`
+	TotalData            int64     `datastore:"total_data,noindex"               json:"total_data"`
+	TotalShared          int64     `datastore:"total_shared,noindex"             json:"total_shared"`
+	TotalResident        int64     `datastore:"total_resident,noindex"           json:"total_resident"`
+	CpuUser              int64     `datastore:"cpu_user,noindex"                 json:"cpu_user"`
+	CpuSystem            int64     `datastore:"cpu_system,noindex"               json:"cpu_system"`
+	CpuIdle              int64     `datastore:"cpu_idle,noindex"                 json:"cpu_idle"`
+	CpuIowait            int64     `datastore:"cpu_iowait,noindex"               json:"cpu_iowait"`
+	MemTotal             int64     `datastore:"mem_total,noindex"                json:"mem_total"`
+	MemAvailable         int64     `datastore:"mem_available,noindex"            json:"mem_available"`
+	MemFree              int64     `datastore:"mem_free,noindex"                 json:"mem_free"`
+	MemPressureSomeAvg10 int32     `datastore:"mem_pressure_some_avg10,noindex"  json:"mem_pressure_some_avg10"`
+	MemPressureFullAvg10 int32     `datastore:"mem_pressure_full_avg10,noindex"  json:"mem_pressure_full_avg10"`
+	Expiry               time.Time `datastore:"expiry"                           json:"-"`
+}
+
+func (m TaskMetric) MarshalJSON() ([]byte, error) {
+	type Alias TaskMetric
+	var volumes json.RawMessage
+	if m.VolumesJSON != "" {
+		volumes = json.RawMessage(m.VolumesJSON)
+	} else {
+		volumes = json.RawMessage("[]")
+	}
+	return json.Marshal(&struct {
+		Alias
+		Volumes json.RawMessage `json:"volumes"`
+	}{
+		Alias:   Alias(m),
+		Volumes: volumes,
+	})
+}
+
+type TaskLog struct {
+	TaskID    string    `datastore:"task_id"          json:"task_id"`
+	Timestamp time.Time `datastore:"timestamp"        json:"timestamp"`
+	Content   string    `datastore:"content,noindex"  json:"content"`
+	Expiry    time.Time `datastore:"expiry"           json:"-"`
 }
 
 // SubscriptionResponse is returned by all subscription-creation endpoints.
@@ -325,33 +389,9 @@ func handleUnsubscribe(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleCreateTaskSubscription(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
 	taskID := r.PathValue("task_id")
 
-	filter := fmt.Sprintf("attributes.task_id = %q", taskID)
-	if typeFilter := buildTypeFilter(r.URL.Query().Get("types")); typeFilter != "" {
-		filter = filter + " AND (" + typeFilter + ")"
-	}
-
-	subID, err := createPubSubSubscription(ctx, topicTaskOut, filter)
-	if err != nil {
-		log.Printf("Failed to create task subscription for %q: %v", taskID, err)
-		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to create subscription")
-		return
-	}
-
-	log.Printf("Created task subscription %s", subID)
-
-	resp, err := buildSubscriptionResponse(ctx, subID)
-	if err != nil {
-		log.Printf("Failed to generate subscriber token: %v", err)
-		fullSubName := fmt.Sprintf("projects/%s/subscriptions/%s", gProjectID, subID)
-		psClient.SubscriptionAdminClient.DeleteSubscription(context.Background(), &pb.DeleteSubscriptionRequest{Subscription: fullSubName})
-		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to generate token")
-		return
-	}
-
-	// Fire-and-forget: tell the task to start publishing.
+	// Fire-and-forget: tell the task to start writing metrics/logs to Datastore.
 	go func() {
 		pubCtx := context.Background()
 		reqID := newID()
@@ -368,18 +408,6 @@ func handleCreateTaskSubscription(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	writeJSON(w, http.StatusOK, resp)
-}
-
-func handleTaskUnsubscribe(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	subID := r.PathValue("subscription_id")
-	fullSubName := fmt.Sprintf("projects/%s/subscriptions/%s", gProjectID, subID)
-	if err := psClient.SubscriptionAdminClient.DeleteSubscription(ctx, &pb.DeleteSubscriptionRequest{Subscription: fullSubName}); err != nil {
-		log.Printf("Failed to delete task subscription %q: %v", subID, err)
-		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to delete subscription")
-		return
-	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -484,18 +512,69 @@ func handleTask(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleTaskLog(w http.ResponseWriter, r *http.Request) {
-	after := r.URL.Query().Get("after")
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	content := ""
-	if after == "" {
-		content = "not yet implemented"
+	ctx := r.Context()
+	taskID := r.PathValue("task_id")
+
+	q := datastore.NewQuery(LogCollection).
+		FilterField("task_id", "=", taskID).
+		Order("timestamp")
+
+	if s := r.URL.Query().Get("after"); s != "" {
+		t, err := parseTimestamp(s)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "BAD_REQUEST", fmt.Sprintf("invalid timestamp: %q", s))
+			return
+		}
+		q = q.FilterField("timestamp", ">", t)
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"content": content, "next_after": now})
+
+	var logs []TaskLog
+	if _, err := dsClient.GetAll(ctx, q, &logs); err != nil {
+		log.Printf("Datastore query error for task log %q: %v", taskID, err)
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "datastore query failed")
+		return
+	}
+
+	var nextAfter string
+	if len(logs) > 0 {
+		nextAfter = logs[len(logs)-1].Timestamp.UTC().Format(time.RFC3339Nano)
+	} else {
+		nextAfter = time.Now().UTC().Format(time.RFC3339Nano)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"logs": logs, "next_after": nextAfter})
 }
 
 func handleTaskMetrics(w http.ResponseWriter, r *http.Request) {
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	writeJSON(w, http.StatusOK, map[string]any{"metrics": []any{}, "next_after": now})
+	ctx := r.Context()
+	taskID := r.PathValue("task_id")
+
+	q := datastore.NewQuery(MetricCollection).
+		FilterField("task_id", "=", taskID).
+		Order("timestamp")
+
+	if s := r.URL.Query().Get("after"); s != "" {
+		t, err := parseTimestamp(s)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "BAD_REQUEST", fmt.Sprintf("invalid timestamp: %q", s))
+			return
+		}
+		q = q.FilterField("timestamp", ">", t)
+	}
+
+	var metrics []TaskMetric
+	if _, err := dsClient.GetAll(ctx, q, &metrics); err != nil {
+		log.Printf("Datastore query error for task metrics %q: %v", taskID, err)
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "datastore query failed")
+		return
+	}
+
+	var nextAfter string
+	if len(metrics) > 0 {
+		nextAfter = metrics[len(metrics)-1].Timestamp.UTC().Format(time.RFC3339Nano)
+	} else {
+		nextAfter = time.Now().UTC().Format(time.RFC3339Nano)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"metrics": metrics, "next_after": nextAfter})
 }
 
 type LogSummaryEntry struct {
@@ -511,8 +590,8 @@ type BatchJobInfo struct {
 }
 
 type LogSummaryResponse struct {
-	Entries        []LogSummaryEntry `json:"entries"`
-	GoogleBatchJobs []BatchJobInfo   `json:"googleBatchJobs"`
+	Entries         []LogSummaryEntry `json:"entries"`
+	GoogleBatchJobs []BatchJobInfo    `json:"googleBatchJobs"`
 }
 
 func flattenLogEntry(e *loggingv2.LogEntry) string {
@@ -598,7 +677,6 @@ func handleClusterLogSummary(w http.ResponseWriter, r *http.Request) {
 				Content:   event.GetDescription(),
 			})
 		}
-
 
 		createTime := job.GetCreateTime().AsTime()
 		updateTime := job.GetUpdateTime().AsTime()
@@ -712,6 +790,8 @@ var gcCollections = []string{
 	ClusterCollection,
 	ClusterStatusCollection,
 	SummaryCollection,
+	MetricCollection,
+	LogCollection,
 }
 
 func handleGC(w http.ResponseWriter, r *http.Request) {
@@ -776,16 +856,44 @@ func recomputeJobSummary(ctx context.Context, jobID string) error {
 		Expiry:      now.Add(7 * 24 * time.Hour),
 		TaskCount:   len(tasks),
 	}
+	var orphanedCount int
 	for _, t := range tasks {
 		if t.Status == "complete" && t.ExitCode == "0" {
 			summary.SuccessCount++
 		} else if t.Status == "complete" || t.Status == "failed" {
 			summary.FailureCount++
+		} else if t.Status == "claimed" {
+			summary.RunningCount++
+		} else {
+			summary.PendingCount++
+		}
+		for i := 1; i < len(t.History); i++ {
+			if t.History[i-1].Status == "claimed" && t.History[i].Status == "pending" {
+				orphanedCount++
+			}
 		}
 	}
 
+	summary.OrphanedCount = orphanedCount
+
 	summaryKey := datastore.NameKey(SummaryCollection, jobID, nil)
-	_, err := dsClient.Put(ctx, summaryKey, &summary)
+	if _, err := dsClient.Put(ctx, summaryKey, &summary); err != nil {
+		return err
+	}
+
+	historyKey := datastore.IncompleteKey(SummaryHistoryCollection, nil)
+	history := JobSummaryHistory{
+		JobID:         jobID,
+		Timestamp:     now,
+		Expiry:        summary.Expiry,
+		TaskCount:     summary.TaskCount,
+		PendingCount:  summary.PendingCount,
+		RunningCount:  summary.RunningCount,
+		SuccessCount:  summary.SuccessCount,
+		FailureCount:  summary.FailureCount,
+		OrphanedCount: orphanedCount,
+	}
+	_, err := dsClient.Put(ctx, historyKey, &history)
 	return err
 }
 
@@ -815,6 +923,21 @@ func handleJobsSummary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, summaries)
+}
+
+func handleJobSummaryHistory(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	jobID := r.PathValue("job_id")
+	dq := datastore.NewQuery(SummaryHistoryCollection).
+		FilterField("job_id", "=", jobID).
+		Order("timestamp")
+	records := make([]JobSummaryHistory, 0)
+	if _, err := dsClient.GetAll(ctx, dq, &records); err != nil {
+		log.Printf("Datastore query error for job summary history %q: %v", jobID, err)
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "datastore query failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, records)
 }
 
 func startSummaryUpdater(ctx context.Context) {
@@ -1272,10 +1395,10 @@ func main() {
 	mux.HandleFunc("GET /api/v1/clusters", handleClusters)
 	mux.HandleFunc("GET /api/v1/clusters/summary", handleClusterStatuses)
 	mux.HandleFunc("GET /api/v1/job/{job_id}", handleJob)
+	mux.HandleFunc("GET /api/v1/job/{job_id}/summary-history", handleJobSummaryHistory)
 	mux.HandleFunc("POST /api/v1/subscription", handleCreateSubscription)
 	mux.HandleFunc("POST /api/v1/subscription/{subscription_id}/unsubscribe", handleUnsubscribe)
 	mux.HandleFunc("POST /api/v1/task/{task_id}/subscription", handleCreateTaskSubscription)
-	mux.HandleFunc("POST /api/v1/task/{task_id}/subscription/{subscription_id}/unsubscribe", handleTaskUnsubscribe)
 	//	mux.HandleFunc("POST /gc", handleGC)
 
 	log.Printf("Listening on %s", *addr)
