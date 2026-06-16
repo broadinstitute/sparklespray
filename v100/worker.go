@@ -2,7 +2,6 @@ package v100
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -20,22 +19,16 @@ import (
 
 const heartbeatPeriod = 1 * time.Minute
 
-const workerOutTopic = "sparkles-worker-out"
+const workerOutTopic = "sparkles-events"
 const workerInTopic = "sparkles-worker-in"
 const workerCollection = "Workers"
 
 type WorkerRecord struct {
 	WorkerID        string    `firestore:"worker_id"`
+	WorkpoolID      string    `firestore:"workpool_id"`
+	Status          string    `firestore:"status"`
 	Expiry          time.Time `firestore:"expiry"`
 	HeartbeatExpiry time.Time `firestore:"heartbeat_expiry"`
-	Status          string    `firestore:"status"`
-	Workpool        string    `firestore:"workpool"`
-}
-
-type WorkerEvent struct {
-	Type     string `json:"type"`
-	WorkerID string `json:"worker_id"`
-	Workpool string `json:"workpool"`
 }
 
 func Main() error {
@@ -64,16 +57,6 @@ func Main() error {
 	}
 
 	return app.Run(os.Args)
-}
-
-func publishEvent(ctx context.Context, topic *pubsub.Topic, event WorkerEvent) error {
-	data, err := json.Marshal(event)
-	if err != nil {
-		return fmt.Errorf("marshalling event: %w", err)
-	}
-	result := topic.Publish(ctx, &pubsub.Message{Data: data})
-	_, err = result.Get(ctx)
-	return err
 }
 
 func runHeartbeat(ctx context.Context, doc *firestore.DocumentRef) {
@@ -118,12 +101,12 @@ func parseResources(s string) (*Resources, error) {
 func runWorker(c *cli.Context) error {
 	project := c.String("project")
 	db := c.String("db")
-	workpool := c.String("workpool")
+	workpoolID := c.String("workpool")
 
 	if project == "" {
 		return fmt.Errorf("--project is required")
 	}
-	if workpool == "" {
+	if workpoolID == "" {
 		return fmt.Errorf("--workpool is required")
 	}
 
@@ -133,12 +116,12 @@ func runWorker(c *cli.Context) error {
 	}
 
 	workerID := uuid.New().String()
-	log.Printf("Starting worker %s in workpool %s", workerID, workpool)
+	log.Printf("Starting worker %s in workpool %s", workerID, workpoolID)
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	ws, err := startWorker(ctx, project, db, workerID, workpool)
+	ws, err := startWorker(ctx, project, db, workerID, workpoolID)
 	if err != nil {
 		return err
 	}
@@ -172,7 +155,7 @@ func executeTask(task *Task, resources Resources, completions chan<- taskComplet
 }
 
 func (ws *workerState) mainLoop(ctx context.Context, resources *Resources) error {
-	queue := NewTaskQueue(ws.fsClient)
+	queue := NewTaskQueue(ws.fsClient, ws.publisher)
 	completions := make(chan taskCompletion, 100)
 	runningCount := 0
 	curResources := resources
@@ -186,12 +169,12 @@ func (ws *workerState) mainLoop(ctx context.Context, resources *Resources) error
 			runningCount--
 			if c.err != nil {
 				log.Printf("task %s failed: %v", c.taskID, c.err)
-				if err := queue.RecordFailed(ctx, c.taskID, c.err.Error()); err != nil {
+				if err := queue.RecordFailed(ctx, c.taskID, c.err.Error(), StatusClaimed); err != nil {
 					log.Printf("recording task %s as failed: %v", c.taskID, err)
 				}
 			} else {
-				if err := queue.RecordComplete(ctx, c.taskID); err != nil {
-					log.Printf("recording task %s as complete: %v", c.taskID, err)
+				if err := queue.RecordSuccess(ctx, c.taskID); err != nil {
+					log.Printf("recording task %s as success: %v", c.taskID, err)
 				}
 			}
 			return nil
@@ -203,7 +186,7 @@ func (ws *workerState) mainLoop(ctx context.Context, resources *Resources) error
 	// loop until we're out of jobs with tasks
 	for {
 		// first, find a job which has at least one task
-		pendingTask, err := queue.GetFirstPendingTask(ctx, ws.workpool)
+		pendingTask, err := queue.GetFirstPendingTask(ctx, ws.workpoolID)
 		if err != nil {
 			return fmt.Errorf("getting first pending task: %w", err)
 		}
@@ -232,7 +215,7 @@ func (ws *workerState) mainLoop(ctx context.Context, resources *Resources) error
 				if task == nil {
 					break
 				}
-				if err := queue.RecordFailed(ctx, task.TaskID, "Task requires more resources than allowed by worker pool"); err != nil {
+				if err := queue.RecordFailed(ctx, task.TaskID, "Task requires more resources than allowed by worker pool", StatusClaimed); err != nil {
 					return fmt.Errorf("recording task %s as failed: %w", task.TaskID, err)
 				}
 			}
@@ -286,21 +269,21 @@ func (ws *workerState) mainLoop(ctx context.Context, resources *Resources) error
 type workerState struct {
 	fsClient  *firestore.Client
 	psClient  *pubsub.Client
+	publisher *EventPublisher
 	workerDoc *firestore.DocumentRef
-	outTopic  *pubsub.Topic
 	sub       *pubsub.Subscription
 	subName   string
 	workerID  string
-	workpool  string
+	workpoolID string
 }
 
 func (ws *workerState) cleanup() {
-	ws.outTopic.Stop()
+	ws.publisher.Stop()
 	ws.psClient.Close()
 	ws.fsClient.Close()
 }
 
-func startWorker(ctx context.Context, project, db, workerID, workpool string) (*workerState, error) {
+func startWorker(ctx context.Context, project, db, workerID, workpoolID string) (*workerState, error) {
 	var fsClient *firestore.Client
 	var err error
 	if db != "" {
@@ -322,10 +305,10 @@ func startWorker(ctx context.Context, project, db, workerID, workpool string) (*
 	workerDoc := fsClient.Collection(workerCollection).Doc(workerID)
 	_, err = workerDoc.Set(ctx, WorkerRecord{
 		WorkerID:        workerID,
+		WorkpoolID:      workpoolID,
+		Status:          "started",
 		Expiry:          now.Add(7 * 24 * time.Hour),
 		HeartbeatExpiry: now.Add(heartbeatPeriod),
-		Status:          "started",
-		Workpool:        workpool,
 	})
 	if err != nil {
 		psClient.Close()
@@ -334,14 +317,14 @@ func startWorker(ctx context.Context, project, db, workerID, workpool string) (*
 	}
 	log.Printf("Registered worker %s in Firestore", workerID)
 
-	outTopic := psClient.Topic(workerOutTopic)
+	publisher := NewEventPublisher(psClient.Topic(workerOutTopic), fsClient)
 
-	if err := publishEvent(ctx, outTopic, WorkerEvent{
-		Type:     "worker_started",
-		WorkerID: workerID,
-		Workpool: workpool,
+	if err := publisher.PublishWorkerEvent(ctx, WorkerEvent{
+		Type:       "worker_started",
+		WorkerID:   workerID,
+		WorkpoolID: workpoolID,
 	}); err != nil {
-		outTopic.Stop()
+		publisher.Stop()
 		psClient.Close()
 		fsClient.Close()
 		return nil, fmt.Errorf("publishing worker_started: %w", err)
@@ -355,7 +338,7 @@ func startWorker(ctx context.Context, project, db, workerID, workpool string) (*
 	})
 	inTopic.Stop()
 	if err != nil {
-		outTopic.Stop()
+		publisher.Stop()
 		psClient.Close()
 		fsClient.Close()
 		return nil, fmt.Errorf("creating subscription %s: %w", subName, err)
@@ -375,14 +358,14 @@ func startWorker(ctx context.Context, project, db, workerID, workpool string) (*
 	}()
 
 	return &workerState{
-		fsClient:  fsClient,
-		psClient:  psClient,
-		workerDoc: workerDoc,
-		outTopic:  outTopic,
-		sub:       sub,
-		subName:   subName,
-		workerID:  workerID,
-		workpool:  workpool,
+		fsClient:   fsClient,
+		psClient:   psClient,
+		publisher:  publisher,
+		workerDoc:  workerDoc,
+		sub:        sub,
+		subName:    subName,
+		workerID:   workerID,
+		workpoolID: workpoolID,
 	}, nil
 }
 
@@ -401,10 +384,10 @@ func (ws *workerState) shutdown() {
 		log.Printf("Failed to update worker record on shutdown: %v", err)
 	}
 
-	if err := publishEvent(ctx, ws.outTopic, WorkerEvent{
-		Type:     "worker_stopped",
-		WorkerID: ws.workerID,
-		Workpool: ws.workpool,
+	if err := ws.publisher.PublishWorkerEvent(ctx, WorkerEvent{
+		Type:       "worker_stopped",
+		WorkerID:   ws.workerID,
+		WorkpoolID: ws.workpoolID,
 	}); err != nil {
 		log.Printf("Failed to publish worker_stopped: %v", err)
 	}
