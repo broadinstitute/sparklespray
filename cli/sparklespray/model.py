@@ -57,6 +57,7 @@ class SubmitConfig(BaseModel):
     sparklesworker_image: str
     target_node_count: int
     max_preemptable_attempts_scale: int
+    accelerators: List[str] = []
 
 
 class MachineSpec(BaseModel):

@@ -68,6 +68,8 @@ class JobSpec(BaseModel):
     # project: str
     # location: str
     gcs_bucket_mounts: List[GCSBucketMount] = dataclasses.field(default_factory=list)
+    # GPU accelerator types to attach (e.g. ["nvidia-tesla-t4", "nvidia-tesla-t4"] for two T4s)
+    accelerators: List[str] = dataclasses.field(default_factory=list)
 
 
 def _create_volumes(disks: List[Disk], gcs_bucket_mounts: List[GCSBucketMount]):
@@ -87,20 +89,17 @@ def _create_volumes(disks: List[Disk], gcs_bucket_mounts: List[GCSBucketMount]):
     return volumes
 
 
-def _create_runnables(runnables: List[Runnable], disks: List[Disk], monitor_port: int):
-    #     return
-    #     [batch.Runnable(script=batch.Runnable.Script(text="""#!/bin/sh
-    # echo "in runnables script"
-    # ls -la /mnt
-    # """))] +
+def _create_runnables(
+    runnables: List[Runnable], disks: List[Disk], monitor_port: int, use_gpu: bool = False
+):
+    gpu_options = " --gpus all" if use_gpu else ""
     return [
         batch.Runnable(
             container=batch.Runnable.Container(
                 image_uri=runnable.image,
                 commands=runnable.command,
                 volumes=[f"{disk.mount_path}:{disk.mount_path}" for disk in disks],
-                options=f"-p {monitor_port}:{monitor_port} -u 0",
-                # "enableImageStreaming": True
+                options=f"-p {monitor_port}:{monitor_port} -u 0{gpu_options}",
             ),
         )
         for runnable in runnables
@@ -121,6 +120,14 @@ def _create_parent_id(project, location):
     return f"projects/{project}/locations/{location}"
 
 
+# Machine type prefixes whose instances always have GPUs pre-attached (A and G series)
+_GPU_MACHINE_PREFIXES = ("a2-", "a3-", "a4-", "g2-", "g4-")
+
+
+def _machine_type_has_gpu(machine_type: str) -> bool:
+    return any(machine_type.startswith(p) for p in _GPU_MACHINE_PREFIXES)
+
+
 def create_batch_job_from_job_spec(
     project: str,
     location: str,
@@ -128,6 +135,17 @@ def create_batch_job_from_job_spec(
     worker_count: int,
     max_retry_count: int,
 ):
+    use_gpu = len(job_spec.accelerators) > 0 or _machine_type_has_gpu(job_spec.machine_type)
+
+    # Group accelerator strings by type and sum counts
+    accelerator_counts: Dict[str, int] = {}
+    for acc_type in job_spec.accelerators:
+        accelerator_counts[acc_type] = accelerator_counts.get(acc_type, 0) + 1
+    batch_accelerators = [
+        batch.AllocationPolicy.Accelerator(type_=acc_type, count=count)
+        for acc_type, count in accelerator_counts.items()
+    ]
+
     # batch api only supports a single group at this time
     # BATCH_TASK_INDEX
     task_groups = [
@@ -136,7 +154,7 @@ def create_batch_job_from_job_spec(
             task_count_per_node="1",
             task_spec=batch.TaskSpec(
                 runnables=_create_runnables(
-                    job_spec.runnables, job_spec.disks, job_spec.monitor_port
+                    job_spec.runnables, job_spec.disks, job_spec.monitor_port, use_gpu=use_gpu
                 ),
                 volumes=_create_volumes(job_spec.disks, job_spec.gcs_bucket_mounts),
             ),
@@ -145,6 +163,25 @@ def create_batch_job_from_job_spec(
             #                                          action_condition=batch.LifecyclePolicy.ActionCondition(exit_codes=[50001]))
         )
     ]
+
+    # GPU driver installation requires the batch-debian image; non-GPU jobs use batch-cos
+    boot_disk_image = "batch-debian" if use_gpu else "batch-cos"
+
+    instance_policy = batch.AllocationPolicy.InstancePolicy(
+        machine_type=job_spec.machine_type,
+        provisioning_model=(
+            batch.AllocationPolicy.ProvisioningModel.SPOT
+            if job_spec.preemptible
+            else batch.AllocationPolicy.ProvisioningModel.STANDARD
+        ),
+        boot_disk=batch.AllocationPolicy.Disk(
+            type=job_spec.boot_disk.type,
+            size_gb=job_spec.boot_disk.size_gb,
+            image=boot_disk_image,
+        ),
+        disks=_create_disks(job_spec.disks),
+        accelerators=batch_accelerators,
+    )
 
     job = batch.Job(
         task_groups=task_groups,
@@ -157,20 +194,8 @@ def create_batch_job_from_job_spec(
             ),
             instances=[
                 batch.AllocationPolicy.InstancePolicyOrTemplate(
-                    policy=batch.AllocationPolicy.InstancePolicy(
-                        machine_type=job_spec.machine_type,
-                        provisioning_model=(
-                            batch.AllocationPolicy.ProvisioningModel.SPOT
-                            if job_spec.preemptible
-                            else batch.AllocationPolicy.ProvisioningModel.STANDARD
-                        ),
-                        boot_disk=batch.AllocationPolicy.Disk(
-                            type=job_spec.boot_disk.type,
-                            size_gb=job_spec.boot_disk.size_gb,
-                            image="batch-cos",
-                        ),
-                        disks=_create_disks(job_spec.disks),
-                    )
+                    policy=instance_policy,
+                    install_gpu_drivers=use_gpu,
                 )
             ],
             tags=job_spec.network_tags,

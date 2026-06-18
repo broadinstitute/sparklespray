@@ -286,6 +286,7 @@ def submit(
         config.region,
         config.boot_volume,
         config.mounts,
+        accelerators=config.accelerators,
     )
 
     pipeline_spec = job.model_dump_json()
@@ -362,6 +363,42 @@ def expand_files_to_upload(io, filenames):
         else:
             pairs.append(SrcDstPair(src, dst))
     return pairs
+
+
+_N1_GPU_TYPES = {
+    "nvidia-tesla-t4",
+    "nvidia-tesla-t4-vws",
+    "nvidia-tesla-p4",
+    "nvidia-tesla-p4-vws",
+    "nvidia-tesla-v100",
+    "nvidia-tesla-p100",
+    "nvidia-tesla-p100-vws",
+}
+
+_N1_SHARED_CORE_TYPES = {"f1-micro", "g1-small"}
+
+
+def _validate_gpu_machine_type(machine_type: str, accelerators: List[str]) -> None:
+    if not accelerators:
+        return
+    if not machine_type.startswith("n1-"):
+        raise UserError(
+            f"--add-gpu is only supported with N1 machine types (e.g. n1-standard-4), "
+            f"but machine type '{machine_type}' was specified. "
+            f"A/G series machine types (a2-*, a3-*, a4-*, g2-*, g4-*) have GPUs pre-attached "
+            f"and do not support --add-gpu."
+        )
+    if machine_type in _N1_SHARED_CORE_TYPES:
+        raise UserError(
+            f"Machine type '{machine_type}' is a shared-core N1 type and does not support GPU attachments."
+        )
+    invalid = [a for a in accelerators if a not in _N1_GPU_TYPES]
+    if invalid:
+        valid_list = ", ".join(sorted(_N1_GPU_TYPES))
+        raise UserError(
+            f"Invalid GPU accelerator type(s) for N1 machines: {', '.join(invalid)}. "
+            f"Valid types are: {valid_list}"
+        )
 
 
 def _setup_parser_for_sub_command(parser):
@@ -478,6 +515,14 @@ def _setup_parser_for_sub_command(parser):
         action="append",
         type=key_value_pair,
     )
+    parser.add_argument(
+        "--add-gpu",
+        action="append",
+        default=[],
+        dest="accelerators",
+        metavar="ACCELERATOR",
+        help="Add a GPU accelerator to the VM (e.g. nvidia-tesla-t4). Can be specified multiple times to add multiple GPUs.",
+    )
     parser.add_argument("command", nargs=argparse.REMAINDER)
 
 
@@ -526,6 +571,8 @@ def submit_cmd(
     machine_type = config.machine_type
     if args.machine_type:
         machine_type = args.machine_type
+
+    _validate_gpu_machine_type(machine_type, args.accelerators)
 
     cas_url_prefix = config.cas_url_prefix
     default_url_prefix = config.default_url_prefix
@@ -628,6 +675,7 @@ def submit_cmd(
         sparklesworker_image=config.sparklesworker_image,
         target_node_count=target_node_count,
         max_preemptable_attempts_scale=max_preemptable_attempts_scale,
+        accelerators=args.accelerators,
     )
     assert mount_ == submit_config.mounts
 

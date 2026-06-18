@@ -31,6 +31,7 @@ def create_job_spec(
     location: str,
     boot_volume: PersistentDiskMount,
     mounts: List[DiskMountT],
+    accelerators: List[str] = [],
 ):
     consume_exe_path = os.path.join(work_root_dir, "consume")
     consume_data = os.path.join(work_root_dir, "data")
@@ -116,6 +117,7 @@ def create_job_spec(
         sparkles_timestamp=timestamp,
         service_account_email=service_account_email,
         scopes=["https://www.googleapis.com/auth/cloud-platform"],
+        accelerators=accelerators,
     )
 
     return job
