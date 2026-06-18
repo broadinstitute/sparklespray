@@ -475,6 +475,87 @@ sparkles sub --params features.csv \
    sparkles sub --params test_params.csv --local python script.py ...
    ```
 
+## Using GPUs
+
+Sparkles supports two ways to run jobs with GPU access, depending on the machine type.
+
+### Attaching GPUs to N1 machines
+
+For N1 general-purpose machine types, use the `--add-gpu` flag to attach one or more GPUs. Each `--add-gpu` invocation adds one GPU of the specified type. Repeat the flag to attach multiple GPUs.
+
+```bash
+# Attach a single T4 GPU to an n1-standard-4 instance
+sparkles sub -n gpu-job --machine-type n1-standard-4 --add-gpu nvidia-tesla-t4 \
+    -i my-cuda-image python train.py
+
+# Attach two T4 GPUs
+sparkles sub -n gpu-job --machine-type n1-standard-4 \
+    --add-gpu nvidia-tesla-t4 --add-gpu nvidia-tesla-t4 \
+    -i my-cuda-image python train.py
+```
+
+The following GPU types can be attached to N1 machines:
+
+| Accelerator type | GPU |
+|---|---|
+| `nvidia-tesla-t4` | NVIDIA T4 |
+| `nvidia-tesla-t4-vws` | NVIDIA T4 Virtual Workstation |
+| `nvidia-tesla-v100` | NVIDIA V100 |
+| `nvidia-tesla-p4` | NVIDIA P4 |
+| `nvidia-tesla-p4-vws` | NVIDIA P4 Virtual Workstation |
+| `nvidia-tesla-p100` | NVIDIA P100 |
+| `nvidia-tesla-p100-vws` | NVIDIA P100 Virtual Workstation |
+
+N1 shared-core types (`f1-micro`, `g1-small`) do not support GPU attachment.
+
+### Using accelerator-optimized machine types
+
+A-series (A2, A3, A4) and G-series (G2, G4) machine types have GPUs pre-attached — you do not use `--add-gpu`. Simply specify the machine type and sparkles will automatically enable GPU driver installation and GPU access for your containers.
+
+```bash
+# NVIDIA L4 via G2
+sparkles sub -n gpu-job --machine-type g2-standard-4 \
+    -i my-cuda-image python train.py
+
+# NVIDIA T4 via G2 (4 GPUs)
+sparkles sub -n gpu-job --machine-type g2-standard-96 \
+    -i my-cuda-image python train.py
+
+# NVIDIA A100 (40 GB) via A2 Standard
+sparkles sub -n gpu-job --machine-type a2-highgpu-1g \
+    -i my-cuda-image python train.py
+
+# NVIDIA H100 via A3 High
+sparkles sub -n gpu-job --machine-type a3-highgpu-8g \
+    -i my-cuda-image python train.py
+```
+
+Common machine types with pre-attached GPUs:
+
+| Series | GPU | Example machine types |
+|---|---|---|
+| G2 | NVIDIA L4 | `g2-standard-4`, `g2-standard-8`, `g2-standard-96` |
+| G4 | NVIDIA RTX PRO 6000 | `g4-standard-48`, `g4-standard-96` |
+| A2 Standard | NVIDIA A100 (40 GB) | `a2-highgpu-1g`, `a2-highgpu-4g`, `a2-highgpu-8g` |
+| A2 Ultra | NVIDIA A100 (80 GB) | `a2-ultragpu-1g`, `a2-ultragpu-4g` |
+| A3 High | NVIDIA H100 | `a3-highgpu-4g`, `a3-highgpu-8g` |
+| A3 Mega | NVIDIA H100 | `a3-megagpu-8g` |
+| A3 Ultra | NVIDIA H200 | `a3-ultragpu-8g` |
+
+### Docker image requirements
+
+Your Docker image must include the CUDA runtime or libraries appropriate for your workload. Sparkles handles driver installation on the VM and passes `--gpus all` to the container automatically — your image just needs to be built with CUDA support.
+
+```bash
+# Example using the official TensorFlow GPU image
+sparkles sub -n train-job --machine-type n1-standard-4 --add-gpu nvidia-tesla-t4 \
+    -i tensorflow/tensorflow:2.15.0-gpu python train.py
+
+# Example using a PyTorch GPU image
+sparkles sub -n train-job --machine-type g2-standard-4 \
+    -i pytorch/pytorch:2.2.0-cuda12.1-cudnn8-runtime python train.py
+```
+
 # Configuration reference
 
 Sparklespray uses a configuration file (`.sparkles`) to define how jobs are executed and managed. The file can be placed in your home directory or any parent directory of where you run the `sparkles` command.
