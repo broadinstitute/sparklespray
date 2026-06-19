@@ -2,6 +2,7 @@ package v100
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"log"
@@ -159,14 +160,14 @@ func executeTask(task *Task, resources Resources, completions chan<- taskComplet
 	}()
 }
 
-func executeDockerCommand(ctx context.Context, imageName string, command []string, extraDockerArgs []string, logPath string) error {
+func executeDockerCommand(ctx context.Context, imageName string, command []string, workDir string, extraDockerArgs []string, logPath string) error {
 	logFile, err := os.Create(logPath)
 	if err != nil {
 		return fmt.Errorf("creating log file: %w", err)
 	}
 	defer logFile.Close()
 
-	args := append([]string{"run", "--rm"}, extraDockerArgs...)
+	args := append([]string{"run", "--rm", "-w", workDir}, extraDockerArgs...)
 	args = append(args, imageName)
 	args = append(args, command...)
 
@@ -182,14 +183,14 @@ func executeDockerCommand(ctx context.Context, imageName string, command []strin
 }
 
 type WorkerLoopConfig struct {
-	WorkpoolID             string
-	WorkerID               string
-	Queue                  TaskQueue
-	Resources              *Resources
-	TransferClient         TransferClient
-	WorkDirParent          string
-	BindMounts             []string
-	ExecuteDockerCommand   func(ctx context.Context, imageName string, command []string, extraDockerArgs []string, logPath string) error
+	WorkpoolID           string
+	WorkerID             string
+	Queue                TaskQueue
+	Resources            *Resources
+	TransferClient       TransferClient
+	WorkDirParent        string
+	BindMounts           []string
+	ExecuteDockerCommand func(ctx context.Context, imageName string, command []string, workDir string, extraDockerArgs []string, logPath string) error
 }
 
 func workerMainLoop(ctx context.Context, cfg *WorkerLoopConfig) error {
@@ -290,13 +291,17 @@ func workerMainLoop(ctx context.Context, cfg *WorkerLoopConfig) error {
 			curResources = remaining
 			runningCount++
 			executeTask(task, jobResources, completions, func(t *Task) error {
-				paths, err := prepareWorkDir(ctx, cfg.TransferClient, cfg.WorkDirParent, t.FilesToLocalize)
+				files, err := resolveFilesToLocalize(ctx, cfg.TransferClient, t)
+				if err != nil {
+					return fmt.Errorf("resolving files to localize: %w", err)
+				}
+				paths, err := prepareWorkDir(ctx, cfg.TransferClient, cfg.WorkDirParent, files)
 				if err != nil {
 					return err
 				}
 
-				extraDockerArgs := buildDockerArgs(paths.workDir, cfg.BindMounts, t)
-				dockerExecErr := cfg.ExecuteDockerCommand(ctx, t.DockerImage, t.Command, extraDockerArgs, paths.logPath)
+				extraDockerArgs := buildDockerArgs(cfg.BindMounts, t)
+				dockerExecErr := cfg.ExecuteDockerCommand(ctx, t.DockerImage, t.Command, paths.taskWorkDir, extraDockerArgs, paths.logPath)
 				uploadResultsErr := uploadResults(ctx, cfg.TransferClient, paths, t.ResultPath, t.LogPath)
 				cleanupErr := cleanupWorkDir(paths)
 				return mergeErrors(dockerExecErr, uploadResultsErr, cleanupErr)
@@ -386,6 +391,36 @@ func mergeErrors(errs ...error) error {
 	return fmt.Errorf("%s", b.String())
 }
 
+func resolveFilesToLocalize(ctx context.Context, tc TransferClient, t *Task) ([]FileToLocalize, error) {
+	if t.FilesToLocalizeManifest == "" {
+		return t.FilesToLocalize, nil
+	}
+
+	tmp, err := os.CreateTemp("", "manifest-*.json")
+	if err != nil {
+		return nil, fmt.Errorf("creating temp file for manifest: %w", err)
+	}
+	tmpPath := tmp.Name()
+	tmp.Close()
+	defer os.Remove(tmpPath)
+
+	if err := tc.downloadFile(ctx, t.FilesToLocalizeManifest, tmpPath); err != nil {
+		return nil, fmt.Errorf("downloading files_to_localize manifest %s: %w", t.FilesToLocalizeManifest, err)
+	}
+
+	data, err := os.ReadFile(tmpPath)
+	if err != nil {
+		return nil, fmt.Errorf("reading manifest: %w", err)
+	}
+
+	var manifest []FileToLocalize
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		return nil, fmt.Errorf("parsing manifest: %w", err)
+	}
+
+	return append(t.FilesToLocalize, manifest...), nil
+}
+
 func prepareWorkDir(ctx context.Context, tc TransferClient, workDirParent string, filesToLocalize []FileToLocalize) (*TaskPaths, error) {
 	workDir, err := os.MkdirTemp(workDirParent, "task-*")
 	if err != nil {
@@ -432,8 +467,8 @@ func cleanupWorkDir(paths *TaskPaths) error {
 	return os.RemoveAll(paths.workDir)
 }
 
-func buildDockerArgs(workDir string, bindMounts []string, _ *Task) []string {
-	args := []string{"-w", workDir}
+func buildDockerArgs(bindMounts []string, _ *Task) []string {
+	var args []string
 	for _, bindMount := range bindMounts {
 		args = append(args, "-v", bindMount)
 	}

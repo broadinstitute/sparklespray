@@ -54,25 +54,29 @@ type Job struct {
 }
 
 type FileToLocalize struct {
-	Source       string `firestore:"source"`
-	Destination  string `firestore:"destination"`
-	IsExecutable bool   `firestore:"is_executable"`
+	Source       string `firestore:"source"        json:"source"`
+	Destination  string `firestore:"destination"   json:"destination"`
+	IsExecutable bool   `firestore:"is_executable" json:"is_executable"`
 }
 
 type Task struct {
-	JobID           string           `firestore:"job_id"`
-	TaskID          string           `firestore:"task_id"`
-	TaskIndex       int              `firestore:"task_index"`
-	WorkpoolID      string           `firestore:"workpool_id"`
-	Status          string           `firestore:"status"`
-	Command         []string         `firestore:"command"`
-	DockerImage     string           `firestore:"docker_image"`
-	ResultPath      string           `firestore:"result_path"`
-	LogPath         string           `firestore:"log_path"`
-	FilesToLocalize []FileToLocalize `firestore:"files_to_localize"`
-	OwningWorkerID  string           `firestore:"owning_worker_id"`
-	FailureReason   string           `firestore:"failure_reason"`
-	ExitCode        int              `firestore:"exit_code"`
+	JobID       string   `firestore:"job_id"`
+	TaskID      string   `firestore:"task_id"`
+	TaskIndex   int      `firestore:"task_index"`
+	WorkpoolID  string   `firestore:"workpool_id"`
+	Status      string   `firestore:"status"`
+	Command     []string `firestore:"command"`
+	DockerImage string   `firestore:"docker_image"`
+	ResultPath  string   `firestore:"result_path"`
+	LogPath     string   `firestore:"log_path"`
+	// either FilesToLocalizeManifest or FilesToLocalize will be populated. If there's a small
+	// number of files, we can just store them in the task, but if we have a large number of files
+	// write them to cloud storage as a manifest and read them from there instead.
+	FilesToLocalizeManifest string           `firestore:"files_to_localize_manifest"`
+	FilesToLocalize         []FileToLocalize `firestore:"files_to_localize"`
+	OwningWorkerID          string           `firestore:"owning_worker_id"`
+	FailureReason           string           `firestore:"failure_reason"`
+	ExitCode                int              `firestore:"exit_code"`
 }
 
 type TaskQueue interface {
@@ -247,5 +251,3 @@ func (q *FirestoreTaskQueue) RecordFailed(ctx context.Context, taskID string, fa
 		NewState: StatusFailed,
 	})
 }
-
-
