@@ -3,9 +3,12 @@ package v100
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"log"
 	"os"
+	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -13,6 +16,7 @@ import (
 
 	"cloud.google.com/go/firestore"
 	"cloud.google.com/go/pubsub"
+	"cloud.google.com/go/storage"
 	"github.com/google/uuid"
 	"github.com/urfave/cli"
 )
@@ -84,7 +88,7 @@ func parseResources(s string) (*Resources, error) {
 	if s == "" {
 		s = "slots=1"
 	}
-	for _, part := range strings.Split(s, ",") {
+	for part := range strings.SplitSeq(s, ",") {
 		kv := strings.SplitN(part, "=", 2)
 		if len(kv) != 2 {
 			return nil, fmt.Errorf("invalid resource %q: expected name=value", part)
@@ -147,18 +151,51 @@ type taskCompletion struct {
 	err       error
 }
 
-func executeTask(task *Task, resources Resources, completions chan<- taskCompletion) {
+func executeTask(task *Task, resources Resources, completions chan<- taskCompletion, executeTaskCallback func(task *Task) error) {
 	log.Printf("Stub: executing: %v", task)
 	go func() {
-		completions <- taskCompletion{taskID: task.TaskID, resources: resources}
+		err := executeTaskCallback(task)
+		completions <- taskCompletion{taskID: task.TaskID, resources: resources, err: err}
 	}()
 }
 
-func (ws *workerState) mainLoop(ctx context.Context, resources *Resources) error {
-	queue := NewTaskQueue(ws.fsClient, ws.publisher)
+func executeDockerCommand(ctx context.Context, imageName string, command []string, extraDockerArgs []string, logPath string) error {
+	logFile, err := os.Create(logPath)
+	if err != nil {
+		return fmt.Errorf("creating log file: %w", err)
+	}
+	defer logFile.Close()
+
+	args := append([]string{"run", "--rm"}, extraDockerArgs...)
+	args = append(args, imageName)
+	args = append(args, command...)
+
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+
+	err = cmd.Run()
+	if err != nil {
+		return fmt.Errorf("Could not run docker command (%s): %s", strings.Join(args, " "), err)
+	}
+	return nil
+}
+
+type WorkerLoopConfig struct {
+	WorkpoolID             string
+	WorkerID               string
+	Queue                  TaskQueue
+	Resources              *Resources
+	TransferClient         TransferClient
+	WorkDirParent          string
+	BindMounts             []string
+	ExecuteDockerCommand   func(ctx context.Context, imageName string, command []string, extraDockerArgs []string, logPath string) error
+}
+
+func workerMainLoop(ctx context.Context, cfg *WorkerLoopConfig) error {
 	completions := make(chan taskCompletion, 100)
 	runningCount := 0
-	curResources := resources
+	curResources := cfg.Resources
 
 	// curResources is the single-goroutine mutable running total of available capacity.
 	// Only waitForCompletion and the claim path touch it, both on this goroutine.
@@ -169,11 +206,11 @@ func (ws *workerState) mainLoop(ctx context.Context, resources *Resources) error
 			runningCount--
 			if c.err != nil {
 				log.Printf("task %s failed: %v", c.taskID, c.err)
-				if err := queue.RecordFailed(ctx, c.taskID, c.err.Error(), StatusClaimed); err != nil {
+				if err := cfg.Queue.RecordFailed(ctx, c.taskID, c.err.Error(), StatusClaimed); err != nil {
 					log.Printf("recording task %s as failed: %v", c.taskID, err)
 				}
 			} else {
-				if err := queue.RecordSuccess(ctx, c.taskID); err != nil {
+				if err := cfg.Queue.UpdateState(ctx, c.taskID, StatusWriting, StatusSuccess); err != nil {
 					log.Printf("recording task %s as success: %v", c.taskID, err)
 				}
 			}
@@ -186,7 +223,7 @@ func (ws *workerState) mainLoop(ctx context.Context, resources *Resources) error
 	// loop until we're out of jobs with tasks
 	for {
 		// first, find a job which has at least one task
-		pendingTask, err := queue.GetFirstPendingTask(ctx, ws.workpoolID)
+		pendingTask, err := cfg.Queue.GetFirstPendingTask(ctx, cfg.WorkpoolID)
 		if err != nil {
 			return fmt.Errorf("getting first pending task: %w", err)
 		}
@@ -194,7 +231,7 @@ func (ws *workerState) mainLoop(ctx context.Context, resources *Resources) error
 			break
 		}
 
-		job, err := queue.GetJob(ctx, pendingTask.JobID)
+		job, err := cfg.Queue.GetJob(ctx, pendingTask.JobID)
 		if err != nil {
 			return fmt.Errorf("getting job %s: %w", pendingTask.JobID, err)
 		}
@@ -205,17 +242,17 @@ func (ws *workerState) mainLoop(ctx context.Context, resources *Resources) error
 		}
 
 		// check to make sure that this job can run at least one task if we used our full allocation of resources
-		if !resources.Sub(jobResources).IsValid() {
+		if !cfg.Resources.Sub(jobResources).IsValid() {
 			log.Printf("Job %s requires more resources than this worker can provide; failing all pending tasks", job.JobID)
 			for {
-				task, err := queue.ClaimTask(ctx, job.JobID, ws.workerID)
+				task, err := cfg.Queue.ClaimTask(ctx, job.JobID, cfg.WorkerID)
 				if err != nil {
 					return fmt.Errorf("claiming task to fail for job %s: %w", job.JobID, err)
 				}
 				if task == nil {
 					break
 				}
-				if err := queue.RecordFailed(ctx, task.TaskID, "Task requires more resources than allowed by worker pool", StatusClaimed); err != nil {
+				if err := cfg.Queue.RecordFailed(ctx, task.TaskID, "Task requires more resources than allowed by worker pool", StatusClaimed); err != nil {
 					return fmt.Errorf("recording task %s as failed: %w", task.TaskID, err)
 				}
 			}
@@ -241,7 +278,7 @@ func (ws *workerState) mainLoop(ctx context.Context, resources *Resources) error
 				continue
 			}
 
-			task, err := queue.ClaimTask(ctx, job.JobID, ws.workerID)
+			task, err := cfg.Queue.ClaimTask(ctx, job.JobID, cfg.WorkerID)
 			if err != nil {
 				return fmt.Errorf("claiming task: %w", err)
 			}
@@ -252,7 +289,18 @@ func (ws *workerState) mainLoop(ctx context.Context, resources *Resources) error
 
 			curResources = remaining
 			runningCount++
-			executeTask(task, jobResources, completions)
+			executeTask(task, jobResources, completions, func(t *Task) error {
+				paths, err := prepareWorkDir(ctx, cfg.TransferClient, cfg.WorkDirParent, t.FilesToLocalize)
+				if err != nil {
+					return err
+				}
+
+				extraDockerArgs := buildDockerArgs(paths.workDir, cfg.BindMounts, t)
+				dockerExecErr := cfg.ExecuteDockerCommand(ctx, t.DockerImage, t.Command, extraDockerArgs, paths.logPath)
+				uploadResultsErr := uploadResults(ctx, cfg.TransferClient, paths, t.ResultPath, t.LogPath)
+				cleanupErr := cleanupWorkDir(paths)
+				return mergeErrors(dockerExecErr, uploadResultsErr, cleanupErr)
+			})
 		}
 	}
 
@@ -266,19 +314,150 @@ func (ws *workerState) mainLoop(ctx context.Context, resources *Resources) error
 	return nil
 }
 
+func (ws *workerState) mainLoop(ctx context.Context, resources *Resources) error {
+	queue := NewFirestoreTaskQueue(ws.fsClient, ws.publisher)
+	return workerMainLoop(ctx, &WorkerLoopConfig{
+		WorkpoolID:           ws.workpoolID,
+		WorkerID:             ws.workerID,
+		Queue:                queue,
+		Resources:            resources,
+		TransferClient:       ws.transferClient,
+		WorkDirParent:        ws.workDirParent,
+		BindMounts:           ws.bindMounts,
+		ExecuteDockerCommand: executeDockerCommand,
+	})
+}
+
+type TaskPaths struct {
+	workDir        string
+	taskWorkDir    string
+	logPath        string
+	localizedFiles []string
+}
+
+func uploadResults(ctx context.Context, tc TransferClient, paths *TaskPaths, resultPath, logPath string) error {
+	if err := tc.uploadFile(ctx, paths.logPath, logPath); err != nil {
+		return fmt.Errorf("uploading log: %w", err)
+	}
+
+	localized := make(map[string]struct{}, len(paths.localizedFiles))
+	for _, p := range paths.localizedFiles {
+		localized[p] = struct{}{}
+	}
+
+	return filepath.WalkDir(paths.taskWorkDir, func(localPath string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if _, skip := localized[localPath]; skip {
+			return nil
+		}
+		relPath, err := filepath.Rel(paths.taskWorkDir, localPath)
+		if err != nil {
+			return err
+		}
+		destGCSPath := strings.TrimSuffix(resultPath, "/") + "/" + filepath.ToSlash(relPath)
+		return tc.uploadFile(ctx, localPath, destGCSPath)
+	})
+}
+
+func mergeErrors(errs ...error) error {
+	var nonNil []error
+	for _, err := range errs {
+		if err != nil {
+			nonNil = append(nonNil, err)
+		}
+	}
+	if len(nonNil) == 0 {
+		return nil
+	}
+	if len(nonNil) == 1 {
+		return nonNil[0]
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "%d error(s) occurred:\n", len(nonNil))
+	for i, err := range nonNil {
+		fmt.Fprintf(&b, "%d. %s\n", i+1, err.Error())
+	}
+	return fmt.Errorf("%s", b.String())
+}
+
+func prepareWorkDir(ctx context.Context, tc TransferClient, workDirParent string, filesToLocalize []FileToLocalize) (*TaskPaths, error) {
+	workDir, err := os.MkdirTemp(workDirParent, "task-*")
+	if err != nil {
+		return nil, fmt.Errorf("creating task dir: %w", err)
+	}
+
+	taskWorkDir := filepath.Join(workDir, "work")
+	if err := os.Mkdir(taskWorkDir, 0755); err != nil {
+		os.RemoveAll(workDir)
+		return nil, fmt.Errorf("creating working dir: %w", err)
+	}
+
+	logPath := filepath.Join(workDir, "output.log")
+
+	var localizedFiles []string
+	for _, f := range filesToLocalize {
+		destPath := filepath.Join(taskWorkDir, f.Destination)
+		if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
+			os.RemoveAll(workDir)
+			return nil, fmt.Errorf("creating parent dirs for %s: %w", f.Destination, err)
+		}
+		if err := tc.downloadFile(ctx, f.Source, destPath); err != nil {
+			os.RemoveAll(workDir)
+			return nil, fmt.Errorf("localizing %s: %w", f.Source, err)
+		}
+		if f.IsExecutable {
+			if err := os.Chmod(destPath, 0755); err != nil {
+				os.RemoveAll(workDir)
+				return nil, fmt.Errorf("making %s executable: %w", destPath, err)
+			}
+		}
+		localizedFiles = append(localizedFiles, destPath)
+	}
+
+	return &TaskPaths{
+		workDir:        workDir,
+		taskWorkDir:    taskWorkDir,
+		logPath:        logPath,
+		localizedFiles: localizedFiles,
+	}, nil
+}
+
+func cleanupWorkDir(paths *TaskPaths) error {
+	return os.RemoveAll(paths.workDir)
+}
+
+func buildDockerArgs(workDir string, bindMounts []string, _ *Task) []string {
+	args := []string{"-w", workDir}
+	for _, bindMount := range bindMounts {
+		args = append(args, "-v", bindMount)
+	}
+	return args
+}
+
 type workerState struct {
-	fsClient  *firestore.Client
-	psClient  *pubsub.Client
-	publisher *EventPublisher
-	workerDoc *firestore.DocumentRef
-	sub       *pubsub.Subscription
-	subName   string
-	workerID  string
-	workpoolID string
+	fsClient       *firestore.Client
+	psClient       *pubsub.Client
+	gcsClient      *storage.Client // held for Close() only
+	transferClient TransferClient
+	publisher      *EventPublisher
+	workerDoc      *firestore.DocumentRef
+	sub            *pubsub.Subscription
+	subName        string
+	workerID       string
+	workpoolID     string
+	bindMounts     []string
+	workDirParent  string
 }
 
 func (ws *workerState) cleanup() {
 	ws.publisher.Stop()
+	ws.gcsClient.Close()
 	ws.psClient.Close()
 	ws.fsClient.Close()
 }
@@ -299,6 +478,13 @@ func startWorker(ctx context.Context, project, db, workerID, workpoolID string) 
 	if err != nil {
 		fsClient.Close()
 		return nil, fmt.Errorf("creating pubsub client: %w", err)
+	}
+
+	gcsClient, err := storage.NewClient(ctx)
+	if err != nil {
+		psClient.Close()
+		fsClient.Close()
+		return nil, fmt.Errorf("creating storage client: %w", err)
 	}
 
 	now := time.Now()
@@ -358,14 +544,16 @@ func startWorker(ctx context.Context, project, db, workerID, workpoolID string) 
 	}()
 
 	return &workerState{
-		fsClient:   fsClient,
-		psClient:   psClient,
-		publisher:  publisher,
-		workerDoc:  workerDoc,
-		sub:        sub,
-		subName:    subName,
-		workerID:   workerID,
-		workpoolID: workpoolID,
+		fsClient:       fsClient,
+		psClient:       psClient,
+		gcsClient:      gcsClient,
+		transferClient: &GCSTransferClient{gcsClient: gcsClient},
+		publisher:      publisher,
+		workerDoc:      workerDoc,
+		sub:            sub,
+		subName:        subName,
+		workerID:       workerID,
+		workpoolID:     workpoolID,
 	}, nil
 }
 

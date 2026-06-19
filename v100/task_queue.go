@@ -53,33 +53,52 @@ type Job struct {
 	Resources  []ResourceEntry `firestore:"resources"`
 }
 
-type Task struct {
-	JobID          string `firestore:"job_id"`
-	TaskID         string `firestore:"task_id"`
-	TaskIndex      int    `firestore:"task_index"`
-	WorkpoolID     string `firestore:"workpool_id"`
-	Status         string `firestore:"status"`
-	Command        string `firestore:"command"`
-	OwningWorkerID string `firestore:"owning_worker_id"`
-	FailureReason  string `firestore:"failure_reason"`
-	ExitCode       int    `firestore:"exit_code"`
+type FileToLocalize struct {
+	Source       string `firestore:"source"`
+	Destination  string `firestore:"destination"`
+	IsExecutable bool   `firestore:"is_executable"`
 }
 
-type TaskQueue struct {
+type Task struct {
+	JobID           string           `firestore:"job_id"`
+	TaskID          string           `firestore:"task_id"`
+	TaskIndex       int              `firestore:"task_index"`
+	WorkpoolID      string           `firestore:"workpool_id"`
+	Status          string           `firestore:"status"`
+	Command         []string         `firestore:"command"`
+	DockerImage     string           `firestore:"docker_image"`
+	ResultPath      string           `firestore:"result_path"`
+	LogPath         string           `firestore:"log_path"`
+	FilesToLocalize []FileToLocalize `firestore:"files_to_localize"`
+	OwningWorkerID  string           `firestore:"owning_worker_id"`
+	FailureReason   string           `firestore:"failure_reason"`
+	ExitCode        int              `firestore:"exit_code"`
+}
+
+type TaskQueue interface {
+	GetFirstPendingTask(ctx context.Context, workpoolID string) (*Task, error)
+	GetJob(ctx context.Context, jobID string) (*Job, error)
+	ClaimTask(ctx context.Context, jobID string, workerID string) (*Task, error)
+	UpdateState(ctx context.Context, taskID string, oldState string, newState string) error
+	RecordError(ctx context.Context, taskID string, exitCode int) error
+	RecordFailed(ctx context.Context, taskID string, failureReason string, oldState string) error
+}
+
+type FirestoreTaskQueue struct {
 	fs        *firestore.Client
 	publisher *EventPublisher
 }
 
-func NewTaskQueue(fs *firestore.Client, publisher *EventPublisher) *TaskQueue {
-	return &TaskQueue{fs: fs, publisher: publisher}
+func NewFirestoreTaskQueue(fs *firestore.Client, publisher *EventPublisher) *FirestoreTaskQueue {
+	return &FirestoreTaskQueue{fs: fs, publisher: publisher}
 }
 
-func (q *TaskQueue) taskDoc(taskID string) *firestore.DocumentRef {
+func (q *FirestoreTaskQueue) taskDoc(taskID string) *firestore.DocumentRef {
 	return q.fs.Collection(taskCollection).Doc(taskID)
 }
 
 // GetFirstPendingTask returns the first pending task in the given workpool, or nil if none exist.
-func (q *TaskQueue) GetFirstPendingTask(ctx context.Context, workpoolID string) (*Task, error) {
+func (q *FirestoreTaskQueue) GetFirstPendingTask(ctx context.Context, workpoolID string) (*Task, error) {
 	iter := q.fs.Collection(taskCollection).
 		Where("workpool_id", "==", workpoolID).
 		Where("status", "==", StatusPending).
@@ -103,7 +122,7 @@ func (q *TaskQueue) GetFirstPendingTask(ctx context.Context, workpoolID string) 
 }
 
 // GetJob fetches a job by ID.
-func (q *TaskQueue) GetJob(ctx context.Context, jobID string) (*Job, error) {
+func (q *FirestoreTaskQueue) GetJob(ctx context.Context, jobID string) (*Job, error) {
 	doc, err := q.fs.Collection(jobCollection).Doc(jobID).Get(ctx)
 	if err != nil {
 		return nil, err
@@ -118,7 +137,7 @@ func (q *TaskQueue) GetJob(ctx context.Context, jobID string) (*Job, error) {
 // ClaimTask atomically claims a pending task from the given job for the given worker.
 // It fetches up to 100 pending tasks, shuffles them to reduce contention, and retries
 // until a claim succeeds or no pending tasks remain.
-func (q *TaskQueue) ClaimTask(ctx context.Context, jobID string, workerID string) (*Task, error) {
+func (q *FirestoreTaskQueue) ClaimTask(ctx context.Context, jobID string, workerID string) (*Task, error) {
 	for {
 		docs, err := q.fs.Collection(taskCollection).
 			Where("job_id", "==", jobID).
@@ -174,55 +193,27 @@ func (q *TaskQueue) ClaimTask(ctx context.Context, jobID string, workerID string
 	}
 }
 
-// RecordRunning marks a task as actively running.
-func (q *TaskQueue) RecordRunning(ctx context.Context, taskID string) error {
-	if _, err := q.taskDoc(taskID).Update(ctx, []firestore.Update{
-		{Path: "status", Value: StatusRunning},
-	}); err != nil {
+// UpdateState transitions a task to newState. It clears owning_worker_id when
+// moving out of an active state (i.e. when newState is not claimed/running/writing).
+func (q *FirestoreTaskQueue) UpdateState(ctx context.Context, taskID string, oldState string, newState string) error {
+	updates := []firestore.Update{{Path: "status", Value: newState}}
+	if !IsActiveStatus(newState) {
+		updates = append(updates, firestore.Update{Path: "owning_worker_id", Value: ""})
+	}
+	if _, err := q.taskDoc(taskID).Update(ctx, updates); err != nil {
 		return err
 	}
 	return q.publisher.PublishTaskStateUpdate(ctx, TaskStateUpdate{
 		Type:     "task_state_update",
 		TaskID:   taskID,
-		OldState: StatusClaimed,
-		NewState: StatusRunning,
-	})
-}
-
-// RecordWriting marks a task as uploading results to cloud storage.
-func (q *TaskQueue) RecordWriting(ctx context.Context, taskID string) error {
-	if _, err := q.taskDoc(taskID).Update(ctx, []firestore.Update{
-		{Path: "status", Value: StatusWriting},
-	}); err != nil {
-		return err
-	}
-	return q.publisher.PublishTaskStateUpdate(ctx, TaskStateUpdate{
-		Type:     "task_state_update",
-		TaskID:   taskID,
-		OldState: StatusRunning,
-		NewState: StatusWriting,
-	})
-}
-
-// RecordSuccess marks a task as successfully completed (exit code 0).
-func (q *TaskQueue) RecordSuccess(ctx context.Context, taskID string) error {
-	if _, err := q.taskDoc(taskID).Update(ctx, []firestore.Update{
-		{Path: "status", Value: StatusSuccess},
-		{Path: "owning_worker_id", Value: ""},
-	}); err != nil {
-		return err
-	}
-	return q.publisher.PublishTaskStateUpdate(ctx, TaskStateUpdate{
-		Type:     "task_state_update",
-		TaskID:   taskID,
-		OldState: StatusWriting,
-		NewState: StatusSuccess,
+		OldState: oldState,
+		NewState: newState,
 	})
 }
 
 // RecordError marks a task as completed with a non-zero exit code. The process
 // ran to completion but reported failure via its exit code.
-func (q *TaskQueue) RecordError(ctx context.Context, taskID string, exitCode int) error {
+func (q *FirestoreTaskQueue) RecordError(ctx context.Context, taskID string, exitCode int) error {
 	if _, err := q.taskDoc(taskID).Update(ctx, []firestore.Update{
 		{Path: "status", Value: StatusError},
 		{Path: "exit_code", Value: exitCode},
@@ -241,7 +232,7 @@ func (q *TaskQueue) RecordError(ctx context.Context, taskID string, exitCode int
 // RecordFailed marks a task as failed due to an infrastructure or system error.
 // The task did not run to completion. oldState must be the task's current status
 // (claimed, running, or writing). failureReason describes what went wrong.
-func (q *TaskQueue) RecordFailed(ctx context.Context, taskID string, failureReason string, oldState string) error {
+func (q *FirestoreTaskQueue) RecordFailed(ctx context.Context, taskID string, failureReason string, oldState string) error {
 	if _, err := q.taskDoc(taskID).Update(ctx, []firestore.Update{
 		{Path: "status", Value: StatusFailed},
 		{Path: "owning_worker_id", Value: ""},
@@ -257,36 +248,4 @@ func (q *TaskQueue) RecordFailed(ctx context.Context, taskID string, failureReas
 	})
 }
 
-// RecordKilled marks a task as administratively killed. oldState must be the
-// task's current status.
-func (q *TaskQueue) RecordKilled(ctx context.Context, taskID string, oldState string) error {
-	if _, err := q.taskDoc(taskID).Update(ctx, []firestore.Update{
-		{Path: "status", Value: StatusKilled},
-		{Path: "owning_worker_id", Value: ""},
-	}); err != nil {
-		return err
-	}
-	return q.publisher.PublishTaskStateUpdate(ctx, TaskStateUpdate{
-		Type:     "task_state_update",
-		TaskID:   taskID,
-		OldState: oldState,
-		NewState: StatusKilled,
-	})
-}
 
-// RecordOrphaned resets a task back to pending after its owning worker was detected
-// as crashed. oldState must be the task's current status (claimed, running, or writing).
-func (q *TaskQueue) RecordOrphaned(ctx context.Context, taskID string, oldState string) error {
-	if _, err := q.taskDoc(taskID).Update(ctx, []firestore.Update{
-		{Path: "status", Value: StatusPending},
-		{Path: "owning_worker_id", Value: ""},
-	}); err != nil {
-		return err
-	}
-	return q.publisher.PublishTaskStateUpdate(ctx, TaskStateUpdate{
-		Type:     "task_state_update",
-		TaskID:   taskID,
-		OldState: oldState,
-		NewState: StatusPending,
-	})
-}

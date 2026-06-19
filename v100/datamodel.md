@@ -29,17 +29,29 @@ One document per submitted job. The document ID is the `job_id`.
 
 One document per task. The document ID is the `task_id`.
 
-| Field              | Type   | Description                                                                          |
-| ------------------ | ------ | ------------------------------------------------------------------------------------ |
-| `task_id`          | string | Unique identifier for the task                                                       |
-| `task_index`       | int    | Zero-based index of this task within its job                                         |
-| `job_id`           | string | ID of the parent job                                                                 |
-| `workpool_id`      | string | The workpool this task belongs to (denormalized from the job for efficient querying) |
-| `status`           | string | Current status — see table below                                                     |
-| `command`          | string | The command to execute                                                               |
-| `owning_worker_id` | string | ID of the worker that has claimed this task; empty when not claimed                  |
-| `failure_reason`   | string | Human-readable reason for failure; populated when `status` is `failed`               |
-| `exit_code`        | int    | Process exit code; populated when `status` is `error`                                |
+| Field               | Type             | Description                                                                               |
+| ------------------- | ---------------- | ----------------------------------------------------------------------------------------- |
+| `task_id`           | string           | Unique identifier for the task                                                            |
+| `task_index`        | int              | Zero-based index of this task within its job                                              |
+| `job_id`            | string           | ID of the parent job                                                                      |
+| `workpool_id`       | string           | The workpool this task belongs to (denormalized from the job for efficient querying)      |
+| `status`            | string           | Current status — see table below                                                          |
+| `command`           | string           | The command to execute                                                                    |
+| `docker_image`      | string           | Docker image used to run the command                                                      |
+| `result_path`       | string           | GCS path (e.g. `gs://bucket/path`) where results are uploaded after the command completes |
+| `log_path`          | string           | GCS path where the command's stdout/stderr is uploaded after the command completes        |
+| `files_to_localize` | []FileToLocalize | Files to download from GCS into the working directory before the command runs             |
+| `owning_worker_id`  | string           | ID of the worker that has claimed this task; empty when not claimed                       |
+| `failure_reason`    | string           | Human-readable reason for failure; populated when `status` is `failed`                    |
+| `exit_code`         | int              | Process exit code; populated when `status` is `error`                                     |
+
+**FileToLocalize** (embedded object):
+
+| Field           | Type   | Description                                                                                  |
+| --------------- | ------ | -------------------------------------------------------------------------------------------- |
+| `source`        | string | GCS path of the file to download (e.g. `gs://bucket/path/file.txt`)                          |
+| `destination`   | string | Relative path under the working directory where the file is written (e.g. `inputs/file.txt`) |
+| `is_executable` | bool   | If true, the file is made executable after download. Defaults to false if omitted.           |
 
 **Status values:**
 
@@ -64,6 +76,36 @@ Terminal states — no further transitions except an administrative kill:
 **Three-way terminal split:** `success`/`error`/`failed` model two distinct failure modes. `error` means the task executed fully and the _program itself_ reported a problem — look at the task's output. `failed` means execution did not complete — look at the worker or infrastructure logs. `success` means exit code 0.
 
 **Claiming is atomic.** `ClaimTask` uses a Firestore transaction to flip `status` from `pending` → `claimed` and record the `owning_worker_id`. To reduce contention when many workers compete for the same job's tasks, the worker fetches up to 100 pending candidates and shuffles them before attempting the transaction.
+
+---
+
+### `WorkPools`
+
+One document per workpool. The document ID is the `workpool_id`. A workpool defines the VM configuration used to create workers that process tasks associated with that workpool.
+
+| Field           | Type          | Description                                                        |
+| --------------- | ------------- | ------------------------------------------------------------------ |
+| `workpool_id`   | string        | Unique identifier for the workpool                                 |
+| `machine_type`  | string        | GCP machine type for worker VMs (e.g. `n2-standard-4`)             |
+| `root_dir`      | string        | Working directory on the VM where tasks are executed               |
+| `resources`     | []Resource    | Resource capacity advertised by workers created from this workpool |
+| `empty_volumes` | []EmptyVolume | Ephemeral volumes to attach to each VM                             |
+| `expiry`        | timestamp     | When this document may be garbage-collected                        |
+
+**Resource** (embedded object) — mirrors the resource entries on `Jobs`; workers created from this workpool will advertise this capacity:
+
+| Field   | Type    | Description                         |
+| ------- | ------- | ----------------------------------- |
+| `name`  | string  | Resource name (e.g. `slots`, `mem`) |
+| `value` | float64 | Quantity of that resource available |
+
+**EmptyVolume** (embedded object) — ephemeral disk volume created fresh for each VM:
+
+| Field         | Type   | Description                                                   |
+| ------------- | ------ | ------------------------------------------------------------- |
+| `mount_point` | string | Filesystem path where the volume is mounted (e.g. `/scratch`) |
+| `type`        | string | Volume type (e.g. `pd-ssd`, `local-ssd`)                      |
+| `size_in_gb`  | int    | Volume size in gibibytes                                      |
 
 ---
 
