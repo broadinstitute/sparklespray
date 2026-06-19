@@ -158,6 +158,59 @@ Every write to `sparkles-events` is mirrored to this collection atomically befor
 
 ---
 
+### `TaskLog`
+
+An append-only log of progress updates written by workers for in-flight tasks. By default tasks do not write to this collection; logging is activated per-task by sending a `start_publishing` control message to the worker. Once activated, the worker writes periodic entries until the task completes.
+
+Each document has a `type` field that identifies which kind of update it represents. The document ID is a UUID assigned at write time.
+
+**Common fields (all entry types):**
+
+| Field       | Type      | Description                                      |
+| ----------- | --------- | ------------------------------------------------ |
+| `task_id`   | string    | ID of the task that produced this entry          |
+| `type`      | string    | Entry type — `metric_update` or `log_update`     |
+| `timestamp` | timestamp | When the entry was recorded                      |
+| `expiry`    | timestamp | When this document may be deleted (TTL-based GC) |
+
+**Additional fields on `metric_update` entries:**
+
+| Field                     | Type           | Description                                            |
+| ------------------------- | -------------- | ------------------------------------------------------ |
+| `process_count`           | int32          | Number of processes in the task's process group        |
+| `total_memory`            | int64          | Total virtual memory size across all processes (bytes) |
+| `total_data`              | int64          | Total data-segment size across all processes (bytes)   |
+| `total_shared`            | int64          | Total shared memory across all processes (bytes)       |
+| `total_resident`          | int64          | Total resident set size across all processes (bytes)   |
+| `cpu_user`                | int64          | Cumulative user-mode CPU time (jiffies)                |
+| `cpu_system`              | int64          | Cumulative kernel-mode CPU time (jiffies)              |
+| `cpu_idle`                | int64          | Cumulative idle CPU time (jiffies)                     |
+| `cpu_iowait`              | int64          | Cumulative I/O-wait CPU time (jiffies)                 |
+| `mem_total`               | int64          | System total memory (bytes)                            |
+| `mem_available`           | int64          | System available memory (bytes)                        |
+| `mem_free`                | int64          | System free memory (bytes)                             |
+| `mem_pressure_some_avg10` | int32          | Memory pressure "some" 10-second average (PSI)         |
+| `mem_pressure_full_avg10` | int32          | Memory pressure "full" 10-second average (PSI)         |
+| `volumes`                 | []VolumeMetric | Disk volume usage snapshots at the time of the update  |
+
+**VolumeMetric** (embedded object):
+
+| Field      | Type    | Description                                     |
+| ---------- | ------- | ----------------------------------------------- |
+| `location` | string  | Mount path of the volume (e.g. `/`, `/scratch`) |
+| `total_gb` | float64 | Total capacity of the volume (GiB)              |
+| `used_gb`  | float64 | Space currently used on the volume (GiB)        |
+
+**Additional fields on `log_update` entries:**
+
+| Field     | Type   | Description                                                            |
+| --------- | ------ | ---------------------------------------------------------------------- |
+| `content` | string | Raw text appended to the task's stdout/stderr log since the last entry |
+
+Metric entries are written every 15 seconds. Log entries are written every 1 second, but only when there is new output to report. Both types share the same TTL-based expiry for garbage collection.
+
+---
+
 ## Pub/Sub Topics
 
 ### `sparkles-events` _(Worker → Control plane)_
