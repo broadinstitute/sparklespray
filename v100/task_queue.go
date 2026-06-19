@@ -3,6 +3,7 @@ package v100
 import (
 	"context"
 	"math/rand"
+	"time"
 
 	"cloud.google.com/go/firestore"
 	"google.golang.org/api/iterator"
@@ -10,6 +11,7 @@ import (
 
 const jobCollection = "Jobs"
 const taskCollection = "Tasks"
+const workpoolCollection = "WorkPools"
 
 // Task status values for the active (non-terminal) states.
 const (
@@ -43,12 +45,28 @@ func IsActiveStatus(s string) bool {
 }
 
 type ResourceEntry struct {
-	Name  string  `firestore:"name"`
-	Value float64 `firestore:"value"`
+	Name  string  `firestore:"name" json:"name"`
+	Value float64 `firestore:"value" json:"value"`
+}
+
+type EmptyVolume struct {
+	MountPoint string `firestore:"mount_point" json:"mountPoint"`
+	Type       string `firestore:"type"        json:"type"`
+	SizeInGB   int    `firestore:"size_in_gb"  json:"sizeInGB"`
+}
+
+type WorkPool struct {
+	WorkpoolID   string          `firestore:"workpool_id"`
+	MachineType  string          `firestore:"machine_type"`
+	RootDir      string          `firestore:"root_dir"`
+	Resources    []ResourceEntry `firestore:"resources"`
+	EmptyVolumes []EmptyVolume   `firestore:"empty_volumes"`
+	Expiry       time.Time       `firestore:"expiry"`
 }
 
 type Job struct {
 	JobID      string          `firestore:"job_id"`
+	Name       string          `firestore:"name"`
 	WorkpoolID string          `firestore:"workpool_id"`
 	Resources  []ResourceEntry `firestore:"resources"`
 }

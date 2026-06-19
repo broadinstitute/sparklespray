@@ -36,34 +36,6 @@ type WorkerRecord struct {
 	HeartbeatExpiry time.Time `firestore:"heartbeat_expiry"`
 }
 
-func Main() error {
-	app := cli.NewApp()
-	app.Name = "sparkles"
-	app.Version = "1.0.0"
-	app.Compiled = time.Now()
-	app.Authors = []cli.Author{
-		{
-			Name:  "Philip Montgomery",
-			Email: "pmontgom@broadinstitute.org",
-		},
-	}
-
-	app.Commands = []cli.Command{
-		{
-			Name: "worker",
-			Flags: []cli.Flag{
-				cli.StringFlag{Name: "project"},
-				cli.StringFlag{Name: "db"},
-				cli.StringFlag{Name: "workpool"},
-				cli.StringFlag{Name: "resources"},
-			},
-			Action: runWorker,
-		},
-	}
-
-	return app.Run(os.Args)
-}
-
 func runHeartbeat(ctx context.Context, doc *firestore.DocumentRef) {
 	ticker := time.NewTicker(heartbeatPeriod)
 	defer ticker.Stop()
