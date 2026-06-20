@@ -137,7 +137,7 @@ func (f *FakeBatchAPIClient) GetJobStatus(ctx context.Context, jobID string) (Ba
 	return j.status, nil
 }
 
-func (f *FakeBatchAPIClient) ListRunningVMs(ctx context.Context, labelFilter string) (map[string]VMInfo, error) {
+func (f *FakeBatchAPIClient) ListRunningVMs(ctx context.Context, filterLabelName, filterLabelValue string) (map[string]VMInfo, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
@@ -146,17 +146,26 @@ func (f *FakeBatchAPIClient) ListRunningVMs(ctx context.Context, labelFilter str
 		if j.status != BatchJobStatusRunning {
 			continue
 		}
-		if j.batchID != labelFilter && j.workpoolID != labelFilter {
+		switch filterLabelName {
+		case "sparkles-worker-batch":
+			if j.batchID != filterLabelValue {
+				continue
+			}
+		case "sparkles-worker-workpool":
+			if j.workpoolID != filterLabelValue {
+				continue
+			}
+		default:
 			continue
 		}
 		for name := range j.activeVMs {
-			result[name] = VMInfo{InstanceName: name}
+			result[name] = VMInfo{InstanceName: name, Zone: "fake-zone"}
 		}
 	}
 	return result, nil
 }
 
-func (f *FakeBatchAPIClient) TerminateVM(ctx context.Context, instanceName string) error {
+func (f *FakeBatchAPIClient) TerminateVM(ctx context.Context, zone, instanceName string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
@@ -332,6 +341,18 @@ func (s *FakeBatchRequestStore) ListByWorkpool(ctx context.Context, workpoolID s
 		return result[i].SubmittedAt.After(result[j].SubmittedAt)
 	})
 	return result, nil
+}
+
+func (s *FakeBatchRequestStore) GetByJobID(ctx context.Context, jobID string) (*BatchAPIRequest, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, b := range s.batches {
+		if b.JobID == jobID {
+			return copyBatch(b), nil
+		}
+	}
+	return nil, nil
 }
 
 func (s *FakeBatchRequestStore) SumPreemptibleVMCount(ctx context.Context, workpoolID string) (int, error) {

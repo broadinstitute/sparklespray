@@ -50,7 +50,7 @@ func (a *Autoscaler) reconcileWorkpool(ctx context.Context, pool *WorkPool) erro
 	}
 
 	// Transition to idle if no VMs remain anywhere in the workpool.
-	workpoolVMs, err := a.batchAPI.ListRunningVMs(ctx, pool.WorkpoolID)
+	workpoolVMs, err := a.batchAPI.ListRunningVMs(ctx, "sparkles-worker-workpool", pool.WorkpoolID)
 	if err != nil {
 		return fmt.Errorf("list workpool VMs: %w", err)
 	}
@@ -107,7 +107,7 @@ func (a *Autoscaler) runTier2ForBatch(ctx context.Context, pool *WorkPool, batch
 }
 
 func (a *Autoscaler) reconcileVMs(ctx context.Context, pool *WorkPool, batch *BatchAPIRequest, apiStatus BatchJobStatus, now time.Time) error {
-	gcpVMs, err := a.batchAPI.ListRunningVMs(ctx, batch.BatchID)
+	gcpVMs, err := a.batchAPI.ListRunningVMs(ctx, "sparkles-worker-batch", batch.BatchID)
 	if err != nil {
 		return fmt.Errorf("list running VMs: %w", err)
 	}
@@ -167,9 +167,9 @@ func (a *Autoscaler) reconcileVMs(ctx context.Context, pool *WorkPool, batch *Ba
 
 		// Some workers registered; surgically terminate the VMs that never did.
 		batchDirty, poolDirty := false, false
-		for instanceName := range gcpVMs {
+		for instanceName, vmInfo := range gcpVMs {
 			if !registeredInstances[instanceName] {
-				if err := a.batchAPI.TerminateVM(ctx, instanceName); err != nil {
+				if err := a.batchAPI.TerminateVM(ctx, vmInfo.Zone, instanceName); err != nil {
 					log.Printf("tier2: terminate VM %s: %v", instanceName, err)
 				}
 				batch.Unhealthy = true
@@ -227,7 +227,7 @@ func (a *Autoscaler) reconcileVMs(ctx context.Context, pool *WorkPool, batch *Ba
 
 	batchDirty, poolDirty := false, false
 	for _, z := range zombies {
-		if err := a.batchAPI.TerminateVM(ctx, z.InstanceName); err != nil {
+		if err := a.batchAPI.TerminateVM(ctx, gcpVMs[z.InstanceName].Zone, z.InstanceName); err != nil {
 			log.Printf("tier2: terminate zombie VM %s: %v", z.InstanceName, err)
 		}
 		batch.Unhealthy = true

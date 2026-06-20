@@ -7,9 +7,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"cloud.google.com/go/firestore"
+	"github.com/broadinstitute/sparklespray/v100/autoscaler"
+	"github.com/broadinstitute/sparklespray/v100/scheduler"
 	"github.com/google/uuid"
 	"github.com/urfave/cli"
 )
@@ -36,6 +40,15 @@ func Main() error {
 				cli.StringFlag{Name: "resources"},
 			},
 			Action: runWorker,
+		},
+		{
+			Name:  "autoscale",
+			Usage: "Start the autoscaler loop",
+			Flags: []cli.Flag{
+				cli.StringFlag{Name: "project", Usage: "GCP project ID (required)"},
+				cli.StringFlag{Name: "db", Usage: "Firestore database (optional, uses default if empty)"},
+			},
+			Action: runAutoscale,
 		},
 		{
 			Name: "dev",
@@ -91,6 +104,21 @@ type WorkpoolSpec struct {
 	RootDir      string          `json:"rootDir"`
 	Resources    []ResourceEntry `json:"resources"`
 	EmptyVolumes []EmptyVolume   `json:"emptyVolumes"`
+	Region       string          `json:"region"`
+
+	// Provisioning parameters
+	MaxWorkerCount               int `json:"maxWorkerCount"`
+	MaxPreemptibleWorkerAttempts int `json:"maxPreemptibleWorkerAttempts"`
+	MaxWorkersPerRequest         int `json:"maxWorkersPerRequest"`
+
+	// Watchdog parameters (zero value → autoscaler uses its own defaults)
+	MinTimeBetweenPollsSec      int `json:"minTimeBetweenPollsSec"`
+	MaxTimeBetweenPollsSec      int `json:"maxTimeBetweenPollsSec"`
+	MaxTimeToStartWorkerSec     int `json:"maxTimeToStartWorkerSec"`
+	MaxTimeInQueueSec           int `json:"maxTimeInQueueSec"`
+	VMShutdownGracePeriodSec    int `json:"vmShutdownGracePeriodSec"`
+	MaxZombiesBeforeAbort       int `json:"maxZombiesBeforeAbort"`
+	MaxConsecutiveFailedBatches int `json:"maxConsecutiveFailedBatches"`
 }
 
 func readJSON[T any](path string) (*T, error) {
@@ -139,6 +167,19 @@ func devSubmit(jobSpecFile, workpoolSpecFile, project string) error {
 		Resources:    workpoolSpec.Resources,
 		EmptyVolumes: workpoolSpec.EmptyVolumes,
 		Expiry:       time.Now().Add(7 * 24 * time.Hour),
+		Region:       workpoolSpec.Region,
+
+		MaxWorkerCount:               workpoolSpec.MaxWorkerCount,
+		MaxPreemptibleWorkerAttempts: workpoolSpec.MaxPreemptibleWorkerAttempts,
+		MaxWorkersPerRequest:         workpoolSpec.MaxWorkersPerRequest,
+
+		MinTimeBetweenPollsSec:      workpoolSpec.MinTimeBetweenPollsSec,
+		MaxTimeBetweenPollsSec:      workpoolSpec.MaxTimeBetweenPollsSec,
+		MaxTimeToStartWorkerSec:     workpoolSpec.MaxTimeToStartWorkerSec,
+		MaxTimeInQueueSec:           workpoolSpec.MaxTimeInQueueSec,
+		VMShutdownGracePeriodSec:    workpoolSpec.VMShutdownGracePeriodSec,
+		MaxZombiesBeforeAbort:       workpoolSpec.MaxZombiesBeforeAbort,
+		MaxConsecutiveFailedBatches: workpoolSpec.MaxConsecutiveFailedBatches,
 	}
 
 	ctx := context.Background()
@@ -195,5 +236,44 @@ func devSubmit(jobSpecFile, workpoolSpecFile, project string) error {
 	}
 
 	fmt.Printf("job %s written with %d tasks\n", jobID, len(jobSpec.Tasks))
+	return nil
+}
+
+func runAutoscale(c *cli.Context) error {
+	project := c.String("project")
+	if project == "" {
+		return fmt.Errorf("--project is required")
+	}
+	db := c.String("db")
+
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	if db == "" {
+		db = "(default)"
+	}
+	fsClient, err := firestore.NewClientWithDatabase(ctx, project, db)
+	if err != nil {
+		return fmt.Errorf("creating firestore client: %w", err)
+	}
+	defer fsClient.Close()
+
+	pools := autoscaler.NewFirestoreWorkPoolStore(fsClient)
+	batches := autoscaler.NewFirestoreBatchRequestStore(fsClient)
+	workers := autoscaler.NewFirestoreWorkerStore(fsClient)
+	tasks := autoscaler.NewFirestoreTaskStore(fsClient)
+
+	batchAPI, err := autoscaler.NewGCPBatchAPIClient(ctx, project, pools)
+	if err != nil {
+		return fmt.Errorf("creating batch API client: %w", err)
+	}
+
+	pubsubReceiver, err := autoscaler.NewGCPPubSubReceiver(ctx, project, batches)
+	if err != nil {
+		return fmt.Errorf("creating pubsub receiver: %w", err)
+	}
+
+	as := autoscaler.New(scheduler.RealClock, batchAPI, pools, batches, workers, tasks, pubsubReceiver)
+	as.RunAutoscalerLoop(ctx)
 	return nil
 }

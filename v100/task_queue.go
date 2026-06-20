@@ -62,6 +62,27 @@ type WorkPool struct {
 	Resources    []ResourceEntry `firestore:"resources"`
 	EmptyVolumes []EmptyVolume   `firestore:"empty_volumes"`
 	Expiry       time.Time       `firestore:"expiry"`
+	Region       string          `firestore:"region"`
+
+	// Provisioning parameters
+	MaxWorkerCount               int `firestore:"max_worker_count"`
+	MaxPreemptibleWorkerAttempts int `firestore:"max_preemptible_worker_attempts"`
+	MaxWorkersPerRequest         int `firestore:"max_workers_per_request"`
+
+	// Watchdog parameters (zero value → autoscaler uses its own defaults)
+	MinTimeBetweenPollsSec      int `firestore:"min_time_between_polls_sec"`
+	MaxTimeBetweenPollsSec      int `firestore:"max_time_between_polls_sec"`
+	MaxTimeToStartWorkerSec     int `firestore:"max_time_to_start_worker_sec"`
+	MaxTimeInQueueSec           int `firestore:"max_time_in_queue_sec"`
+	VMShutdownGracePeriodSec    int `firestore:"vm_shutdown_grace_period_sec"`
+	MaxZombiesBeforeAbort       int `firestore:"max_zombies_before_abort"`
+	MaxConsecutiveFailedBatches int `firestore:"max_consecutive_failed_batches"`
+
+	// Status fields (written by the autoscaler)
+	Status         string    `firestore:"status"`
+	StatusMessage  string    `firestore:"status_message"`
+	LastIncidentAt time.Time `firestore:"last_incident_at"`
+	IncidentCount  int       `firestore:"incident_count"`
 }
 
 type Job struct {

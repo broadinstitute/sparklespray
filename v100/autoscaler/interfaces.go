@@ -53,7 +53,9 @@ const (
 // WorkPool holds both the configuration and runtime status of a workpool.
 // Corresponds to the WorkPools Firestore collection, extended with autoscaler fields.
 type WorkPool struct {
-	WorkpoolID string
+	WorkpoolID  string
+	Region      string // GCP region for Batch jobs, e.g. "us-central1"
+	MachineType string // GCP machine type, e.g. "n1-standard-4"
 
 	// Provisioning parameters
 	MaxWorkerCount               int
@@ -110,19 +112,21 @@ type Task struct {
 // VMInfo holds information about a running GCP VM.
 type VMInfo struct {
 	InstanceName string
+	Zone         string
 }
 
 // ----- External service interfaces -----
 
 // BatchAPIClient wraps the GCP Batch API. All methods receive a context for cancellation.
 //
-// ListRunningVMs accepts either a batch_id label (to scope to one batch's VMs) or a
-// workpool_id label (to scope to all VMs across a workpool).
+// ListRunningVMs filters by a single GCE label. Pass filterLabelName as either
+// "sparkles-worker-batch" (to scope to one batch's VMs) or "sparkles-worker-workpool"
+// (to scope to all VMs across a workpool).
 type BatchAPIClient interface {
 	CreateJob(ctx context.Context, workpoolID, batchID string, vmCount int, preemptible bool) (jobID string, err error)
 	GetJobStatus(ctx context.Context, jobID string) (BatchJobStatus, error)
-	ListRunningVMs(ctx context.Context, labelFilter string) (map[string]VMInfo, error)
-	TerminateVM(ctx context.Context, instanceName string) error
+	ListRunningVMs(ctx context.Context, filterLabelName, filterLabelValue string) (map[string]VMInfo, error)
+	TerminateVM(ctx context.Context, zone, instanceName string) error
 	TerminateJob(ctx context.Context, jobID string) error
 }
 
@@ -138,6 +142,9 @@ type BatchRequestStore interface {
 	Create(ctx context.Context, batch *BatchAPIRequest) error
 	Get(ctx context.Context, batchID string) (*BatchAPIRequest, error)
 	Save(ctx context.Context, batch *BatchAPIRequest) error
+	// GetByJobID returns the BatchAPIRequest whose JobID matches the GCP job name.
+	// Returns nil, nil if not found.
+	GetByJobID(ctx context.Context, jobID string) (*BatchAPIRequest, error)
 	// ListByWorkpool returns batches filtered by status, ordered by SubmittedAt DESC.
 	ListByWorkpool(ctx context.Context, workpoolID string, statuses []BatchStatus) ([]*BatchAPIRequest, error)
 	// SumPreemptibleVMCount returns total ExpectedVMCount across all preemptible batches for the workpool.
