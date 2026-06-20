@@ -94,7 +94,7 @@ func (f *FakeBatchAPIClient) RemoveVM(instanceName string) {
 	}
 }
 
-func (f *FakeBatchAPIClient) CreateJob(ctx context.Context, workpoolID, batchID string, vmCount int, preemptible bool) (string, error) {
+func (f *FakeBatchAPIClient) CreateJob(ctx context.Context, spec *WorkerJobSpec) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
@@ -102,25 +102,25 @@ func (f *FakeBatchAPIClient) CreateJob(ctx context.Context, workpoolID, batchID 
 	jobID := fmt.Sprintf("job-%d", f.nextJobID)
 
 	activeVMs := make(map[string]bool)
-	for i := 0; i < vmCount; i++ {
-		activeVMs[vmName(batchID, i)] = true
+	for i := 0; i < spec.VMCount; i++ {
+		activeVMs[vmName(spec.BatchID, i)] = true
 	}
 
 	f.jobs[jobID] = &fakeJob{
 		jobID:       jobID,
-		batchID:     batchID,
-		workpoolID:  workpoolID,
-		preemptible: preemptible,
+		batchID:     spec.BatchID,
+		workpoolID:  spec.WorkpoolID,
+		preemptible: spec.Preemptible,
 		status:      BatchJobStatusQueued,
 		activeVMs:   activeVMs,
 	}
 
 	f.CreatedJobs = append(f.CreatedJobs, FakeCreatedJob{
 		JobID:       jobID,
-		BatchID:     batchID,
-		WorkpoolID:  workpoolID,
-		VMCount:     vmCount,
-		Preemptible: preemptible,
+		BatchID:     spec.BatchID,
+		WorkpoolID:  spec.WorkpoolID,
+		VMCount:     spec.VMCount,
+		Preemptible: spec.Preemptible,
 	})
 
 	return jobID, nil
@@ -137,7 +137,7 @@ func (f *FakeBatchAPIClient) GetJobStatus(ctx context.Context, jobID string) (Ba
 	return j.status, nil
 }
 
-func (f *FakeBatchAPIClient) ListRunningVMs(ctx context.Context, filterLabelName, filterLabelValue string) (map[string]VMInfo, error) {
+func (f *FakeBatchAPIClient) ListRunningVMs(ctx context.Context, filterLabelName, filterLabelValue string, zones []string) (map[string]VMInfo, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 

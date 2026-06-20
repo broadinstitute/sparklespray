@@ -19,6 +19,7 @@ type firestoreWorkPool struct {
 	WorkpoolID   string    `firestore:"workpool_id"`
 	MachineType  string    `firestore:"machine_type"`
 	Region       string    `firestore:"region"`
+	Zones        []string  `firestore:"zones"`
 	Expiry       time.Time `firestore:"expiry"`
 
 	MaxWorkerCount               int `firestore:"max_worker_count"`
@@ -50,6 +51,7 @@ func toAutoscalerWorkPool(f *firestoreWorkPool) *WorkPool {
 	return &WorkPool{
 		WorkpoolID:                   f.WorkpoolID,
 		Region:                       f.Region,
+		Zones:                        f.Zones,
 		MachineType:                  f.MachineType,
 		MaxWorkerCount:               f.MaxWorkerCount,
 		MaxPreemptibleWorkerAttempts: f.MaxPreemptibleWorkerAttempts,

@@ -38,6 +38,7 @@ func Main() error {
 				cli.StringFlag{Name: "db"},
 				cli.StringFlag{Name: "workpool"},
 				cli.StringFlag{Name: "resources"},
+				cli.BoolFlag{Name: "no-gcp", Usage: "local development mode: skip GCP metadata server"},
 			},
 			Action: runWorker,
 		},
@@ -105,6 +106,7 @@ type WorkpoolSpec struct {
 	Resources    []ResourceEntry `json:"resources"`
 	EmptyVolumes []EmptyVolume   `json:"emptyVolumes"`
 	Region       string          `json:"region"`
+	Zones        []string        `json:"zones"`
 
 	// Provisioning parameters
 	MaxWorkerCount               int `json:"maxWorkerCount"`
@@ -168,6 +170,7 @@ func devSubmit(jobSpecFile, workpoolSpecFile, project string) error {
 		EmptyVolumes: workpoolSpec.EmptyVolumes,
 		Expiry:       time.Now().Add(7 * 24 * time.Hour),
 		Region:       workpoolSpec.Region,
+		Zones:        workpoolSpec.Zones,
 
 		MaxWorkerCount:               workpoolSpec.MaxWorkerCount,
 		MaxPreemptibleWorkerAttempts: workpoolSpec.MaxPreemptibleWorkerAttempts,
@@ -263,7 +266,7 @@ func runAutoscale(c *cli.Context) error {
 	workers := autoscaler.NewFirestoreWorkerStore(fsClient)
 	tasks := autoscaler.NewFirestoreTaskStore(fsClient)
 
-	batchAPI, err := autoscaler.NewGCPBatchAPIClient(ctx, project, pools)
+	batchAPI, err := autoscaler.NewGCPBatchAPIClient(ctx, project)
 	if err != nil {
 		return fmt.Errorf("creating batch API client: %w", err)
 	}

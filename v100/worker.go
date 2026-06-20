@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"cloud.google.com/go/compute/metadata"
 	"cloud.google.com/go/firestore"
 	"cloud.google.com/go/pubsub"
 	"cloud.google.com/go/storage"
@@ -31,6 +32,8 @@ const workerCollection = "Workers"
 type WorkerRecord struct {
 	WorkerID        string    `firestore:"worker_id"`
 	WorkpoolID      string    `firestore:"workpool_id"`
+	BatchID         string    `firestore:"batch_id"`
+	InstanceName    string    `firestore:"instance_name"`
 	Status          string    `firestore:"status"`
 	Expiry          time.Time `firestore:"expiry"`
 	HeartbeatExpiry time.Time `firestore:"heartbeat_expiry"`
@@ -79,6 +82,7 @@ func runWorker(c *cli.Context) error {
 	project := c.String("project")
 	db := c.String("db")
 	workpoolID := c.String("workpool")
+	noGCP := c.Bool("no-gcp")
 
 	if project == "" {
 		return fmt.Errorf("--project is required")
@@ -98,7 +102,7 @@ func runWorker(c *cli.Context) error {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	ws, err := startWorker(ctx, project, db, workerID, workpoolID)
+	ws, err := startWorker(ctx, project, db, workerID, workpoolID, noGCP)
 	if err != nil {
 		return err
 	}
@@ -469,7 +473,7 @@ func (ws *workerState) cleanup() {
 	ws.fsClient.Close()
 }
 
-func startWorker(ctx context.Context, project, db, workerID, workpoolID string) (*workerState, error) {
+func startWorker(ctx context.Context, project, db, workerID, workpoolID string, noGCP bool) (*workerState, error) {
 	var fsClient *firestore.Client
 	var err error
 	if db != "" {
@@ -494,11 +498,31 @@ func startWorker(ctx context.Context, project, db, workerID, workpoolID string) 
 		return nil, fmt.Errorf("creating storage client: %w", err)
 	}
 
+	var instanceName, batchID string
+	if !noGCP {
+		instanceName, err = metadata.InstanceNameWithContext(ctx)
+		if err != nil {
+			psClient.Close()
+			fsClient.Close()
+			gcsClient.Close()
+			return nil, fmt.Errorf("reading instance name from metadata server: %w", err)
+		}
+		batchID, err = metadata.GetWithContext(ctx, "instance/labels/sparkles-worker-batch")
+		if err != nil {
+			psClient.Close()
+			fsClient.Close()
+			gcsClient.Close()
+			return nil, fmt.Errorf("reading batch ID from instance labels: %w", err)
+		}
+	}
+
 	now := time.Now()
 	workerDoc := fsClient.Collection(workerCollection).Doc(workerID)
 	_, err = workerDoc.Set(ctx, WorkerRecord{
 		WorkerID:        workerID,
 		WorkpoolID:      workpoolID,
+		BatchID:         batchID,
+		InstanceName:    instanceName,
 		Status:          "started",
 		Expiry:          now.Add(7 * 24 * time.Hour),
 		HeartbeatExpiry: now.Add(heartbeatPeriod),

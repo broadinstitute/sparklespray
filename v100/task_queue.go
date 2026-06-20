@@ -63,6 +63,7 @@ type WorkPool struct {
 	EmptyVolumes []EmptyVolume   `firestore:"empty_volumes"`
 	Expiry       time.Time       `firestore:"expiry"`
 	Region       string          `firestore:"region"`
+	Zones        []string        `firestore:"zones"`
 
 	// Provisioning parameters
 	MaxWorkerCount               int `firestore:"max_worker_count"`

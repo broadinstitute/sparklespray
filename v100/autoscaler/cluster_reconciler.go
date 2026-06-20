@@ -50,7 +50,7 @@ func (a *Autoscaler) reconcileWorkpool(ctx context.Context, pool *WorkPool) erro
 	}
 
 	// Transition to idle if no VMs remain anywhere in the workpool.
-	workpoolVMs, err := a.batchAPI.ListRunningVMs(ctx, "sparkles-worker-workpool", pool.WorkpoolID)
+	workpoolVMs, err := a.batchAPI.ListRunningVMs(ctx, "sparkles-worker-workpool", pool.WorkpoolID, pool.Zones)
 	if err != nil {
 		return fmt.Errorf("list workpool VMs: %w", err)
 	}
@@ -107,7 +107,7 @@ func (a *Autoscaler) runTier2ForBatch(ctx context.Context, pool *WorkPool, batch
 }
 
 func (a *Autoscaler) reconcileVMs(ctx context.Context, pool *WorkPool, batch *BatchAPIRequest, apiStatus BatchJobStatus, now time.Time) error {
-	gcpVMs, err := a.batchAPI.ListRunningVMs(ctx, "sparkles-worker-batch", batch.BatchID)
+	gcpVMs, err := a.batchAPI.ListRunningVMs(ctx, "sparkles-worker-batch", batch.BatchID, pool.Zones)
 	if err != nil {
 		return fmt.Errorf("list running VMs: %w", err)
 	}

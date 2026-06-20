@@ -54,8 +54,9 @@ const (
 // Corresponds to the WorkPools Firestore collection, extended with autoscaler fields.
 type WorkPool struct {
 	WorkpoolID  string
-	Region      string // GCP region for Batch jobs, e.g. "us-central1"
-	MachineType string // GCP machine type, e.g. "n1-standard-4"
+	Region      string   // GCP region for Batch jobs, e.g. "us-central1"
+	Zones       []string // GCP zones to query for running VMs, e.g. ["us-central1-a", "us-central1-b"]
+	MachineType string   // GCP machine type, e.g. "n1-standard-4"
 
 	// Provisioning parameters
 	MaxWorkerCount               int
@@ -115,6 +116,19 @@ type VMInfo struct {
 	Zone         string
 }
 
+// WorkerJobSpec holds all parameters needed to create a GCP Batch job for workers.
+type WorkerJobSpec struct {
+	WorkpoolID   string
+	BatchID      string
+	Region       string
+	MachineType  string
+	VMCount      int
+	Preemptible  bool
+	DockerImage  string
+	Command      string
+	EmptyVolumes []string
+}
+
 // ----- External service interfaces -----
 
 // BatchAPIClient wraps the GCP Batch API. All methods receive a context for cancellation.
@@ -123,9 +137,9 @@ type VMInfo struct {
 // "sparkles-worker-batch" (to scope to one batch's VMs) or "sparkles-worker-workpool"
 // (to scope to all VMs across a workpool).
 type BatchAPIClient interface {
-	CreateJob(ctx context.Context, workpoolID, batchID string, vmCount int, preemptible bool) (jobID string, err error)
+	CreateJob(ctx context.Context, spec *WorkerJobSpec) (jobID string, err error)
 	GetJobStatus(ctx context.Context, jobID string) (BatchJobStatus, error)
-	ListRunningVMs(ctx context.Context, filterLabelName, filterLabelValue string) (map[string]VMInfo, error)
+	ListRunningVMs(ctx context.Context, filterLabelName, filterLabelValue string, zones []string) (map[string]VMInfo, error)
 	TerminateVM(ctx context.Context, zone, instanceName string) error
 	TerminateJob(ctx context.Context, jobID string) error
 }

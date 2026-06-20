@@ -107,7 +107,14 @@ func (a *Autoscaler) runAutoscalerPollForWorkpool(ctx context.Context, pool *Wor
 func (a *Autoscaler) submitBatch(ctx context.Context, pool *WorkPool, vmCount int, preemptible bool, now time.Time) error {
 	batchID := uuid.New().String()
 
-	jobID, err := a.batchAPI.CreateJob(ctx, pool.WorkpoolID, batchID, vmCount, preemptible)
+	jobID, err := a.batchAPI.CreateJob(ctx, &WorkerJobSpec{
+		WorkpoolID:  pool.WorkpoolID,
+		BatchID:     batchID,
+		Region:      pool.Region,
+		MachineType: pool.MachineType,
+		VMCount:     vmCount,
+		Preemptible: preemptible,
+	})
 	if err != nil {
 		return fmt.Errorf("create GCP batch job: %w", err)
 	}
