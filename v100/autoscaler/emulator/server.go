@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -48,6 +49,7 @@ type emulatorVM struct {
 	Zone         string
 	done         bool
 	exitCode     int
+	cmd          *exec.Cmd // non-nil in no-docker mode while process is running
 }
 
 type emulatorJob struct {
@@ -71,13 +73,15 @@ type server struct {
 	jobs      map[string]*emulatorJob
 	nextJobID int
 	queueTime time.Duration
-	wg        sync.WaitGroup // tracks all docker-wait goroutines for graceful shutdown
+	noDocker  bool
+	wg        sync.WaitGroup // tracks all process-wait goroutines for graceful shutdown
 }
 
-func newServer(queueTime time.Duration) *server {
+func newServer(queueTime time.Duration, noDocker bool) *server {
 	return &server{
 		jobs:      make(map[string]*emulatorJob),
 		queueTime: queueTime,
+		noDocker:  noDocker,
 	}
 }
 
@@ -214,9 +218,25 @@ func jobMatchesLabel(job *emulatorJob, name, value string) bool {
 func (s *server) handleTerminateVM(w http.ResponseWriter, r *http.Request) {
 	instanceName := r.PathValue("instanceName")
 	log.Printf("emulator: TerminateVM instance=%s", instanceName)
-	if err := exec.Command("docker", "stop", instanceName).Run(); err != nil {
-		http.Error(w, fmt.Sprintf("docker stop %s: %v", instanceName, err), http.StatusInternalServerError)
-		return
+	if s.noDocker {
+		s.mu.Lock()
+		var cmd *exec.Cmd
+		for _, job := range s.jobs {
+			for _, vm := range job.VMs {
+				if vm.InstanceName == instanceName && vm.cmd != nil {
+					cmd = vm.cmd
+				}
+			}
+		}
+		s.mu.Unlock()
+		if cmd != nil && cmd.Process != nil {
+			cmd.Process.Kill()
+		}
+	} else {
+		if err := exec.Command("docker", "stop", instanceName).Run(); err != nil {
+			http.Error(w, fmt.Sprintf("docker stop %s: %v", instanceName, err), http.StatusInternalServerError)
+			return
+		}
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -333,23 +353,51 @@ func (s *server) runJob(job *emulatorJob) {
 		return
 	}
 
-	// Phase 2: spawn containers sequentially.
+	// Phase 2: spawn VMs sequentially.
 	for _, vm := range job.VMs {
-		args := []string{"run", "-d", "--name", vm.InstanceName}
-		for _, l := range job.Labels {
-			args = append(args, "--label", fmt.Sprintf("%s=%s", l.Name, l.Value))
-		}
-		args = append(args, job.DockerImage)
-		if job.Command != "" {
-			args = append(args, strings.Fields(job.Command)...)
-		}
-		cmd := exec.Command("docker", args...)
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
-			log.Printf("emulator: docker run -d %s: %v", vm.InstanceName, err)
-			vm.done = true
-			vm.exitCode = 1
+		if s.noDocker {
+			dir := filepath.Join("batch-api-procs", vm.InstanceName)
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				log.Printf("emulator: mkdir %s: %v", dir, err)
+				vm.done = true
+				vm.exitCode = 1
+				continue
+			}
+			fields := strings.Fields(job.Command)
+			if len(fields) == 0 {
+				log.Printf("emulator: no-docker: empty command for %s", vm.InstanceName)
+				vm.done = true
+				vm.exitCode = 1
+				continue
+			}
+			cmd := exec.Command(fields[0], fields[1:]...)
+			cmd.Dir = dir
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			if err := cmd.Start(); err != nil {
+				log.Printf("emulator: no-docker start %s: %v", vm.InstanceName, err)
+				vm.done = true
+				vm.exitCode = 1
+				continue
+			}
+			vm.cmd = cmd
+		} else {
+			args := []string{"run", "-d", "--name", vm.InstanceName}
+			for _, l := range job.Labels {
+				args = append(args, "--label", fmt.Sprintf("%s=%s", l.Name, l.Value))
+			}
+			args = append(args, job.DockerImage)
+			if job.Command != "" {
+				args = append(args, strings.Fields(job.Command)...)
+			}
+			cmd := exec.Command("docker", args...)
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			if err := cmd.Run(); err != nil {
+				log.Printf("emulator: docker run -d %s: %v", vm.InstanceName, err)
+				vm.done = true
+				vm.exitCode = 1
+			}
 		}
 	}
 
@@ -373,7 +421,7 @@ func (s *server) runJob(job *emulatorJob) {
 	job.Status = autoscaler.BatchJobStatusRunning
 	s.mu.Unlock()
 
-	// Phase 3: watch each successfully-started container.
+	// Phase 3: watch each successfully-started VM.
 	var watchWg sync.WaitGroup
 	for _, vm := range job.VMs {
 		if vm.done {
@@ -386,11 +434,23 @@ func (s *server) runJob(job *emulatorJob) {
 			defer watchWg.Done()
 			defer s.wg.Done()
 
-			exitCode := waitContainer(vm.InstanceName)
-			exec.Command("docker", "rm", vm.InstanceName).Run()
+			var exitCode int
+			if s.noDocker {
+				if err := vm.cmd.Wait(); err != nil {
+					if exitErr, ok := err.(*exec.ExitError); ok {
+						exitCode = exitErr.ExitCode()
+					} else {
+						exitCode = 1
+					}
+				}
+			} else {
+				exitCode = waitContainer(vm.InstanceName)
+				exec.Command("docker", "rm", vm.InstanceName).Run()
+			}
 
 			s.mu.Lock()
 			vm.done = true
+			vm.cmd = nil
 			vm.exitCode = exitCode
 			s.mu.Unlock()
 		}()
@@ -432,17 +492,34 @@ func waitContainer(name string) int {
 func (s *server) stopAllContainers() {
 	s.mu.Lock()
 	var names []string
+	var procs []*exec.Cmd
 	for _, job := range s.jobs {
 		job.cancelJob()
 		if job.Status == autoscaler.BatchJobStatusRunning {
 			for _, vm := range job.VMs {
 				if !vm.done {
-					names = append(names, vm.InstanceName)
+					if s.noDocker {
+						if vm.cmd != nil {
+							procs = append(procs, vm.cmd)
+						}
+					} else {
+						names = append(names, vm.InstanceName)
+					}
 				}
 			}
 		}
 	}
 	s.mu.Unlock()
+
+	if s.noDocker {
+		for _, cmd := range procs {
+			if cmd.Process != nil {
+				log.Printf("emulator: killing process %d", cmd.Process.Pid)
+				cmd.Process.Kill()
+			}
+		}
+		return
+	}
 
 	var wg sync.WaitGroup
 	for _, name := range names {
@@ -458,10 +535,10 @@ func (s *server) stopAllContainers() {
 }
 
 // Run starts the batch API emulator HTTP server and blocks until SIGINT or SIGTERM.
-// On shutdown, it stops all running Docker containers and waits for them to exit cleanly
+// On shutdown, it stops all running processes/containers and waits for them to exit cleanly
 // before returning.
-func Run(addr string, queueTime time.Duration) error {
-	s := newServer(queueTime)
+func Run(addr string, queueTime time.Duration, noDocker bool) error {
+	s := newServer(queueTime, noDocker)
 	mux := http.NewServeMux()
 	s.registerRoutes(mux)
 	srv := &http.Server{Addr: addr, Handler: mux}

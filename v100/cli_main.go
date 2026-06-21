@@ -89,6 +89,7 @@ func Main() error {
 					Flags: []cli.Flag{
 						cli.StringFlag{Name: "addr", Value: ":8742", Usage: "address to listen on"},
 						cli.DurationFlag{Name: "queueTime", Value: 0, Usage: "how long jobs sit in QUEUED state before containers are started"},
+						cli.BoolFlag{Name: "no-docker", Usage: "run commands directly in batch-api-procs/<instance> instead of Docker"},
 					},
 					Action: runBatchAPIEmulator,
 				},
@@ -477,7 +478,7 @@ func devSubmit(jobSpecFile, workpoolSpecFile, project, db string) error {
 }
 
 func runBatchAPIEmulator(c *cli.Context) error {
-	return emulator.Run(c.String("addr"), c.Duration("queueTime"))
+	return emulator.Run(c.String("addr"), c.Duration("queueTime"), c.Bool("no-docker"))
 }
 
 func runAutoscale(c *cli.Context) error {
