@@ -86,7 +86,10 @@ func (ep *EventPublisher) recordAndPublish(ctx context.Context, record EventReco
 	if err != nil {
 		return fmt.Errorf("marshalling event: %w", err)
 	}
-	if _, err := ep.publisher.Publish(ctx, &pubsub.Message{Data: data}).Get(ctx); err != nil {
+	if _, err := ep.publisher.Publish(ctx, &pubsub.Message{
+		Data:       data,
+		Attributes: map[string]string{"event_id": record.EventID},
+	}).Get(ctx); err != nil {
 		return fmt.Errorf("publishing event to topic: %w", err)
 	}
 	return nil

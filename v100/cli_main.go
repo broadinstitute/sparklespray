@@ -333,7 +333,69 @@ func devSubmit(jobSpecFile, workpoolSpecFile, project, db string) error {
 		return err
 	}
 
+	ctx := context.Background()
+
+	fsClient, err := firestore.NewClientWithDatabase(ctx, project, db)
+	if err != nil {
+		return fmt.Errorf("creating firestore client: %w", err)
+	}
+	defer fsClient.Close()
+
+	psClient, err := pubsub.NewClient(ctx, project)
+	if err != nil {
+		return fmt.Errorf("creating pubsub client: %w", err)
+	}
+	defer psClient.Close()
+
+	// Ensure sparkles-events topic exists before subscribing or publishing.
+	topicName := fmt.Sprintf("projects/%s/topics/sparkles-events", project)
+	if _, err := psClient.TopicAdminClient.CreateTopic(ctx, &pubsubpb.Topic{Name: topicName}); err != nil {
+		if grpcstatus.Code(err) != codes.AlreadyExists {
+			return fmt.Errorf("ensuring sparkles-events topic: %w", err)
+		}
+	}
+
+	// Create an ephemeral subscription so we receive all events published during this run.
+	monitorSubID := fmt.Sprintf("devsubmit-monitor-%s", uuid.New().String()[:8])
+	monitorSubName := fmt.Sprintf("projects/%s/subscriptions/%s", project, monitorSubID)
+	if _, err := psClient.SubscriptionAdminClient.CreateSubscription(ctx, &pubsubpb.Subscription{
+		Name:  monitorSubName,
+		Topic: topicName,
+	}); err != nil {
+		log.Printf("devSubmit: creating monitor subscription: %v", err)
+	} else {
+		monCtx, monCancel := context.WithCancel(ctx)
+		defer func() {
+			monCancel()
+			psClient.SubscriptionAdminClient.DeleteSubscription(context.Background(), &pubsubpb.DeleteSubscriptionRequest{Subscription: monitorSubName})
+		}()
+		go func() {
+			sub := psClient.Subscriber(monitorSubID)
+			sub.Receive(monCtx, func(ctx context.Context, msg *pubsub.Message) {
+				msg.Ack()
+				eventID := msg.Attributes["event_id"]
+				if eventID == "" {
+					return
+				}
+				doc, err := fsClient.Collection(eventCollection).Doc(eventID).Get(ctx)
+				if err != nil {
+					log.Printf("devSubmit: monitor: looking up event %s: %v", eventID, err)
+					return
+				}
+				var record EventRecord
+				if err := doc.DataTo(&record); err != nil {
+					log.Printf("devSubmit: monitor: parsing event %s: %v", eventID, err)
+					return
+				}
+				log.Printf("event received: id=%s type=%s", record.EventID, record.Type)
+			})
+		}()
+	}
+
 	workpoolID, err := resolveWorkpoolID(workpoolSpec)
+	if err != nil {
+		return err
+	}
 	workpool := WorkPool{
 		WorkpoolID:   workpoolID,
 		MachineType:  workpoolSpec.MachineType,
@@ -357,18 +419,10 @@ func devSubmit(jobSpecFile, workpoolSpecFile, project, db string) error {
 		MaxConsecutiveFailedBatches: workpoolSpec.MaxConsecutiveFailedBatches,
 	}
 
-	ctx := context.Background()
-	fsClient, err := firestore.NewClientWithDatabase(ctx, project, db)
-	if err != nil {
-		return fmt.Errorf("creating firestore client: %w", err)
-	}
-	defer fsClient.Close()
-
 	_, err = fsClient.Collection(workpoolCollection).Doc(workpoolID).Set(ctx, workpool)
 	if err != nil {
 		return fmt.Errorf("writing workpool to firestore: %w", err)
 	}
-
 	fmt.Printf("workpool %s written\n", workpoolID)
 
 	jobID := uuid.New().String()
@@ -409,28 +463,14 @@ func devSubmit(jobSpecFile, workpoolSpecFile, project, db string) error {
 	if err != nil {
 		return fmt.Errorf("writing job and tasks to firestore: %w", err)
 	}
-
 	fmt.Printf("job %s written with %d tasks\n", jobID, len(jobSpec.Tasks))
 
 	// Publish job_created event so the autoscaler can react immediately.
 	// Non-fatal: the autoscaler's periodic poll will pick up the job if this fails.
-	psClient, psErr := pubsub.NewClient(ctx, project)
-	if psErr != nil {
-		log.Printf("devSubmit: creating pubsub client: %v", psErr)
-		return nil
-	}
-	defer psClient.Close()
-	topicName := fmt.Sprintf("projects/%s/topics/sparkles-events", project)
-	if _, psErr = psClient.TopicAdminClient.CreateTopic(ctx, &pubsubpb.Topic{Name: topicName}); psErr != nil {
-		if grpcstatus.Code(psErr) != codes.AlreadyExists {
-			log.Printf("devSubmit: ensuring sparkles-events topic: %v", psErr)
-			return nil
-		}
-	}
 	ep := NewEventPublisher(psClient.Publisher("sparkles-events"), fsClient)
 	defer ep.Stop()
-	if psErr = ep.PublishJobCreated(ctx, JobCreatedEvent{JobID: jobID, WorkpoolID: workpoolID}); psErr != nil {
-		log.Printf("devSubmit: publishing job_created event: %v", psErr)
+	if err := ep.PublishJobCreated(ctx, JobCreatedEvent{JobID: jobID, WorkpoolID: workpoolID}); err != nil {
+		log.Printf("devSubmit: publishing job_created event: %v", err)
 	}
 
 	return nil
