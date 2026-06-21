@@ -12,7 +12,7 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-const monitorSubscription = "monitor-in"
+const batchAPINotificationsSubscription = "batch-api-notifications"
 const sparklesEventsTopic = "sparkles-events"
 const monitorEventsSubscription = "monitor-events-in"
 
@@ -72,7 +72,7 @@ func NewGCPPubSubReceiver(ctx context.Context, project string, batches BatchRequ
 		return nil, err
 	}
 
-	if err := ensurePubSubResources(ctx, client, project, monitorSubscription, monitorSubscription); err != nil {
+	if err := ensurePubSubResources(ctx, client, project, batchAPINotificationsSubscription, batchAPINotificationsSubscription); err != nil {
 		client.Close()
 		return nil, fmt.Errorf("ensuring pubsub subscription: %w", err)
 	}
@@ -81,7 +81,7 @@ func NewGCPPubSubReceiver(ctx context.Context, project string, batches BatchRequ
 		ch: make(chan Notification, 64),
 	}
 
-	sub := client.Subscriber(monitorSubscription)
+	sub := client.Subscriber(batchAPINotificationsSubscription)
 
 	go func() {
 		defer client.Close()

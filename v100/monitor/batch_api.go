@@ -13,7 +13,7 @@ const (
 	labelBatch    = "sparkles-worker-batch"
 	labelWorkpool = "sparkles-worker-workpool"
 
-	pubsubNotificationTopic = "monitor-in"
+	pubsubNotificationTopic = "batch-api-notifications"
 )
 
 // GCPBatchAPIClient implements BatchAPIClient using the GCP Batch API and

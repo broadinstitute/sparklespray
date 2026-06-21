@@ -131,12 +131,12 @@ An append-only log of every event published to `sparkles-worker-out`. The docume
 
 Each event document contains the same fields as the corresponding Pub/Sub message, plus an `expiry` field for TTL-based garbage collection:
 
-| Field       | Type      | Description                                                                            |
-| ----------- | --------- | -------------------------------------------------------------------------------------- |
-| `event_id`  | string    | UUID uniquely identifying this event                                                   |
-| `type`      | string    | Event type — `worker_started`, `worker_stopped`, `task_state_update`, or `job_created` |
-| `timestamp` | timestamp | When the event was recorded                                                            |
-| `expiry`    | timestamp | When this document may be deleted (7-day TTL)                                          |
+| Field       | Type      | Description                                                                                              |
+| ----------- | --------- | -------------------------------------------------------------------------------------------------------- |
+| `event_id`  | string    | UUID uniquely identifying this event                                                                     |
+| `type`      | string    | Event type — `worker_started`, `worker_stopped`, `task_state_update`, `job_created`, or `job_terminated` |
+| `timestamp` | timestamp | When the event was recorded                                                                              |
+| `expiry`    | timestamp | When this document may be deleted (7-day TTL)                                                            |
 
 Additional fields present on **worker events** (`worker_started`, `worker_stopped`):
 
@@ -290,6 +290,16 @@ Published by workers to report lifecycle events. Messages are JSON-encoded. Ever
 
 The monitor subscribes to this topic via the `monitor-events-in` subscription and triggers an immediate provisioning poll on `job_created` receipt, rather than waiting for the next timer tick. The `dev submit` command creates a short-lived ephemeral subscription (`devsubmit-monitor-<id>`) to log events as they arrive, and deletes it on exit.
 
+**JobTerminatedEvent** — published by the monitor when all tasks in a job have reached a terminal state (`success`, `error`, `failed`, or `killed`). This event signals that the job is done; it does not indicate whether the job succeeded or failed — consumers should query `JobSummary` for that.
+
+```json
+{
+  "type": "job_terminated",
+  "job_id": "...",
+  "workpool_id": "..."
+}
+```
+
 **TaskStateUpdate** — published on every task state transition:
 
 ```json
@@ -315,9 +325,9 @@ The monitor subscribes to this topic via the `monitor-events-in` subscription an
 
 ---
 
-### `monitor-in` _(GCP Batch API → Monitor)_
+### `batch-api-notifications` _(GCP Batch API → Monitor)_
 
-Published by GCP Batch API (or the batch API emulator) to notify the monitor when a batch job changes state. The monitor subscribes to this topic under the `monitor-in` subscription. When a notification arrives the monitor immediately runs its tier-2 reconciliation loop (checking job status, reconciling VMs) for the affected batch rather than waiting for the next periodic tick.
+Published by GCP Batch API (or the batch API emulator) to notify the monitor when a batch job changes state. The monitor subscribes to this topic under the `batch-api-notifications` subscription. When a notification arrives the monitor immediately runs its tier-2 reconciliation loop (checking job status, reconciling VMs) for the affected batch rather than waiting for the next periodic tick.
 
 Messages are JSON-encoded GCP Batch API state-change notifications:
 
