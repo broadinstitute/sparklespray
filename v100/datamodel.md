@@ -29,21 +29,21 @@ One document per submitted job. The document ID is the `job_id`.
 
 One document per task. The document ID is the `task_id`.
 
-| Field               | Type             | Description                                                                               |
-| ------------------- | ---------------- | ----------------------------------------------------------------------------------------- |
-| `task_id`           | string           | Unique identifier for the task                                                            |
-| `task_index`        | int              | Zero-based index of this task within its job                                              |
-| `job_id`            | string           | ID of the parent job                                                                      |
-| `workpool_id`       | string           | The workpool this task belongs to (denormalized from the job for efficient querying)      |
-| `status`            | string           | Current status — see table below                                                          |
-| `command`           | string           | The command to execute                                                                    |
-| `docker_image`      | string           | Docker image used to run the command                                                      |
-| `result_path`       | string           | GCS path (e.g. `gs://bucket/path`) where results are uploaded after the command completes |
-| `log_path`          | string           | GCS path where the command's stdout/stderr is uploaded after the command completes        |
-| `files_to_localize` | []FileToLocalize | Files to download from GCS into the working directory before the command runs             |
-| `owning_worker_id`  | string           | ID of the worker that has claimed this task; empty when not claimed                       |
-| `failure_reason`    | string           | Human-readable reason for failure; populated when `status` is `failed`                    |
-| `exit_code`         | int              | Process exit code; populated when `status` is `error`                                     |
+| Field               | Type             | Description                                                                                |
+| ------------------- | ---------------- | ------------------------------------------------------------------------------------------ |
+| `task_id`           | string           | Unique identifier for the task                                                             |
+| `task_index`        | int              | Zero-based index of this task within its job                                               |
+| `job_id`            | string           | ID of the parent job                                                                       |
+| `workpool_id`       | string           | The workpool this task belongs to (denormalized from the job for efficient querying)       |
+| `status`            | string           | Current status — see table below                                                           |
+| `command`           | []string         | The command to execute, as an argv array (e.g. `["python", "train.py", "--epochs", "10"]`) |
+| `docker_image`      | string           | Docker image used to run the command                                                       |
+| `result_path`       | string           | GCS path (e.g. `gs://bucket/path`) where results are uploaded after the command completes  |
+| `log_path`          | string           | GCS path where the command's stdout/stderr is uploaded after the command completes         |
+| `files_to_localize` | []FileToLocalize | Files to download from GCS into the working directory before the command runs              |
+| `owning_worker_id`  | string           | ID of the worker that has claimed this task; empty when not claimed                        |
+| `failure_reason`    | string           | Human-readable reason for failure; populated when `status` is `failed`                     |
+| `exit_code`         | int              | Process exit code; populated when `status` is `error`                                      |
 
 **FileToLocalize** (embedded object):
 
@@ -87,10 +87,21 @@ One document per workpool. The document ID is the `workpool_id`. A workpool defi
 | --------------- | ------------- | ------------------------------------------------------------------ |
 | `workpool_id`   | string        | Unique identifier for the workpool                                 |
 | `machine_type`  | string        | GCP machine type for worker VMs (e.g. `n2-standard-4`)             |
+| `region`        | string        | GCP region for Batch jobs (e.g. `us-central1`)                     |
+| `zones`         | []string      | GCP zones to query for running VMs (e.g. `["us-central1-a"]`)      |
 | `root_dir`      | string        | Working directory on the VM where tasks are executed               |
 | `resources`     | []Resource    | Resource capacity advertised by workers created from this workpool |
 | `empty_volumes` | []EmptyVolume | Ephemeral volumes to attach to each VM                             |
 | `expiry`        | timestamp     | When this document may be garbage-collected                        |
+
+The following fields are written exclusively by the monitor process and must not be set at submission time:
+
+| Field              | Type      | Description                                                                                |
+| ------------------ | --------- | ------------------------------------------------------------------------------------------ |
+| `status`           | string    | Operational health: `idle`, `ok`, `unhealthy`, or `halted`                                 |
+| `status_message`   | string    | Human-readable description of the current status or last incident                          |
+| `last_incident_at` | timestamp | Time of the most recent watchdog incident                                                  |
+| `incident_count`   | int       | Cumulative number of incidents; the monitor halts the workpool if this exceeds a threshold |
 
 **Resource** (embedded object) — mirrors the resource entries on `Jobs`; workers created from this workpool will advertise this capacity:
 
@@ -117,6 +128,8 @@ One document per active worker process. The document ID is the `worker_id` (a UU
 | ------------------ | --------- | ----------------------------------------------------------------------------------------------------------- |
 | `worker_id`        | string    | UUID assigned at worker startup                                                                             |
 | `workpool_id`      | string    | Workpool this worker serves                                                                                 |
+| `batch_id`         | string    | ID of the `BatchAPIRequests` document that spawned this worker                                              |
+| `instance_name`    | string    | GCP VM instance name; used by the monitor for surgical VM termination                                       |
 | `status`           | string    | `started` or `stopped`                                                                                      |
 | `expiry`           | timestamp | Time after which this record can be garbage-collected (set 7 days out at startup; zeroed on clean shutdown) |
 | `heartbeat_expiry` | timestamp | Rolling deadline updated every heartbeat period; used to detect crashed workers                             |
@@ -127,7 +140,7 @@ The worker updates `heartbeat_expiry` every minute while running. On a clean shu
 
 ### `Events`
 
-An append-only log of every event published to `sparkles-worker-out`. The document ID is a UUID assigned at write time.
+An append-only log of every event published to `sparkles-events`. The document ID is a UUID assigned at write time.
 
 Each event document contains the same fields as the corresponding Pub/Sub message, plus an `expiry` field for TTL-based garbage collection:
 
@@ -153,6 +166,13 @@ Additional fields present on **task state update events** (`task_state_update`):
 | `job_id`    | string | ID of the parent job                    |
 | `old_state` | string | The task's status before the transition |
 | `new_state` | string | The task's status after the transition  |
+
+Additional fields present on **job events** (`job_created`, `job_terminated`):
+
+| Field         | Type   | Description                    |
+| ------------- | ------ | ------------------------------ |
+| `job_id`      | string | ID of the job                  |
+| `workpool_id` | string | Workpool the job is running in |
 
 Every write to `sparkles-events` is mirrored to this collection atomically before (or as part of) the publish, so the `Events` collection is the durable record and Pub/Sub is the real-time delivery mechanism.
 
@@ -217,12 +237,13 @@ One document per job, keyed by `job_id`. This is the **mutable** counterpart to 
 
 Any question about job progress — "is this job still running?", "how many tasks failed?" — should be answered by reading `JobSummary`, not by scanning `Tasks` or adding derived fields to `Jobs`.
 
-| Field    | Type        | Description                                                  |
-| -------- | ----------- | ------------------------------------------------------------ |
-| `job_id` | string      | ID of the job this summary describes                         |
-| `expiry` | timestamp   | When this document may be garbage-collected                  |
-| `status` | string      | Rolled-up job status — see table below                       |
-| `tasks`  | []TaskCount | Task counts grouped by status; one entry per non-zero status |
+| Field         | Type        | Description                                                  |
+| ------------- | ----------- | ------------------------------------------------------------ |
+| `job_id`      | string      | ID of the job this summary describes                         |
+| `workpool_id` | string      | Workpool the job is running in                               |
+| `expiry`      | timestamp   | When this document may be garbage-collected                  |
+| `status`      | string      | Rolled-up job status — see table below                       |
+| `tasks`       | []TaskCount | Task counts grouped by status; one entry per non-zero status |
 
 **TaskCount** (embedded object):
 
@@ -250,15 +271,35 @@ Any question about job progress — "is this job still running?", "how many task
 
 An append-only log of `JobSummary` snapshots. Each document is a point-in-time copy written by the monitor process whenever it updates `JobSummary`. The document ID is a UUID assigned at write time.
 
-| Field       | Type        | Description                                                          |
-| ----------- | ----------- | -------------------------------------------------------------------- |
-| `job_id`    | string      | ID of the job this snapshot describes                                |
-| `timestamp` | timestamp   | When this snapshot was recorded                                      |
-| `expiry`    | timestamp   | When this document may be garbage-collected                          |
-| `status`    | string      | Job status at the time of the snapshot (same values as `JobSummary`) |
-| `tasks`     | []TaskCount | Task counts at the time of the snapshot                              |
+| Field         | Type        | Description                                                          |
+| ------------- | ----------- | -------------------------------------------------------------------- |
+| `job_id`      | string      | ID of the job this snapshot describes                                |
+| `workpool_id` | string      | Workpool the job is running in                                       |
+| `timestamp`   | timestamp   | When this snapshot was recorded                                      |
+| `expiry`      | timestamp   | When this document may be garbage-collected                          |
+| `status`      | string      | Job status at the time of the snapshot (same values as `JobSummary`) |
+| `tasks`       | []TaskCount | Task counts at the time of the snapshot                              |
 
 **TaskCount** is the same embedded object as in `JobSummary`.
+
+---
+
+### `BatchAPIRequests`
+
+One document per GCP Batch job submitted by the monitor. The document ID is the internal `batch_id` (a UUID). This collection is written and read exclusively by the monitor; no other process should modify it.
+
+| Field                     | Type      | Description                                                                              |
+| ------------------------- | --------- | ---------------------------------------------------------------------------------------- |
+| `batch_id`                | string    | Internal UUID for this batch request (document ID)                                       |
+| `job_id`                  | string    | GCP Batch job resource name returned by the Batch API                                    |
+| `workpool_id`             | string    | Workpool this batch request belongs to                                                   |
+| `expected_vm_count`       | int       | Number of VMs requested in this batch job                                                |
+| `preemptible`             | bool      | Whether the batch was submitted as preemptible                                           |
+| `submitted_at`            | timestamp | When the batch job was submitted to GCP                                                  |
+| `running_since`           | timestamp | When the batch job first reached RUNNING state; absent until then                        |
+| `registered_worker_count` | int       | Number of worker processes that have registered for this batch; monotonically increasing |
+| `status`                  | string    | Monitor's classification of this batch — `pending`, `started`, `completed`, or `failed`  |
+| `unhealthy`               | bool      | Sticky flag set when the monitor detects a problem with this batch; never cleared        |
 
 ---
 
@@ -424,7 +465,7 @@ While tasks are running the worker tracks available capacity and waits for a run
 
 ### Transitions
 
-Every state transition publishes a `task_state_update` event to `sparkles-worker-out` and appends a corresponding document to the `Events` collection.
+Every state transition publishes a `task_state_update` event to `sparkles-events` and appends a corresponding document to the `Events` collection.
 
 1. **`pending` → `claimed`**  
    A worker atomically claims the task via a Firestore transaction. The transaction re-reads the document and only commits if the task is still `pending`, so only one worker can succeed under concurrent competition. Staging begins immediately after.
