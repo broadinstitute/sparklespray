@@ -513,19 +513,19 @@ func (s *FakeTaskStore) ResetToPending(ctx context.Context, taskID string) error
 // ---- FakePubSubReceiver ----
 
 type FakePubSubReceiver struct {
-	ch chan string
+	ch chan Notification
 }
 
 func newFakePubSubReceiver() *FakePubSubReceiver {
-	return &FakePubSubReceiver{ch: make(chan string, 16)}
+	return &FakePubSubReceiver{ch: make(chan Notification, 16)}
 }
 
-func (f *FakePubSubReceiver) Notifications() <-chan string {
+func (f *FakePubSubReceiver) Notifications() <-chan Notification {
 	return f.ch
 }
 
 func (f *FakePubSubReceiver) Deliver(batchID string) {
-	f.ch <- batchID
+	f.ch <- Notification{BatchID: batchID}
 }
 
 // ---- World: test fixture builder ----

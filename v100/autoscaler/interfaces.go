@@ -185,8 +185,16 @@ type TaskStore interface {
 	ResetToPending(ctx context.Context, taskID string) error
 }
 
+// Notification is delivered on the channel returned by PubSubReceiver.Notifications.
+// Exactly one of BatchID or Err is set: Err is non-nil when the receive loop fails fatally.
+type Notification struct {
+	BatchID string
+	Err     error
+}
+
 // PubSubReceiver delivers Batch API status-change notifications.
-// Each notification carries the BatchID of the batch that changed state.
+// Each notification carries the BatchID of the batch that changed state,
+// or a fatal Err that the autoscaler should propagate.
 type PubSubReceiver interface {
-	Notifications() <-chan string
+	Notifications() <-chan Notification
 }

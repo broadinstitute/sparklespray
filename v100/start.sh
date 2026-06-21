@@ -14,30 +14,12 @@ go build -o ./bin/sparkles ./cmd/sparkles
 
 SPARKLES="$(pwd)/bin/sparkles"
 
-# Write a small setup script that waits for the Pub/Sub emulator to accept
-# connections, then creates the topic and subscription the autoscaler needs.
-cat > /tmp/sparkles-pubsub-setup.sh <<SETUP
-#!/usr/bin/env bash
-echo "pubsub-setup: waiting for emulator on port ${PUBSUB_PORT}..."
-until curl -sf "http://localhost:${PUBSUB_PORT}" > /dev/null 2>&1; do sleep 0.5; done
-echo "pubsub-setup: creating topic and subscription autoscaler-in"
-PUBSUB_EMULATOR_HOST="localhost:${PUBSUB_PORT}" \\
-  gcloud beta pubsub topics create autoscaler-in --project="${PROJECT}" 2>/dev/null || true
-PUBSUB_EMULATOR_HOST="localhost:${PUBSUB_PORT}" \\
-  gcloud beta pubsub subscriptions create autoscaler-in \\
-    --topic=autoscaler-in --project="${PROJECT}" 2>/dev/null || true
-echo "pubsub-setup: done"
-SETUP
-chmod +x /tmp/sparkles-pubsub-setup.sh
-
 cat > /tmp/mprocs-sparkles.yaml <<EOF
 procs:
   firestore:
     cmd: ["gcloud", "emulators", "firestore", "start", "--host-port=localhost:${FIRESTORE_PORT}"]
   pubsub:
     cmd: ["gcloud",  "beta", "emulators", "pubsub", "start", "--host-port=localhost:${PUBSUB_PORT}"]
-  pubsub-setup:
-    cmd: ["/tmp/sparkles-pubsub-setup.sh"]
   batchapi-emulator:
     cmd: ["${SPARKLES}", "dev", "batchapi-emulator", "--addr", ":${BATCHAPI_PORT}"]
   autoscaler:

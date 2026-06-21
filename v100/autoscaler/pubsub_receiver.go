@@ -20,11 +20,13 @@ type batchNotificationMessage struct {
 // subscription. It reverse-looks up the internal batch_id from the GCP job
 // name using the BatchRequestStore.
 type GCPPubSubReceiver struct {
-	ch chan string
+	ch chan Notification
 }
 
 // NewGCPPubSubReceiver creates a receiver and starts a background pull loop.
-// The loop runs until ctx is cancelled.
+// The loop runs until ctx is cancelled. If the loop exits due to a fatal error
+// (rather than ctx cancellation), a Notification with Err set is sent so the
+// caller can fail fast.
 func NewGCPPubSubReceiver(ctx context.Context, project string, batches BatchRequestStore) (*GCPPubSubReceiver, error) {
 	client, err := pubsub.NewClient(ctx, project)
 	if err != nil {
@@ -32,7 +34,7 @@ func NewGCPPubSubReceiver(ctx context.Context, project string, batches BatchRequ
 	}
 
 	r := &GCPPubSubReceiver{
-		ch: make(chan string, 64),
+		ch: make(chan Notification, 64),
 	}
 
 	sub := client.Subscriber(autoscalerSubscription)
@@ -61,19 +63,20 @@ func NewGCPPubSubReceiver(ctx context.Context, project string, batches BatchRequ
 			}
 
 			select {
-			case r.ch <- batch.BatchID:
+			case r.ch <- Notification{BatchID: batch.BatchID}:
 			default:
 				// Channel full — drop; the autoscaler has a periodic fallback.
 			}
 		})
 		if err != nil && ctx.Err() == nil {
 			log.Printf("pubsub: receive loop exited: %v", err)
+			r.ch <- Notification{Err: err}
 		}
 	}()
 
 	return r, nil
 }
 
-func (r *GCPPubSubReceiver) Notifications() <-chan string {
+func (r *GCPPubSubReceiver) Notifications() <-chan Notification {
 	return r.ch
 }

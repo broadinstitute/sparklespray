@@ -113,13 +113,20 @@ func (a *Autoscaler) RunAutoscalerLoop(ctx context.Context) {
 	})
 
 	// Route PubSub notifications to the appropriate tier in a background goroutine.
+	// A notification with Err set means the receive loop failed fatally; propagate it.
+	fatalErrCh := make(chan error, 1)
 	go func() {
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case batchID := <-a.pubsub.Notifications():
-				a.routeNotification(ctx, batchID, notifyTier2, notifyTier3)
+			case n := <-a.pubsub.Notifications():
+				if n.Err != nil {
+					log.Printf("pubsub: fatal error: %v", n.Err)
+					fatalErrCh <- n.Err
+					return
+				}
+				a.routeNotification(ctx, n.BatchID, notifyTier2, notifyTier3)
 			}
 		}
 	}()
@@ -129,12 +136,16 @@ func (a *Autoscaler) RunAutoscalerLoop(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
+		case <-fatalErrCh:
+			return
 		default:
 		}
 
 		timerCh, runDue := sched.GetNextCallback()
 		select {
 		case <-ctx.Done():
+			return
+		case <-fatalErrCh:
 			return
 		case cb := <-sched.NotifyChannel():
 			cb()
