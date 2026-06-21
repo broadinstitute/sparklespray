@@ -144,8 +144,10 @@ func (a *Monitor) RunMonitorLoop(ctx context.Context) {
 	})
 
 	// Job summary poll: recomputes JobSummary for every non-terminal job.
+	// Triggered by job_created and task_state_update events; falls back to max interval.
+	var notifyJobSummary func()
 	if a.jobSummaries != nil {
-		sched.Add(jobSummaryMinInterval, jobSummaryMaxInterval, func() {
+		notifyJobSummary = sched.Add(jobSummaryMinInterval, jobSummaryMaxInterval, func() {
 			a.vlogf("poll: starting job summary poll")
 			if err := a.runJobSummaryPoll(ctx); err != nil {
 				log.Printf("job summary poll: %v", err)
@@ -169,8 +171,13 @@ func (a *Monitor) RunMonitorLoop(ctx context.Context) {
 						fatalErrCh <- n.Err
 						return
 					}
-					a.vlogf("job events: received job_created for job %s, triggering provisioning poll", n.JobID)
-					notifyProvisioning()
+					a.vlogf("job events: received %s event for job %s", n.EventType, n.JobID)
+					if n.EventType == "job_created" {
+						notifyProvisioning()
+					}
+					if notifyJobSummary != nil {
+						notifyJobSummary()
+					}
 				}
 			}
 		}()

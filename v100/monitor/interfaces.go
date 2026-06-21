@@ -268,6 +268,7 @@ type Notification struct {
 // JobNotification is delivered on the channel returned by JobEventReceiver.JobEvents.
 // Exactly one of JobID or Err is set.
 type JobNotification struct {
+	EventType  string // "job_created" or "task_state_update"
 	JobID      string
 	WorkpoolID string
 	Err        error

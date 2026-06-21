@@ -125,15 +125,15 @@ func (r *GCPPubSubReceiver) Notifications() <-chan Notification {
 	return r.ch
 }
 
-// jobCreatedMessage is the JSON payload for a job_created event on sparkles-events.
-type jobCreatedMessage struct {
+// sparklesEventMessage is the minimal JSON shape shared by all sparkles-events payloads.
+type sparklesEventMessage struct {
 	Type       string `json:"type"`
 	JobID      string `json:"job_id"`
 	WorkpoolID string `json:"workpool_id"`
 }
 
 // GCPJobEventReceiver implements JobEventReceiver by pulling from the sparkles-events
-// Pub/Sub topic and forwarding job_created events.
+// Pub/Sub topic and forwarding job_created and task_state_update events.
 type GCPJobEventReceiver struct {
 	ch chan JobNotification
 }
@@ -158,13 +158,18 @@ func NewGCPJobEventReceiver(ctx context.Context, project string) (*GCPJobEventRe
 		defer client.Close()
 		err := sub.Receive(ctx, func(ctx context.Context, msg *pubsub.Message) {
 			msg.Ack()
-			var e jobCreatedMessage
-			if err := json.Unmarshal(msg.Data, &e); err != nil || e.Type != "job_created" {
+			var e sparklesEventMessage
+			if err := json.Unmarshal(msg.Data, &e); err != nil {
 				return
 			}
-			log.Printf("pubsub: received job_created event for job %s workpool %s", e.JobID, e.WorkpoolID)
+			switch e.Type {
+			case "job_created", "task_state_update":
+			default:
+				return
+			}
+			log.Printf("pubsub: received %s event for job %s", e.Type, e.JobID)
 			select {
-			case r.ch <- JobNotification{JobID: e.JobID, WorkpoolID: e.WorkpoolID}:
+			case r.ch <- JobNotification{EventType: e.Type, JobID: e.JobID, WorkpoolID: e.WorkpoolID}:
 			default:
 				// Channel full — drop; the monitor has a periodic fallback.
 			}
