@@ -13,6 +13,7 @@ import (
 
 	"cloud.google.com/go/firestore"
 	"github.com/broadinstitute/sparklespray/v100/autoscaler"
+	"github.com/broadinstitute/sparklespray/v100/autoscaler/emulator"
 	"github.com/broadinstitute/sparklespray/v100/scheduler"
 	"github.com/google/uuid"
 	"github.com/urfave/cli"
@@ -61,6 +62,15 @@ func Main() error {
 						cli.StringFlag{Name: "project"},
 					},
 					Action: runDevSubmit,
+				},
+				{
+					Name:  "batchapi-emulator",
+					Usage: "Run a local batch API emulator for testing",
+					Flags: []cli.Flag{
+						cli.StringFlag{Name: "addr", Value: ":8742", Usage: "address to listen on"},
+						cli.DurationFlag{Name: "queueTime", Value: 0, Usage: "how long jobs sit in QUEUED state before containers are started"},
+					},
+					Action: runBatchAPIEmulator,
 				},
 			},
 		},
@@ -242,6 +252,10 @@ func devSubmit(jobSpecFile, workpoolSpecFile, project string) error {
 	return nil
 }
 
+func runBatchAPIEmulator(c *cli.Context) error {
+	return emulator.Run(c.String("addr"), c.Duration("queueTime"))
+}
+
 func runAutoscale(c *cli.Context) error {
 	project := c.String("project")
 	if project == "" {
@@ -266,9 +280,14 @@ func runAutoscale(c *cli.Context) error {
 	workers := autoscaler.NewFirestoreWorkerStore(fsClient)
 	tasks := autoscaler.NewFirestoreTaskStore(fsClient)
 
-	batchAPI, err := autoscaler.NewGCPBatchAPIClient(ctx, project)
-	if err != nil {
-		return fmt.Errorf("creating batch API client: %w", err)
+	var batchAPI autoscaler.BatchAPIClient
+	if emulatorURL := os.Getenv("SPARKLES_BATCH_API_EMULATOR"); emulatorURL != "" {
+		batchAPI = autoscaler.NewRemoteBatchAPIClient(emulatorURL)
+	} else {
+		batchAPI, err = autoscaler.NewGCPBatchAPIClient(ctx, project)
+		if err != nil {
+			return fmt.Errorf("creating batch API client: %w", err)
+		}
 	}
 
 	pubsubReceiver, err := autoscaler.NewGCPPubSubReceiver(ctx, project, batches)
