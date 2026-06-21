@@ -70,7 +70,7 @@ type WorkPool struct {
 	MaxPreemptibleWorkerAttempts int `firestore:"max_preemptible_worker_attempts"`
 	MaxWorkersPerRequest         int `firestore:"max_workers_per_request"`
 
-	// Watchdog parameters (zero value → autoscaler uses its own defaults)
+	// Watchdog parameters (zero value → monitor uses its own defaults)
 	MinTimeBetweenPollsSec      int `firestore:"min_time_between_polls_sec"`
 	MaxTimeBetweenPollsSec      int `firestore:"max_time_between_polls_sec"`
 	MaxTimeToStartWorkerSec     int `firestore:"max_time_to_start_worker_sec"`
@@ -79,7 +79,7 @@ type WorkPool struct {
 	MaxZombiesBeforeAbort       int `firestore:"max_zombies_before_abort"`
 	MaxConsecutiveFailedBatches int `firestore:"max_consecutive_failed_batches"`
 
-	// Status fields (written by the autoscaler)
+	// Status fields (written by the monitor)
 	Status         string    `firestore:"status"`
 	StatusMessage  string    `firestore:"status_message"`
 	LastIncidentAt time.Time `firestore:"last_incident_at"`

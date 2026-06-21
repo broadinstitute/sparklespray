@@ -1,4 +1,4 @@
-package autoscaler
+package monitor
 
 import (
 	"context"
@@ -10,7 +10,7 @@ import (
 	"github.com/broadinstitute/sparklespray/v100/scheduler"
 )
 
-// epoch is the fixed base time used across all autoscaler tests.
+// epoch is the fixed base time used across all monitor tests.
 var epoch = time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
 
 // ---- FakeBatchAPIClient ----
@@ -538,7 +538,7 @@ type World struct {
 	Workers  *FakeWorkerStore
 	Tasks    *FakeTaskStore
 	PubSub   *FakePubSubReceiver
-	A        *Autoscaler
+	A        *Monitor
 }
 
 func newWorld() *World {

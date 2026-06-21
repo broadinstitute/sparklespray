@@ -1,4 +1,4 @@
-package autoscaler
+package monitor
 
 import (
 	"context"
@@ -10,7 +10,7 @@ import (
 // Runs on PubSub notifications for pending batches
 // or after max_time_between_polls. Only processes pending batches; once promoted to started,
 // failed, or completed, Tier 2 owns the batch.
-func (a *Autoscaler) runBatchStartupMonitor(ctx context.Context) error {
+func (a *Monitor) runBatchStartupMonitor(ctx context.Context) error {
 	pools, err := a.pools.ListAll(ctx)
 	if err != nil {
 		return fmt.Errorf("list workpools: %w", err)
@@ -33,7 +33,7 @@ func (a *Autoscaler) runBatchStartupMonitor(ctx context.Context) error {
 	return nil
 }
 
-func (a *Autoscaler) checkBatchStartup(ctx context.Context, pool *WorkPool, batch *BatchAPIRequest, now time.Time) error {
+func (a *Monitor) checkBatchStartup(ctx context.Context, pool *WorkPool, batch *BatchAPIRequest, now time.Time) error {
 	apiStatus, err := a.batchAPI.GetJobStatus(ctx, batch.JobID)
 	if err != nil {
 		return fmt.Errorf("get job status: %w", err)

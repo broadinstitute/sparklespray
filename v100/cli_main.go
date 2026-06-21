@@ -17,8 +17,8 @@ import (
 	"cloud.google.com/go/firestore"
 	"cloud.google.com/go/pubsub/v2"
 	pubsubpb "cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
-	"github.com/broadinstitute/sparklespray/v100/autoscaler"
-	"github.com/broadinstitute/sparklespray/v100/autoscaler/emulator"
+	"github.com/broadinstitute/sparklespray/v100/monitor"
+	"github.com/broadinstitute/sparklespray/v100/monitor/emulator"
 	"github.com/broadinstitute/sparklespray/v100/scheduler"
 	"github.com/google/uuid"
 	"github.com/urfave/cli"
@@ -53,14 +53,14 @@ func Main() error {
 			Action: runWorker,
 		},
 		{
-			Name:  "autoscale",
-			Usage: "Start the autoscaler loop",
+			Name:  "monitor",
+			Usage: "Start the monitor",
 			Flags: []cli.Flag{
 				cli.StringFlag{Name: "project", Usage: "GCP project ID (required)"},
 				cli.StringFlag{Name: "db", Value: defaultDB, Usage: "Firestore database"},
 				cli.BoolFlag{Name: "verbose, v", Usage: "log a message at the start of every poll"},
 			},
-			Action: runAutoscale,
+			Action: runMonitor,
 		},
 		{
 			Name: "dev",
@@ -286,7 +286,7 @@ type WorkpoolSpec struct {
 	MaxPreemptibleWorkerAttempts int `json:"maxPreemptibleWorkerAttempts"`
 	MaxWorkersPerRequest         int `json:"maxWorkersPerRequest"`
 
-	// Watchdog parameters (zero value → autoscaler uses its own defaults)
+	// Watchdog parameters (zero value → monitor uses its own defaults)
 	MinTimeBetweenPollsSec      int `json:"minTimeBetweenPollsSec"`
 	MaxTimeBetweenPollsSec      int `json:"maxTimeBetweenPollsSec"`
 	MaxTimeToStartWorkerSec     int `json:"maxTimeToStartWorkerSec"`
@@ -466,8 +466,8 @@ func devSubmit(jobSpecFile, workpoolSpecFile, project, db string) error {
 	}
 	fmt.Printf("job %s written with %d tasks\n", jobID, len(jobSpec.Tasks))
 
-	// Publish job_created event so the autoscaler can react immediately.
-	// Non-fatal: the autoscaler's periodic poll will pick up the job if this fails.
+	// Publish job_created event so the monitor can react immediately.
+	// Non-fatal: the monitor's periodic poll will pick up the job if this fails.
 	ep := NewEventPublisher(psClient.Publisher("sparkles-events"), fsClient)
 	defer ep.Stop()
 	if err := ep.PublishJobCreated(ctx, JobCreatedEvent{JobID: jobID, WorkpoolID: workpoolID}); err != nil {
@@ -481,7 +481,7 @@ func runBatchAPIEmulator(c *cli.Context) error {
 	return emulator.Run(c.String("addr"), c.Duration("queueTime"), c.Bool("no-docker"))
 }
 
-func runAutoscale(c *cli.Context) error {
+func runMonitor(c *cli.Context) error {
 	project := c.String("project")
 	if project == "" {
 		return fmt.Errorf("--project is required")
@@ -498,34 +498,34 @@ func runAutoscale(c *cli.Context) error {
 	}
 	defer fsClient.Close()
 
-	pools := autoscaler.NewFirestoreWorkPoolStore(fsClient)
-	batches := autoscaler.NewFirestoreBatchRequestStore(fsClient)
-	workers := autoscaler.NewFirestoreWorkerStore(fsClient)
-	tasks := autoscaler.NewFirestoreTaskStore(fsClient)
+	pools := monitor.NewFirestoreWorkPoolStore(fsClient)
+	batches := monitor.NewFirestoreBatchRequestStore(fsClient)
+	workers := monitor.NewFirestoreWorkerStore(fsClient)
+	tasks := monitor.NewFirestoreTaskStore(fsClient)
 
-	var batchAPI autoscaler.BatchAPIClient
+	var batchAPI monitor.BatchAPIClient
 	if emulatorURL := os.Getenv("SPARKLES_BATCH_API_EMULATOR"); emulatorURL != "" {
-		batchAPI = autoscaler.NewRemoteBatchAPIClient(emulatorURL)
+		batchAPI = monitor.NewRemoteBatchAPIClient(emulatorURL)
 	} else {
-		batchAPI, err = autoscaler.NewGCPBatchAPIClient(ctx, project)
+		batchAPI, err = monitor.NewGCPBatchAPIClient(ctx, project)
 		if err != nil {
 			return fmt.Errorf("creating batch API client: %w", err)
 		}
 	}
 
-	pubsubReceiver, err := autoscaler.NewGCPPubSubReceiver(ctx, project, batches)
+	pubsubReceiver, err := monitor.NewGCPPubSubReceiver(ctx, project, batches)
 	if err != nil {
 		return fmt.Errorf("creating pubsub receiver: %w", err)
 	}
 
-	jobEventReceiver, err := autoscaler.NewGCPJobEventReceiver(ctx, project)
+	jobEventReceiver, err := monitor.NewGCPJobEventReceiver(ctx, project)
 	if err != nil {
 		return fmt.Errorf("creating job event receiver: %w", err)
 	}
 
-	as := autoscaler.New(scheduler.RealClock, batchAPI, pools, batches, workers, tasks, pubsubReceiver)
-	as.SetVerbose(c.Bool("verbose"))
-	as.SetJobEventReceiver(jobEventReceiver)
-	as.RunAutoscalerLoop(ctx)
+	m := monitor.New(scheduler.RealClock, batchAPI, pools, batches, workers, tasks, pubsubReceiver)
+	m.SetVerbose(c.Bool("verbose"))
+	m.SetJobEventReceiver(jobEventReceiver)
+	m.RunMonitorLoop(ctx)
 	return nil
 }

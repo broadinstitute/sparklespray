@@ -1,4 +1,4 @@
-package autoscaler
+package monitor
 
 import (
 	"context"
@@ -47,7 +47,7 @@ func secToDur(secs int, defaultDur time.Duration) time.Duration {
 	return time.Duration(secs) * time.Second
 }
 
-func toAutoscalerWorkPool(f *firestoreWorkPool) *WorkPool {
+func toWorkPool(f *firestoreWorkPool) *WorkPool {
 	return &WorkPool{
 		WorkpoolID:                   f.WorkpoolID,
 		Region:                       f.Region,
@@ -104,7 +104,7 @@ func (s *FirestoreWorkPoolStore) ListAll(ctx context.Context) ([]*WorkPool, erro
 		if err := snap.DataTo(&f); err != nil {
 			return nil, err
 		}
-		pools = append(pools, toAutoscalerWorkPool(&f))
+		pools = append(pools, toWorkPool(&f))
 	}
 	return pools, nil
 }
@@ -118,7 +118,7 @@ func (s *FirestoreWorkPoolStore) Get(ctx context.Context, workpoolID string) (*W
 	if err := snap.DataTo(&f); err != nil {
 		return nil, err
 	}
-	return toAutoscalerWorkPool(&f), nil
+	return toWorkPool(&f), nil
 }
 
 func (s *FirestoreWorkPoolStore) Save(ctx context.Context, pool *WorkPool) error {
@@ -141,7 +141,7 @@ type firestoreBatchRequest struct {
 	Unhealthy             bool       `firestore:"unhealthy"`
 }
 
-func toAutoscalerBatchRequest(f *firestoreBatchRequest) *BatchAPIRequest {
+func toBatchRequest(f *firestoreBatchRequest) *BatchAPIRequest {
 	return &BatchAPIRequest{
 		BatchID:               f.BatchID,
 		JobID:                 f.JobID,
@@ -156,7 +156,7 @@ func toAutoscalerBatchRequest(f *firestoreBatchRequest) *BatchAPIRequest {
 	}
 }
 
-func fromAutoscalerBatchRequest(b *BatchAPIRequest) *firestoreBatchRequest {
+func fromBatchRequest(b *BatchAPIRequest) *firestoreBatchRequest {
 	return &firestoreBatchRequest{
 		BatchID:               b.BatchID,
 		JobID:                 b.JobID,
@@ -182,7 +182,7 @@ func NewFirestoreBatchRequestStore(fs *firestore.Client) *FirestoreBatchRequestS
 }
 
 func (s *FirestoreBatchRequestStore) Create(ctx context.Context, batch *BatchAPIRequest) error {
-	_, err := s.fs.Collection(batchRequestCollection).Doc(batch.BatchID).Set(ctx, fromAutoscalerBatchRequest(batch))
+	_, err := s.fs.Collection(batchRequestCollection).Doc(batch.BatchID).Set(ctx, fromBatchRequest(batch))
 	return err
 }
 
@@ -195,11 +195,11 @@ func (s *FirestoreBatchRequestStore) Get(ctx context.Context, batchID string) (*
 	if err := snap.DataTo(&f); err != nil {
 		return nil, err
 	}
-	return toAutoscalerBatchRequest(&f), nil
+	return toBatchRequest(&f), nil
 }
 
 func (s *FirestoreBatchRequestStore) Save(ctx context.Context, batch *BatchAPIRequest) error {
-	_, err := s.fs.Collection(batchRequestCollection).Doc(batch.BatchID).Set(ctx, fromAutoscalerBatchRequest(batch))
+	_, err := s.fs.Collection(batchRequestCollection).Doc(batch.BatchID).Set(ctx, fromBatchRequest(batch))
 	return err
 }
 
@@ -219,7 +219,7 @@ func (s *FirestoreBatchRequestStore) GetByJobID(ctx context.Context, jobID strin
 	if err := snap.DataTo(&f); err != nil {
 		return nil, err
 	}
-	return toAutoscalerBatchRequest(&f), nil
+	return toBatchRequest(&f), nil
 }
 
 func (s *FirestoreBatchRequestStore) ListByWorkpool(ctx context.Context, workpoolID string, statuses []BatchStatus) ([]*BatchAPIRequest, error) {
@@ -246,7 +246,7 @@ func (s *FirestoreBatchRequestStore) ListByWorkpool(ctx context.Context, workpoo
 		if err := snap.DataTo(&f); err != nil {
 			return nil, err
 		}
-		batches = append(batches, toAutoscalerBatchRequest(&f))
+		batches = append(batches, toBatchRequest(&f))
 	}
 	return batches, nil
 }

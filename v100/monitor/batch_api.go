@@ -1,4 +1,4 @@
-package autoscaler
+package monitor
 
 import (
 	"context"
@@ -13,7 +13,7 @@ const (
 	labelBatch    = "sparkles-worker-batch"
 	labelWorkpool = "sparkles-worker-workpool"
 
-	pubsubNotificationTopic = "autoscaler-in"
+	pubsubNotificationTopic = "monitor-in"
 )
 
 // GCPBatchAPIClient implements BatchAPIClient using the GCP Batch API and

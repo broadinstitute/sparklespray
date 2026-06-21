@@ -1,4 +1,4 @@
-package autoscaler
+package monitor
 
 import (
 	"context"
@@ -9,7 +9,7 @@ import (
 
 // Runs on PubSub notifications for started batches
 // or after max_time_between_polls. Makes GCP API calls for both VM list and Batch API status.
-func (a *Autoscaler) runClusterReconciler(ctx context.Context) error {
+func (a *Monitor) runClusterReconciler(ctx context.Context) error {
 	pools, err := a.pools.ListAll(ctx)
 	if err != nil {
 		return fmt.Errorf("list workpools: %w", err)
@@ -23,7 +23,7 @@ func (a *Autoscaler) runClusterReconciler(ctx context.Context) error {
 	return nil
 }
 
-func (a *Autoscaler) reconcileWorkpool(ctx context.Context, pool *WorkPool) error {
+func (a *Monitor) reconcileWorkpool(ctx context.Context, pool *WorkPool) error {
 	now := a.clock.Now()
 
 	activeBatches, err := a.batches.ListByWorkpool(ctx, pool.WorkpoolID, []BatchStatus{
@@ -66,7 +66,7 @@ func (a *Autoscaler) reconcileWorkpool(ctx context.Context, pool *WorkPool) erro
 
 // runTier2ForBatch processes one batch. Returns (done=true) if the batch was terminated
 // and the caller should reload the workpool before continuing.
-func (a *Autoscaler) runTier2ForBatch(ctx context.Context, pool *WorkPool, batch *BatchAPIRequest, now time.Time) (done bool, err error) {
+func (a *Monitor) runTier2ForBatch(ctx context.Context, pool *WorkPool, batch *BatchAPIRequest, now time.Time) (done bool, err error) {
 	apiStatus, err := a.batchAPI.GetJobStatus(ctx, batch.JobID)
 	if err != nil {
 		return false, fmt.Errorf("get job status: %w", err)
@@ -106,7 +106,7 @@ func (a *Autoscaler) runTier2ForBatch(ctx context.Context, pool *WorkPool, batch
 	return false, a.reconcileVMs(ctx, pool, batch, apiStatus, now)
 }
 
-func (a *Autoscaler) reconcileVMs(ctx context.Context, pool *WorkPool, batch *BatchAPIRequest, apiStatus BatchJobStatus, now time.Time) error {
+func (a *Monitor) reconcileVMs(ctx context.Context, pool *WorkPool, batch *BatchAPIRequest, apiStatus BatchJobStatus, now time.Time) error {
 	gcpVMs, err := a.batchAPI.ListRunningVMs(ctx, "sparkles-worker-batch", batch.BatchID, pool.Zones)
 	if err != nil {
 		return fmt.Errorf("list running VMs: %w", err)

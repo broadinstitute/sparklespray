@@ -1,4 +1,4 @@
-package autoscaler
+package monitor
 
 import (
 	"context"
@@ -9,7 +9,7 @@ import (
 // runRequeueOrphanedTasks is the Task Recovery tier. Runs every 30s with no GCP API calls.
 // For every worker whose heartbeat has expired, it orphans any active tasks back to pending
 // so they can be picked up by a healthy worker.
-func (a *Autoscaler) runRequeueOrphanedTasks(ctx context.Context) error {
+func (a *Monitor) runRequeueOrphanedTasks(ctx context.Context) error {
 	now := a.clock.Now()
 
 	expired, err := a.workers.ListExpired(ctx, now)

@@ -1,4 +1,4 @@
-package autoscaler
+package monitor
 
 import (
 	"context"
@@ -9,26 +9,26 @@ import (
 	"github.com/google/uuid"
 )
 
-// runAutoscalerPoll is the provisioning loop. Runs every 1 minute.
+// runProvisioningPoll is the provisioning loop. Runs every 1 minute.
 // For each workpool it compares pending task demand against active worker supply
 // and submits BatchAPIRequests to close the gap, preferring preemptible VMs up to the
 // workpool's budget before falling back to non-preemptible.
-func (a *Autoscaler) runAutoscalerPoll(ctx context.Context) error {
+func (a *Monitor) runProvisioningPoll(ctx context.Context) error {
 	pools, err := a.pools.ListAll(ctx)
 	if err != nil {
 		return fmt.Errorf("list workpools: %w", err)
 	}
-	a.vlogf("autoscaler poll: Found %d workpools", len(pools))
+	a.vlogf("provisioning poll: Found %d workpools", len(pools))
 
 	for _, pool := range pools {
-		if err := a.runAutoscalerPollForWorkpool(ctx, pool); err != nil {
-			log.Printf("autoscaler poll: workpool %s: %v", pool.WorkpoolID, err)
+		if err := a.runProvisioningPollForWorkpool(ctx, pool); err != nil {
+			log.Printf("provisioning poll: workpool %s: %v", pool.WorkpoolID, err)
 		}
 	}
 	return nil
 }
 
-func (a *Autoscaler) runAutoscalerPollForWorkpool(ctx context.Context, pool *WorkPool) error {
+func (a *Monitor) runProvisioningPollForWorkpool(ctx context.Context, pool *WorkPool) error {
 	// workpool.status is the provisioning guard: halted means stop.
 	if pool.Status == WorkPoolStatusHalted {
 		return nil
@@ -58,7 +58,7 @@ func (a *Autoscaler) runAutoscalerPollForWorkpool(ctx context.Context, pool *Wor
 	target := min(pool.MaxWorkerCount, pendingCount)
 	needed := max(0, target-requestedCount)
 	if needed == 0 {
-		a.vlogf("autoscaler poll: %d pending tasks in pool %s, but %d already requested, so nothing more needed", (pendingCount), pool.WorkpoolID, requestedCount)
+		a.vlogf("provisioning poll: %d pending tasks in pool %s, but %d already requested, so nothing more needed", (pendingCount), pool.WorkpoolID, requestedCount)
 		return nil
 	}
 
@@ -76,7 +76,7 @@ func (a *Autoscaler) runAutoscalerPollForWorkpool(ctx context.Context, pool *Wor
 
 	poolDirty := false
 
-	a.vlogf("autoscaler: submitting a batch request for %d preemptible VMs and %d nonpreemptible VMs (already requested %d)", preemptibleCount, nonPreemptibleCount, requestedCount)
+	a.vlogf("monitor: submitting a batch request for %d preemptible VMs and %d nonpreemptible VMs (already requested %d)", preemptibleCount, nonPreemptibleCount, requestedCount)
 	if preemptibleCount > 0 {
 		if err := a.submitBatch(ctx, pool, preemptibleCount, true, now); err != nil {
 			return fmt.Errorf("submit preemptible batch: %w", err)
@@ -107,7 +107,7 @@ func (a *Autoscaler) runAutoscalerPollForWorkpool(ctx context.Context, pool *Wor
 }
 
 // submitBatch creates a BatchAPIRequest in Firestore and the corresponding GCP Batch API job.
-func (a *Autoscaler) submitBatch(ctx context.Context, pool *WorkPool, vmCount int, preemptible bool, now time.Time) error {
+func (a *Monitor) submitBatch(ctx context.Context, pool *WorkPool, vmCount int, preemptible bool, now time.Time) error {
 	batchID := uuid.New().String()
 
 	jobID, err := a.batchAPI.CreateJob(ctx, &WorkerJobSpec{

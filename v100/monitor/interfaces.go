@@ -1,4 +1,4 @@
-package autoscaler
+package monitor
 
 import (
 	"context"
@@ -51,7 +51,7 @@ const (
 // ----- Data model -----
 
 // WorkPool holds both the configuration and runtime status of a workpool.
-// Corresponds to the WorkPools Firestore collection, extended with autoscaler fields.
+// Corresponds to the WorkPools Firestore collection, extended with monitor fields.
 type WorkPool struct {
 	WorkpoolID  string
 	Region      string   // GCP region for Batch jobs, e.g. "us-central1"
@@ -72,7 +72,7 @@ type WorkPool struct {
 	MaxZombiesBeforeAbort       int           // default: 3
 	MaxConsecutiveFailedBatches int           // default: 2
 
-	// Status fields (written by the autoscaler, read by the UI and provisioning guard)
+	// Status fields (written by the monitor, read by the UI and provisioning guard)
 	Status         WorkPoolStatus
 	StatusMessage  string
 	LastIncidentAt time.Time
@@ -93,7 +93,7 @@ type BatchAPIRequest struct {
 	Unhealthy             bool // sticky; never cleared; independent of Status
 }
 
-// Worker is the subset of the Workers Firestore document needed by the autoscaler.
+// Worker is the subset of the Workers Firestore document needed by the monitor.
 type Worker struct {
 	WorkerID        string
 	WorkpoolID      string
@@ -102,7 +102,7 @@ type Worker struct {
 	HeartbeatExpiry time.Time // rolling deadline; used to detect crashed/preempted workers
 }
 
-// Task is the subset of the Tasks Firestore document needed by the autoscaler.
+// Task is the subset of the Tasks Firestore document needed by the monitor.
 type Task struct {
 	TaskID         string
 	WorkpoolID     string
@@ -207,7 +207,7 @@ type JobEventReceiver interface {
 
 // PubSubReceiver delivers Batch API status-change notifications.
 // Each notification carries the BatchID of the batch that changed state,
-// or a fatal Err that the autoscaler should propagate.
+// or a fatal Err that the monitor should propagate.
 type PubSubReceiver interface {
 	Notifications() <-chan Notification
 }

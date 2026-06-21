@@ -22,8 +22,8 @@ procs:
     cmd: ["gcloud",  "beta", "emulators", "pubsub", "start", "--host-port=localhost:${PUBSUB_PORT}"]
   batchapi-emulator:
     cmd: ["${SPARKLES}", "dev", "batchapi-emulator", "--addr", ":${BATCHAPI_PORT}"]
-  autoscaler:
-    cmd: ["${SPARKLES}", "autoscale", "--project", "${PROJECT}", "--verbose"]
+  monitor:
+    cmd: ["${SPARKLES}", "monitor", "--project", "${PROJECT}", "--verbose"]
     env:
       FIRESTORE_EMULATOR_HOST: "localhost:${FIRESTORE_PORT}"
       PUBSUB_EMULATOR_HOST: "localhost:${PUBSUB_PORT}"

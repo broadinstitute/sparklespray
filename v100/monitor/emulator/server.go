@@ -16,7 +16,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/broadinstitute/sparklespray/v100/autoscaler"
+	"github.com/broadinstitute/sparklespray/v100/monitor"
 	"github.com/google/uuid"
 )
 
@@ -58,7 +58,7 @@ type emulatorJob struct {
 	DockerImage string
 	Command     string
 	VMCount     int
-	Status      autoscaler.BatchJobStatus
+	Status      monitor.BatchJobStatus
 	VMs         []*emulatorVM
 	cancel      chan struct{}
 	cancelOnce  sync.Once
@@ -127,7 +127,7 @@ func (s *server) handleCreateJob(w http.ResponseWriter, r *http.Request) {
 		DockerImage: req.DockerImage,
 		Command:     req.Command,
 		VMCount:     req.VMCount,
-		Status:      autoscaler.BatchJobStatusQueued,
+		Status:      monitor.BatchJobStatusQueued,
 		cancel:      make(chan struct{}),
 	}
 	for i := 0; i < req.VMCount; i++ {
@@ -150,7 +150,7 @@ func (s *server) handleGetJobStatus(w http.ResponseWriter, r *http.Request) {
 
 	s.mu.Lock()
 	job := s.jobs[jobID]
-	var status autoscaler.BatchJobStatus
+	var status monitor.BatchJobStatus
 	if job != nil {
 		status = job.Status
 	}
@@ -182,9 +182,9 @@ func (s *server) handleListVMs(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	result := make(map[string]autoscaler.VMInfo)
+	result := make(map[string]monitor.VMInfo)
 	for _, job := range s.jobs {
-		if job.Status != autoscaler.BatchJobStatusRunning {
+		if job.Status != monitor.BatchJobStatusRunning {
 			continue
 		}
 		if !jobMatchesLabel(job, filterName, filterValue) {
@@ -194,13 +194,13 @@ func (s *server) handleListVMs(w http.ResponseWriter, r *http.Request) {
 			if vm.Zone != zone || vm.done {
 				continue
 			}
-			result[vm.InstanceName] = autoscaler.VMInfo{
+			result[vm.InstanceName] = monitor.VMInfo{
 				InstanceName: vm.InstanceName,
 				Zone:         vm.Zone,
 			}
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]map[string]autoscaler.VMInfo{"vms": result})
+	writeJSON(w, http.StatusOK, map[string]map[string]monitor.VMInfo{"vms": result})
 }
 
 func jobMatchesLabel(job *emulatorJob, name, value string) bool {
@@ -254,7 +254,7 @@ func (s *server) handleTerminateJob(w http.ResponseWriter, r *http.Request) {
 				containerNames = append(containerNames, vm.InstanceName)
 			}
 		}
-		job.Status = autoscaler.BatchJobStatusFailed
+		job.Status = monitor.BatchJobStatusFailed
 	}
 	s.mu.Unlock()
 
@@ -348,7 +348,7 @@ func (s *server) runJob(job *emulatorJob) {
 	case <-time.After(s.queueTime):
 	case <-job.cancel:
 		s.mu.Lock()
-		job.Status = autoscaler.BatchJobStatusFailed
+		job.Status = monitor.BatchJobStatusFailed
 		s.mu.Unlock()
 		return
 	}
@@ -411,14 +411,14 @@ func (s *server) runJob(job *emulatorJob) {
 	}
 	if allFailed {
 		s.mu.Lock()
-		job.Status = autoscaler.BatchJobStatusFailed
+		job.Status = monitor.BatchJobStatusFailed
 		s.mu.Unlock()
 		log.Printf("emulator: all VMs failed to start for job %s", job.JobID)
 		return
 	}
 
 	s.mu.Lock()
-	job.Status = autoscaler.BatchJobStatusRunning
+	job.Status = monitor.BatchJobStatusRunning
 	s.mu.Unlock()
 
 	// Phase 3: watch each successfully-started VM.
@@ -461,16 +461,16 @@ func (s *server) runJob(job *emulatorJob) {
 		watchWg.Wait()
 		s.mu.Lock()
 		defer s.mu.Unlock()
-		if job.Status != autoscaler.BatchJobStatusRunning {
+		if job.Status != monitor.BatchJobStatusRunning {
 			return
 		}
 		for _, vm := range job.VMs {
 			if vm.exitCode != 0 {
-				job.Status = autoscaler.BatchJobStatusFailed
+				job.Status = monitor.BatchJobStatusFailed
 				return
 			}
 		}
-		job.Status = autoscaler.BatchJobStatusSucceeded
+		job.Status = monitor.BatchJobStatusSucceeded
 	}()
 }
 
@@ -495,7 +495,7 @@ func (s *server) stopAllContainers() {
 	var procs []*exec.Cmd
 	for _, job := range s.jobs {
 		job.cancelJob()
-		if job.Status == autoscaler.BatchJobStatusRunning {
+		if job.Status == monitor.BatchJobStatusRunning {
 			for _, vm := range job.VMs {
 				if !vm.done {
 					if s.noDocker {

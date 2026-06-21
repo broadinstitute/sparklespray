@@ -211,6 +211,57 @@ Metric entries are written every 15 seconds. Log entries are written every 1 sec
 
 ---
 
+### `JobSummary`
+
+One document per job, keyed by `job_id`. This is the **mutable** counterpart to the immutable `Jobs` document: a `Job` is written once at submission and never updated; all evolving state lives here. `JobSummary` is owned exclusively by the **monitor** process, which recomputes it whenever task states change. No other process should write to this collection.
+
+Any question about job progress — "is this job still running?", "how many tasks failed?" — should be answered by reading `JobSummary`, not by scanning `Tasks` or adding derived fields to `Jobs`.
+
+| Field    | Type        | Description                                                  |
+| -------- | ----------- | ------------------------------------------------------------ |
+| `job_id` | string      | ID of the job this summary describes                         |
+| `expiry` | timestamp   | When this document may be garbage-collected                  |
+| `status` | string      | Rolled-up job status — see table below                       |
+| `tasks`  | []TaskCount | Task counts grouped by status; one entry per non-zero status |
+
+**TaskCount** (embedded object):
+
+| Field   | Type   | Description                                                       |
+| ------- | ------ | ----------------------------------------------------------------- |
+| `state` | string | Task status value (same allowed values as the `Tasks` collection) |
+| `count` | int    | Number of tasks currently in that state                           |
+
+**Status values:**
+
+| Status                     | Description                                                                               |
+| -------------------------- | ----------------------------------------------------------------------------------------- |
+| `pending`                  | All tasks are `pending`; no work has started                                              |
+| `in_progress`              | At least one task is active (`claimed`/`running`/`writing`); no `failed` or `error` tasks |
+| `in_progress_with_error`   | At least one task is active; at least one task is in `error` state                        |
+| `in_progress_with_failure` | At least one task is active; at least one task is in `failed` state                       |
+| `killed`                   | At least one task was `killed`                                                            |
+| `success`                  | All tasks complete; every terminal task reached `success`                                 |
+| `error`                    | All tasks complete; at least one task is in `error` state, none in `failed`               |
+| `failed`                   | All tasks complete; at least one task is in `failed` state                                |
+
+---
+
+### `JobSummaryHistory`
+
+An append-only log of `JobSummary` snapshots. Each document is a point-in-time copy written by the monitor process whenever it updates `JobSummary`. The document ID is a UUID assigned at write time.
+
+| Field       | Type        | Description                                                          |
+| ----------- | ----------- | -------------------------------------------------------------------- |
+| `job_id`    | string      | ID of the job this snapshot describes                                |
+| `timestamp` | timestamp   | When this snapshot was recorded                                      |
+| `expiry`    | timestamp   | When this document may be garbage-collected                          |
+| `status`    | string      | Job status at the time of the snapshot (same values as `JobSummary`) |
+| `tasks`     | []TaskCount | Task counts at the time of the snapshot                              |
+
+**TaskCount** is the same embedded object as in `JobSummary`.
+
+---
+
 ## Pub/Sub Topics
 
 ### `sparkles-events` _(Worker → Control plane)_
@@ -237,7 +288,7 @@ Published by workers to report lifecycle events. Messages are JSON-encoded. Ever
 }
 ```
 
-The autoscaler subscribes to this topic via the `autoscaler-events-in` subscription and triggers an immediate provisioning poll on receipt, rather than waiting for the next 1-minute timer tick.
+The monitor subscribes to this topic via the `monitor-events-in` subscription and triggers an immediate provisioning poll on `job_created` receipt, rather than waiting for the next timer tick. The `dev submit` command creates a short-lived ephemeral subscription (`devsubmit-monitor-<id>`) to log events as they arrive, and deletes it on exit.
 
 **TaskStateUpdate** — published on every task state transition:
 
@@ -261,6 +312,24 @@ The autoscaler subscribes to this topic via the `autoscaler-events-in` subscript
 | `failed`    | `claimed` \| `running` \| `writing` | Infrastructure failure; task did not complete         |
 | `pending`   | `claimed` \| `running` \| `writing` | Task orphaned back to pending (worker crash detected) |
 | `killed`    | _(any)_                             | Task administratively terminated                      |
+
+---
+
+### `monitor-in` _(GCP Batch API → Monitor)_
+
+Published by GCP Batch API (or the batch API emulator) to notify the monitor when a batch job changes state. The monitor subscribes to this topic under the `monitor-in` subscription. When a notification arrives the monitor immediately runs its tier-2 reconciliation loop (checking job status, reconciling VMs) for the affected batch rather than waiting for the next periodic tick.
+
+Messages are JSON-encoded GCP Batch API state-change notifications:
+
+```json
+{
+  "jobName": "projects/<project>/locations/<region>/jobs/<job-id>"
+}
+```
+
+The `jobName` field is a fully-qualified GCP Batch job resource name. The monitor reverse-looks up the internal `batch_id` from the `BatchAPIRequests` Firestore collection using this value.
+
+The topic is configured as the Pub/Sub notification target when the monitor creates each GCP Batch job (via the `PubsubTopic` field on the job spec). The monitor creates this topic and its subscription at startup if they do not already exist.
 
 ---
 

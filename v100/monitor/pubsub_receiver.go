@@ -1,4 +1,4 @@
-package autoscaler
+package monitor
 
 import (
 	"context"
@@ -12,9 +12,9 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-const autoscalerSubscription = "autoscaler-in"
+const monitorSubscription = "monitor-in"
 const sparklesEventsTopic = "sparkles-events"
-const autoscalerEventsSubscription = "autoscaler-events-in"
+const monitorEventsSubscription = "monitor-events-in"
 
 // batchNotificationMessage is the JSON payload published by GCP Batch API
 // state-change notifications.
@@ -72,7 +72,7 @@ func NewGCPPubSubReceiver(ctx context.Context, project string, batches BatchRequ
 		return nil, err
 	}
 
-	if err := ensurePubSubResources(ctx, client, project, autoscalerSubscription, autoscalerSubscription); err != nil {
+	if err := ensurePubSubResources(ctx, client, project, monitorSubscription, monitorSubscription); err != nil {
 		client.Close()
 		return nil, fmt.Errorf("ensuring pubsub subscription: %w", err)
 	}
@@ -81,7 +81,7 @@ func NewGCPPubSubReceiver(ctx context.Context, project string, batches BatchRequ
 		ch: make(chan Notification, 64),
 	}
 
-	sub := client.Subscriber(autoscalerSubscription)
+	sub := client.Subscriber(monitorSubscription)
 
 	go func() {
 		defer client.Close()
@@ -109,7 +109,7 @@ func NewGCPPubSubReceiver(ctx context.Context, project string, batches BatchRequ
 			select {
 			case r.ch <- Notification{BatchID: batch.BatchID}:
 			default:
-				// Channel full — drop; the autoscaler has a periodic fallback.
+				// Channel full — drop; the monitor has a periodic fallback.
 			}
 		})
 		if err != nil && ctx.Err() == nil {
@@ -146,13 +146,13 @@ func NewGCPJobEventReceiver(ctx context.Context, project string) (*GCPJobEventRe
 		return nil, err
 	}
 
-	if err := ensurePubSubResources(ctx, client, project, sparklesEventsTopic, autoscalerEventsSubscription); err != nil {
+	if err := ensurePubSubResources(ctx, client, project, sparklesEventsTopic, monitorEventsSubscription); err != nil {
 		client.Close()
 		return nil, fmt.Errorf("ensuring job events subscription: %w", err)
 	}
 
 	r := &GCPJobEventReceiver{ch: make(chan JobNotification, 64)}
-	sub := client.Subscriber(autoscalerEventsSubscription)
+	sub := client.Subscriber(monitorEventsSubscription)
 
 	go func() {
 		defer client.Close()
@@ -166,7 +166,7 @@ func NewGCPJobEventReceiver(ctx context.Context, project string) (*GCPJobEventRe
 			select {
 			case r.ch <- JobNotification{JobID: e.JobID, WorkpoolID: e.WorkpoolID}:
 			default:
-				// Channel full — drop; the autoscaler has a periodic fallback.
+				// Channel full — drop; the monitor has a periodic fallback.
 			}
 		})
 		if err != nil && ctx.Err() == nil {

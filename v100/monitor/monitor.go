@@ -1,4 +1,4 @@
-package autoscaler
+package monitor
 
 import (
 	"context"
@@ -20,15 +20,15 @@ const (
 	defaultMaxZombiesBeforeAbort       = 3
 	defaultMaxConsecutiveFailedBatches = 2
 
-	autoscalerPollInterval = 5 * time.Second
+	provisioningPollInterval = 5 * time.Second
 	tier1Interval          = 30 * time.Second
 )
 
 // activeTasks is the set of task statuses that are orphaned back to pending when a worker dies.
 var activeTasks = []TaskStatus{TaskStatusClaimed, TaskStatusRunning, TaskStatusWriting}
 
-// Autoscaler runs provisioning and watchdog logic against a set of workpools.
-type Autoscaler struct {
+// Monitor runs provisioning and watchdog logic against a set of workpools.
+type Monitor struct {
 	clock     scheduler.Clock
 	batchAPI  BatchAPIClient
 	pools     WorkPoolStore
@@ -41,14 +41,14 @@ type Autoscaler struct {
 }
 
 // SetVerbose enables or disables verbose poll logging.
-func (a *Autoscaler) SetVerbose(v bool) { a.verbose = v }
+func (a *Monitor) SetVerbose(v bool) { a.verbose = v }
 
 // SetJobEventReceiver sets an optional receiver for job_created events.
 // When set, a new job submission triggers an immediate provisioning poll.
-func (a *Autoscaler) SetJobEventReceiver(r JobEventReceiver) { a.jobEvents = r }
+func (a *Monitor) SetJobEventReceiver(r JobEventReceiver) { a.jobEvents = r }
 
 // vlogf logs only when verbose mode is on.
-func (a *Autoscaler) vlogf(format string, args ...any) {
+func (a *Monitor) vlogf(format string, args ...any) {
 	if a.verbose {
 		log.Printf(format, args...)
 	}
@@ -62,8 +62,8 @@ func New(
 	workers WorkerStore,
 	tasks TaskStore,
 	pubsub PubSubReceiver,
-) *Autoscaler {
-	return &Autoscaler{
+) *Monitor {
+	return &Monitor{
 		clock:    clock,
 		batchAPI: batchAPI,
 		pools:    pools,
@@ -76,7 +76,7 @@ func New(
 
 // RunJobSubmission updates workpool status when a new job is submitted.
 // Should be called from job submission logic before tasks are enqueued.
-func (a *Autoscaler) RunJobSubmission(ctx context.Context, workpoolID string) error {
+func (a *Monitor) RunJobSubmission(ctx context.Context, workpoolID string) error {
 	pool, err := a.pools.Get(ctx, workpoolID)
 	if err != nil {
 		return fmt.Errorf("get workpool %s: %w", workpoolID, err)
@@ -93,16 +93,16 @@ func (a *Autoscaler) RunJobSubmission(ctx context.Context, workpoolID string) er
 	return nil
 }
 
-// RunAutoscalerLoop runs the autoscaler until ctx is cancelled.
+// RunMonitorLoop runs the monitor until ctx is cancelled.
 // Blocks; run in a dedicated goroutine.
-func (a *Autoscaler) RunAutoscalerLoop(ctx context.Context) {
+func (a *Monitor) RunMonitorLoop(ctx context.Context) {
 	sched := scheduler.New(a.clock)
 
-	// Autoscaler poll: provisioning. Triggered by job_created events; falls back to 1-minute timer.
-	notifyProvisioning := sched.Add(autoscalerPollInterval, autoscalerPollInterval, func() {
+	// Provisioning poll: provisioning. Triggered by job_created events; falls back to 1-minute timer.
+	notifyProvisioning := sched.Add(provisioningPollInterval, provisioningPollInterval, func() {
 		a.vlogf("poll: starting provisioning poll")
-		if err := a.runAutoscalerPoll(ctx); err != nil {
-			log.Printf("autoscaler poll: %v", err)
+		if err := a.runProvisioningPoll(ctx); err != nil {
+			log.Printf("provisioning poll: %v", err)
 		}
 	})
 
@@ -196,7 +196,7 @@ func (a *Autoscaler) RunAutoscalerLoop(ctx context.Context) {
 }
 
 // routeNotification looks up a batch and notifies the appropriate tier.
-func (a *Autoscaler) routeNotification(ctx context.Context, batchID string, notifyTier2, notifyTier3 func()) {
+func (a *Monitor) routeNotification(ctx context.Context, batchID string, notifyTier2, notifyTier3 func()) {
 	batch, err := a.batches.Get(ctx, batchID)
 	if err != nil {
 		log.Printf("notification: failed to look up batch %s: %v — notifying both tiers", batchID, err)
@@ -227,7 +227,7 @@ func recordIncident(pool *WorkPool, message string, now time.Time) {
 
 // checkHaltThreshold transitions the workpool to halted if the last N classified batches
 // all failed. Saves the pool if it transitions.
-func (a *Autoscaler) checkHaltThreshold(ctx context.Context, pool *WorkPool) error {
+func (a *Monitor) checkHaltThreshold(ctx context.Context, pool *WorkPool) error {
 	n := pool.MaxConsecutiveFailedBatches
 	if n <= 0 {
 		n = defaultMaxConsecutiveFailedBatches
