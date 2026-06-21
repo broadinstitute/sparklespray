@@ -16,11 +16,11 @@ const taskCollection = "Tasks"
 // firestoreWorkPool is the Firestore representation of a workpool document.
 // Duration fields are stored as seconds (int) to be JSON/Firestore friendly.
 type firestoreWorkPool struct {
-	WorkpoolID   string    `firestore:"workpool_id"`
-	MachineType  string    `firestore:"machine_type"`
-	Region       string    `firestore:"region"`
-	Zones        []string  `firestore:"zones"`
-	Expiry       time.Time `firestore:"expiry"`
+	WorkpoolID  string    `firestore:"workpool_id"`
+	MachineType string    `firestore:"machine_type"`
+	Region      string    `firestore:"region"`
+	Zones       []string  `firestore:"zones"`
+	Expiry      time.Time `firestore:"expiry"`
 
 	MaxWorkerCount               int `firestore:"max_worker_count"`
 	MaxPreemptibleWorkerAttempts int `firestore:"max_preemptible_worker_attempts"`

@@ -20,7 +20,7 @@ const (
 	defaultMaxZombiesBeforeAbort       = 3
 	defaultMaxConsecutiveFailedBatches = 2
 
-	autoscalerPollInterval = 1 * time.Minute
+	autoscalerPollInterval = 5 * time.Second
 	tier1Interval          = 30 * time.Second
 )
 
@@ -29,13 +29,29 @@ var activeTasks = []TaskStatus{TaskStatusClaimed, TaskStatusRunning, TaskStatusW
 
 // Autoscaler runs provisioning and watchdog logic against a set of workpools.
 type Autoscaler struct {
-	clock    scheduler.Clock
-	batchAPI BatchAPIClient
-	pools    WorkPoolStore
-	batches  BatchRequestStore
-	workers  WorkerStore
-	tasks    TaskStore
-	pubsub   PubSubReceiver
+	clock     scheduler.Clock
+	batchAPI  BatchAPIClient
+	pools     WorkPoolStore
+	batches   BatchRequestStore
+	workers   WorkerStore
+	tasks     TaskStore
+	pubsub    PubSubReceiver
+	jobEvents JobEventReceiver
+	verbose   bool
+}
+
+// SetVerbose enables or disables verbose poll logging.
+func (a *Autoscaler) SetVerbose(v bool) { a.verbose = v }
+
+// SetJobEventReceiver sets an optional receiver for job_created events.
+// When set, a new job submission triggers an immediate provisioning poll.
+func (a *Autoscaler) SetJobEventReceiver(r JobEventReceiver) { a.jobEvents = r }
+
+// vlogf logs only when verbose mode is on.
+func (a *Autoscaler) vlogf(format string, args ...any) {
+	if a.verbose {
+		log.Printf(format, args...)
+	}
 }
 
 func New(
@@ -82,8 +98,9 @@ func (a *Autoscaler) RunJobSubmission(ctx context.Context, workpoolID string) er
 func (a *Autoscaler) RunAutoscalerLoop(ctx context.Context) {
 	sched := scheduler.New(a.clock)
 
-	// Autoscaler poll: provisioning. Fixed 1-minute interval; no notification trigger.
-	sched.Add(autoscalerPollInterval, autoscalerPollInterval, func() {
+	// Autoscaler poll: provisioning. Triggered by job_created events; falls back to 1-minute timer.
+	notifyProvisioning := sched.Add(autoscalerPollInterval, autoscalerPollInterval, func() {
+		a.vlogf("poll: starting provisioning poll")
 		if err := a.runAutoscalerPoll(ctx); err != nil {
 			log.Printf("autoscaler poll: %v", err)
 		}
@@ -91,6 +108,7 @@ func (a *Autoscaler) RunAutoscalerLoop(ctx context.Context) {
 
 	// Tier 1: task recovery. Fixed 30-second interval; no notification trigger.
 	sched.Add(tier1Interval, tier1Interval, func() {
+		a.vlogf("poll: starting orphaned task requeue")
 		if err := a.runRequeueOrphanedTasks(ctx); err != nil {
 			log.Printf("tier1: %v", err)
 		}
@@ -99,6 +117,7 @@ func (a *Autoscaler) RunAutoscalerLoop(ctx context.Context) {
 	// Tier 2: cluster reconciler. Triggered by PubSub notifications for started batches;
 	// falls back to max_time_between_polls if no notification arrives.
 	notifyTier2 := sched.Add(defaultMinTimeBetweenPolls, defaultMaxTimeBetweenPolls, func() {
+		a.vlogf("poll: starting cluster reconciler")
 		if err := a.runClusterReconciler(ctx); err != nil {
 			log.Printf("tier2: %v", err)
 		}
@@ -107,6 +126,7 @@ func (a *Autoscaler) RunAutoscalerLoop(ctx context.Context) {
 	// Tier 3: batch startup monitor. Triggered by PubSub notifications for pending batches;
 	// same fallback timing as tier 2.
 	notifyTier3 := sched.Add(defaultMinTimeBetweenPolls, defaultMaxTimeBetweenPolls, func() {
+		a.vlogf("poll: starting batch startup monitor")
 		if err := a.runBatchStartupMonitor(ctx); err != nil {
 			log.Printf("tier3: %v", err)
 		}
@@ -115,6 +135,25 @@ func (a *Autoscaler) RunAutoscalerLoop(ctx context.Context) {
 	// Route PubSub notifications to the appropriate tier in a background goroutine.
 	// A notification with Err set means the receive loop failed fatally; propagate it.
 	fatalErrCh := make(chan error, 1)
+
+	if a.jobEvents != nil {
+		go func() {
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case n := <-a.jobEvents.JobEvents():
+					if n.Err != nil {
+						log.Printf("job events: fatal error: %v", n.Err)
+						fatalErrCh <- n.Err
+						return
+					}
+					a.vlogf("job events: received job_created for job %s, triggering provisioning poll", n.JobID)
+					notifyProvisioning()
+				}
+			}
+		}()
+	}
 	go func() {
 		for {
 			select {
@@ -126,6 +165,7 @@ func (a *Autoscaler) RunAutoscalerLoop(ctx context.Context) {
 					fatalErrCh <- n.Err
 					return
 				}
+				a.vlogf("pubsub: received notification for batch %s", n.BatchID)
 				a.routeNotification(ctx, n.BatchID, notifyTier2, notifyTier3)
 			}
 		}

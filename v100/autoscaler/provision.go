@@ -18,6 +18,7 @@ func (a *Autoscaler) runAutoscalerPoll(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("list workpools: %w", err)
 	}
+	a.vlogf("autoscaler poll: Found %d workpools", len(pools))
 
 	for _, pool := range pools {
 		if err := a.runAutoscalerPollForWorkpool(ctx, pool); err != nil {
@@ -57,6 +58,7 @@ func (a *Autoscaler) runAutoscalerPollForWorkpool(ctx context.Context, pool *Wor
 	target := min(pool.MaxWorkerCount, pendingCount)
 	needed := max(0, target-requestedCount)
 	if needed == 0 {
+		a.vlogf("autoscaler poll: %d pending tasks in pool %s, but %d already requested, so nothing more needed", (pendingCount), pool.WorkpoolID, requestedCount)
 		return nil
 	}
 
@@ -74,6 +76,7 @@ func (a *Autoscaler) runAutoscalerPollForWorkpool(ctx context.Context, pool *Wor
 
 	poolDirty := false
 
+	a.vlogf("autoscaler: submitting a batch request for %d preemptible VMs and %d nonpreemptible VMs (already requested %d)", preemptibleCount, nonPreemptibleCount, requestedCount)
 	if preemptibleCount > 0 {
 		if err := a.submitBatch(ctx, pool, preemptibleCount, true, now); err != nil {
 			return fmt.Errorf("submit preemptible batch: %w", err)

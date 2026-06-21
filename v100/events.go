@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/firestore"
-	"cloud.google.com/go/pubsub"
+	"cloud.google.com/go/pubsub/v2"
 	"github.com/google/uuid"
 )
 
@@ -50,23 +50,30 @@ type TaskStateUpdate struct {
 	NewState string `json:"new_state"`
 }
 
+// JobCreatedEvent is published to sparkles-events and recorded in Events when a new job is submitted.
+type JobCreatedEvent struct {
+	Type       string `json:"type"`
+	JobID      string `json:"job_id"`
+	WorkpoolID string `json:"workpool_id"`
+}
+
 // EventPublisher writes events to the sparkles-events Pub/Sub topic and
 // records a corresponding document in the Events Firestore collection.
 // Firestore is written first (durable record), then Pub/Sub (real-time
 // delivery). If the Pub/Sub publish fails the event is still preserved in
 // Firestore.
 type EventPublisher struct {
-	topic *pubsub.Topic
-	fs    *firestore.Client
+	publisher *pubsub.Publisher
+	fs        *firestore.Client
 }
 
-func NewEventPublisher(topic *pubsub.Topic, fs *firestore.Client) *EventPublisher {
-	return &EventPublisher{topic: topic, fs: fs}
+func NewEventPublisher(publisher *pubsub.Publisher, fs *firestore.Client) *EventPublisher {
+	return &EventPublisher{publisher: publisher, fs: fs}
 }
 
-// Stop flushes pending publishes and stops the underlying Pub/Sub topic client.
+// Stop flushes pending publishes and stops the underlying Pub/Sub publisher.
 func (ep *EventPublisher) Stop() {
-	ep.topic.Stop()
+	ep.publisher.Stop()
 }
 
 func (ep *EventPublisher) recordAndPublish(ctx context.Context, record EventRecord, payload any) error {
@@ -79,7 +86,7 @@ func (ep *EventPublisher) recordAndPublish(ctx context.Context, record EventReco
 	if err != nil {
 		return fmt.Errorf("marshalling event: %w", err)
 	}
-	if _, err := ep.topic.Publish(ctx, &pubsub.Message{Data: data}).Get(ctx); err != nil {
+	if _, err := ep.publisher.Publish(ctx, &pubsub.Message{Data: data}).Get(ctx); err != nil {
 		return fmt.Errorf("publishing event to topic: %w", err)
 	}
 	return nil
@@ -94,6 +101,21 @@ func (ep *EventPublisher) PublishWorkerEvent(ctx context.Context, event WorkerEv
 		Timestamp:  now,
 		Expiry:     now.Add(eventTTL),
 		WorkerID:   event.WorkerID,
+		WorkpoolID: event.WorkpoolID,
+	}
+	return ep.recordAndPublish(ctx, record, event)
+}
+
+// PublishJobCreated records and publishes a job creation event.
+func (ep *EventPublisher) PublishJobCreated(ctx context.Context, event JobCreatedEvent) error {
+	event.Type = "job_created"
+	now := time.Now()
+	record := EventRecord{
+		EventID:    uuid.New().String(),
+		Type:       "job_created",
+		Timestamp:  now,
+		Expiry:     now.Add(eventTTL),
+		JobID:      event.JobID,
 		WorkpoolID: event.WorkpoolID,
 	}
 	return ep.recordAndPublish(ctx, record, event)

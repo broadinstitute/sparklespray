@@ -131,12 +131,12 @@ An append-only log of every event published to `sparkles-worker-out`. The docume
 
 Each event document contains the same fields as the corresponding Pub/Sub message, plus an `expiry` field for TTL-based garbage collection:
 
-| Field       | Type      | Description                                                             |
-| ----------- | --------- | ----------------------------------------------------------------------- |
-| `event_id`  | string    | UUID uniquely identifying this event                                    |
-| `type`      | string    | Event type — `worker_started`, `worker_stopped`, or `task_state_update` |
-| `timestamp` | timestamp | When the event was recorded                                             |
-| `expiry`    | timestamp | When this document may be deleted (7-day TTL)                           |
+| Field       | Type      | Description                                                                            |
+| ----------- | --------- | -------------------------------------------------------------------------------------- |
+| `event_id`  | string    | UUID uniquely identifying this event                                                   |
+| `type`      | string    | Event type — `worker_started`, `worker_stopped`, `task_state_update`, or `job_created` |
+| `timestamp` | timestamp | When the event was recorded                                                            |
+| `expiry`    | timestamp | When this document may be deleted (7-day TTL)                                          |
 
 Additional fields present on **worker events** (`worker_started`, `worker_stopped`):
 
@@ -226,6 +226,18 @@ Published by workers to report lifecycle events. Messages are JSON-encoded. Ever
   "workpool_id": "..."
 }
 ```
+
+**JobCreatedEvent** — published when a new job is submitted:
+
+```json
+{
+  "type": "job_created",
+  "job_id": "...",
+  "workpool_id": "..."
+}
+```
+
+The autoscaler subscribes to this topic via the `autoscaler-events-in` subscription and triggers an immediate provisioning poll on receipt, rather than waiting for the next 1-minute timer tick.
 
 **TaskStateUpdate** — published on every task state transition:
 

@@ -23,7 +23,13 @@ procs:
   batchapi-emulator:
     cmd: ["${SPARKLES}", "dev", "batchapi-emulator", "--addr", ":${BATCHAPI_PORT}"]
   autoscaler:
-    cmd: ["${SPARKLES}", "autoscale", "--project", "${PROJECT}"]
+    cmd: ["${SPARKLES}", "autoscale", "--project", "${PROJECT}", "--verbose"]
+    env:
+      FIRESTORE_EMULATOR_HOST: "localhost:${FIRESTORE_PORT}"
+      PUBSUB_EMULATOR_HOST: "localhost:${PUBSUB_PORT}"
+      SPARKLES_BATCH_API_EMULATOR: "http://localhost:${BATCHAPI_PORT}"
+  shell:
+    cmd: ["bash"]
     env:
       FIRESTORE_EMULATOR_HOST: "localhost:${FIRESTORE_PORT}"
       PUBSUB_EMULATOR_HOST: "localhost:${PUBSUB_PORT}"

@@ -17,7 +17,8 @@ import (
 
 	"cloud.google.com/go/compute/metadata"
 	"cloud.google.com/go/firestore"
-	"cloud.google.com/go/pubsub"
+	"cloud.google.com/go/pubsub/v2"
+	pubsubpb "cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
 	"cloud.google.com/go/storage"
 	"github.com/google/uuid"
 	"github.com/urfave/cli"
@@ -458,8 +459,8 @@ type workerState struct {
 	transferClient TransferClient
 	publisher      *EventPublisher
 	workerDoc      *firestore.DocumentRef
-	sub            *pubsub.Subscription
 	subName        string
+	project        string
 	workerID       string
 	workpoolID     string
 	bindMounts     []string
@@ -534,7 +535,7 @@ func startWorker(ctx context.Context, project, db, workerID, workpoolID string, 
 	}
 	log.Printf("Registered worker %s in Firestore", workerID)
 
-	publisher := NewEventPublisher(psClient.Topic(workerOutTopic), fsClient)
+	publisher := NewEventPublisher(psClient.Publisher(workerOutTopic), fsClient)
 
 	if err := publisher.PublishWorkerEvent(ctx, WorkerEvent{
 		Type:       "worker_started",
@@ -549,12 +550,12 @@ func startWorker(ctx context.Context, project, db, workerID, workpoolID string, 
 	log.Printf("Published worker_started event")
 
 	subName := fmt.Sprintf("%s-%s", workerInTopic, workerID)
-	inTopic := psClient.Topic(workerInTopic)
-	sub, err := psClient.CreateSubscription(ctx, subName, pubsub.SubscriptionConfig{
-		Topic: inTopic,
-	})
-	inTopic.Stop()
-	if err != nil {
+	subResourceName := fmt.Sprintf("projects/%s/subscriptions/%s", project, subName)
+	topicResourceName := fmt.Sprintf("projects/%s/topics/%s", project, workerInTopic)
+	if _, err = psClient.SubscriptionAdminClient.CreateSubscription(ctx, &pubsubpb.Subscription{
+		Name:  subResourceName,
+		Topic: topicResourceName,
+	}); err != nil {
 		publisher.Stop()
 		psClient.Close()
 		fsClient.Close()
@@ -565,7 +566,7 @@ func startWorker(ctx context.Context, project, db, workerID, workpoolID string, 
 	go runHeartbeat(ctx, workerDoc)
 
 	go func() {
-		recvErr := sub.Receive(ctx, func(ctx context.Context, msg *pubsub.Message) {
+		recvErr := psClient.Subscriber(subName).Receive(ctx, func(ctx context.Context, msg *pubsub.Message) {
 			log.Printf("Received message on %s: %s", workerInTopic, string(msg.Data))
 			msg.Ack()
 		})
@@ -581,8 +582,8 @@ func startWorker(ctx context.Context, project, db, workerID, workpoolID string, 
 		transferClient: &GCSTransferClient{gcsClient: gcsClient},
 		publisher:      publisher,
 		workerDoc:      workerDoc,
-		sub:            sub,
 		subName:        subName,
+		project:        project,
 		workerID:       workerID,
 		workpoolID:     workpoolID,
 	}, nil
@@ -611,7 +612,10 @@ func (ws *workerState) shutdown() {
 		log.Printf("Failed to publish worker_stopped: %v", err)
 	}
 
-	if err := ws.sub.Delete(ctx); err != nil {
+	subResourceName := fmt.Sprintf("projects/%s/subscriptions/%s", ws.project, ws.subName)
+	if err := ws.psClient.SubscriptionAdminClient.DeleteSubscription(ctx, &pubsubpb.DeleteSubscriptionRequest{
+		Subscription: subResourceName,
+	}); err != nil {
 		log.Printf("Failed to delete subscription %s: %v", ws.subName, err)
 	}
 }

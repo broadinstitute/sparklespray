@@ -192,6 +192,19 @@ type Notification struct {
 	Err     error
 }
 
+// JobNotification is delivered on the channel returned by JobEventReceiver.JobEvents.
+// Exactly one of JobID or Err is set.
+type JobNotification struct {
+	JobID      string
+	WorkpoolID string
+	Err        error
+}
+
+// JobEventReceiver signals when a new job has been submitted.
+type JobEventReceiver interface {
+	JobEvents() <-chan JobNotification
+}
+
 // PubSubReceiver delivers Batch API status-change notifications.
 // Each notification carries the BatchID of the batch that changed state,
 // or a fatal Err that the autoscaler should propagate.

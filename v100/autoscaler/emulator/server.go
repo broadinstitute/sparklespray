@@ -333,34 +333,41 @@ func (s *server) runJob(job *emulatorJob) {
 		return
 	}
 
-	// Phase 2: spawn all containers in parallel.
-	var spawnWg sync.WaitGroup
+	// Phase 2: spawn containers sequentially.
 	for _, vm := range job.VMs {
-		spawnWg.Add(1)
-		vm := vm
-		go func() {
-			defer spawnWg.Done()
-			args := []string{"run", "-d", "--name", vm.InstanceName}
-			for _, l := range job.Labels {
-				args = append(args, "--label", fmt.Sprintf("%s=%s", l.Name, l.Value))
-			}
-			args = append(args, job.DockerImage)
-			if job.Command != "" {
-				args = append(args, strings.Fields(job.Command)...)
-			}
-			cmd := exec.Command("docker", args...)
-			cmd.Stdout = os.Stdout
-			cmd.Stderr = os.Stderr
-			if err := cmd.Run(); err != nil {
-				log.Printf("emulator: docker run -d %s: %v", vm.InstanceName, err)
-				s.mu.Lock()
-				vm.done = true
-				vm.exitCode = 1
-				s.mu.Unlock()
-			}
-		}()
+		args := []string{"run", "-d", "--name", vm.InstanceName}
+		for _, l := range job.Labels {
+			args = append(args, "--label", fmt.Sprintf("%s=%s", l.Name, l.Value))
+		}
+		args = append(args, job.DockerImage)
+		if job.Command != "" {
+			args = append(args, strings.Fields(job.Command)...)
+		}
+		cmd := exec.Command("docker", args...)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			log.Printf("emulator: docker run -d %s: %v", vm.InstanceName, err)
+			vm.done = true
+			vm.exitCode = 1
+		}
 	}
-	spawnWg.Wait()
+
+	// If every VM failed to start, mark the job Failed immediately without entering Running.
+	allFailed := true
+	for _, vm := range job.VMs {
+		if !vm.done {
+			allFailed = false
+			break
+		}
+	}
+	if allFailed {
+		s.mu.Lock()
+		job.Status = autoscaler.BatchJobStatusFailed
+		s.mu.Unlock()
+		log.Printf("emulator: all VMs failed to start for job %s", job.JobID)
+		return
+	}
 
 	s.mu.Lock()
 	job.Status = autoscaler.BatchJobStatusRunning

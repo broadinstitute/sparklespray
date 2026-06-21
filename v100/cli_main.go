@@ -6,18 +6,27 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
+	"net/http"
+
 	"cloud.google.com/go/firestore"
+	"cloud.google.com/go/pubsub/v2"
+	pubsubpb "cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
 	"github.com/broadinstitute/sparklespray/v100/autoscaler"
 	"github.com/broadinstitute/sparklespray/v100/autoscaler/emulator"
 	"github.com/broadinstitute/sparklespray/v100/scheduler"
 	"github.com/google/uuid"
 	"github.com/urfave/cli"
+	"google.golang.org/grpc/codes"
+	grpcstatus "google.golang.org/grpc/status"
 )
+
+const defaultDB = "sparkles"
 
 func Main() error {
 	app := cli.NewApp()
@@ -36,7 +45,7 @@ func Main() error {
 			Name: "worker",
 			Flags: []cli.Flag{
 				cli.StringFlag{Name: "project"},
-				cli.StringFlag{Name: "db"},
+				cli.StringFlag{Name: "db", Value: defaultDB},
 				cli.StringFlag{Name: "workpool"},
 				cli.StringFlag{Name: "resources"},
 				cli.BoolFlag{Name: "no-gcp", Usage: "local development mode: skip GCP metadata server"},
@@ -48,7 +57,8 @@ func Main() error {
 			Usage: "Start the autoscaler loop",
 			Flags: []cli.Flag{
 				cli.StringFlag{Name: "project", Usage: "GCP project ID (required)"},
-				cli.StringFlag{Name: "db", Usage: "Firestore database (optional, uses default if empty)"},
+				cli.StringFlag{Name: "db", Value: defaultDB, Usage: "Firestore database"},
+				cli.BoolFlag{Name: "verbose, v", Usage: "log a message at the start of every poll"},
 			},
 			Action: runAutoscale,
 		},
@@ -60,8 +70,18 @@ func Main() error {
 					ArgsUsage: "<job-spec-json> <workpool-spec-json>",
 					Flags: []cli.Flag{
 						cli.StringFlag{Name: "project"},
+						cli.StringFlag{Name: "db", Value: defaultDB},
 					},
 					Action: runDevSubmit,
+				},
+				{
+					Name:  "dumpdb",
+					Usage: "Print all tasks and workpools from Firestore",
+					Flags: []cli.Flag{
+						cli.StringFlag{Name: "project"},
+						cli.StringFlag{Name: "db", Value: defaultDB},
+					},
+					Action: runDevDumpDB,
 				},
 				{
 					Name:  "batchapi-emulator",
@@ -79,6 +99,148 @@ func Main() error {
 	return app.Run(os.Args)
 }
 
+func runDevDumpDB(c *cli.Context) error {
+	project := c.String("project")
+	if project == "" {
+		return fmt.Errorf("--project is required")
+	}
+	db := c.String("db")
+
+	ctx := context.Background()
+	log.Printf("Connecting to project %s, db %s", project, db)
+	fsClient, err := firestore.NewClientWithDatabase(ctx, project, db)
+	if err != nil {
+		return fmt.Errorf("creating firestore client: %w", err)
+	}
+	defer fsClient.Close()
+
+	fmt.Println("=== Tasks ===")
+	taskDocs, err := fsClient.Collection(taskCollection).Documents(ctx).GetAll()
+	if err != nil {
+		return fmt.Errorf("listing tasks: %w", err)
+	}
+	for _, doc := range taskDocs {
+		var t Task
+		if err := doc.DataTo(&t); err != nil {
+			fmt.Printf("  %s  (error reading fields: %v)\n", doc.Ref.ID, err)
+			continue
+		}
+		fmt.Printf("  %s  job=%s  workpool=%s  status=%s\n", t.TaskID, t.JobID, t.WorkpoolID, t.Status)
+	}
+	fmt.Printf("  (%d total)\n\n", len(taskDocs))
+
+	fmt.Println("=== WorkPools ===")
+	poolDocs, err := fsClient.Collection(workpoolCollection).Documents(ctx).GetAll()
+	if err != nil {
+		return fmt.Errorf("listing workpools: %w", err)
+	}
+	for _, doc := range poolDocs {
+		var p WorkPool
+		if err := doc.DataTo(&p); err != nil {
+			fmt.Printf("  %s  (error reading fields: %v)\n", doc.Ref.ID, err)
+			continue
+		}
+		fmt.Printf("  %s  machine=%s  region=%s  status=%s\n", p.WorkpoolID, p.MachineType, p.Region, p.Status)
+	}
+	fmt.Printf("  (%d total)\n", len(poolDocs))
+
+	if emulatorURL := os.Getenv("SPARKLES_BATCH_API_EMULATOR"); emulatorURL != "" {
+		fmt.Println()
+		if err := dumpBatchAPI(ctx, emulatorURL); err != nil {
+			fmt.Printf("batch API dump error: %v\n", err)
+		}
+	}
+
+	return nil
+}
+
+type dumpJobInfo struct {
+	JobID  string `json:"jobID"`
+	Status string `json:"status"`
+	Labels []struct {
+		Name  string `json:"name"`
+		Value string `json:"value"`
+	} `json:"labels"`
+	VMs []struct {
+		InstanceName string `json:"instanceName"`
+		Zone         string `json:"zone"`
+		Done         bool   `json:"done"`
+		ExitCode     int    `json:"exitCode"`
+	} `json:"vms"`
+}
+
+type dumpVMInfo struct {
+	InstanceName string `json:"instanceName"`
+	Zone         string `json:"zone"`
+}
+
+func batchAPIGet(ctx context.Context, url string, result any) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+	return json.NewDecoder(resp.Body).Decode(result)
+}
+
+func dumpBatchAPI(ctx context.Context, baseURL string) error {
+	fmt.Println("=== Batch API Jobs ===")
+	var jobsResp struct {
+		Jobs []dumpJobInfo `json:"jobs"`
+	}
+	if err := batchAPIGet(ctx, baseURL+"/jobs", &jobsResp); err != nil {
+		return fmt.Errorf("GET /jobs: %w", err)
+	}
+	for _, job := range jobsResp.Jobs {
+		labels := ""
+		for _, l := range job.Labels {
+			labels += fmt.Sprintf(" %s=%s", l.Name, l.Value)
+		}
+		fmt.Printf("  %s  status=%s  vms=%d%s\n", job.JobID, job.Status, len(job.VMs), labels)
+		for _, vm := range job.VMs {
+			doneStr := ""
+			if vm.Done {
+				doneStr = fmt.Sprintf(" done(exit=%d)", vm.ExitCode)
+			}
+			fmt.Printf("    vm=%s  zone=%s%s\n", vm.InstanceName, vm.Zone, doneStr)
+		}
+	}
+	fmt.Printf("  (%d total)\n\n", len(jobsResp.Jobs))
+
+	fmt.Println("=== Batch API VMs (by zone) ===")
+	var zonesResp struct {
+		Zones []string `json:"zones"`
+	}
+	if err := batchAPIGet(ctx, baseURL+"/region/emulator/zones", &zonesResp); err != nil {
+		return fmt.Errorf("GET /region/emulator/zones: %w", err)
+	}
+	totalVMs := 0
+	for _, zone := range zonesResp.Zones {
+		var vmsResp struct {
+			VMs map[string]dumpVMInfo `json:"vms"`
+		}
+		if err := batchAPIGet(ctx, baseURL+"/vms/"+zone, &vmsResp); err != nil {
+			fmt.Printf("  zone=%s  error: %v\n", zone, err)
+			continue
+		}
+		fmt.Printf("  zone=%s  vms=%d\n", zone, len(vmsResp.VMs))
+		for _, vm := range vmsResp.VMs {
+			fmt.Printf("    %s\n", vm.InstanceName)
+		}
+		totalVMs += len(vmsResp.VMs)
+	}
+	fmt.Printf("  (%d total across %d zones)\n", totalVMs, len(zonesResp.Zones))
+
+	return nil
+}
+
 func runDevSubmit(c *cli.Context) error {
 	args := c.Args()
 	jobSpecFile := args.Get(0)
@@ -93,7 +255,7 @@ func runDevSubmit(c *cli.Context) error {
 	if project == "" {
 		return fmt.Errorf("--project is required")
 	}
-	return devSubmit(jobSpecFile, workpoolSpecFile, project)
+	return devSubmit(jobSpecFile, workpoolSpecFile, project, c.String("db"))
 }
 
 type JobSpec struct {
@@ -159,7 +321,7 @@ func resolveWorkpoolID(workpoolSpec *WorkpoolSpec) (string, error) {
 	return workpoolID, nil
 }
 
-func devSubmit(jobSpecFile, workpoolSpecFile, project string) error {
+func devSubmit(jobSpecFile, workpoolSpecFile, project, db string) error {
 	jobSpec, err := readJSON[JobSpec](jobSpecFile)
 	if err != nil {
 		return err
@@ -196,7 +358,7 @@ func devSubmit(jobSpecFile, workpoolSpecFile, project string) error {
 	}
 
 	ctx := context.Background()
-	fsClient, err := firestore.NewClient(ctx, project)
+	fsClient, err := firestore.NewClientWithDatabase(ctx, project, db)
 	if err != nil {
 		return fmt.Errorf("creating firestore client: %w", err)
 	}
@@ -249,6 +411,28 @@ func devSubmit(jobSpecFile, workpoolSpecFile, project string) error {
 	}
 
 	fmt.Printf("job %s written with %d tasks\n", jobID, len(jobSpec.Tasks))
+
+	// Publish job_created event so the autoscaler can react immediately.
+	// Non-fatal: the autoscaler's periodic poll will pick up the job if this fails.
+	psClient, psErr := pubsub.NewClient(ctx, project)
+	if psErr != nil {
+		log.Printf("devSubmit: creating pubsub client: %v", psErr)
+		return nil
+	}
+	defer psClient.Close()
+	topicName := fmt.Sprintf("projects/%s/topics/sparkles-events", project)
+	if _, psErr = psClient.TopicAdminClient.CreateTopic(ctx, &pubsubpb.Topic{Name: topicName}); psErr != nil {
+		if grpcstatus.Code(psErr) != codes.AlreadyExists {
+			log.Printf("devSubmit: ensuring sparkles-events topic: %v", psErr)
+			return nil
+		}
+	}
+	ep := NewEventPublisher(psClient.Publisher("sparkles-events"), fsClient)
+	defer ep.Stop()
+	if psErr = ep.PublishJobCreated(ctx, JobCreatedEvent{JobID: jobID, WorkpoolID: workpoolID}); psErr != nil {
+		log.Printf("devSubmit: publishing job_created event: %v", psErr)
+	}
+
 	return nil
 }
 
@@ -266,10 +450,8 @@ func runAutoscale(c *cli.Context) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	if db == "" {
-		db = "(default)"
-	}
 	fsClient, err := firestore.NewClientWithDatabase(ctx, project, db)
+	log.Printf("Connecting to project %s, database %s", project, db)
 	if err != nil {
 		return fmt.Errorf("creating firestore client: %w", err)
 	}
@@ -295,7 +477,14 @@ func runAutoscale(c *cli.Context) error {
 		return fmt.Errorf("creating pubsub receiver: %w", err)
 	}
 
+	jobEventReceiver, err := autoscaler.NewGCPJobEventReceiver(ctx, project)
+	if err != nil {
+		return fmt.Errorf("creating job event receiver: %w", err)
+	}
+
 	as := autoscaler.New(scheduler.RealClock, batchAPI, pools, batches, workers, tasks, pubsubReceiver)
+	as.SetVerbose(c.Bool("verbose"))
+	as.SetJobEventReceiver(jobEventReceiver)
 	as.RunAutoscalerLoop(ctx)
 	return nil
 }
