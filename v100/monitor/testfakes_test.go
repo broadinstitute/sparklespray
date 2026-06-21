@@ -510,6 +510,19 @@ func (s *FakeTaskStore) ResetToPending(ctx context.Context, taskID string) error
 	return nil
 }
 
+func (s *FakeTaskStore) CountByJob(ctx context.Context, jobID string) (map[string]int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	counts := make(map[string]int)
+	for _, t := range s.tasks {
+		if t.JobID == jobID {
+			counts[string(t.Status)]++
+		}
+	}
+	return counts, nil
+}
+
 // ---- FakePubSubReceiver ----
 
 type FakePubSubReceiver struct {

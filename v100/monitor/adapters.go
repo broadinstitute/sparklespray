@@ -429,3 +429,84 @@ func (s *FirestoreTaskStore) ResetToPending(ctx context.Context, taskID string) 
 	})
 	return err
 }
+
+func (s *FirestoreTaskStore) CountByJob(ctx context.Context, jobID string) (map[string]int, error) {
+	iter := s.fs.Collection(taskCollection).
+		Where("job_id", "==", jobID).
+		Documents(ctx)
+
+	counts := make(map[string]int)
+	for {
+		snap, err := iter.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		var f firestoreTask
+		if err := snap.DataTo(&f); err != nil {
+			return nil, err
+		}
+		counts[f.Status]++
+	}
+	return counts, nil
+}
+
+// ----- FirestoreJobSummaryStore -----
+
+const jobSummaryCollection = "JobSummary"
+const jobSummaryHistoryCollection = "JobSummaryHistory"
+
+type FirestoreJobSummaryStore struct {
+	fs *firestore.Client
+}
+
+func NewFirestoreJobSummaryStore(fs *firestore.Client) *FirestoreJobSummaryStore {
+	return &FirestoreJobSummaryStore{fs: fs}
+}
+
+func (s *FirestoreJobSummaryStore) Create(ctx context.Context, summary *JobSummary) error {
+	_, err := s.fs.Collection(jobSummaryCollection).Doc(summary.JobID).Set(ctx, summary)
+	return err
+}
+
+func (s *FirestoreJobSummaryStore) ListNonTerminal(ctx context.Context) ([]*JobSummary, error) {
+	nonTerminal := []interface{}{
+		string(JobStatusPending),
+		string(JobStatusInProgress),
+		string(JobStatusInProgressWithError),
+		string(JobStatusInProgressWithFailure),
+	}
+	iter := s.fs.Collection(jobSummaryCollection).
+		Where("status", "in", nonTerminal).
+		Documents(ctx)
+
+	var summaries []*JobSummary
+	for {
+		snap, err := iter.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		var doc JobSummary
+		if err := snap.DataTo(&doc); err != nil {
+			return nil, err
+		}
+		cp := doc
+		summaries = append(summaries, &cp)
+	}
+	return summaries, nil
+}
+
+func (s *FirestoreJobSummaryStore) Save(ctx context.Context, summary *JobSummary) error {
+	_, err := s.fs.Collection(jobSummaryCollection).Doc(summary.JobID).Set(ctx, summary)
+	return err
+}
+
+func (s *FirestoreJobSummaryStore) SaveHistory(ctx context.Context, history *JobSummaryHistory) error {
+	_, _, err := s.fs.Collection(jobSummaryHistoryCollection).Add(ctx, history)
+	return err
+}

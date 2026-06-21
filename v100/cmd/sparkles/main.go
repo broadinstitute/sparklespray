@@ -5,11 +5,13 @@ import (
 	"os"
 
 	v100 "github.com/broadinstitute/sparklespray/v100"
+	"github.com/broadinstitute/sparklespray/v100/dev"
 )
 
 func main() {
-	if err := v100.Main(); err != nil {
+	app := v100.NewApp()
+	app.Commands = append(app.Commands, dev.Command())
+	if err := app.Run(os.Args); err != nil {
 		log.Fatal(err)
-		os.Exit(1)
 	}
 }

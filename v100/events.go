@@ -11,7 +11,8 @@ import (
 	"github.com/google/uuid"
 )
 
-const eventCollection = "Events"
+const EventCollection = "Events"
+const eventCollection = EventCollection
 const eventTTL = 7 * 24 * time.Hour
 
 // EventRecord is written to the Events Firestore collection for every event
@@ -52,6 +53,14 @@ type TaskStateUpdate struct {
 
 // JobCreatedEvent is published to sparkles-events and recorded in Events when a new job is submitted.
 type JobCreatedEvent struct {
+	Type       string `json:"type"`
+	JobID      string `json:"job_id"`
+	WorkpoolID string `json:"workpool_id"`
+}
+
+// JobTerminatedEvent is published to sparkles-events and recorded in Events when
+// a job reaches a terminal state (success, error, failed, or killed).
+type JobTerminatedEvent struct {
 	Type       string `json:"type"`
 	JobID      string `json:"job_id"`
 	WorkpoolID string `json:"workpool_id"`
@@ -105,6 +114,22 @@ func (ep *EventPublisher) PublishWorkerEvent(ctx context.Context, event WorkerEv
 		Expiry:     now.Add(eventTTL),
 		WorkerID:   event.WorkerID,
 		WorkpoolID: event.WorkpoolID,
+	}
+	return ep.recordAndPublish(ctx, record, event)
+}
+
+// PublishJobTerminated records and publishes a job termination event.
+// Satisfies the monitor.JobTerminatedPublisher interface.
+func (ep *EventPublisher) PublishJobTerminated(ctx context.Context, jobID, workpoolID string) error {
+	event := JobTerminatedEvent{Type: "job_terminated", JobID: jobID, WorkpoolID: workpoolID}
+	now := time.Now()
+	record := EventRecord{
+		EventID:    uuid.New().String(),
+		Type:       "job_terminated",
+		Timestamp:  now,
+		Expiry:     now.Add(eventTTL),
+		JobID:      jobID,
+		WorkpoolID: workpoolID,
 	}
 	return ep.recordAndPublish(ctx, record, event)
 }

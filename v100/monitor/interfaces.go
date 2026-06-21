@@ -105,6 +105,7 @@ type Worker struct {
 // Task is the subset of the Tasks Firestore document needed by the monitor.
 type Task struct {
 	TaskID         string
+	JobID          string
 	WorkpoolID     string
 	Status         TaskStatus
 	OwningWorkerID string
@@ -183,6 +184,78 @@ type TaskStore interface {
 	CountPending(ctx context.Context, workpoolID string) (int, error)
 	// ResetToPending sets the task to pending and clears OwningWorkerID.
 	ResetToPending(ctx context.Context, taskID string) error
+	// CountByJob returns a map from task status string to count for the given job.
+	CountByJob(ctx context.Context, jobID string) (map[string]int, error)
+}
+
+// ----- Job summary types -----
+
+// JobStatus is the rolled-up lifecycle state of a job.
+type JobStatus string
+
+const (
+	JobStatusPending               JobStatus = "pending"
+	JobStatusInProgress            JobStatus = "in_progress"
+	JobStatusInProgressWithError   JobStatus = "in_progress_with_error"
+	JobStatusInProgressWithFailure JobStatus = "in_progress_with_failure"
+	JobStatusKilled                JobStatus = "killed"
+	JobStatusSuccess               JobStatus = "success"
+	JobStatusError                 JobStatus = "error"
+	JobStatusFailed                JobStatus = "failed"
+)
+
+// IsTerminalJobStatus reports whether s is a terminal job status.
+func IsTerminalJobStatus(s JobStatus) bool {
+	switch s {
+	case JobStatusSuccess, JobStatusError, JobStatusFailed, JobStatusKilled:
+		return true
+	}
+	return false
+}
+
+// TaskCount is one entry in a JobSummary's task-state breakdown.
+type TaskCount struct {
+	State string `firestore:"state" json:"state"`
+	Count int    `firestore:"count" json:"count"`
+}
+
+// JobSummary is created at job submission (status=pending) and updated by the
+// monitor's job-summary poll as task states change.
+type JobSummary struct {
+	JobID      string      `firestore:"job_id"`
+	WorkpoolID string      `firestore:"workpool_id"`
+	Expiry     time.Time   `firestore:"expiry"`
+	Status     JobStatus   `firestore:"status"`
+	Tasks      []TaskCount `firestore:"tasks"`
+}
+
+// JobSummaryHistory is an append-only snapshot written each time the monitor
+// updates a JobSummary.
+type JobSummaryHistory struct {
+	JobID      string      `firestore:"job_id"`
+	WorkpoolID string      `firestore:"workpool_id"`
+	Timestamp  time.Time   `firestore:"timestamp"`
+	Expiry     time.Time   `firestore:"expiry"`
+	Status     JobStatus   `firestore:"status"`
+	Tasks      []TaskCount `firestore:"tasks"`
+}
+
+// JobSummaryStore reads and writes JobSummary and JobSummaryHistory documents.
+type JobSummaryStore interface {
+	// Create writes the initial JobSummary for a new job.
+	Create(ctx context.Context, summary *JobSummary) error
+	// ListNonTerminal returns all JobSummary documents whose status is not terminal.
+	ListNonTerminal(ctx context.Context) ([]*JobSummary, error)
+	// Save replaces an existing JobSummary document.
+	Save(ctx context.Context, summary *JobSummary) error
+	// SaveHistory appends a snapshot to the JobSummaryHistory collection.
+	SaveHistory(ctx context.Context, history *JobSummaryHistory) error
+}
+
+// JobTerminatedPublisher emits a job_terminated event when a job reaches a
+// terminal state. Defined here (not in v100) to avoid an import cycle.
+type JobTerminatedPublisher interface {
+	PublishJobTerminated(ctx context.Context, jobID, workpoolID string) error
 }
 
 // Notification is delivered on the channel returned by PubSubReceiver.Notifications.

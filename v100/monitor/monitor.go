@@ -21,23 +21,28 @@ const (
 	defaultMaxConsecutiveFailedBatches = 2
 
 	provisioningPollInterval = 5 * time.Second
-	tier1Interval          = 30 * time.Second
+	tier1Interval            = 30 * time.Second
+
+	jobSummaryMinInterval = 1 * time.Second
+	jobSummaryMaxInterval = 5 * time.Minute
 )
 
 // activeTasks is the set of task statuses that are orphaned back to pending when a worker dies.
 var activeTasks = []TaskStatus{TaskStatusClaimed, TaskStatusRunning, TaskStatusWriting}
 
-// Monitor runs provisioning and watchdog logic against a set of workpools.
+// Monitor runs provisioning, watchdog, and job-summary bookkeeping logic.
 type Monitor struct {
-	clock     scheduler.Clock
-	batchAPI  BatchAPIClient
-	pools     WorkPoolStore
-	batches   BatchRequestStore
-	workers   WorkerStore
-	tasks     TaskStore
-	pubsub    PubSubReceiver
-	jobEvents JobEventReceiver
-	verbose   bool
+	clock         scheduler.Clock
+	batchAPI      BatchAPIClient
+	pools         WorkPoolStore
+	batches       BatchRequestStore
+	workers       WorkerStore
+	tasks         TaskStore
+	pubsub        PubSubReceiver
+	jobEvents     JobEventReceiver
+	jobSummaries  JobSummaryStore
+	jobTerminated JobTerminatedPublisher
+	verbose       bool
 }
 
 // SetVerbose enables or disables verbose poll logging.
@@ -46,6 +51,12 @@ func (a *Monitor) SetVerbose(v bool) { a.verbose = v }
 // SetJobEventReceiver sets an optional receiver for job_created events.
 // When set, a new job submission triggers an immediate provisioning poll.
 func (a *Monitor) SetJobEventReceiver(r JobEventReceiver) { a.jobEvents = r }
+
+// SetJobSummaryStore sets the store used to read and write JobSummary documents.
+func (a *Monitor) SetJobSummaryStore(s JobSummaryStore) { a.jobSummaries = s }
+
+// SetJobTerminatedPublisher sets the publisher used to emit job_terminated events.
+func (a *Monitor) SetJobTerminatedPublisher(p JobTerminatedPublisher) { a.jobTerminated = p }
 
 // vlogf logs only when verbose mode is on.
 func (a *Monitor) vlogf(format string, args ...any) {
@@ -131,6 +142,16 @@ func (a *Monitor) RunMonitorLoop(ctx context.Context) {
 			log.Printf("tier3: %v", err)
 		}
 	})
+
+	// Job summary poll: recomputes JobSummary for every non-terminal job.
+	if a.jobSummaries != nil {
+		sched.Add(jobSummaryMinInterval, jobSummaryMaxInterval, func() {
+			a.vlogf("poll: starting job summary poll")
+			if err := a.runJobSummaryPoll(ctx); err != nil {
+				log.Printf("job summary poll: %v", err)
+			}
+		})
+	}
 
 	// Route PubSub notifications to the appropriate tier in a background goroutine.
 	// A notification with Err set means the receive loop failed fatally; propagate it.

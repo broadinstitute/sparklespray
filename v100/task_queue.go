@@ -9,9 +9,16 @@ import (
 	"google.golang.org/api/iterator"
 )
 
-const jobCollection = "Jobs"
-const taskCollection = "Tasks"
-const workpoolCollection = "WorkPools"
+// Exported collection name constants for use by sub-packages.
+const (
+	JobCollection      = "Jobs"
+	TaskCollection     = "Tasks"
+	WorkpoolCollection = "WorkPools"
+)
+
+const jobCollection = JobCollection
+const taskCollection = TaskCollection
+const workpoolCollection = WorkpoolCollection
 
 // Task status values for the active (non-terminal) states.
 const (
