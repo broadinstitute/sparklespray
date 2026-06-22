@@ -95,6 +95,15 @@ func (q *mockTaskQueue) RecordError(_ context.Context, _ string, _ int) error {
 	return nil
 }
 
+func (q *mockTaskQueue) RecordKilled(_ context.Context, taskID string, _ bool) error {
+	t := q.taskByID(taskID)
+	if t != nil {
+		t.Status = StatusKilled
+		t.OwningWorkerID = ""
+	}
+	return nil
+}
+
 // --- recordingDockerCommand ---
 
 // recordingDockerCommand writes the invocation as "image extraArgs... command" to
@@ -184,7 +193,7 @@ func makeConfig(t *testing.T, q TaskQueue, tc TransferClient, docker *recordingD
 		Resources:            makeResources(4),
 		TransferClient:       tc,
 		WorkDirParent:        t.TempDir(),
-		Registry:             &taskEventLogRegistry{logs: make(map[string]*TaskEventLog)},
+		Registry:             &taskRegistry{entries: make(map[string]*registeredTask)},
 		FSClient:             nil,
 		ExecuteDockerCommand: docker.run,
 	}

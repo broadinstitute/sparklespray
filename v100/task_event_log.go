@@ -17,35 +17,70 @@ const taskLogCollection = "TaskLog"
 const taskEventLogTTL = 7 * 24 * time.Hour
 const metricsInterval = 1 * time.Minute
 
-// taskEventLogRegistry maps live task IDs to their TaskEventLog so the
-// subscription handler can look them up by task_id.
-type taskEventLogRegistry struct {
-	mu   sync.Mutex
-	logs map[string]*TaskEventLog
+// registeredTask holds the state for a task currently running on this worker.
+type registeredTask struct {
+	tel    *TaskEventLog
+	jobID  string
+	cancel context.CancelFunc
+	killed bool
 }
 
-func (r *taskEventLogRegistry) register(taskID string, tel *TaskEventLog) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.logs[taskID] = tel
+// taskRegistry maps live task IDs to their running state, enabling the
+// subscription handler to stream logs, cancel tasks by job, and detect kills.
+type taskRegistry struct {
+	mu      sync.Mutex
+	entries map[string]*registeredTask
 }
 
-func (r *taskEventLogRegistry) unregister(taskID string) {
+func (r *taskRegistry) register(taskID, jobID string, tel *TaskEventLog, cancel context.CancelFunc) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	delete(r.logs, taskID)
+	r.entries[taskID] = &registeredTask{tel: tel, jobID: jobID, cancel: cancel}
 }
 
-func (r *taskEventLogRegistry) get(taskID string) *TaskEventLog {
+func (r *taskRegistry) unregister(taskID string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.logs[taskID]
+	delete(r.entries, taskID)
+}
+
+// getLog returns the TaskEventLog for a running task, or nil if not found.
+func (r *taskRegistry) getLog(taskID string) *TaskEventLog {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if e := r.entries[taskID]; e != nil {
+		return e.tel
+	}
+	return nil
+}
+
+// killJob cancels all running tasks belonging to jobID and marks them killed.
+func (r *taskRegistry) killJob(jobID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, e := range r.entries {
+		if e.jobID == jobID {
+			e.killed = true
+			e.cancel()
+		}
+	}
+}
+
+// wasKilled reports whether the task was cancelled via killJob.
+func (r *taskRegistry) wasKilled(taskID string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if e := r.entries[taskID]; e != nil {
+		return e.killed
+	}
+	return false
 }
 
 // workerControlMessage is the JSON shape of messages received on workerInTopic.
 type workerControlMessage struct {
 	Type   string `json:"type"`
 	TaskID string `json:"task_id"`
+	JobID  string `json:"job_id"`
 }
 
 // OutputTaskEvent is one entry in the events file and in the TaskLog collection.

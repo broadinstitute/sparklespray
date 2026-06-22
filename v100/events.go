@@ -82,10 +82,15 @@ func NewEventPublisher(publisher *pubsub.Publisher, fs *firestore.Client) *Event
 
 // Stop flushes pending publishes and stops the underlying Pub/Sub publisher.
 func (ep *EventPublisher) Stop() {
-	ep.publisher.Stop()
+	if ep.publisher != nil {
+		ep.publisher.Stop()
+	}
 }
 
 func (ep *EventPublisher) recordAndPublish(ctx context.Context, record EventRecord, payload any) error {
+	if ep.fs == nil || ep.publisher == nil {
+		return nil
+	}
 	// Write to Firestore first so the event is durably recorded even if the
 	// Pub/Sub publish subsequently fails.
 	if _, err := ep.fs.Collection(eventCollection).Doc(record.EventID).Set(ctx, record); err != nil {

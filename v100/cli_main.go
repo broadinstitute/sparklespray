@@ -49,6 +49,17 @@ func NewApp() *cli.App {
 			Action: runWorker,
 		},
 		{
+			Name:      "kill",
+			ArgsUsage: "<job-id>",
+			Usage:     "Kill all pending and running tasks for a job",
+			Flags: []cli.Flag{
+				cli.StringFlag{Name: "project"},
+				cli.StringFlag{Name: "db", Value: defaultDB},
+				cli.BoolFlag{Name: "no-wait", Usage: "exit immediately after sending kill signal without polling for completion"},
+			},
+			Action: runKill,
+		},
+		{
 			Name:  "monitor",
 			Usage: "Start the monitor",
 			Flags: []cli.Flag{

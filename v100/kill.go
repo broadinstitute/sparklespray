@@ -1,0 +1,143 @@
+package v100
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"log"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"cloud.google.com/go/firestore"
+	"cloud.google.com/go/pubsub/v2"
+	"github.com/urfave/cli"
+	"google.golang.org/api/iterator"
+)
+
+func runKill(c *cli.Context) error {
+	jobID := c.Args().First()
+	if jobID == "" {
+		return fmt.Errorf("usage: sparkles kill <job-id>")
+	}
+	project := c.String("project")
+	if project == "" {
+		return fmt.Errorf("--project is required")
+	}
+	db := c.String("db")
+	noWait := c.Bool("no-wait")
+
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	var fsClient *firestore.Client
+	var err error
+	if db != "" {
+		fsClient, err = firestore.NewClientWithDatabase(ctx, project, db)
+	} else {
+		fsClient, err = firestore.NewClient(ctx, project)
+	}
+	if err != nil {
+		return fmt.Errorf("creating firestore client: %w", err)
+	}
+	defer fsClient.Close()
+
+	psClient, err := pubsub.NewClient(ctx, project)
+	if err != nil {
+		return fmt.Errorf("creating pubsub client: %w", err)
+	}
+	defer psClient.Close()
+
+	queue := NewFirestoreTaskQueue(fsClient, newNoopEventPublisher())
+
+	// Step 1: mark all pending tasks for this job as killed.
+	iter := fsClient.Collection(taskCollection).
+		Where("job_id", "==", jobID).
+		Where("status", "==", StatusPending).
+		Documents(ctx)
+	defer iter.Stop()
+
+	killedCount := 0
+	for {
+		doc, err := iter.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("querying pending tasks: %w", err)
+		}
+		var t Task
+		if err := doc.DataTo(&t); err != nil {
+			return fmt.Errorf("reading task: %w", err)
+		}
+		if err := queue.RecordKilled(ctx, t.TaskID, true); err != nil {
+			log.Printf("skipping task %s: %v", t.TaskID, err)
+			continue
+		}
+		killedCount++
+	}
+	log.Printf("Marked %d pending task(s) as killed", killedCount)
+
+	// Step 2: notify workers so they cancel any running tasks for this job.
+	msg := workerControlMessage{Type: "kill_job", JobID: jobID}
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return fmt.Errorf("marshalling kill_job message: %w", err)
+	}
+	if _, err := psClient.Publisher(workerInTopic).Publish(ctx, &pubsub.Message{Data: data}).Get(ctx); err != nil {
+		return fmt.Errorf("publishing kill_job message: %w", err)
+	}
+	log.Printf("Sent kill_job signal to workers")
+
+	if noWait {
+		return nil
+	}
+
+	// Step 3: poll until all tasks for the job are in a terminal state.
+	terminalStatuses := map[string]bool{
+		StatusSuccess: true,
+		StatusError:   true,
+		StatusFailed:  true,
+		StatusKilled:  true,
+	}
+
+	log.Printf("Waiting for all tasks to reach a terminal state...")
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(2 * time.Second):
+		}
+
+		docs, err := fsClient.Collection(taskCollection).
+			Where("job_id", "==", jobID).
+			Documents(ctx).
+			GetAll()
+		if err != nil {
+			return fmt.Errorf("polling task status: %w", err)
+		}
+
+		nonTerminal := 0
+		for _, doc := range docs {
+			var t Task
+			if err := doc.DataTo(&t); err != nil {
+				continue
+			}
+			if !terminalStatuses[t.Status] {
+				nonTerminal++
+			}
+		}
+
+		log.Printf("Non-terminal tasks remaining: %d", nonTerminal)
+		if nonTerminal == 0 {
+			break
+		}
+	}
+
+	log.Printf("All tasks are done.")
+	return nil
+}
+
+func newNoopEventPublisher() *EventPublisher {
+	return NewEventPublisher(nil, nil)
+}

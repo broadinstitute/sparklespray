@@ -2,6 +2,7 @@ package v100
 
 import (
 	"context"
+	"fmt"
 	"math/rand"
 	"time"
 
@@ -133,6 +134,11 @@ type TaskQueue interface {
 	UpdateState(ctx context.Context, taskID string, oldState string, newState string) error
 	RecordError(ctx context.Context, taskID string, exitCode int) error
 	RecordFailed(ctx context.Context, taskID string, failureReason string, oldState string) error
+	// RecordKilled marks a task as killed. If onlyIfPending is true, the update
+	// is skipped (with an error) if the task is no longer in StatusPending — this
+	// handles the race where a task is claimed between the CLI's query and kill.
+	// Pass onlyIfPending=false from the worker, where the task is known to be active.
+	RecordKilled(ctx context.Context, taskID string, onlyIfPending bool) error
 }
 
 type FirestoreTaskQueue struct {
@@ -277,6 +283,40 @@ func (q *FirestoreTaskQueue) RecordError(ctx context.Context, taskID string, exi
 		TaskID:   taskID,
 		OldState: StatusWriting,
 		NewState: StatusError,
+	})
+}
+
+// RecordKilled marks a task as killed. If onlyIfPending is true the update is
+// skipped with an error if the task is no longer StatusPending (handles the
+// race where a task is claimed between the CLI's query and the kill call).
+func (q *FirestoreTaskQueue) RecordKilled(ctx context.Context, taskID string, onlyIfPending bool) error {
+	var oldState string
+	err := q.fs.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
+		doc, err := tx.Get(q.taskDoc(taskID))
+		if err != nil {
+			return err
+		}
+		var t Task
+		if err := doc.DataTo(&t); err != nil {
+			return err
+		}
+		if onlyIfPending && t.Status != StatusPending {
+			return fmt.Errorf("task %s is no longer pending (status=%s); skipping kill", taskID, t.Status)
+		}
+		oldState = t.Status
+		return tx.Update(q.taskDoc(taskID), []firestore.Update{
+			{Path: "status", Value: StatusKilled},
+			{Path: "owning_worker_id", Value: ""},
+		})
+	})
+	if err != nil {
+		return err
+	}
+	return q.publisher.PublishTaskStateUpdate(ctx, TaskStateUpdate{
+		Type:     "task_state_update",
+		TaskID:   taskID,
+		OldState: oldState,
+		NewState: StatusKilled,
 	})
 }
 

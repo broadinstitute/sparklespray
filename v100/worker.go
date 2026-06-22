@@ -191,10 +191,13 @@ type WorkerLoopConfig struct {
 	TransferClient       TransferClient
 	WorkDirParent        string
 	BindMounts           []string
-	Registry             *taskEventLogRegistry
+	Registry             *taskRegistry
 	FSClient             *firestore.Client
 	ExecuteDockerCommand func(ctx context.Context, imageName string, command []string, workDir string, extraDockerArgs []string, tel *TaskEventLog) error
 }
+
+// ErrTaskKilled is returned by the task callback when a task was cancelled via a kill_job message.
+var ErrTaskKilled = errors.New("task killed")
 
 func workerMainLoop(ctx context.Context, cfg *WorkerLoopConfig) error {
 	completions := make(chan taskCompletion, 100)
@@ -208,7 +211,12 @@ func workerMainLoop(ctx context.Context, cfg *WorkerLoopConfig) error {
 		case c := <-completions:
 			curResources = curResources.Add(c.resources)
 			runningCount--
-			if c.err != nil {
+			if errors.Is(c.err, ErrTaskKilled) {
+				if err := cfg.Queue.RecordKilled(ctx, c.taskID, false); err != nil {
+					log.Printf("recording task %s as killed: %v", c.taskID, err)
+					return err
+				}
+			} else if c.err != nil {
 				log.Printf("task %s failed: %v", c.taskID, c.err)
 				var exitErr *exec.ExitError
 				if errors.As(c.err, &exitErr) {
@@ -302,11 +310,14 @@ func workerMainLoop(ctx context.Context, cfg *WorkerLoopConfig) error {
 			curResources = remaining
 			runningCount++
 			executeTask(task, jobResources, completions, func(t *Task) error {
-				files, err := resolveFilesToLocalize(ctx, cfg.TransferClient, t)
+				taskCtx, cancel := context.WithCancel(ctx)
+				defer cancel()
+
+				files, err := resolveFilesToLocalize(taskCtx, cfg.TransferClient, t)
 				if err != nil {
 					return fmt.Errorf("resolving files to localize: %w", err)
 				}
-				paths, err := prepareWorkDir(ctx, cfg.TransferClient, cfg.WorkDirParent, files)
+				paths, err := prepareWorkDir(taskCtx, cfg.TransferClient, cfg.WorkDirParent, files)
 				if err != nil {
 					return err
 				}
@@ -316,21 +327,29 @@ func workerMainLoop(ctx context.Context, cfg *WorkerLoopConfig) error {
 				if err != nil {
 					return fmt.Errorf("opening task event log for %s: %w", t.TaskID, err)
 				}
-				cfg.Registry.register(t.TaskID, tel)
+				cfg.Registry.register(t.TaskID, t.JobID, tel, cancel)
 				defer cfg.Registry.unregister(t.TaskID)
 				if err := cfg.Queue.UpdateState(ctx, t.TaskID, StatusClaimed, StatusRunning); err != nil {
 					tel.Close()
 					return fmt.Errorf("marking task %s running: %w", t.TaskID, err)
 				}
-				dockerExecErr := cfg.ExecuteDockerCommand(ctx, t.DockerImage, t.Command, paths.taskWorkDir, extraDockerArgs, tel)
+				dockerExecErr := cfg.ExecuteDockerCommand(taskCtx, t.DockerImage, t.Command, paths.taskWorkDir, extraDockerArgs, tel)
+				killed := cfg.Registry.wasKilled(t.TaskID)
 				flushErr := tel.Flush()
-				if err := cfg.Queue.UpdateState(ctx, t.TaskID, StatusRunning, StatusWriting); err != nil {
-					tel.Close()
-					return fmt.Errorf("marking task %s writing: %w", t.TaskID, err)
+				var uploadResultsErr error
+				if !killed {
+					if err := cfg.Queue.UpdateState(ctx, t.TaskID, StatusRunning, StatusWriting); err != nil {
+						tel.Close()
+						return fmt.Errorf("marking task %s writing: %w", t.TaskID, err)
+					}
+					uploadResultsErr = uploadResults(ctx, cfg.TransferClient, paths, t.ResultPath, t.LogPath)
 				}
-				uploadResultsErr := uploadResults(ctx, cfg.TransferClient, paths, t.ResultPath, t.LogPath)
 				closeErr := tel.Close()
 				cleanupErr := cleanupWorkDir(paths)
+				if killed {
+					_ = mergeErrors(flushErr, closeErr, cleanupErr)
+					return ErrTaskKilled
+				}
 				return mergeErrors(dockerExecErr, flushErr, uploadResultsErr, closeErr, cleanupErr)
 			})
 		}
@@ -511,7 +530,7 @@ type workerState struct {
 	transferClient TransferClient
 	publisher      *EventPublisher
 	workerDoc      *firestore.DocumentRef
-	registry       *taskEventLogRegistry
+	registry       *taskRegistry
 	subName        string
 	project        string
 	workerID       string
@@ -616,7 +635,7 @@ func startWorker(ctx context.Context, project, db, workerID, workpoolID string, 
 	}
 	log.Printf("Created subscription %s", subName)
 
-	registry := &taskEventLogRegistry{logs: make(map[string]*TaskEventLog)}
+	registry := &taskRegistry{entries: make(map[string]*registeredTask)}
 
 	go runHeartbeat(ctx, workerDoc)
 
@@ -634,7 +653,7 @@ func startWorker(ctx context.Context, project, db, workerID, workpoolID string, 
 					log.Printf("worker-in: stream_task_updates missing task_id")
 					return
 				}
-				tel := registry.get(m.TaskID)
+				tel := registry.getLog(m.TaskID)
 				if tel == nil {
 					log.Printf("worker-in: no active TaskEventLog for task %s", m.TaskID)
 					return
@@ -642,6 +661,13 @@ func startWorker(ctx context.Context, project, db, workerID, workpoolID string, 
 				if err := tel.StartStreaming(); err != nil {
 					log.Printf("worker-in: start streaming for task %s: %v", m.TaskID, err)
 				}
+			case "kill_job":
+				if m.JobID == "" {
+					log.Printf("worker-in: kill_job missing job_id")
+					return
+				}
+				log.Printf("worker-in: killing tasks for job %s", m.JobID)
+				registry.killJob(m.JobID)
 			default:
 				log.Printf("worker-in: unknown message type %q", m.Type)
 			}
