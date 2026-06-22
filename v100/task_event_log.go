@@ -15,6 +15,7 @@ import (
 
 const taskLogCollection = "TaskLog"
 const taskEventLogTTL = 7 * 24 * time.Hour
+const metricsInterval = 1 * time.Minute
 
 // taskEventLogRegistry maps live task IDs to their TaskEventLog so the
 // subscription handler can look them up by task_id.
@@ -62,17 +63,21 @@ type OutputTaskEvent struct {
 // directly to the Firestore TaskLog collection instead of the events file.
 type TaskEventLog struct {
 	taskID         string
+	workDir        string
 	eventsFilename string
 	file           *os.File
 	logFile        *os.File
 	streaming      bool
 	mu             sync.Mutex
 	fsClient       *firestore.Client
+	cancelPoll     context.CancelFunc
+	pollDone       chan struct{}
 }
 
 // OpenTaskEventLog creates a TaskEventLog that writes to filename (raw log)
-// and filename+".events.log" (structured JSON events).
-func OpenTaskEventLog(filename string, taskID string, fsClient *firestore.Client) (*TaskEventLog, error) {
+// and filename+".events.log" (structured JSON events). A background goroutine
+// polls resource metrics every minute until Close is called.
+func OpenTaskEventLog(ctx context.Context, filename string, taskID string, workDir string, fsClient *firestore.Client) (*TaskEventLog, error) {
 	logFile, err := os.Create(filename)
 	if err != nil {
 		return nil, fmt.Errorf("creating log file: %w", err)
@@ -85,13 +90,59 @@ func OpenTaskEventLog(filename string, taskID string, fsClient *firestore.Client
 		return nil, fmt.Errorf("creating task event log %s: %w", eventsFilename, err)
 	}
 
-	return &TaskEventLog{
+	pollCtx, cancelPoll := context.WithCancel(ctx)
+	t := &TaskEventLog{
 		taskID:         taskID,
+		workDir:        workDir,
 		eventsFilename: eventsFilename,
 		file:           file,
 		logFile:        logFile,
 		fsClient:       fsClient,
-	}, nil
+		cancelPoll:     cancelPoll,
+		pollDone:       make(chan struct{}),
+	}
+
+	go func() {
+		defer close(t.pollDone)
+		ticker := time.NewTicker(metricsInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-pollCtx.Done():
+				return
+			case <-ticker.C:
+				event := collectMetrics(t.taskID, t.workDir)
+				if err := t.WriteMetric(event); err != nil {
+					log.Printf("writing metric for task %s: %v", t.taskID, err)
+				}
+			}
+		}
+	}()
+
+	return t, nil
+}
+
+// WriteMetric records a resource usage sample. Before streaming is activated
+// it writes a JSON event to the events file; after activation it writes
+// directly to Firestore.
+func (t *TaskEventLog) WriteMetric(event *ResourceUsageEvent) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if t.streaming {
+		if _, _, err := t.fsClient.Collection(taskLogCollection).Add(context.Background(), event); err != nil {
+			return fmt.Errorf("writing metric to firestore: %w", err)
+		}
+	} else {
+		data, err := json.Marshal(event)
+		if err != nil {
+			return fmt.Errorf("marshalling metric event: %w", err)
+		}
+		if _, err := t.file.Write(append(data, '\n')); err != nil {
+			return fmt.Errorf("writing metric event: %w", err)
+		}
+	}
+	return nil
 }
 
 // WriteOutput records a chunk of docker output. Before streaming is activated
@@ -158,12 +209,34 @@ func (t *TaskEventLog) StartStreaming() error {
 		if len(line) == 0 {
 			continue
 		}
-		var event OutputTaskEvent
-		if err := json.Unmarshal(line, &event); err != nil {
+		var base struct {
+			Type string `json:"type"`
+		}
+		if err := json.Unmarshal(line, &base); err != nil {
 			log.Printf("stream_task_updates: skipping malformed line: %v", err)
 			continue
 		}
-		if _, _, err := t.fsClient.Collection(taskLogCollection).Add(ctx, &event); err != nil {
+		var doc interface{}
+		switch base.Type {
+		case "log_update":
+			var event OutputTaskEvent
+			if err := json.Unmarshal(line, &event); err != nil {
+				log.Printf("stream_task_updates: skipping malformed log_update: %v", err)
+				continue
+			}
+			doc = &event
+		case "metric_update":
+			var event ResourceUsageEvent
+			if err := json.Unmarshal(line, &event); err != nil {
+				log.Printf("stream_task_updates: skipping malformed metric_update: %v", err)
+				continue
+			}
+			doc = &event
+		default:
+			log.Printf("stream_task_updates: unknown event type %q, skipping", base.Type)
+			continue
+		}
+		if _, _, err := t.fsClient.Collection(taskLogCollection).Add(ctx, doc); err != nil {
 			return fmt.Errorf("writing task log to firestore: %w", err)
 		}
 	}
@@ -193,8 +266,12 @@ func (t *TaskEventLog) Flush() error {
 	return nil
 }
 
-// Close closes the plain log file and, if not streaming, the events file.
+// Close stops the metrics polling goroutine, then closes the plain log file
+// and, if not streaming, the events file.
 func (t *TaskEventLog) Close() error {
+	t.cancelPoll()
+	<-t.pollDone
+
 	t.mu.Lock()
 	streaming := t.streaming
 	defer t.mu.Unlock()

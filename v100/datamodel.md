@@ -13,6 +13,7 @@ One document per submitted job. The document ID is the `job_id`.
 | Field         | Type            | Description                                                                                                            |
 | ------------- | --------------- | ---------------------------------------------------------------------------------------------------------------------- |
 | `job_id`      | string          | Unique identifier for the job                                                                                          |
+| `name`        | string          | Human-readable label for the job (set at submission time)                                                              |
 | `workpool_id` | string          | The workpool this job's tasks should be executed in                                                                    |
 | `resources`   | []ResourceEntry | Per-task resource requirements (e.g. `slots=1,mem=8`). Workers verify they can satisfy these before claiming any task. |
 
@@ -93,6 +94,21 @@ One document per workpool. The document ID is the `workpool_id`. A workpool defi
 | `resources`     | []Resource    | Resource capacity advertised by workers created from this workpool |
 | `empty_volumes` | []EmptyVolume | Ephemeral volumes to attach to each VM                             |
 | `expiry`        | timestamp     | When this document may be garbage-collected                        |
+
+The following provisioning and watchdog parameters are set once at workpool creation and read by the monitor to govern autoscaling behaviour:
+
+| Field                             | Type | Description                                                                                  |
+| --------------------------------- | ---- | -------------------------------------------------------------------------------------------- |
+| `max_worker_count`                | int  | Maximum number of VMs the monitor may have running concurrently for this workpool            |
+| `max_preemptible_worker_attempts` | int  | How many times the monitor may submit a preemptible batch before falling back to on-demand   |
+| `max_workers_per_request`         | int  | Maximum number of VMs in a single GCP Batch job submission                                   |
+| `min_time_between_polls_sec`      | int  | Minimum seconds between provisioning poll iterations                                         |
+| `max_time_between_polls_sec`      | int  | Maximum seconds between provisioning poll iterations (when idle)                             |
+| `max_time_to_start_worker_sec`    | int  | Seconds after batch submission before a VM that never registered is considered a zombie      |
+| `max_time_in_queue_sec`           | int  | Maximum seconds a task may wait in `pending` before the monitor considers the pool unhealthy |
+| `vm_shutdown_grace_period_sec`    | int  | Seconds the monitor waits after asking a VM to shut down before treating it as gone          |
+| `max_zombies_before_abort`        | int  | Number of zombie VMs tolerated in one batch before the monitor marks the batch failed        |
+| `max_consecutive_failed_batches`  | int  | Number of consecutive failed batches before the monitor halts the workpool                   |
 
 The following fields are written exclusively by the monitor process and must not be set at submission time:
 
@@ -178,56 +194,54 @@ Every write to `sparkles-events` is mirrored to this collection atomically befor
 
 ---
 
-### `TaskLog` _(not yet implemented)_
+### `TaskLog`
 
-An append-only log of progress updates written by workers for in-flight tasks. By default tasks do not write to this collection; logging is activated per-task by sending a `start_publishing` control message to the worker. Once activated, the worker writes periodic entries until the task completes.
+An append-only collection of entries written by workers for in-flight tasks. It holds two entry types: `log_update` (stdout/stderr output chunks) and `metric_update` (periodic resource usage samples). By default tasks buffer entries locally; streaming to this collection is activated per-task by sending a `stream_task_updates` control message to the worker (see [`sparkles-worker-in`](#sparkles-worker-in-control-plane--worker)). Once activated, the worker replays any buffered entries accumulated since the task started, then writes each subsequent entry directly to this collection until the task completes.
 
-Each document has a `type` field that identifies which kind of update it represents. The document ID is a UUID assigned at write time.
+The document ID is auto-assigned by Firestore. The TTL is 7 days from the time the entry is written.
 
-**Common fields (all entry types):**
+All entries share these common fields:
 
-| Field       | Type      | Description                                      |
-| ----------- | --------- | ------------------------------------------------ |
-| `task_id`   | string    | ID of the task that produced this entry          |
-| `type`      | string    | Entry type — `metric_update` or `log_update`     |
-| `timestamp` | timestamp | When the entry was recorded                      |
-| `expiry`    | timestamp | When this document may be deleted (TTL-based GC) |
+| Field       | Type      | Description                                     |
+| ----------- | --------- | ----------------------------------------------- |
+| `task_id`   | string    | ID of the task that produced this entry         |
+| `type`      | string    | Entry type — `log_update` or `metric_update`    |
+| `timestamp` | timestamp | When this entry was captured by the worker      |
+| `expiry`    | timestamp | 7 days after `timestamp`; used for TTL-based GC |
 
-**Additional fields on `metric_update` entries:**
+**`log_update` entries** — one chunk of docker stdout/stderr output:
 
-| Field                     | Type           | Description                                            |
-| ------------------------- | -------------- | ------------------------------------------------------ |
-| `process_count`           | int32          | Number of processes in the task's process group        |
-| `total_memory`            | int64          | Total virtual memory size across all processes (bytes) |
-| `total_data`              | int64          | Total data-segment size across all processes (bytes)   |
-| `total_shared`            | int64          | Total shared memory across all processes (bytes)       |
-| `total_resident`          | int64          | Total resident set size across all processes (bytes)   |
-| `cpu_user`                | int64          | Cumulative user-mode CPU time (jiffies)                |
-| `cpu_system`              | int64          | Cumulative kernel-mode CPU time (jiffies)              |
-| `cpu_idle`                | int64          | Cumulative idle CPU time (jiffies)                     |
-| `cpu_iowait`              | int64          | Cumulative I/O-wait CPU time (jiffies)                 |
-| `mem_total`               | int64          | System total memory (bytes)                            |
-| `mem_available`           | int64          | System available memory (bytes)                        |
-| `mem_free`                | int64          | System free memory (bytes)                             |
-| `mem_pressure_some_avg10` | int32          | Memory pressure "some" 10-second average (PSI)         |
-| `mem_pressure_full_avg10` | int32          | Memory pressure "full" 10-second average (PSI)         |
-| `volumes`                 | []VolumeMetric | Disk volume usage snapshots at the time of the update  |
+| Field     | Type   | Description                                             |
+| --------- | ------ | ------------------------------------------------------- |
+| `content` | string | Raw stdout/stderr text for this chunk (arbitrary bytes) |
 
-**VolumeMetric** (embedded object):
+**`metric_update` entries** — a periodic resource usage sample collected once per minute while the task is running:
+
+| Field                     | Type          | Description                                                                                                       |
+| ------------------------- | ------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `process_count`           | int32         | Number of processes visible in `/proc`                                                                            |
+| `total_memory`            | int64         | Total virtual memory size across all processes (bytes)                                                            |
+| `total_data`              | int64         | Total data-segment size across all processes (bytes)                                                              |
+| `total_shared`            | int64         | Total shared memory across all processes (bytes)                                                                  |
+| `total_resident`          | int64         | Total resident set size across all processes (bytes)                                                              |
+| `cpu_user`                | int64         | Cumulative user-mode CPU time (jiffies) from `/proc/stat`                                                         |
+| `cpu_system`              | int64         | Cumulative kernel-mode CPU time (jiffies) from `/proc/stat`                                                       |
+| `cpu_idle`                | int64         | Cumulative idle CPU time (jiffies) from `/proc/stat`                                                              |
+| `cpu_iowait`              | int64         | Cumulative I/O-wait CPU time (jiffies) from `/proc/stat`                                                          |
+| `mem_total`               | int64         | System total memory (bytes) from `/proc/meminfo`                                                                  |
+| `mem_available`           | int64         | System available memory (bytes) from `/proc/meminfo`                                                              |
+| `mem_free`                | int64         | System free memory (bytes) from `/proc/meminfo`                                                                   |
+| `mem_pressure_some_avg10` | int32         | Memory pressure "some" 10-second average × 100 (e.g. 150 = 1.50%) from `/proc/pressure/memory`; -1 if unavailable |
+| `mem_pressure_full_avg10` | int32         | Memory pressure "full" 10-second average × 100; -1 if unavailable                                                 |
+| `volumes`                 | []VolumeUsage | Disk volume usage snapshots at the time of the update                                                             |
+
+**VolumeUsage** (embedded object):
 
 | Field      | Type    | Description                                     |
 | ---------- | ------- | ----------------------------------------------- |
 | `location` | string  | Mount path of the volume (e.g. `/`, `/scratch`) |
 | `total_gb` | float64 | Total capacity of the volume (GiB)              |
 | `used_gb`  | float64 | Space currently used on the volume (GiB)        |
-
-**Additional fields on `log_update` entries:**
-
-| Field     | Type   | Description                                                            |
-| --------- | ------ | ---------------------------------------------------------------------- |
-| `content` | string | Raw text appended to the task's stdout/stderr log since the last entry |
-
-Metric entries are written every 15 seconds. Log entries are written every 1 second, but only when there is new output to report. Both types share the same TTL-based expiry for garbage collection.
 
 ---
 
@@ -388,7 +402,22 @@ The topic is configured as the Pub/Sub notification target when the monitor crea
 
 Used to send control messages to a specific worker. Each worker creates a **per-worker subscription** named `sparkles-worker-in-<worker_id>` at startup and deletes it on clean shutdown.
 
-Messages received on this topic are currently logged and acknowledged; the control protocol is a stub pending future extension.
+All messages share a common JSON envelope:
+
+| Field     | Type   | Description                            |
+| --------- | ------ | -------------------------------------- |
+| `type`    | string | Message type (see below)               |
+| `task_id` | string | ID of the task this message applies to |
+
+#### `stream_task_updates`
+
+Activates live streaming of a task's stdout/stderr to the `TaskLog` Firestore collection. The worker:
+
+1. Closes the local events buffer file for the identified task.
+2. Replays all buffered `log_update` entries accumulated since the task started by reading the buffer file and writing each entry to `TaskLog`.
+3. Sets a flag so that all subsequent output chunks for that task are written directly to `TaskLog` instead of the local buffer.
+
+If no task with the given `task_id` is currently running on the worker, the message is acknowledged and ignored.
 
 ---
 

@@ -312,7 +312,7 @@ func workerMainLoop(ctx context.Context, cfg *WorkerLoopConfig) error {
 				}
 
 				extraDockerArgs := buildDockerArgs(cfg.BindMounts, t)
-				tel, err := OpenTaskEventLog(paths.logPath, t.TaskID, cfg.FSClient)
+				tel, err := OpenTaskEventLog(ctx, paths.logPath, t.TaskID, paths.taskWorkDir, cfg.FSClient)
 				if err != nil {
 					return fmt.Errorf("opening task event log for %s: %w", t.TaskID, err)
 				}
