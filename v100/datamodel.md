@@ -71,7 +71,7 @@ Terminal states — no further transitions except an administrative kill:
 | `success` | Task ran to completion and the process exited with code 0                 |
 | `error`   | Task ran to completion but the process returned a non-zero exit code      |
 | `failed`  | Task did not run to completion due to an infrastructure or system failure |
-| `killed`  | Task was administratively terminated                                      |
+| `killed`  | Task was administratively terminated _(not yet implemented)_              |
 
 **Three-way terminal split:** `success`/`error`/`failed` model two distinct failure modes. `error` means the task executed fully and the _program itself_ reported a problem — look at the task's output. `failed` means execution did not complete — look at the worker or infrastructure logs. `success` means exit code 0.
 
@@ -178,7 +178,7 @@ Every write to `sparkles-events` is mirrored to this collection atomically befor
 
 ---
 
-### `TaskLog`
+### `TaskLog` _(not yet implemented)_
 
 An append-only log of progress updates written by workers for in-flight tasks. By default tasks do not write to this collection; logging is activated per-task by sending a `start_publishing` control message to the worker. Once activated, the worker writes periodic entries until the task completes.
 
@@ -260,7 +260,7 @@ Any question about job progress — "is this job still running?", "how many task
 | `in_progress`              | At least one task is active (`claimed`/`running`/`writing`); no `failed` or `error` tasks |
 | `in_progress_with_error`   | At least one task is active; at least one task is in `error` state                        |
 | `in_progress_with_failure` | At least one task is active; at least one task is in `failed` state                       |
-| `killed`                   | At least one task was `killed`                                                            |
+| `killed`                   | At least one task was `killed` _(not yet implemented)_                                    |
 | `success`                  | All tasks complete; every terminal task reached `success`                                 |
 | `error`                    | All tasks complete; at least one task is in `error` state, none in `failed`               |
 | `failed`                   | All tasks complete; at least one task is in `failed` state                                |
@@ -353,16 +353,16 @@ The monitor subscribes to this topic via the `monitor-events-in` subscription an
 }
 ```
 
-| `new_state` | `old_state`                         | Meaning                                               |
-| ----------- | ----------------------------------- | ----------------------------------------------------- |
-| `claimed`   | `pending`                           | Worker successfully claimed the task; staging begins  |
-| `running`   | `claimed`                           | Staging complete; task process launched               |
-| `writing`   | `running`                           | Process exited; uploading results to cloud storage    |
-| `success`   | `writing`                           | Upload complete; process exited with code 0           |
-| `error`     | `writing`                           | Upload complete; process exited with non-zero code    |
-| `failed`    | `claimed` \| `running` \| `writing` | Infrastructure failure; task did not complete         |
-| `pending`   | `claimed` \| `running` \| `writing` | Task orphaned back to pending (worker crash detected) |
-| `killed`    | _(any)_                             | Task administratively terminated                      |
+| `new_state` | `old_state`                         | Meaning                                                  |
+| ----------- | ----------------------------------- | -------------------------------------------------------- |
+| `claimed`   | `pending`                           | Worker successfully claimed the task; staging begins     |
+| `running`   | `claimed`                           | Staging complete; task process launched                  |
+| `writing`   | `running`                           | Process exited; uploading results to cloud storage       |
+| `success`   | `writing`                           | Upload complete; process exited with code 0              |
+| `error`     | `writing`                           | Upload complete; process exited with non-zero code       |
+| `failed`    | `claimed` \| `running` \| `writing` | Infrastructure failure; task did not complete            |
+| `pending`   | `claimed` \| `running` \| `writing` | Task orphaned back to pending (worker crash detected)    |
+| `killed`    | _(any)_                             | Task administratively terminated _(not yet implemented)_ |
 
 ---
 
@@ -438,7 +438,7 @@ While tasks are running the worker tracks available capacity and waits for a run
       (terminal)  (terminal)  (terminal)
 
      ┌────────┐
-     │ killed │  (administrative kill, from any state)
+     │ killed │  (administrative kill, from any state) (not yet implemented)
      └────────┘
       (terminal)
 ```
@@ -459,7 +459,7 @@ While tasks are running the worker tracks available capacity and waits for a run
 
 **`failed`** — The task did not run to completion due to an infrastructure or system failure (worker crash, resource mismatch, timeout, etc.). Look at the worker or infrastructure logs. Terminal.
 
-**`killed`** — The task was administratively terminated. Terminal.
+**`killed`** — The task was administratively terminated. Terminal. _(not yet implemented)_
 
 **Three-way terminal split:** `success`/`error`/`failed` distinguish two fundamentally different kinds of failure. `error` means _the program_ reported a problem; `failed` means _the infrastructure_ prevented the program from completing.
 
@@ -488,7 +488,7 @@ Every state transition publishes a `task_state_update` event to `sparkles-events
 7. **Any active state → `pending`** _(planned)_  
    A watchdog process periodically scans for worker records whose `heartbeat_expiry` has passed. For each crashed worker, any task in an active state (`claimed`, `running`, or `writing`) is reset to `pending` so it can be retried. Not yet implemented in v100.
 
-8. **Any state → `killed`**  
+8. **Any state → `killed`** _(not yet implemented)_  
    An external administrative action. `owning_worker_id` is cleared.
 
 ### Worker perspective
