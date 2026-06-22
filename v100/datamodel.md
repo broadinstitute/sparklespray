@@ -404,12 +404,27 @@ Used to send control messages to a specific worker. Each worker creates a **per-
 
 All messages share a common JSON envelope:
 
-| Field     | Type   | Description                            |
-| --------- | ------ | -------------------------------------- |
-| `type`    | string | Message type (see below)               |
-| `task_id` | string | ID of the task this message applies to |
+| Field  | Type   | Description              |
+| ------ | ------ | ------------------------ |
+| `type` | string | Message type (see below) |
+
+#### `kill_job`
+
+Additional fields
+
+| Field    | Type   | Description                           |
+| -------- | ------ | ------------------------------------- |
+| `job_id` | string | ID of the job this message applies to |
+
+Notifies all workers that the job `job_id` has been marked as killed, and so if the worker is currently running a task associated with that job, it should abort that work and mark the task as killed. This message is a best-effort message.
 
 #### `stream_task_updates`
+
+Additional fields
+
+| Field     | Type   | Description                            |
+| --------- | ------ | -------------------------------------- |
+| `task_id` | string | ID of the task this message applies to |
 
 Activates live streaming of a task's stdout/stderr to the `TaskLog` Firestore collection. The worker:
 
@@ -417,7 +432,7 @@ Activates live streaming of a task's stdout/stderr to the `TaskLog` Firestore co
 2. Replays all buffered `log_update` entries accumulated since the task started by reading the buffer file and writing each entry to `TaskLog`.
 3. Sets a flag so that all subsequent output chunks for that task are written directly to `TaskLog` instead of the local buffer.
 
-If no task with the given `task_id` is currently running on the worker, the message is acknowledged and ignored.
+If no task with the given `task_id` is currently running on the worker, the message is ignored
 
 ---
 
