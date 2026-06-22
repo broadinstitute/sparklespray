@@ -3,6 +3,7 @@ package v100
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"log"
@@ -184,12 +185,20 @@ func workerMainLoop(ctx context.Context, cfg *WorkerLoopConfig) error {
 			runningCount--
 			if c.err != nil {
 				log.Printf("task %s failed: %v", c.taskID, c.err)
-				if err := cfg.Queue.RecordFailed(ctx, c.taskID, c.err.Error(), StatusClaimed); err != nil {
+				var exitErr *exec.ExitError
+				if errors.As(c.err, &exitErr) {
+					if err := cfg.Queue.RecordError(ctx, c.taskID, exitErr.ExitCode()); err != nil {
+						log.Printf("recording task %s error (exit %d): %v", c.taskID, exitErr.ExitCode(), err)
+						return err
+					}
+				} else if err := cfg.Queue.RecordFailed(ctx, c.taskID, c.err.Error(), StatusClaimed); err != nil {
 					log.Printf("recording task %s as failed: %v", c.taskID, err)
+					return err
 				}
 			} else {
 				if err := cfg.Queue.UpdateState(ctx, c.taskID, StatusWriting, StatusSuccess); err != nil {
 					log.Printf("recording task %s as success: %v", c.taskID, err)
+					return err
 				}
 			}
 			return nil
@@ -278,7 +287,13 @@ func workerMainLoop(ctx context.Context, cfg *WorkerLoopConfig) error {
 				}
 
 				extraDockerArgs := buildDockerArgs(cfg.BindMounts, t)
+				if err := cfg.Queue.UpdateState(ctx, t.TaskID, StatusClaimed, StatusRunning); err != nil {
+					return fmt.Errorf("marking task %s running: %w", t.TaskID, err)
+				}
 				dockerExecErr := cfg.ExecuteDockerCommand(ctx, t.DockerImage, t.Command, paths.taskWorkDir, extraDockerArgs, paths.logPath)
+				if err := cfg.Queue.UpdateState(ctx, t.TaskID, StatusRunning, StatusWriting); err != nil {
+					return fmt.Errorf("marking task %s writing: %w", t.TaskID, err)
+				}
 				uploadResultsErr := uploadResults(ctx, cfg.TransferClient, paths, t.ResultPath, t.LogPath)
 				cleanupErr := cleanupWorkDir(paths)
 				return mergeErrors(dockerExecErr, uploadResultsErr, cleanupErr)
