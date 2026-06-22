@@ -139,76 +139,6 @@ func executeTask(task *Task, resources Resources, completions chan<- taskComplet
 	}()
 }
 
-type TaskEventLog struct {
-	taskID  string
-	file    *os.File
-	logFile *os.File
-}
-
-func (t *TaskEventLog) Flush() error {
-	if err := t.logFile.Sync(); err != nil {
-		return fmt.Errorf("flushing log file: %w", err)
-	}
-	if err := t.file.Sync(); err != nil {
-		return fmt.Errorf("flushing event file: %w", err)
-	}
-	return nil
-}
-
-func (t *TaskEventLog) Close() error {
-	err := t.logFile.Close()
-	if err != nil {
-		return err
-	}
-	return t.file.Close()
-}
-
-func OpenTaskEventLog(filename string, taskID string) (*TaskEventLog, error) {
-	logFile, err := os.Create(filename)
-	if err != nil {
-		return nil, fmt.Errorf("creating log file: %w", err)
-	}
-
-	file, err := os.Create(filename + ".events.log")
-	if err != nil {
-		return nil, fmt.Errorf("Could not open task event log %s: %s", filename, err)
-	}
-
-	return &TaskEventLog{file: file, logFile: logFile, taskID: taskID}, nil
-}
-
-const taskEventLogTTL = 7 * 24 * time.Hour
-
-type OutputTaskEvent struct {
-	TaskID    string    `json:"task_id"`
-	Type      string    `json:"type"`
-	Timestamp time.Time `json:"timestamp"`
-	Expiry    time.Time `json:"expiry"`
-	Content   string    `json:"content"`
-}
-
-func (t *TaskEventLog) WriteOutput(content string) error {
-	event := &OutputTaskEvent{
-		TaskID:    t.taskID,
-		Type:      "output",
-		Timestamp: time.Now(),
-		Expiry:    time.Now().Add(taskEventLogTTL),
-		Content:   content,
-	}
-
-	data, err := json.Marshal(event)
-	if err != nil {
-		return fmt.Errorf("marshalling task event: %w", err)
-	}
-	if _, err := t.file.Write(append(data, '\n')); err != nil {
-		return fmt.Errorf("writing task event: %w", err)
-	}
-	if _, err := t.logFile.WriteString(content); err != nil {
-		return fmt.Errorf("writing task log: %w", err)
-	}
-	return nil
-}
-
 func executeDockerCommand(ctx context.Context, imageName string, command []string, workDir string, extraDockerArgs []string, tel *TaskEventLog) error {
 	args := append([]string{"run", "--rm", "-w", workDir}, extraDockerArgs...)
 	args = append(args, imageName)
@@ -261,6 +191,8 @@ type WorkerLoopConfig struct {
 	TransferClient       TransferClient
 	WorkDirParent        string
 	BindMounts           []string
+	Registry             *taskEventLogRegistry
+	FSClient             *firestore.Client
 	ExecuteDockerCommand func(ctx context.Context, imageName string, command []string, workDir string, extraDockerArgs []string, tel *TaskEventLog) error
 }
 
@@ -380,10 +312,12 @@ func workerMainLoop(ctx context.Context, cfg *WorkerLoopConfig) error {
 				}
 
 				extraDockerArgs := buildDockerArgs(cfg.BindMounts, t)
-				tel, err := OpenTaskEventLog(paths.logPath, t.TaskID)
+				tel, err := OpenTaskEventLog(paths.logPath, t.TaskID, cfg.FSClient)
 				if err != nil {
 					return fmt.Errorf("opening task event log for %s: %w", t.TaskID, err)
 				}
+				cfg.Registry.register(t.TaskID, tel)
+				defer cfg.Registry.unregister(t.TaskID)
 				if err := cfg.Queue.UpdateState(ctx, t.TaskID, StatusClaimed, StatusRunning); err != nil {
 					tel.Close()
 					return fmt.Errorf("marking task %s running: %w", t.TaskID, err)
@@ -422,6 +356,8 @@ func (ws *workerState) mainLoop(ctx context.Context, resources *Resources) error
 		TransferClient:       ws.transferClient,
 		WorkDirParent:        ws.workDirParent,
 		BindMounts:           ws.bindMounts,
+		Registry:             ws.registry,
+		FSClient:             ws.fsClient,
 		ExecuteDockerCommand: executeDockerCommand,
 	})
 }
@@ -575,6 +511,7 @@ type workerState struct {
 	transferClient TransferClient
 	publisher      *EventPublisher
 	workerDoc      *firestore.DocumentRef
+	registry       *taskEventLogRegistry
 	subName        string
 	project        string
 	workerID       string
@@ -679,12 +616,35 @@ func startWorker(ctx context.Context, project, db, workerID, workpoolID string, 
 	}
 	log.Printf("Created subscription %s", subName)
 
+	registry := &taskEventLogRegistry{logs: make(map[string]*TaskEventLog)}
+
 	go runHeartbeat(ctx, workerDoc)
 
 	go func() {
 		recvErr := psClient.Subscriber(subName).Receive(ctx, func(ctx context.Context, msg *pubsub.Message) {
-			log.Printf("Received message on %s: %s", workerInTopic, string(msg.Data))
 			msg.Ack()
+			var m workerControlMessage
+			if err := json.Unmarshal(msg.Data, &m); err != nil {
+				log.Printf("worker-in: failed to parse message: %v", err)
+				return
+			}
+			switch m.Type {
+			case "stream_task_updates":
+				if m.TaskID == "" {
+					log.Printf("worker-in: stream_task_updates missing task_id")
+					return
+				}
+				tel := registry.get(m.TaskID)
+				if tel == nil {
+					log.Printf("worker-in: no active TaskEventLog for task %s", m.TaskID)
+					return
+				}
+				if err := tel.StartStreaming(); err != nil {
+					log.Printf("worker-in: start streaming for task %s: %v", m.TaskID, err)
+				}
+			default:
+				log.Printf("worker-in: unknown message type %q", m.Type)
+			}
 		})
 		if recvErr != nil && ctx.Err() == nil {
 			log.Printf("subscription receive error: %v", recvErr)
@@ -698,6 +658,7 @@ func startWorker(ctx context.Context, project, db, workerID, workpoolID string, 
 		transferClient: &GCSTransferClient{gcsClient: gcsClient},
 		publisher:      publisher,
 		workerDoc:      workerDoc,
+		registry:       registry,
 		subName:        subName,
 		project:        project,
 		workerID:       workerID,

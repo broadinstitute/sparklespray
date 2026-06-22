@@ -184,6 +184,8 @@ func makeConfig(t *testing.T, q TaskQueue, tc TransferClient, docker *recordingD
 		Resources:            makeResources(4),
 		TransferClient:       tc,
 		WorkDirParent:        t.TempDir(),
+		Registry:             &taskEventLogRegistry{logs: make(map[string]*TaskEventLog)},
+		FSClient:             nil,
 		ExecuteDockerCommand: docker.run,
 	}
 }
