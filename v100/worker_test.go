@@ -104,10 +104,10 @@ type recordingDockerCommand struct {
 	blockC chan struct{} // if non-nil, blocks until closed
 }
 
-func (r *recordingDockerCommand) run(_ context.Context, imageName string, command []string, workDir string, extraDockerArgs []string, logPath string) error {
+func (r *recordingDockerCommand) run(_ context.Context, imageName string, command []string, workDir string, extraDockerArgs []string, tel *TaskEventLog) error {
 	parts := append([]string{imageName}, extraDockerArgs...)
 	parts = append(parts, command...)
-	if err := os.WriteFile(logPath, []byte(strings.Join(parts, " ")), 0644); err != nil {
+	if err := tel.WriteOutput(strings.Join(parts, " ")); err != nil {
 		return fmt.Errorf("recordingDockerCommand: writing log: %w", err)
 	}
 
@@ -312,14 +312,14 @@ func TestWorkerMainLoop_FilesToLocalizeManifest(t *testing.T) {
 	}
 	var gotFile1, gotFile2 fileRead
 
-	verifyingDocker := func(_ context.Context, _ string, _ []string, workDir string, _ []string, logPath string) error {
+	verifyingDocker := func(_ context.Context, _ string, _ []string, workDir string, _ []string, tel *TaskEventLog) error {
 		data1, err := os.ReadFile(filepath.Join(workDir, "file1.txt"))
 		gotFile1 = fileRead{string(data1), err}
 
 		data2, err := os.ReadFile(filepath.Join(workDir, "file2.txt"))
 		gotFile2 = fileRead{string(data2), err}
 
-		return os.WriteFile(logPath, []byte("ok"), 0644)
+		return tel.WriteOutput("ok")
 	}
 
 	cfg := makeConfig(t, q, tc, &recordingDockerCommand{})

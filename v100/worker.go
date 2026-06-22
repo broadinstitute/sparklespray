@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"log"
 	"os"
@@ -138,26 +139,118 @@ func executeTask(task *Task, resources Resources, completions chan<- taskComplet
 	}()
 }
 
-func executeDockerCommand(ctx context.Context, imageName string, command []string, workDir string, extraDockerArgs []string, logPath string) error {
-	logFile, err := os.Create(logPath)
-	if err != nil {
-		return fmt.Errorf("creating log file: %w", err)
-	}
-	defer logFile.Close()
+type TaskEventLog struct {
+	taskID  string
+	file    *os.File
+	logFile *os.File
+}
 
+func (t *TaskEventLog) Flush() error {
+	if err := t.logFile.Sync(); err != nil {
+		return fmt.Errorf("flushing log file: %w", err)
+	}
+	if err := t.file.Sync(); err != nil {
+		return fmt.Errorf("flushing event file: %w", err)
+	}
+	return nil
+}
+
+func (t *TaskEventLog) Close() error {
+	err := t.logFile.Close()
+	if err != nil {
+		return err
+	}
+	return t.file.Close()
+}
+
+func OpenTaskEventLog(filename string, taskID string) (*TaskEventLog, error) {
+	logFile, err := os.Create(filename)
+	if err != nil {
+		return nil, fmt.Errorf("creating log file: %w", err)
+	}
+
+	file, err := os.Create(filename + ".events.log")
+	if err != nil {
+		return nil, fmt.Errorf("Could not open task event log %s: %s", filename, err)
+	}
+
+	return &TaskEventLog{file: file, logFile: logFile, taskID: taskID}, nil
+}
+
+const taskEventLogTTL = 7 * 24 * time.Hour
+
+type OutputTaskEvent struct {
+	TaskID    string    `json:"task_id"`
+	Type      string    `json:"type"`
+	Timestamp time.Time `json:"timestamp"`
+	Expiry    time.Time `json:"expiry"`
+	Content   string    `json:"content"`
+}
+
+func (t *TaskEventLog) WriteOutput(content string) error {
+	event := &OutputTaskEvent{
+		TaskID:    t.taskID,
+		Type:      "output",
+		Timestamp: time.Now(),
+		Expiry:    time.Now().Add(taskEventLogTTL),
+		Content:   content,
+	}
+
+	data, err := json.Marshal(event)
+	if err != nil {
+		return fmt.Errorf("marshalling task event: %w", err)
+	}
+	if _, err := t.file.Write(append(data, '\n')); err != nil {
+		return fmt.Errorf("writing task event: %w", err)
+	}
+	if _, err := t.logFile.WriteString(content); err != nil {
+		return fmt.Errorf("writing task log: %w", err)
+	}
+	return nil
+}
+
+func executeDockerCommand(ctx context.Context, imageName string, command []string, workDir string, extraDockerArgs []string, tel *TaskEventLog) error {
 	args := append([]string{"run", "--rm", "-w", workDir}, extraDockerArgs...)
 	args = append(args, imageName)
 	args = append(args, command...)
 
 	cmd := exec.CommandContext(ctx, "docker", args...)
-	cmd.Stdout = logFile
-	cmd.Stderr = logFile
 
-	err = cmd.Run()
-	if err != nil {
-		return fmt.Errorf("Could not run docker command (%s): %s", strings.Join(args, " "), err)
+	pr, pw := io.Pipe()
+	cmd.Stdout = pw
+	cmd.Stderr = pw
+
+	pipeErrCh := make(chan error, 1)
+	go func() {
+		buf := make([]byte, 4096*10)
+		for {
+			n, err := pr.Read(buf)
+			if n > 0 {
+				if writeErr := tel.WriteOutput(string(buf[:n])); writeErr != nil {
+					pr.CloseWithError(writeErr)
+					pipeErrCh <- writeErr
+					return
+				}
+			}
+			if err == io.EOF {
+				pipeErrCh <- nil
+				return
+			}
+			if err != nil {
+				pipeErrCh <- err
+				return
+			}
+		}
+	}()
+
+	runErr := cmd.Run()
+	pw.Close()
+	pipeErr := <-pipeErrCh
+
+	if runErr != nil {
+		return fmt.Errorf("could not run docker command (%s): %w", strings.Join(args, " "), runErr)
 	}
-	return nil
+	return pipeErr
 }
 
 type WorkerLoopConfig struct {
@@ -168,7 +261,7 @@ type WorkerLoopConfig struct {
 	TransferClient       TransferClient
 	WorkDirParent        string
 	BindMounts           []string
-	ExecuteDockerCommand func(ctx context.Context, imageName string, command []string, workDir string, extraDockerArgs []string, logPath string) error
+	ExecuteDockerCommand func(ctx context.Context, imageName string, command []string, workDir string, extraDockerArgs []string, tel *TaskEventLog) error
 }
 
 func workerMainLoop(ctx context.Context, cfg *WorkerLoopConfig) error {
@@ -287,16 +380,24 @@ func workerMainLoop(ctx context.Context, cfg *WorkerLoopConfig) error {
 				}
 
 				extraDockerArgs := buildDockerArgs(cfg.BindMounts, t)
+				tel, err := OpenTaskEventLog(paths.logPath, t.TaskID)
+				if err != nil {
+					return fmt.Errorf("opening task event log for %s: %w", t.TaskID, err)
+				}
 				if err := cfg.Queue.UpdateState(ctx, t.TaskID, StatusClaimed, StatusRunning); err != nil {
+					tel.Close()
 					return fmt.Errorf("marking task %s running: %w", t.TaskID, err)
 				}
-				dockerExecErr := cfg.ExecuteDockerCommand(ctx, t.DockerImage, t.Command, paths.taskWorkDir, extraDockerArgs, paths.logPath)
+				dockerExecErr := cfg.ExecuteDockerCommand(ctx, t.DockerImage, t.Command, paths.taskWorkDir, extraDockerArgs, tel)
+				flushErr := tel.Flush()
 				if err := cfg.Queue.UpdateState(ctx, t.TaskID, StatusRunning, StatusWriting); err != nil {
+					tel.Close()
 					return fmt.Errorf("marking task %s writing: %w", t.TaskID, err)
 				}
 				uploadResultsErr := uploadResults(ctx, cfg.TransferClient, paths, t.ResultPath, t.LogPath)
+				closeErr := tel.Close()
 				cleanupErr := cleanupWorkDir(paths)
-				return mergeErrors(dockerExecErr, uploadResultsErr, cleanupErr)
+				return mergeErrors(dockerExecErr, flushErr, uploadResultsErr, closeErr, cleanupErr)
 			})
 		}
 	}
