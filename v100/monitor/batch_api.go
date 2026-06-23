@@ -15,6 +15,7 @@ const (
 
 	pubsubNotificationTopic = "batch-api-notifications"
 
+	cloudSDKImage = "gcr.io/google.com/cloudsdktool/cloud-sdk:slim"
 )
 
 // GCPBatchAPIClient implements BatchAPIClient using the GCP Batch API and
@@ -81,10 +82,23 @@ func (c *GCPBatchAPIClient) CreateJob(ctx context.Context, spec *WorkerJobSpec) 
 					Volumes: volumes,
 					Runnables: []*batch.Runnable{
 						{
+							// Download the worker binary from GCS.
 							Container: &batch.Container{
-								ImageUri:   spec.DockerImage,
-								Entrypoint: spec.RootDir + "/sparkles",
-								Commands:   []string{"--root-dir", spec.RootDir},
+								ImageUri: cloudSDKImage,
+								Commands: []string{
+									"gcloud", "storage", "cp",
+									spec.SparklesWorkerGCSPath,
+									spec.RootDir + "/sparkles",
+								},
+							},
+						},
+						{
+							// Make the binary executable and run it.
+							Script: &batch.Script{
+								Text: fmt.Sprintf(
+									"chmod +x %s/sparkles && exec %s/sparkles --root-dir %s",
+									spec.RootDir, spec.RootDir, spec.RootDir,
+								),
 							},
 						},
 					},

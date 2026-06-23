@@ -36,7 +36,7 @@ type createJobRequest struct {
 	MachineType  string   `json:"machineType"`
 	VMCount      int      `json:"vmCount"`
 	Preemptible  bool     `json:"preemptible"`
-	DockerImage  string   `json:"dockerImage"`
+	SparklesWorkerGCSPath string `json:"sparklesWorkerGCSPath"`
 	Command      string   `json:"command"`
 	EmptyVolumes []monitor.EmptyVolume `json:"emptyVolumes"`
 	Labels       []label  `json:"labels"`
@@ -55,7 +55,7 @@ type emulatorVM struct {
 type emulatorJob struct {
 	JobID       string
 	Labels      []label
-	DockerImage string
+	SparklesWorkerGCSPath string
 	Command     string
 	VMCount     int
 	Status      monitor.BatchJobStatus
@@ -120,12 +120,12 @@ func (s *server) handleCreateJob(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	s.nextJobID++
 	jobID := fmt.Sprintf("emjob-%d-%s", s.nextJobID, uuid.New().String()[:8])
-	log.Printf("emulator: CreateJob jobID=%s image=%s vmCount=%d preemptible=%v", jobID, req.DockerImage, req.VMCount, req.Preemptible)
+	log.Printf("emulator: CreateJob jobID=%s gcsPath=%s vmCount=%d preemptible=%v", jobID, req.SparklesWorkerGCSPath, req.VMCount, req.Preemptible)
 	job := &emulatorJob{
-		JobID:       jobID,
-		Labels:      req.Labels,
-		DockerImage: req.DockerImage,
-		Command:     req.Command,
+		JobID:                 jobID,
+		Labels:                req.Labels,
+		SparklesWorkerGCSPath: req.SparklesWorkerGCSPath,
+		Command:               req.Command,
 		VMCount:     req.VMCount,
 		Status:      monitor.BatchJobStatusQueued,
 		cancel:      make(chan struct{}),
@@ -386,7 +386,7 @@ func (s *server) runJob(job *emulatorJob) {
 			for _, l := range job.Labels {
 				args = append(args, "--label", fmt.Sprintf("%s=%s", l.Name, l.Value))
 			}
-			args = append(args, job.DockerImage)
+			args = append(args, job.SparklesWorkerGCSPath)
 			if job.Command != "" {
 				args = append(args, strings.Fields(job.Command)...)
 			}

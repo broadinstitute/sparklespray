@@ -70,8 +70,8 @@ type remoteCreateJobBody struct {
 	MachineType  string        `json:"machineType"`
 	VMCount      int           `json:"vmCount"`
 	Preemptible  bool          `json:"preemptible"`
-	DockerImage  string        `json:"dockerImage"`
-	Command      string        `json:"command"`
+	SparklesWorkerGCSPath string        `json:"sparklesWorkerGCSPath"`
+	Command               string        `json:"command"`
 	EmptyVolumes []EmptyVolume `json:"emptyVolumes"`
 	Labels       []remoteLabel `json:"labels"`
 }
@@ -82,7 +82,7 @@ func (c *RemoteBatchAPIClient) CreateJob(ctx context.Context, spec *WorkerJobSpe
 		MachineType:  spec.MachineType,
 		VMCount:      spec.VMCount,
 		Preemptible:  spec.Preemptible,
-		DockerImage:  spec.DockerImage,
+		SparklesWorkerGCSPath: spec.SparklesWorkerGCSPath,
 		Command:      spec.Command,
 		EmptyVolumes: spec.EmptyVolumes,
 		Labels: []remoteLabel{

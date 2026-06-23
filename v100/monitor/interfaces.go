@@ -132,8 +132,8 @@ type WorkerJobSpec struct {
 	MachineType  string
 	VMCount      int
 	Preemptible  bool
-	DockerImage  string
-	Command      string
+	SparklesWorkerGCSPath string
+	Command               string
 	RootDir      string
 	EmptyVolumes []EmptyVolume
 }
