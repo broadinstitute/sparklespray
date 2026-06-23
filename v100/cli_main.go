@@ -45,6 +45,7 @@ func NewApp() *cli.App {
 				cli.StringFlag{Name: "workpool"},
 				cli.StringFlag{Name: "resources"},
 				cli.BoolFlag{Name: "no-gcp", Usage: "local development mode: skip GCP metadata server"},
+				cli.BoolFlag{Name: "no-docker", Usage: "run task commands directly without Docker (ignores image name)"},
 			},
 			Action: runWorker,
 		},

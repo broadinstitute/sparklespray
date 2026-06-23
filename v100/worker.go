@@ -24,6 +24,7 @@ import (
 	"cloud.google.com/go/storage"
 	"github.com/google/uuid"
 	"github.com/urfave/cli"
+	"google.golang.org/api/option"
 )
 
 const heartbeatPeriod = 1 * time.Minute
@@ -86,6 +87,7 @@ func runWorker(c *cli.Context) error {
 	db := c.String("db")
 	workpoolID := c.String("workpool")
 	noGCP := c.Bool("no-gcp")
+	noDocker := c.Bool("no-docker")
 
 	if project == "" {
 		return fmt.Errorf("--project is required")
@@ -105,7 +107,7 @@ func runWorker(c *cli.Context) error {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	ws, err := startWorker(ctx, project, db, workerID, workpoolID, noGCP)
+	ws, err := startWorker(ctx, project, db, workerID, workpoolID, noGCP, noDocker)
 	if err != nil {
 		return err
 	}
@@ -366,6 +368,10 @@ func workerMainLoop(ctx context.Context, cfg *WorkerLoopConfig) error {
 }
 
 func (ws *workerState) mainLoop(ctx context.Context, resources *Resources) error {
+	execFn := executeDockerCommand
+	if ws.noDocker {
+		execFn = executeCommandDirect
+	}
 	queue := NewFirestoreTaskQueue(ws.fsClient, ws.publisher)
 	return workerMainLoop(ctx, &WorkerLoopConfig{
 		WorkpoolID:           ws.workpoolID,
@@ -377,8 +383,89 @@ func (ws *workerState) mainLoop(ctx context.Context, resources *Resources) error
 		BindMounts:           ws.bindMounts,
 		Registry:             ws.registry,
 		FSClient:             ws.fsClient,
-		ExecuteDockerCommand: executeDockerCommand,
+		ExecuteDockerCommand: execFn,
 	})
+}
+
+// executeCommandDirect runs a command directly without Docker.
+// The image name and extra docker args are ignored.
+func executeCommandDirect(ctx context.Context, _ string, command []string, workDir string, _ []string, tel *TaskEventLog) error {
+	cmd := exec.CommandContext(ctx, command[0], command[1:]...)
+	cmd.Dir = workDir
+
+	pr, pw := io.Pipe()
+	cmd.Stdout = pw
+	cmd.Stderr = pw
+
+	pipeErrCh := make(chan error, 1)
+	go func() {
+		buf := make([]byte, 4096*10)
+		for {
+			n, err := pr.Read(buf)
+			if n > 0 {
+				if writeErr := tel.WriteOutput(string(buf[:n])); writeErr != nil {
+					pr.CloseWithError(writeErr)
+					pipeErrCh <- writeErr
+					return
+				}
+			}
+			if err == io.EOF {
+				pipeErrCh <- nil
+				return
+			}
+			if err != nil {
+				pipeErrCh <- err
+				return
+			}
+		}
+	}()
+
+	runErr := cmd.Run()
+	pw.Close()
+	pipeErr := <-pipeErrCh
+
+	if runErr != nil {
+		return fmt.Errorf("could not run command (%s): %w", strings.Join(command, " "), runErr)
+	}
+	return pipeErr
+}
+
+// WorkerRunConfig holds all parameters for running a worker programmatically.
+type WorkerRunConfig struct {
+	Project    string
+	DB         string
+	WorkerID   string
+	WorkpoolID string
+	// Resources is a comma-separated list of name=value pairs (e.g. "slots=1").
+	// Defaults to "slots=1" if empty.
+	Resources string
+	NoGCP     bool
+	NoDocker  bool
+}
+
+// RunWorker starts a worker and blocks until ctx is cancelled or all pending
+// tasks in the workpool are complete. Intended for use by functional tests and
+// integration tooling.
+func RunWorker(ctx context.Context, cfg WorkerRunConfig) error {
+	resources, err := parseResources(cfg.Resources)
+	if err != nil {
+		return fmt.Errorf("parsing resources: %w", err)
+	}
+
+	log.Printf("Starting worker %s in workpool %s", cfg.WorkerID, cfg.WorkpoolID)
+	ws, err := startWorker(ctx, cfg.Project, cfg.DB, cfg.WorkerID, cfg.WorkpoolID, cfg.NoGCP, cfg.NoDocker)
+	if err != nil {
+		return fmt.Errorf("starting worker: %w", err)
+	}
+	defer ws.cleanup()
+
+	mainLoopErr := ws.mainLoop(ctx, resources)
+	ws.shutdown()
+
+	if mainLoopErr != nil && ctx.Err() == nil {
+		return fmt.Errorf("worker main loop: %w", mainLoopErr)
+	}
+	return nil
 }
 
 type TaskPaths struct {
@@ -537,6 +624,7 @@ type workerState struct {
 	workpoolID     string
 	bindMounts     []string
 	workDirParent  string
+	noDocker       bool
 }
 
 func (ws *workerState) cleanup() {
@@ -546,7 +634,7 @@ func (ws *workerState) cleanup() {
 	ws.fsClient.Close()
 }
 
-func startWorker(ctx context.Context, project, db, workerID, workpoolID string, noGCP bool) (*workerState, error) {
+func startWorker(ctx context.Context, project, db, workerID, workpoolID string, noGCP, noDocker bool) (*workerState, error) {
 	var fsClient *firestore.Client
 	var err error
 	if db != "" {
@@ -564,7 +652,14 @@ func startWorker(ctx context.Context, project, db, workerID, workpoolID string, 
 		return nil, fmt.Errorf("creating pubsub client: %w", err)
 	}
 
-	gcsClient, err := storage.NewClient(ctx)
+	var gcsOpts []option.ClientOption
+	if endpoint := os.Getenv("GCS_EMULATOR_ENDPOINT"); endpoint != "" {
+		gcsOpts = append(gcsOpts,
+			option.WithEndpoint(endpoint),
+			option.WithoutAuthentication(),
+		)
+	}
+	gcsClient, err := storage.NewClient(ctx, gcsOpts...)
 	if err != nil {
 		psClient.Close()
 		fsClient.Close()
@@ -689,6 +784,7 @@ func startWorker(ctx context.Context, project, db, workerID, workpoolID string, 
 		project:        project,
 		workerID:       workerID,
 		workpoolID:     workpoolID,
+		noDocker:       noDocker,
 	}, nil
 }
 

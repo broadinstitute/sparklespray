@@ -30,6 +30,34 @@ func runKill(c *cli.Context) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	if err := KillJob(ctx, project, db, jobID); err != nil {
+		return err
+	}
+
+	if noWait {
+		return nil
+	}
+
+	// Poll until all tasks reach a terminal state.
+	var fsClient *firestore.Client
+	var err error
+	if db != "" {
+		fsClient, err = firestore.NewClientWithDatabase(ctx, project, db)
+	} else {
+		fsClient, err = firestore.NewClient(ctx, project)
+	}
+	if err != nil {
+		return fmt.Errorf("creating firestore client for polling: %w", err)
+	}
+	defer fsClient.Close()
+
+	return waitForJobTerminal(ctx, fsClient, jobID)
+}
+
+// KillJob marks all pending tasks for jobID as killed and sends a kill_job
+// signal to workers so they cancel any in-flight tasks. Exported for use by
+// tests and tooling. GCS/Firestore/PubSub emulator env vars are honoured.
+func KillJob(ctx context.Context, project, db, jobID string) error {
 	var fsClient *firestore.Client
 	var err error
 	if db != "" {
@@ -48,6 +76,10 @@ func runKill(c *cli.Context) error {
 	}
 	defer psClient.Close()
 
+	return killJobWithClients(ctx, fsClient, psClient, jobID)
+}
+
+func killJobWithClients(ctx context.Context, fsClient *firestore.Client, psClient *pubsub.Client, jobID string) error {
 	queue := NewFirestoreTaskQueue(fsClient, newNoopEventPublisher())
 
 	// Step 1: mark all pending tasks for this job as killed.
@@ -88,12 +120,12 @@ func runKill(c *cli.Context) error {
 		return fmt.Errorf("publishing kill_job message: %w", err)
 	}
 	log.Printf("Sent kill_job signal to workers")
+	return nil
+}
 
-	if noWait {
-		return nil
-	}
-
-	// Step 3: poll until all tasks for the job are in a terminal state.
+// waitForJobTerminal polls Firestore every 2 s until all tasks for jobID reach
+// a terminal state (success/error/failed/killed) or ctx is cancelled.
+func waitForJobTerminal(ctx context.Context, fsClient *firestore.Client, jobID string) error {
 	terminalStatuses := map[string]bool{
 		StatusSuccess: true,
 		StatusError:   true,
