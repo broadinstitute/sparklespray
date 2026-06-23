@@ -13,6 +13,15 @@ const workpoolCollection = "WorkPools"
 const workerCollection = "Workers"
 const taskCollection = "Tasks"
 
+// Exported for use by functional tests.
+const (
+	CollectionWorkPools   = workpoolCollection
+	CollectionBatches     = batchRequestCollection
+	CollectionWorkers     = workerCollection
+	CollectionTasks       = taskCollection
+	CollectionJobSummary  = jobSummaryCollection
+)
+
 // firestoreWorkPool is the Firestore representation of a workpool document.
 // Duration fields are stored as seconds (int) to be JSON/Firestore friendly.
 type firestoreWorkPool struct {

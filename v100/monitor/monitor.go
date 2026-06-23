@@ -295,6 +295,19 @@ func (a *Monitor) checkHaltThreshold(ctx context.Context, pool *WorkPool) error 
 	return nil
 }
 
+// RunRequeueOrphanedTasks runs one tier-1 pass: any tasks owned by workers
+// whose heartbeats have expired are reset to pending. Exported for functional tests.
+func (a *Monitor) RunRequeueOrphanedTasks(ctx context.Context) error {
+	return a.runRequeueOrphanedTasks(ctx)
+}
+
+// RunJobSummaryPoll runs one job-summary pass: recomputes status for every
+// non-terminal job and publishes job_terminated events as needed.
+// Exported for functional tests; requires SetJobSummaryStore to have been called.
+func (a *Monitor) RunJobSummaryPoll(ctx context.Context) error {
+	return a.runJobSummaryPoll(ctx)
+}
+
 // param returns v if v != 0, otherwise def. Used to apply per-workpool defaults.
 func param[T int | time.Duration](v, def T) T {
 	if v != 0 {
