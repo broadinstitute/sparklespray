@@ -25,11 +25,14 @@ const (
 // firestoreWorkPool is the Firestore representation of a workpool document.
 // Duration fields are stored as seconds (int) to be JSON/Firestore friendly.
 type firestoreWorkPool struct {
-	WorkpoolID  string    `firestore:"workpool_id"`
-	MachineType string    `firestore:"machine_type"`
-	Region      string    `firestore:"region"`
-	Zones       []string  `firestore:"zones"`
-	Expiry      time.Time `firestore:"expiry"`
+	WorkpoolID            string        `firestore:"workpool_id"`
+	MachineType           string        `firestore:"machine_type"`
+	Region                string        `firestore:"region"`
+	Zones                 []string      `firestore:"zones"`
+	Expiry                time.Time     `firestore:"expiry"`
+	RootDir               string        `firestore:"root_dir"`
+	SparklesWorkerGCSPath string        `firestore:"sparkles_worker_gcs_path"`
+	EmptyVolumes          []EmptyVolume `firestore:"empty_volumes"`
 
 	MaxWorkerCount               int `firestore:"max_worker_count"`
 	MaxPreemptibleWorkerAttempts int `firestore:"max_preemptible_worker_attempts"`
@@ -62,6 +65,9 @@ func toWorkPool(f *firestoreWorkPool) *WorkPool {
 		Region:                       f.Region,
 		Zones:                        f.Zones,
 		MachineType:                  f.MachineType,
+		RootDir:                      f.RootDir,
+		SparklesWorkerGCSPath:        f.SparklesWorkerGCSPath,
+		EmptyVolumes:                 f.EmptyVolumes,
 		MaxWorkerCount:               f.MaxWorkerCount,
 		MaxPreemptibleWorkerAttempts: f.MaxPreemptibleWorkerAttempts,
 		MaxWorkersPerRequest:         f.MaxWorkersPerRequest,

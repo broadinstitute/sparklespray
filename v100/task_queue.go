@@ -66,9 +66,10 @@ type EmptyVolume struct {
 type WorkPool struct {
 	WorkpoolID   string          `firestore:"workpool_id"`
 	MachineType  string          `firestore:"machine_type"`
-	RootDir      string          `firestore:"root_dir"`
-	Resources    []ResourceEntry `firestore:"resources"`
-	EmptyVolumes []EmptyVolume   `firestore:"empty_volumes"`
+	RootDir               string          `firestore:"root_dir"`
+	SparklesWorkerGCSPath string          `firestore:"sparkles_worker_gcs_path"`
+	Resources             []ResourceEntry `firestore:"resources"`
+	EmptyVolumes          []EmptyVolume   `firestore:"empty_volumes"`
 	Expiry       time.Time       `firestore:"expiry"`
 	Region       string          `firestore:"region"`
 	Zones        []string        `firestore:"zones"`

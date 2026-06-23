@@ -111,12 +111,15 @@ func (a *Monitor) submitBatch(ctx context.Context, pool *WorkPool, vmCount int, 
 	batchID := uuid.New().String()
 
 	jobID, err := a.batchAPI.CreateJob(ctx, &WorkerJobSpec{
-		WorkpoolID:  pool.WorkpoolID,
-		BatchID:     batchID,
-		Region:      pool.Region,
-		MachineType: pool.MachineType,
-		VMCount:     vmCount,
-		Preemptible: preemptible,
+		WorkpoolID:            pool.WorkpoolID,
+		BatchID:               batchID,
+		Region:                pool.Region,
+		MachineType:           pool.MachineType,
+		VMCount:               vmCount,
+		Preemptible:           preemptible,
+		RootDir:               pool.RootDir,
+		SparklesWorkerGCSPath: pool.SparklesWorkerGCSPath,
+		EmptyVolumes:          pool.EmptyVolumes,
 	})
 	if err != nil {
 		return fmt.Errorf("create GCP batch job: %w", err)

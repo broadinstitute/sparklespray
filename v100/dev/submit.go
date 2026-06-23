@@ -37,11 +37,12 @@ type JobSpecTask struct {
 
 // WorkpoolSpec is the JSON schema for the workpool spec file passed to "dev submit".
 type WorkpoolSpec struct {
-	ID           string              `json:"id"`
-	MachineType  string              `json:"machineType"`
-	RootDir      string              `json:"rootDir"`
-	Resources    []v100.ResourceEntry  `json:"resources"`
-	EmptyVolumes []v100.EmptyVolume    `json:"emptyVolumes"`
+	ID                    string              `json:"id"`
+	MachineType           string              `json:"machineType"`
+	RootDir               string              `json:"rootDir"`
+	SparklesWorkerGCSPath string              `json:"sparklesWorkerGCSPath"`
+	Resources             []v100.ResourceEntry  `json:"resources"`
+	EmptyVolumes          []v100.EmptyVolume    `json:"emptyVolumes"`
 	Region       string              `json:"region"`
 	Zones        []string            `json:"zones"`
 
@@ -174,11 +175,12 @@ func devSubmit(jobSpecFile, workpoolSpecFile, project, db string) error {
 		return err
 	}
 	workpool := v100.WorkPool{
-		WorkpoolID:   workpoolID,
-		MachineType:  workpoolSpec.MachineType,
-		RootDir:      workpoolSpec.RootDir,
-		Resources:    workpoolSpec.Resources,
-		EmptyVolumes: workpoolSpec.EmptyVolumes,
+		WorkpoolID:            workpoolID,
+		MachineType:           workpoolSpec.MachineType,
+		RootDir:               workpoolSpec.RootDir,
+		SparklesWorkerGCSPath: workpoolSpec.SparklesWorkerGCSPath,
+		Resources:             workpoolSpec.Resources,
+		EmptyVolumes:          workpoolSpec.EmptyVolumes,
 		Expiry:       time.Now().Add(7 * 24 * time.Hour),
 		Region:       workpoolSpec.Region,
 		Zones:        workpoolSpec.Zones,

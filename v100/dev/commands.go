@@ -28,6 +28,18 @@ func Command() cli.Command {
 				Action: runDevDumpDB,
 			},
 			{
+				Name:      "add-worker",
+				ArgsUsage: "<workpool-spec-json>",
+				Usage:     "Create a GCP Batch job for a workpool and record it in Firestore",
+				Flags: []cli.Flag{
+					cli.StringFlag{Name: "project"},
+					cli.StringFlag{Name: "db", Value: defaultDB},
+					cli.IntFlag{Name: "vm-count", Value: 1, Usage: "number of VMs to provision"},
+					cli.BoolFlag{Name: "preemptible", Usage: "use SPOT/preemptible VMs"},
+				},
+				Action: runDevAddWorker,
+			},
+			{
 				Name:  "batchapi-emulator",
 				Usage: "Run a local batch API emulator for testing",
 				Flags: []cli.Flag{

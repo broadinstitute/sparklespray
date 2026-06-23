@@ -61,12 +61,12 @@ func (c *GCPBatchAPIClient) CreateJob(ctx context.Context, spec *WorkerJobSpec) 
 			DeviceName: deviceName,
 			NewDisk: &batch.Disk{
 				Type:   ev.Type,
-				SizeGb: ev.SizeGB,
+				SizeGb: int64(ev.SizeInGB),
 			},
 		})
 		volumes = append(volumes, &batch.Volume{
 			DeviceName: deviceName,
-			MountPath:  ev.MountPath,
+			MountPath:  ev.MountPoint,
 		})
 	}
 

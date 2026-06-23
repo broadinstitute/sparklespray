@@ -53,10 +53,13 @@ const (
 // WorkPool holds both the configuration and runtime status of a workpool.
 // Corresponds to the WorkPools Firestore collection, extended with monitor fields.
 type WorkPool struct {
-	WorkpoolID  string
-	Region      string   // GCP region for Batch jobs, e.g. "us-central1"
-	Zones       []string // GCP zones to query for running VMs, e.g. ["us-central1-a", "us-central1-b"]
-	MachineType string   // GCP machine type, e.g. "n1-standard-4"
+	WorkpoolID            string
+	Region                string   // GCP region for Batch jobs, e.g. "us-central1"
+	Zones                 []string // GCP zones to query for running VMs, e.g. ["us-central1-a", "us-central1-b"]
+	MachineType           string   // GCP machine type, e.g. "n1-standard-4"
+	RootDir               string
+	SparklesWorkerGCSPath string
+	EmptyVolumes          []EmptyVolume
 
 	// Provisioning parameters
 	MaxWorkerCount               int
@@ -118,10 +121,11 @@ type VMInfo struct {
 }
 
 // EmptyVolume describes a new scratch disk to attach and mount on each worker VM.
+// Field names and tags match v100.EmptyVolume so Firestore documents round-trip correctly.
 type EmptyVolume struct {
-	MountPath string
-	Type      string // e.g. "pd-ssd", "pd-standard", "local-ssd"
-	SizeGB    int64
+	MountPoint string `firestore:"mount_point" json:"mountPoint"`
+	Type       string `firestore:"type"        json:"type"`
+	SizeInGB   int    `firestore:"size_in_gb"  json:"sizeInGB"`
 }
 
 // WorkerJobSpec holds all parameters needed to create a GCP Batch job for workers.
