@@ -72,7 +72,7 @@ type remoteCreateJobBody struct {
 	Preemptible  bool          `json:"preemptible"`
 	DockerImage  string        `json:"dockerImage"`
 	Command      string        `json:"command"`
-	EmptyVolumes []string      `json:"emptyVolumes"`
+	EmptyVolumes []EmptyVolume `json:"emptyVolumes"`
 	Labels       []remoteLabel `json:"labels"`
 }
 

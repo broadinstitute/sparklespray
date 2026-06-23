@@ -117,6 +117,13 @@ type VMInfo struct {
 	Zone         string
 }
 
+// EmptyVolume describes a new scratch disk to attach and mount on each worker VM.
+type EmptyVolume struct {
+	MountPath string
+	Type      string // e.g. "pd-ssd", "pd-standard", "local-ssd"
+	SizeGB    int64
+}
+
 // WorkerJobSpec holds all parameters needed to create a GCP Batch job for workers.
 type WorkerJobSpec struct {
 	WorkpoolID   string
@@ -127,7 +134,8 @@ type WorkerJobSpec struct {
 	Preemptible  bool
 	DockerImage  string
 	Command      string
-	EmptyVolumes []string
+	RootDir      string
+	EmptyVolumes []EmptyVolume
 }
 
 // ----- External service interfaces -----

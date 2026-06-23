@@ -14,6 +14,7 @@ const (
 	labelWorkpool = "sparkles-worker-workpool"
 
 	pubsubNotificationTopic = "batch-api-notifications"
+
 )
 
 // GCPBatchAPIClient implements BatchAPIClient using the GCP Batch API and
@@ -51,6 +52,23 @@ func (c *GCPBatchAPIClient) CreateJob(ctx context.Context, spec *WorkerJobSpec) 
 		provisioningModel = "SPOT"
 	}
 
+	disks := make([]*batch.AttachedDisk, 0, len(spec.EmptyVolumes))
+	volumes := make([]*batch.Volume, 0, len(spec.EmptyVolumes))
+	for i, ev := range spec.EmptyVolumes {
+		deviceName := fmt.Sprintf("empty-vol-%d", i)
+		disks = append(disks, &batch.AttachedDisk{
+			DeviceName: deviceName,
+			NewDisk: &batch.Disk{
+				Type:   ev.Type,
+				SizeGb: ev.SizeGB,
+			},
+		})
+		volumes = append(volumes, &batch.Volume{
+			DeviceName: deviceName,
+			MountPath:  ev.MountPath,
+		})
+	}
+
 	job := &batch.Job{
 		Labels: map[string]string{
 			labelBatch:    spec.BatchID,
@@ -59,7 +77,18 @@ func (c *GCPBatchAPIClient) CreateJob(ctx context.Context, spec *WorkerJobSpec) 
 		TaskGroups: []*batch.TaskGroup{
 			{
 				TaskCount: int64(spec.VMCount),
-				TaskSpec:  &batch.TaskSpec{},
+				TaskSpec: &batch.TaskSpec{
+					Volumes: volumes,
+					Runnables: []*batch.Runnable{
+						{
+							Container: &batch.Container{
+								ImageUri:   spec.DockerImage,
+								Entrypoint: spec.RootDir + "/sparkles",
+								Commands:   []string{"--root-dir", spec.RootDir},
+							},
+						},
+					},
+				},
 			},
 		},
 		AllocationPolicy: &batch.AllocationPolicy{
@@ -68,6 +97,7 @@ func (c *GCPBatchAPIClient) CreateJob(ctx context.Context, spec *WorkerJobSpec) 
 					Policy: &batch.InstancePolicy{
 						MachineType:       spec.MachineType,
 						ProvisioningModel: provisioningModel,
+						Disks:             disks,
 					},
 				},
 			},
@@ -80,10 +110,6 @@ func (c *GCPBatchAPIClient) CreateJob(ctx context.Context, spec *WorkerJobSpec) 
 	}
 
 	parent := fmt.Sprintf("projects/%s/locations/%s", c.project, spec.Region)
-	if parent != "" {
-		panic("not fully implemented -- no runnables or mounts")
-	}
-
 	created, err := c.batchSvc.Projects.Locations.Jobs.Create(parent, job).Context(ctx).Do()
 	if err != nil {
 		return "", fmt.Errorf("batch create job: %w", err)

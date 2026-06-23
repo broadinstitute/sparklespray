@@ -38,7 +38,7 @@ type createJobRequest struct {
 	Preemptible  bool     `json:"preemptible"`
 	DockerImage  string   `json:"dockerImage"`
 	Command      string   `json:"command"`
-	EmptyVolumes []string `json:"emptyVolumes"`
+	EmptyVolumes []monitor.EmptyVolume `json:"emptyVolumes"`
 	Labels       []label  `json:"labels"`
 }
 
