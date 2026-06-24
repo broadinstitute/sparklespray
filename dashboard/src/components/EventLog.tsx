@@ -1,34 +1,18 @@
-import type {
-  AnyTaskEvent,
-  TaskExecCompleteEvent,
-  TaskFailedEvent,
-} from "../types";
+import type { AnyTaskEvent, TaskStateUpdateEvent } from "../types";
 
 interface Props {
   events: AnyTaskEvent[];
 }
 
-const EVENT_COLORS: Record<string, string> = {
-  task_claimed: "#2196f3",
-  task_exec_started: "#9c27b0",
-  task_exec_complete: "#ff9800",
-  task_complete: "#00897b",
-  task_orphaned: "#ff5722",
-  task_failed: "#f44336",
-  task_killed: "#795548",
+const STATE_COLORS: Record<string, string> = {
+  claimed: "#2196f3",
+  running: "#9c27b0",
+  writing: "#ff9800",
+  success: "#00897b",
+  error: "#ff5722",
+  failed: "#f44336",
+  killed: "#795548",
 };
-
-function eventDetails(event: AnyTaskEvent): string | null {
-  if (event.type === "task_exec_complete") {
-    const e = event as TaskExecCompleteEvent;
-    return `exit_code=${e.exit_code}`;
-  }
-  if (event.type === "task_failed") {
-    const e = event as TaskFailedEvent;
-    return `failure_reason: ${e.failure_reason}`;
-  }
-  return null;
-}
 
 export default function EventLog({ events }: Props) {
   return (
@@ -53,8 +37,9 @@ export default function EventLog({ events }: Props) {
         }}
       >
         {events.map((event, i) => {
-          const color = EVENT_COLORS[event.type] ?? "#777";
-          const details = eventDetails(event);
+          const tsu = event as TaskStateUpdateEvent;
+          const newState = tsu.new_state ?? "";
+          const color = STATE_COLORS[newState] ?? "#777";
           return (
             <div
               key={i}
@@ -83,9 +68,13 @@ export default function EventLog({ events }: Props) {
                   fontSize: "0.78rem",
                 }}
               >
-                {event.type}
+                {newState || event.type}
               </span>
-              {details && <span style={{ color: "#555" }}>{details}</span>}
+              {tsu.old_state && (
+                <span style={{ color: "#999", fontSize: "0.78rem" }}>
+                  {tsu.old_state} → {tsu.new_state}
+                </span>
+              )}
             </div>
           );
         })}

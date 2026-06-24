@@ -43,10 +43,12 @@ func (a *Monitor) updateJobSummary(ctx context.Context, summary *JobSummary) err
 	history := &JobSummaryHistory{
 		JobID:      summary.JobID,
 		WorkpoolID: summary.WorkpoolID,
+		CreatedAt:  summary.CreatedAt,
 		Timestamp:  time.Now(),
 		Expiry:     summary.Expiry,
 		Status:     newStatus,
 		Tasks:      newTasks,
+		Labels:     summary.Labels,
 	}
 	if err := a.jobSummaries.SaveHistory(ctx, history); err != nil {
 		return err

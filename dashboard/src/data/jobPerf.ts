@@ -1,20 +1,13 @@
-import type { AnyEvent, AnyTaskEvent, TaskCompleteEvent } from "../types";
+import type { TaskSummaryRecord } from "../types";
 
 export interface TaskPerfEntry {
   taskId: string;
-  localizationMin: number;
-  executionMin: number;
-  uploadMin: number | undefined;
+  executionSec: number;
   maxMemGb: number;
   userCpuSec: number;
   systemCpuSec: number;
-  maxMemoryBytes: number;
-  sharedMemoryBytes: number;
-  unsharedMemoryBytes: number;
-  blockInputOps: number;
-  blockOutputOps: number;
-  downloadBytes: number;
-  uploadBytes: number;
+  blockReadBytes: number;
+  blockWriteBytes: number;
 }
 
 export interface PerfStats {
@@ -31,17 +24,11 @@ export interface JobPerfData {
   entries: TaskPerfEntry[];
   execStats: PerfStats;
   memStats: PerfStats;
-  locStats: PerfStats;
-  uploadTimeStats: PerfStats | null;
   userCpuStats: PerfStats;
   systemCpuStats: PerfStats;
   cpuEffStats: PerfStats;
-  blockInputStats: PerfStats;
-  blockOutputStats: PerfStats;
-  downloadStats: PerfStats;
-  uploadBytesStats: PerfStats;
-  sharedMemStats: PerfStats;
-  unsharedMemStats: PerfStats;
+  blockReadStats: PerfStats;
+  blockWriteStats: PerfStats;
 }
 
 function quantile(sorted: number[], q: number): number {
@@ -64,115 +51,60 @@ function computeStats(values: number[]): PerfStats {
   };
 }
 
-export function computeJobPerf(events: AnyEvent[], jobId: string): JobPerfData {
-  const jobEvents = events.filter(
-    (e) => "job_id" in e && (e as any).job_id === jobId
-  ) as AnyTaskEvent[];
-
-  const byTask = new Map<string, AnyTaskEvent[]>();
-  for (const e of jobEvents) {
-    if (!("task_id" in e)) continue;
-    const list = byTask.get(e.task_id) ?? [];
-    list.push(e);
-    byTask.set(e.task_id, list);
-  }
-
+export function computeJobPerf(tasks: TaskSummaryRecord[]): JobPerfData {
   const entries: TaskPerfEntry[] = [];
 
-  for (const [taskId, evs] of byTask) {
-    evs.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
-
-    // Find the task_complete event — this is the authoritative rusage source
-    const completeEv = evs.findLast(
-      (e: AnyTaskEvent) => e.type === "task_complete"
-    ) as TaskCompleteEvent | undefined;
-    if (!completeEv) continue;
-
-    // Find the last exec cycle: task_exec_started → task_exec_complete before the task_complete
-    let execCompleteIdx = -1;
-    for (let i = evs.length - 1; i >= 0; i--) {
-      if (evs[i].type === "task_exec_complete") {
-        execCompleteIdx = i;
-        break;
-      }
-    }
-    if (execCompleteIdx < 0) continue;
-
-    let execStartedIdx = -1;
-    for (let i = execCompleteIdx - 1; i >= 0; i--) {
-      if (evs[i].type === "task_exec_started") {
-        execStartedIdx = i;
-        break;
-      }
-    }
-    if (execStartedIdx < 0) continue;
-
-    let claimedIdx = -1;
-    for (let i = execStartedIdx - 1; i >= 0; i--) {
-      if (evs[i].type === "task_claimed") {
-        claimedIdx = i;
-        break;
-      }
-    }
-
-    const tExecStarted = new Date(evs[execStartedIdx].timestamp).getTime();
-    const tExecComplete = new Date(evs[execCompleteIdx].timestamp).getTime();
-    const executionMin = (tExecComplete - tExecStarted) / 60_000;
-    if (executionMin < 0) continue;
-
-    const localizationMin =
-      claimedIdx >= 0
-        ? (tExecStarted - new Date(evs[claimedIdx].timestamp).getTime()) /
-          60_000
-        : 0;
-
-    const tComplete = new Date(completeEv.timestamp).getTime();
-    const uploadMin = (tComplete - tExecComplete) / 60_000;
-
+  for (const task of tasks) {
+    const ru = task.resource_usage;
+    if (!ru) continue;
     entries.push({
-      taskId,
-      localizationMin,
-      executionMin,
-      uploadMin,
-      maxMemGb: completeEv.max_mem_in_gb,
-      userCpuSec: completeEv.user_cpu_sec,
-      systemCpuSec: completeEv.system_cpu_sec,
-      maxMemoryBytes: completeEv.max_memory_bytes,
-      sharedMemoryBytes: completeEv.shared_memory_bytes,
-      unsharedMemoryBytes: completeEv.unshared_memory_bytes,
-      blockInputOps: completeEv.block_input_ops,
-      blockOutputOps: completeEv.block_output_ops,
-      downloadBytes: completeEv.download_bytes,
-      uploadBytes: completeEv.upload_bytes,
+      taskId: task.task_id,
+      executionSec: ru.elapsed_seconds,
+      maxMemGb: ru.max_memory_bytes / 1e9,
+      userCpuSec: ru.cpu_user_usec / 1e6,
+      systemCpuSec: ru.cpu_system_usec / 1e6,
+      blockReadBytes: ru.block_read_bytes,
+      blockWriteBytes: ru.block_write_bytes,
     });
   }
 
-  const uploadTimeEntries = entries.filter((e) => e.uploadMin !== undefined);
+  if (entries.length === 0) {
+    const empty: PerfStats = {
+      count: 0,
+      min: 0,
+      p25: 0,
+      median: 0,
+      p75: 0,
+      p95: 0,
+      max: 0,
+    };
+    return {
+      entries,
+      execStats: empty,
+      memStats: empty,
+      userCpuStats: empty,
+      systemCpuStats: empty,
+      cpuEffStats: empty,
+      blockReadStats: empty,
+      blockWriteStats: empty,
+    };
+  }
 
   return {
     entries,
-    execStats: computeStats(entries.map((e) => e.executionMin)),
+    execStats: computeStats(entries.map((e) => e.executionSec)),
     memStats: computeStats(entries.map((e) => e.maxMemGb * 1024)),
-    locStats: computeStats(entries.map((e) => e.localizationMin)),
-    uploadTimeStats:
-      uploadTimeEntries.length > 0
-        ? computeStats(uploadTimeEntries.map((e) => e.uploadMin as number))
-        : null,
     userCpuStats: computeStats(entries.map((e) => e.userCpuSec)),
     systemCpuStats: computeStats(entries.map((e) => e.systemCpuSec)),
     cpuEffStats: computeStats(
-      entries.map(
-        (e) => (e.userCpuSec + e.systemCpuSec) / (e.executionMin * 60)
+      entries.map((e) =>
+        e.executionSec > 0
+          ? (e.userCpuSec + e.systemCpuSec) / e.executionSec
+          : 0
       )
     ),
-    blockInputStats: computeStats(entries.map((e) => e.blockInputOps)),
-    blockOutputStats: computeStats(entries.map((e) => e.blockOutputOps)),
-    downloadStats: computeStats(entries.map((e) => e.downloadBytes / 1e9)),
-    uploadBytesStats: computeStats(entries.map((e) => e.uploadBytes / 1e9)),
-    sharedMemStats: computeStats(entries.map((e) => e.sharedMemoryBytes / 1e6)),
-    unsharedMemStats: computeStats(
-      entries.map((e) => e.unsharedMemoryBytes / 1e6)
-    ),
+    blockReadStats: computeStats(entries.map((e) => e.blockReadBytes / 1e6)),
+    blockWriteStats: computeStats(entries.map((e) => e.blockWriteBytes / 1e6)),
   };
 }
 

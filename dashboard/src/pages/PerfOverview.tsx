@@ -1,7 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { useParams } from "react-router-dom";
-import { useEvents, mergeEvents } from "../data/EventProvider";
-import type { AnyEvent } from "../types";
+import type { TaskSummaryRecord } from "../types";
 import TabBar from "../components/TabBar";
 import {
   BarChart,
@@ -22,18 +21,6 @@ const TOOLTIP_STYLE = { fontFamily: "monospace", fontSize: 11 };
 
 function fmt(n: number, decimals = 2) {
   return n.toFixed(decimals);
-}
-
-function scaleStats(stats: PerfStats, factor: number): PerfStats {
-  return {
-    count: stats.count,
-    min: stats.min * factor,
-    p25: stats.p25 * factor,
-    median: stats.median * factor,
-    p75: stats.p75 * factor,
-    p95: stats.p95 * factor,
-    max: stats.max * factor,
-  };
 }
 
 interface MetricDef {
@@ -258,29 +245,38 @@ function DrillDown({ metric }: { metric: MetricDef }) {
 
 export default function PerfOverview() {
   const { jobId } = useParams<{ jobId: string }>();
-  const { addJobEventListener } = useEvents();
-  const [localEvents, setLocalEvents] = useState<AnyEvent[]>([]);
+  const [tasks, setTasks] = useState<TaskSummaryRecord[]>([]);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
 
   useEffect(() => {
     if (!jobId) return;
-    return addJobEventListener(jobId, (newEvents) => {
-      const relevant = newEvents.filter(
-        (e) =>
-          e.type === "task_claimed" ||
-          e.type === "task_exec_started" ||
-          e.type === "task_exec_complete" ||
-          e.type === "task_complete"
-      );
-      if (relevant.length > 0)
-        setLocalEvents((prev) => mergeEvents(prev, relevant));
-    });
-  }, [addJobEventListener, jobId]);
+    let cancelled = false;
+    const POLL_MS = 10_000;
 
-  const perf = useMemo(() => computeJobPerf(localEvents, jobId ?? ""), [
-    localEvents,
-    jobId,
-  ]);
+    async function poll() {
+      while (!cancelled) {
+        try {
+          const res = await fetch(
+            `/api/v1/job/${jobId}/tasks?status=success,error,failed,killed`
+          );
+          if (res.ok) {
+            const data: TaskSummaryRecord[] = await res.json();
+            if (!cancelled) setTasks(data);
+          }
+        } catch {
+          // transient
+        }
+        await new Promise<void>((r) => setTimeout(r, POLL_MS));
+      }
+    }
+
+    poll();
+    return () => {
+      cancelled = true;
+    };
+  }, [jobId]);
+
+  const perf = useMemo(() => computeJobPerf(tasks), [tasks]);
 
   if (!jobId) {
     return (
@@ -293,16 +289,12 @@ export default function PerfOverview() {
   const {
     entries,
     execStats,
-    locStats,
-    uploadTimeStats,
     memStats,
     userCpuStats,
     systemCpuStats,
     cpuEffStats,
-    blockInputStats,
-    blockOutputStats,
-    downloadStats,
-    uploadBytesStats,
+    blockReadStats,
+    blockWriteStats,
   } = perf;
 
   const jobTabs = [
@@ -315,8 +307,6 @@ export default function PerfOverview() {
     },
   ];
 
-  const uploadEntries = entries.filter((e) => e.uploadMin !== undefined);
-
   const groups: MetricGroup[] = [
     {
       label: "Timing",
@@ -326,38 +316,12 @@ export default function PerfOverview() {
           label: "Execution Time",
           unit: "sec",
           color: "#7c4dff",
-          stats: scaleStats(execStats, 60),
+          stats: execStats,
           histData: makeHistogram(
-            entries.map((e) => e.executionMin * 60),
+            entries.map((e) => e.executionSec),
             20
           ),
         },
-        {
-          key: "locTime",
-          label: "Localization Time",
-          unit: "sec",
-          color: "#1565c0",
-          stats: scaleStats(locStats, 60),
-          histData: makeHistogram(
-            entries.map((e) => e.localizationMin * 60),
-            20
-          ),
-        },
-        ...(uploadTimeStats
-          ? [
-              {
-                key: "uploadTime",
-                label: "Upload Time",
-                unit: "sec",
-                color: "#e65100",
-                stats: scaleStats(uploadTimeStats, 60),
-                histData: makeHistogram(
-                  uploadEntries.map((e) => (e.uploadMin as number) * 60),
-                  20
-                ),
-              },
-            ]
-          : []),
       ],
     },
     {
@@ -408,8 +372,10 @@ export default function PerfOverview() {
           color: "#4527a0",
           stats: cpuEffStats,
           histData: makeHistogram(
-            entries.map(
-              (e) => (e.userCpuSec + e.systemCpuSec) / (e.executionMin * 60)
+            entries.map((e) =>
+              e.executionSec > 0
+                ? (e.userCpuSec + e.systemCpuSec) / e.executionSec
+                : 0
             ),
             20
           ),
@@ -422,46 +388,24 @@ export default function PerfOverview() {
       label: "I/O",
       metrics: [
         {
-          key: "blockIn",
-          label: "Block Input Ops",
-          unit: "ops",
+          key: "blockRead",
+          label: "Block Read",
+          unit: "MB",
           color: "#0277bd",
-          stats: blockInputStats,
+          stats: blockReadStats,
           histData: makeHistogram(
-            entries.map((e) => e.blockInputOps),
+            entries.map((e) => e.blockReadBytes / 1e6),
             20
           ),
         },
         {
-          key: "blockOut",
-          label: "Block Output Ops",
-          unit: "ops",
+          key: "blockWrite",
+          label: "Block Write",
+          unit: "MB",
           color: "#01579b",
-          stats: blockOutputStats,
+          stats: blockWriteStats,
           histData: makeHistogram(
-            entries.map((e) => e.blockOutputOps),
-            20
-          ),
-        },
-        {
-          key: "download",
-          label: "Download",
-          unit: "GB",
-          color: "#c62828",
-          stats: downloadStats,
-          histData: makeHistogram(
-            entries.map((e) => e.downloadBytes / 1e9),
-            20
-          ),
-        },
-        {
-          key: "uploadBytes",
-          label: "Upload Bytes",
-          unit: "GB",
-          color: "#b71c1c",
-          stats: uploadBytesStats,
-          histData: makeHistogram(
-            entries.map((e) => e.uploadBytes / 1e9),
+            entries.map((e) => e.blockWriteBytes / 1e6),
             20
           ),
         },
@@ -481,7 +425,6 @@ export default function PerfOverview() {
         fontFamily: "monospace",
       }}
     >
-      {/* Header */}
       <div style={{ marginBottom: "1.5rem" }}>
         <h1
           style={{ margin: "0 0 1.5rem", fontSize: "1.3rem", fontWeight: 700 }}
@@ -517,7 +460,6 @@ export default function PerfOverview() {
             minHeight: 420,
           }}
         >
-          {/* Left: metric list */}
           <div
             style={{
               width: 520,
@@ -555,7 +497,6 @@ export default function PerfOverview() {
             ))}
           </div>
 
-          {/* Right: detail panel */}
           <div
             style={{
               flex: 1,

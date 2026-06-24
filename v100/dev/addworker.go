@@ -80,6 +80,16 @@ func runDevAddWorker(c *cli.Context) error {
 	return nil
 }
 
+// toMonitorLabels converts v100.Label to monitor.Label.
+// The two types have identical field names and Firestore tags by design.
+func toMonitorLabels(ls []v100.Label) []monitor.Label {
+	out := make([]monitor.Label, len(ls))
+	for i, l := range ls {
+		out[i] = monitor.Label{Name: l.Name, Value: l.Value}
+	}
+	return out
+}
+
 // toMonitorEmptyVolumes converts v100.EmptyVolume to monitor.EmptyVolume.
 // The two types have identical field names and Firestore tags by design.
 func toMonitorEmptyVolumes(vs []v100.EmptyVolume) []monitor.EmptyVolume {

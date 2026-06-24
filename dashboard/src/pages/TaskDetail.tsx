@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useRef, Fragment } from "react";
 import { useParams, useLocation } from "react-router-dom";
 import { getTaskEvents, deriveStatus, extractTimings } from "../data/events";
 import { useEvents, mergeEvents } from "../data/EventProvider";
-import { useTaskPubsub } from "../data/useTaskPubsub";
+import { useTaskLog } from "../data/useTaskLog";
 import type { AnyEvent } from "../types";
 import TaskProperties from "../components/TaskProperties";
 import MultiLineChart from "../components/MultiLineChart";
@@ -12,10 +12,10 @@ import TabBar from "../components/TabBar";
 const STATUS_COLORS: Record<string, { bg: string; text: string }> = {
   pending: { bg: "#e3f2fd", text: "#1565c0" },
   claimed: { bg: "#fff3e0", text: "#e65100" },
-  exec_started: { bg: "#f3e5f5", text: "#6a1b9a" },
-  exec_complete: { bg: "#e8f5e9", text: "#2e7d32" },
-  complete: { bg: "#e0f2f1", text: "#00695c" },
-  orphaned: { bg: "#fbe9e7", text: "#bf360c" },
+  running: { bg: "#f3e5f5", text: "#6a1b9a" },
+  writing: { bg: "#e8f5e9", text: "#2e7d32" },
+  success: { bg: "#e0f2f1", text: "#00695c" },
+  error: { bg: "#fbe9e7", text: "#bf360c" },
   failed: { bg: "#ffebee", text: "#b71c1c" },
   killed: { bg: "#eeeeee", text: "#555555" },
 };
@@ -58,7 +58,7 @@ export default function TaskDetail() {
         setTaskInfo({
           command: d.command ?? "missing",
           dockerImage: d.docker_image ?? "missing",
-          logUrl: d.log_url ?? "",
+          logUrl: d.log_path ?? "",
         })
       )
       .catch(() =>
@@ -74,10 +74,8 @@ export default function TaskDetail() {
   const status = useMemo(() => deriveStatus(taskEvents), [taskEvents]);
   const timings = useMemo(() => extractTimings(taskEvents), [taskEvents]);
 
-  const isActive = ["claimed", "exec_started", "exec_complete"].includes(
-    status
-  );
-  const { resourceData, logContent, error: pubsubError } = useTaskPubsub(
+  const isActive = ["claimed", "running", "writing"].includes(status);
+  const { resourceData, logContent, error: pubsubError } = useTaskLog(
     taskId ?? "",
     isActive
   );

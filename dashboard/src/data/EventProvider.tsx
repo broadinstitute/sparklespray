@@ -15,8 +15,8 @@ export function mergeEvents(
   prev: AnyEvent[],
   incoming: AnyEvent[]
 ): AnyEvent[] {
-  const knownIds = new Set(prev.map((e) => e.id));
-  const novel = incoming.filter((e) => !knownIds.has(e.id));
+  const knownIds = new Set(prev.map((e) => e.event_id));
+  const novel = incoming.filter((e) => !knownIds.has(e.event_id));
   return novel.length > 0 ? [...prev, ...novel] : prev;
 }
 
@@ -34,11 +34,29 @@ const EventContext = createContext<EventContextValue>({
   jobCache: {},
 });
 
+function computeJobSummary(
+  raw: Omit<BackendJobSummary, "taskCount" | "successCount" | "failureCount">
+): BackendJobSummary {
+  let taskCount = 0,
+    successCount = 0,
+    failureCount = 0;
+  for (const t of raw.tasks) {
+    taskCount += t.count;
+    if (t.state === "success") successCount += t.count;
+    else if (
+      t.state === "error" ||
+      t.state === "failed" ||
+      t.state === "killed"
+    )
+      failureCount += t.count;
+  }
+  return { ...raw, taskCount, successCount, failureCount };
+}
+
 export function EventProvider({ children }: { children: React.ReactNode }) {
   const [jobs, setJobs] = useState<BackendJobSummary[]>([]);
   const [jobCache, setJobCache] = useState<Record<string, JobDetail>>({});
 
-  // Per-job event caches, cursors, listener sets, and polling flags.
   const jobEventCacheRef = useRef<Record<string, AnyEvent[]>>({});
   const jobCursorRef = useRef<Record<string, string | null>>({});
   const jobListenersRef = useRef<Record<string, Set<EventListener>>>({});
@@ -47,28 +65,48 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
 
   const pendingJobFetchesRef = useRef<Set<string>>(new Set());
 
-  // Jobs polling — replaces the old global event stream.
   useEffect(() => {
     let cancelled = false;
 
     async function pollJobs() {
       while (!cancelled) {
         try {
-          const res = await fetch("/api/v1/jobs/summary");
+          const res = await fetch("/api/v1/jobs");
           if (res.ok) {
-            const data: BackendJobSummary[] = await res.json();
+            const rawData: Omit<
+              BackendJobSummary,
+              "taskCount" | "successCount" | "failureCount"
+            >[] = await res.json();
+            const data = rawData.map(computeJobSummary);
             setJobs(data);
 
-            // Eagerly fetch full job detail for any new job IDs.
             for (const j of data) {
-              if (!pendingJobFetchesRef.current.has(j.jobID)) {
-                pendingJobFetchesRef.current.add(j.jobID);
-                fetch(`/api/v1/job/${j.jobID}`)
+              if (!pendingJobFetchesRef.current.has(j.job_id)) {
+                pendingJobFetchesRef.current.add(j.job_id);
+                fetch(`/api/v1/job/${j.job_id}`)
                   .then((r) => (r.ok ? r.json() : null))
-                  .then((detail: JobDetail | null) => {
-                    if (detail)
-                      setJobCache((prev) => ({ ...prev, [j.jobID]: detail }));
-                  })
+                  .then(
+                    (
+                      raw: {
+                        job_id: string;
+                        workpool_id: string;
+                        created_at: string;
+                        task_count: number;
+                        labels: { name: string; value: string }[];
+                      } | null
+                    ) => {
+                      if (raw) {
+                        const metadata = Object.fromEntries(
+                          raw.labels.map((l) => [l.name, l.value])
+                        );
+                        const detail: JobDetail = { ...raw, metadata };
+                        setJobCache((prev) => ({
+                          ...prev,
+                          [j.job_id]: detail,
+                        }));
+                      }
+                    }
+                  )
                   .catch(() => {});
               }
             }
@@ -88,20 +126,17 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
 
   const addJobEventListener = useMemo(
     () => (jobId: string, cb: EventListener): (() => void) => {
-      // Initialise per-job structures lazily.
       if (!jobListenersRef.current[jobId])
         jobListenersRef.current[jobId] = new Set();
       if (!jobEventCacheRef.current[jobId])
         jobEventCacheRef.current[jobId] = [];
       if (!(jobId in jobCursorRef.current)) jobCursorRef.current[jobId] = null;
 
-      // Replay existing cache immediately.
       if (jobEventCacheRef.current[jobId].length > 0)
         cb(jobEventCacheRef.current[jobId]);
 
       jobListenersRef.current[jobId].add(cb);
 
-      // Start per-job polling loop if not already running.
       if (!jobPollingRef.current[jobId]) {
         jobPollingRef.current[jobId] = true;
         const myGen = (jobLoopGenRef.current[jobId] =
@@ -130,10 +165,10 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
 
               if (data.events.length > 0) {
                 const knownIds = new Set(
-                  jobEventCacheRef.current[jobId].map((e) => e.id)
+                  jobEventCacheRef.current[jobId].map((e) => e.event_id)
                 );
                 const newEvents = data.events.filter(
-                  (e) => !knownIds.has(e.id)
+                  (e) => !knownIds.has(e.event_id)
                 );
 
                 if (newEvents.length > 0) {
@@ -148,7 +183,6 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
                 if (data.next_after)
                   jobCursorRef.current[jobId] = data.next_after;
 
-                // Drain remaining pages without sleeping.
                 if (data.events.length >= PAGE_LIMIT) continue;
               }
             } catch (err) {
@@ -158,7 +192,6 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
               );
             }
 
-            // Stop if no listeners remain.
             if (
               !jobListenersRef.current[jobId] ||
               jobListenersRef.current[jobId].size === 0

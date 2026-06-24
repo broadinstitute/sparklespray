@@ -2,15 +2,14 @@ import type {
   AnyEvent,
   AnyTaskEvent,
   BackendJobSummary,
-  TaskCompleteEvent,
-  TaskExecCompleteEvent,
+  TaskStateUpdateEvent,
 } from "../types";
 
 export function getJobTaskCount(events: AnyEvent[], jobId: string): number {
   const ids = new Set(
     events
-      .filter((e) => "task_id" in e && (e as any).job_id === jobId)
-      .map((e) => (e as any).task_id as string)
+      .filter((e) => "task_id" in e && (e as AnyTaskEvent).job_id === jobId)
+      .map((e) => (e as AnyTaskEvent).task_id)
   );
   return ids.size;
 }
@@ -28,7 +27,7 @@ export interface JobSummary {
 
 export function getJobs(jobs: BackendJobSummary[]): JobSummary[] {
   return jobs
-    .map((j) => ({ jobId: j.jobID, startTime: new Date(j.submitTime) }))
+    .map((j) => ({ jobId: j.job_id, startTime: new Date(j.created_at) }))
     .sort((a, b) => b.startTime.getTime() - a.startTime.getTime());
 }
 
@@ -40,9 +39,9 @@ export interface ClusterSummary {
 export function getClusters(jobs: BackendJobSummary[]): ClusterSummary[] {
   const earliest = new Map<string, Date>();
   for (const j of jobs) {
-    const t = new Date(j.submitTime);
-    const prev = earliest.get(j.clusterId);
-    if (!prev || t < prev) earliest.set(j.clusterId, t);
+    const t = new Date(j.created_at);
+    const prev = earliest.get(j.workpool_id);
+    if (!prev || t < prev) earliest.set(j.workpool_id, t);
   }
   return Array.from(earliest.entries())
     .map(([clusterId, startTime]) => ({ clusterId, startTime }))
@@ -51,7 +50,7 @@ export function getClusters(jobs: BackendJobSummary[]): ClusterSummary[] {
 
 export function getJobTasks(events: AnyEvent[], jobId: string): TaskSummary[] {
   const jobEvents = events.filter(
-    (e) => "task_id" in e && (e as any).job_id === jobId
+    (e) => "task_id" in e && (e as AnyTaskEvent).job_id === jobId
   ) as AnyTaskEvent[];
   const byTask = new Map<string, AnyTaskEvent[]>();
   for (const e of jobEvents) {
@@ -78,8 +77,8 @@ export function getTaskEvents(
     .filter(
       (e) =>
         "task_id" in e &&
-        (e as any).task_id === taskId &&
-        (e as any).job_id === jobId
+        (e as AnyTaskEvent).task_id === taskId &&
+        (e as AnyTaskEvent).job_id === jobId
     )
     .sort((a, b) => a.timestamp.localeCompare(b.timestamp)) as AnyTaskEvent[];
 }
@@ -87,43 +86,34 @@ export function getTaskEvents(
 export type TaskStatus =
   | "pending"
   | "claimed"
-  | "exec_started"
-  | "exec_complete"
-  | "complete"
-  | "orphaned"
+  | "running"
+  | "writing"
+  | "success"
+  | "error"
   | "failed"
   | "killed";
 
 export function deriveStatus(events: AnyTaskEvent[]): TaskStatus {
   if (events.length === 0) return "pending";
-  const last = events[events.length - 1];
-  switch (last.type) {
-    case "task_claimed":
-      return "claimed";
-    case "task_exec_started":
-      return "exec_started";
-    case "task_exec_complete":
-      return "exec_complete";
-    case "task_complete":
-      return "complete";
-    case "task_orphaned":
-      return "orphaned";
-    case "task_failed":
-      return "failed";
-    case "task_killed":
-      return "killed";
-    default:
-      return "pending";
+  const last = events[events.length - 1] as TaskStateUpdateEvent;
+  if (last.type === "task_state_update") {
+    const s = last.new_state;
+    if (s === "claimed") return "claimed";
+    if (s === "running") return "running";
+    if (s === "writing") return "writing";
+    if (s === "success") return "success";
+    if (s === "error") return "error";
+    if (s === "failed") return "failed";
+    if (s === "killed") return "killed";
   }
+  return "pending";
 }
 
 export interface TimingWindows {
   claimed?: Date;
-  exec_started?: Date;
-  exec_complete?: Date;
-  complete?: Date;
-  maxMemInGb?: number;
-  exitCode?: number;
+  running?: Date;
+  writing?: Date;
+  done?: Date;
 }
 
 export interface JobTaskStats {
@@ -141,13 +131,13 @@ export function getJobTaskStats(
   let success = 0;
   let failure = 0;
   for (const task of tasks) {
-    if (task.status === "complete") {
-      const timings = extractTimings(task.events);
-      if (timings.exitCode === 0) success++;
-      else failure++;
-    } else if (task.status === "failed") {
+    if (task.status === "success") success++;
+    else if (
+      task.status === "error" ||
+      task.status === "failed" ||
+      task.status === "killed"
+    )
       failure++;
-    }
   }
   return { total, success, failure };
 }
@@ -155,17 +145,20 @@ export function getJobTaskStats(
 export function extractTimings(events: AnyTaskEvent[]): TimingWindows {
   const result: TimingWindows = {};
   for (const e of events) {
-    if (e.type === "task_claimed") result.claimed = new Date(e.timestamp);
-    if (e.type === "task_exec_started")
-      result.exec_started = new Date(e.timestamp);
-    if (e.type === "task_exec_complete") {
-      result.exec_complete = new Date(e.timestamp);
-      result.exitCode = (e as TaskExecCompleteEvent).exit_code;
-    }
-    if (e.type === "task_complete") {
-      result.complete = new Date(e.timestamp);
-      result.maxMemInGb = (e as TaskCompleteEvent).max_mem_in_gb;
-      result.exitCode = (e as TaskCompleteEvent).exit_code;
+    if (e.type === "task_state_update") {
+      const tsu = e as TaskStateUpdateEvent;
+      const t = new Date(e.timestamp);
+      if (tsu.new_state === "claimed") result.claimed = t;
+      else if (tsu.new_state === "running") result.running = t;
+      else if (tsu.new_state === "writing") result.writing = t;
+      else if (
+        tsu.new_state === "success" ||
+        tsu.new_state === "error" ||
+        tsu.new_state === "failed" ||
+        tsu.new_state === "killed"
+      ) {
+        result.done = t;
+      }
     }
   }
   return result;

@@ -1,7 +1,7 @@
 import { useState, useMemo, useRef, useCallback, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useEvents } from "../data/EventProvider";
-import type { BackendJobSummary, ClusterStatus, ClusterInfo } from "../types";
+import type { BackendJobSummary } from "../types";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -55,23 +55,11 @@ function workerPoolColor(id: string) {
 }
 
 const C_OK = "oklch(45% 0.14 145)";
-const C_OK_SOFT = "oklch(72% 0.12 145)";
-const C_WARN = "oklch(55% 0.16 70)";
 const C_BAD = "oklch(48% 0.20 25)";
 const C_BAD_SOFT = "oklch(72% 0.16 25)";
 const MONO = "'JetBrains Mono', 'Courier New', monospace";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
-
-function relTime(dateStr: string): string {
-  const s = Math.max(
-    0,
-    Math.round((Date.now() - new Date(dateStr).getTime()) / 1000)
-  );
-  if (s < 60) return `${s}s ago`;
-  if (s < 3600) return `${Math.round(s / 60)}m ago`;
-  return `${Math.round(s / 3600)}h ago`;
-}
 
 const LOCAL_TZ =
   new Intl.DateTimeFormat("en", { timeZoneName: "short" })
@@ -90,27 +78,55 @@ function formatTimestamp(d: Date): string {
 
 // ── useWorkerPools hook ───────────────────────────────────────────────────────
 
+interface WorkpoolInfo {
+  workpool_id: string;
+  machine_type: string;
+  region: string;
+  status: string;
+  status_message: string;
+  last_incident_at: string | null;
+  incident_count: number;
+  expiry: string;
+}
+
 interface WorkerPool {
-  status: ClusterStatus;
-  machineType: string;
+  info: WorkpoolInfo;
+  activeWorkerCount: number;
   jobs: BackendJobSummary[];
 }
 
 function useWorkerPools(jobs: BackendJobSummary[]): WorkerPool[] {
-  const [statuses, setStatuses] = useState<ClusterStatus[]>([]);
-  const [infos, setInfos] = useState<ClusterInfo[]>([]);
+  const [workpools, setWorkpools] = useState<WorkpoolInfo[]>([]);
+  const [workerCounts, setWorkerCounts] = useState<Record<string, number>>({});
 
   useEffect(() => {
     let cancelled = false;
     async function poll() {
       while (!cancelled) {
         try {
-          const [sr, ir] = await Promise.all([
-            fetch("/api/v1/clusters/summary"),
-            fetch("/api/v1/clusters"),
-          ]);
-          if (sr.ok) setStatuses(await sr.json());
-          if (ir.ok) setInfos(await ir.json());
+          const res = await fetch("/api/v1/workpools");
+          if (res.ok) {
+            const data: WorkpoolInfo[] = await res.json();
+            setWorkpools(data);
+            // Fetch worker counts for each workpool in parallel.
+            const counts: Record<string, number> = {};
+            await Promise.all(
+              data.map(async (wp) => {
+                try {
+                  const r = await fetch(
+                    `/api/v1/workpool/${wp.workpool_id}/workers?status=started`
+                  );
+                  if (r.ok) {
+                    const workers: unknown[] = await r.json();
+                    counts[wp.workpool_id] = workers.length;
+                  }
+                } catch {
+                  /* ignore */
+                }
+              })
+            );
+            setWorkerCounts(counts);
+          }
         } catch {
           // network errors are transient; just retry
         }
@@ -124,163 +140,20 @@ function useWorkerPools(jobs: BackendJobSummary[]): WorkerPool[] {
   }, []);
 
   return useMemo(() => {
-    const infoMap = new Map(infos.map((c) => [c.cluster_id, c]));
-    return statuses.map((s) => ({
-      status: s,
-      machineType: infoMap.get(s.clusterId)?.machine_type ?? "",
-      jobs: jobs.filter((j) => j.clusterId === s.clusterId),
+    return workpools.map((wp) => ({
+      info: wp,
+      activeWorkerCount: workerCounts[wp.workpool_id] ?? 0,
+      jobs: jobs.filter((j) => j.workpool_id === wp.workpool_id),
     }));
-  }, [statuses, infos, jobs]);
-}
-
-// ── Proportion bar ────────────────────────────────────────────────────────────
-
-function ProportionBar({
-  segments,
-  height = 10,
-  emptyLabel = "no workers",
-}: {
-  segments: { value: number; color: string; title: string }[];
-  height?: number;
-  emptyLabel?: string;
-}) {
-  const total = segments.reduce((s, x) => s + x.value, 0);
-  if (total === 0) {
-    return (
-      <div
-        style={{
-          height,
-          background: "#f3f3f3",
-          border: "1px solid #e5e5e5",
-          borderRadius: 2,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          fontSize: 11,
-          color: "#bbb",
-          fontFamily: MONO,
-          letterSpacing: 1,
-        }}
-      >
-        {emptyLabel}
-      </div>
-    );
-  }
-  return (
-    <div
-      style={{
-        display: "flex",
-        height,
-        borderRadius: 2,
-        overflow: "hidden",
-        background: "#f3f3f3",
-        border: "1px solid #e5e5e5",
-      }}
-    >
-      {segments.map((seg, i) =>
-        seg.value > 0 ? (
-          <div
-            key={i}
-            title={seg.title}
-            style={{
-              width: `${(seg.value / total) * 100}%`,
-              background: seg.color,
-            }}
-          />
-        ) : null
-      )}
-    </div>
-  );
-}
-
-function MiniBar({
-  value,
-  max,
-  color,
-}: {
-  value: number;
-  max: number;
-  color: string;
-}) {
-  const pct = max > 0 ? Math.max(2, (value / max) * 100) : 0;
-  return (
-    <div
-      style={{
-        flex: 1,
-        height: 4,
-        background: "#f0f0f0",
-        borderRadius: 1,
-        overflow: "hidden",
-        minWidth: 30,
-      }}
-    >
-      <div
-        style={{
-          width: `${pct}%`,
-          height: "100%",
-          background: value > 0 ? color : "transparent",
-        }}
-      />
-    </div>
-  );
-}
-
-function BreakdownRow({
-  label,
-  value,
-  max,
-  color,
-  textColor,
-  emphasize,
-}: {
-  label: string;
-  value: number;
-  max: number;
-  color: string;
-  textColor: string;
-  emphasize?: boolean;
-}) {
-  return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "78px 32px 1fr",
-        alignItems: "center",
-        gap: 8,
-        fontFamily: MONO,
-        fontSize: 12,
-      }}
-    >
-      <span style={{ color: "#888" }}>{label}</span>
-      <span
-        style={{
-          textAlign: "right",
-          color: textColor,
-          fontWeight: emphasize ? 700 : 400,
-        }}
-      >
-        {value}
-      </span>
-      <MiniBar value={value} max={max} color={color} />
-    </div>
-  );
+  }, [workpools, workerCounts, jobs]);
 }
 
 // ── Worker pool card ──────────────────────────────────────────────────────────
 
 function WorkerPoolCard({ pool }: { pool: WorkerPool }) {
-  const col = workerPoolColor(pool.status.clusterId);
-  const s = pool.status;
-
-  const totalWorkers =
-    s.preemptableInstanceCount + s.nonPreemptableInstanceCount;
-  const totalFailed = s.shortFailedWorkerRequests + s.otherFailedWorkerRequests;
-  const reqBarMax = Math.max(
-    s.submittedWorkerRequests,
-    s.completedWorkerRequests + totalFailed,
-    1
-  );
-  const idleColor = s.idleInstanceCount > 0 ? C_WARN : "#bbb";
+  const col = workerPoolColor(pool.info.workpool_id);
+  const wp = pool.info;
+  const hasIncident = wp.incident_count > 0;
 
   return (
     <div
@@ -307,7 +180,8 @@ function WorkerPoolCard({ pool }: { pool: WorkerPool }) {
             width: 8,
             height: 8,
             borderRadius: "50%",
-            background: col.border,
+            background:
+              wp.status === "ok" || wp.status === "active" ? C_OK : C_BAD,
             flexShrink: 0,
           }}
         />
@@ -323,9 +197,9 @@ function WorkerPoolCard({ pool }: { pool: WorkerPool }) {
             flex: 1,
           }}
         >
-          {s.clusterId}
+          {wp.workpool_id}
         </span>
-        {pool.machineType && (
+        {wp.machine_type && (
           <span
             style={{
               fontSize: 11,
@@ -335,13 +209,13 @@ function WorkerPoolCard({ pool }: { pool: WorkerPool }) {
               flexShrink: 0,
             }}
           >
-            {pool.machineType}
+            {wp.machine_type}
           </span>
         )}
       </div>
 
-      {/* Alert: short-failed workers */}
-      {s.shortFailedWorkerRequests > 0 && (
+      {/* Incident alert */}
+      {hasIncident && (
         <div
           style={{
             padding: "7px 10px",
@@ -349,65 +223,40 @@ function WorkerPoolCard({ pool }: { pool: WorkerPool }) {
             borderBottom: `1px solid ${C_BAD_SOFT}`,
             fontSize: 12,
             fontFamily: MONO,
-            color: "#553",
+            color: C_BAD,
             lineHeight: 1.45,
           }}
         >
-          <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
-            <span style={{ color: C_BAD, fontWeight: 700, flexShrink: 0 }}>
-              ⚠
+          ⚠ {wp.incident_count} incident{wp.incident_count !== 1 ? "s" : ""}
+          {wp.status_message && (
+            <span style={{ color: "#555", fontWeight: 400 }}>
+              {" — "}
+              {wp.status_message}
             </span>
-            <div>
-              <span style={{ color: C_BAD, fontWeight: 700 }}>
-                {s.shortFailedWorkerRequests} workers
-              </span>
-              <span style={{ color: "#555" }}>
-                {" "}
-                failed quickly. A misconfiguration may be preventing workers
-                from starting.{" "}
-              </span>
-              <a
-                href={`/clusters/${s.clusterId}`}
-                style={{
-                  color: C_BAD,
-                  fontWeight: 700,
-                  textDecoration: "underline",
-                  textUnderlineOffset: 2,
-                }}
-              >
-                View the worker pool's page
-              </a>
-              <span style={{ color: "#555" }}> to see details.</span>
-            </div>
-          </div>
+          )}
         </div>
       )}
 
       <div style={{ padding: "10px 12px 12px" }}>
-        {/* Top stats */}
+        {/* Stats */}
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "1fr 1fr 1fr",
+            gridTemplateColumns: "1fr 1fr",
             gap: 8,
-            marginBottom: 10,
+            marginBottom: 8,
           }}
         >
           {[
             {
-              value: s.runningTaskCount,
-              label: "RUNNING TASKS",
-              color: s.runningTaskCount > 0 ? C_OK : "#bbb",
+              value: pool.activeWorkerCount,
+              label: "ACTIVE WORKERS",
+              color: pool.activeWorkerCount > 0 ? C_OK : "#bbb",
             },
             {
-              value: s.instanceInUseCount,
-              label: "WORKERS IN USE",
-              color: s.instanceInUseCount > 0 ? "#222" : "#bbb",
-            },
-            {
-              value: s.idleInstanceCount,
-              label: "WORKERS IDLE",
-              color: idleColor,
+              value: pool.jobs.length,
+              label: "JOBS",
+              color: pool.jobs.length > 0 ? "#222" : "#bbb",
             },
           ].map(({ value, label, color }) => (
             <div
@@ -440,224 +289,22 @@ function WorkerPoolCard({ pool }: { pool: WorkerPool }) {
           ))}
         </div>
 
-        {/* Workers bars */}
-        <div>
+        {/* Status */}
+        {wp.status && (
           <div
             style={{
-              display: "flex",
-              justifyContent: "space-between",
-              marginBottom: 4,
-            }}
-          >
-            <span
-              style={{
-                fontSize: 10,
-                letterSpacing: 1.5,
-                color: "#999",
-                fontFamily: MONO,
-              }}
-            >
-              WORKERS
-            </span>
-            <span style={{ fontSize: 11, fontFamily: MONO, color: "#888" }}>
-              <span style={{ color: "#222", fontWeight: 700 }}>
-                {totalWorkers}
-              </span>{" "}
-              total
-            </span>
-          </div>
-
-          <ProportionBar
-            segments={[
-              {
-                value: s.instanceInUseCount,
-                color: C_OK_SOFT,
-                title: `${s.instanceInUseCount} in use`,
-              },
-              {
-                value: s.idleInstanceCount,
-                color: "oklch(90% 0.03 70)",
-                title: `${s.idleInstanceCount} idle`,
-              },
-            ]}
-          />
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              marginTop: 3,
               fontSize: 11,
               fontFamily: MONO,
-              color: "#777",
+              color: "#888",
+              marginTop: 4,
             }}
           >
-            <span>
-              <ColorSwatch color={C_OK_SOFT} />
-              <span style={{ color: "#222", fontWeight: 700 }}>
-                {s.instanceInUseCount}
-              </span>{" "}
-              in use
-            </span>
-            <span>
-              <ColorSwatch color="oklch(90% 0.03 70)" />
-              <span
-                style={{
-                  color: s.idleInstanceCount > 0 ? "#222" : "#bbb",
-                  fontWeight: 700,
-                }}
-              >
-                {s.idleInstanceCount}
-              </span>{" "}
-              idle
-            </span>
-          </div>
-
-          <div style={{ height: 6 }} />
-          <ProportionBar
-            segments={[
-              {
-                value: s.preemptableInstanceCount,
-                color: "oklch(72% 0.10 240)",
-                title: `${s.preemptableInstanceCount} preemptable`,
-              },
-              {
-                value: s.nonPreemptableInstanceCount,
-                color: "oklch(50% 0.13 240)",
-                title: `${s.nonPreemptableInstanceCount} non-preemptable`,
-              },
-            ]}
-            emptyLabel="no workers"
-          />
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              marginTop: 3,
-              fontSize: 11,
-              fontFamily: MONO,
-              color: "#777",
-            }}
-          >
-            <span>
-              <ColorSwatch color="oklch(72% 0.10 240)" />
-              <span style={{ color: "#222", fontWeight: 700 }}>
-                {s.preemptableInstanceCount}
-              </span>{" "}
-              preemptable
-            </span>
-            <span>
-              <ColorSwatch color="oklch(50% 0.13 240)" />
-              <span
-                style={{
-                  color: s.nonPreemptableInstanceCount > 0 ? "#222" : "#bbb",
-                  fontWeight: 700,
-                }}
-              >
-                {s.nonPreemptableInstanceCount}
-              </span>{" "}
-              non-preemptable
-            </span>
-          </div>
-        </div>
-
-        {/* Orphaned tasks */}
-        {s.orphanedTaskCount > 0 && (
-          <div
-            style={{
-              marginTop: 10,
-              padding: "5px 8px",
-              border: `1px solid ${C_BAD_SOFT}`,
-              borderRadius: 2,
-              background: "oklch(97% 0.04 25)",
-              display: "flex",
-              alignItems: "center",
-              gap: 6,
-              fontSize: 12,
-              fontFamily: MONO,
-            }}
-          >
-            <span style={{ color: C_BAD, fontWeight: 700 }}>
-              {s.orphanedTaskCount}
-            </span>
-            <span style={{ color: "#666" }}>
-              orphaned task{s.orphanedTaskCount !== 1 ? "s" : ""}
-            </span>
+            status: <span style={{ color: "#333" }}>{wp.status}</span>
+            {wp.region && (
+              <span style={{ marginLeft: 8, color: "#aaa" }}>{wp.region}</span>
+            )}
           </div>
         )}
-
-        {/* Worker requests */}
-        <div
-          style={{ marginTop: 12, borderTop: "1px dashed #eee", paddingTop: 8 }}
-        >
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              marginBottom: 6,
-            }}
-          >
-            <span
-              style={{
-                fontSize: 10,
-                letterSpacing: 1.5,
-                color: "#999",
-                fontFamily: MONO,
-              }}
-            >
-              WORKER REQUESTS
-            </span>
-            <span style={{ fontSize: 11, fontFamily: MONO, color: "#888" }}>
-              <span style={{ color: "#222", fontWeight: 700 }}>
-                {s.submittedWorkerRequests}
-              </span>{" "}
-              submitted
-            </span>
-          </div>
-          <div style={{ display: "grid", rowGap: 3 }}>
-            <BreakdownRow
-              label="completed"
-              value={s.completedWorkerRequests}
-              max={reqBarMax}
-              color={C_OK}
-              textColor="#444"
-            />
-            <BreakdownRow
-              label="failed"
-              value={totalFailed}
-              max={reqBarMax}
-              color={C_BAD}
-              textColor={totalFailed > 0 ? C_BAD : "#aaa"}
-              emphasize={totalFailed > 0}
-            />
-          </div>
-        </div>
-
-        {/* Footer */}
-        <div
-          style={{
-            marginTop: 10,
-            paddingTop: 6,
-            borderTop: "1px solid #f0f0f0",
-            display: "flex",
-            justifyContent: "space-between",
-            fontSize: 10,
-            fontFamily: MONO,
-            color: "#aaa",
-          }}
-        >
-          <span>
-            {pool.jobs.length} job{pool.jobs.length !== 1 ? "s" : ""}
-          </span>
-          <span
-            style={
-              Date.now() - new Date(s.lastUpdate).getTime() > 5 * 60_000
-                ? { color: C_BAD }
-                : undefined
-            }
-          >
-            updated {relTime(s.lastUpdate)}
-          </span>
-        </div>
       </div>
     </div>
   );
@@ -726,7 +373,7 @@ function WorkerPoolsSidebar({ workerPools }: { workerPools: WorkerPool[] }) {
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {workerPools.map((p) => (
-            <WorkerPoolCard key={p.status.clusterId} pool={p} />
+            <WorkerPoolCard key={p.info.workpool_id} pool={p} />
           ))}
         </div>
       )}
@@ -1113,12 +760,7 @@ export default function JobList() {
   const [timePreset, setTimePreset] = useState(0);
   const [facets, setFacets] = useState<Record<string, Set<string>>>({});
 
-  const workerPools = useWorkerPools(jobs).filter(
-    (p) =>
-      p.status.runningTaskCount > 0 ||
-      p.status.instanceInUseCount > 0 ||
-      p.status.idleInstanceCount > 0
-  );
+  const workerPools = useWorkerPools(jobs);
 
   // ── Facet helpers ──────────────────────────────────────────────────────────
 
@@ -1155,8 +797,8 @@ export default function JobList() {
     () =>
       jobs.map((j) => ({
         ...j,
-        submitDate: new Date(j.submitTime),
-        metadata: jobCache[j.jobID]?.metadata,
+        submitDate: new Date(j.created_at),
+        metadata: jobCache[j.job_id]?.metadata,
       })),
     [jobs, jobCache]
   );
@@ -1172,7 +814,7 @@ export default function JobList() {
     const q = search.trim().toLowerCase();
     if (!q) return timeFiltered;
     return timeFiltered.filter((j) => {
-      if (j.jobID.toLowerCase().includes(q)) return true;
+      if (j.job_id.toLowerCase().includes(q)) return true;
       if (!j.metadata) return false;
       return Object.entries(j.metadata).some(
         ([k, v]) =>
@@ -1331,21 +973,22 @@ export default function JobList() {
                   </thead>
                   <tbody>
                     {filteredJobs.map(
-                      ({ jobID, submitDate, clusterId, metadata }, i) => {
-                        const cc = clusterId
-                          ? workerPoolColor(clusterId)
+                      ({ job_id, workpool_id, metadata, created_at }, i) => {
+                        const submitDate = new Date(created_at);
+                        const cc = workpool_id
+                          ? workerPoolColor(workpool_id)
                           : null;
                         return (
                           <tr
-                            key={jobID}
+                            key={job_id}
                             className="jl-tr"
-                            onClick={() => navigate(`/jobs/${jobID}`)}
+                            onClick={() => navigate(`/jobs/${job_id}`)}
                           >
                             <td className="jl-td jl-td-index">
                               {String(i + 1).padStart(2, "0")}
                             </td>
                             <td className="jl-td">
-                              <div className="jl-id">{jobID}</div>
+                              <div className="jl-id">{job_id}</div>
                               <LabelChips
                                 metadata={metadata}
                                 search={search}
@@ -1354,7 +997,7 @@ export default function JobList() {
                               />
                             </td>
                             <td className="jl-td jl-td-pool">
-                              {clusterId && cc ? (
+                              {workpool_id && cc ? (
                                 <span className="jl-pool-cell">
                                   <span
                                     className="jl-pool-swatch"
@@ -1371,7 +1014,7 @@ export default function JobList() {
                                       whiteSpace: "nowrap",
                                     }}
                                   >
-                                    {clusterId}
+                                    {workpool_id}
                                   </span>
                                 </span>
                               ) : (
@@ -1380,7 +1023,7 @@ export default function JobList() {
                             </td>
                             <td className="jl-td jl-td-stats">
                               <JobStatsChip
-                                job={jobs.find((j) => j.jobID === jobID)!}
+                                job={jobs.find((j) => j.job_id === job_id)!}
                               />
                             </td>
                             <td className="jl-td jl-td-time">
@@ -1415,6 +1058,9 @@ function JobStatsChip({ job }: { job: BackendJobSummary }) {
   else if (total > 0 && total === ok) cls += " jl-chip-green";
   return <span className={cls}>{`${total} / ${ok} / ${fail}`}</span>;
 }
+
+// ColorSwatch used in sidebar (kept for completeness)
+void ColorSwatch;
 
 // ── Styles ────────────────────────────────────────────────────────────────────
 

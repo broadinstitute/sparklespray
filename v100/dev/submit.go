@@ -26,6 +26,7 @@ type JobSpec struct {
 	Name            string              `json:"name"`
 	Resources       []v100.ResourceEntry  `json:"resources"`
 	FilesToLocalize []v100.FileToLocalize `json:"filesToLocalize"`
+	Labels          []v100.Label          `json:"labels"`
 	Tasks           []JobSpecTask       `json:"tasks"`
 }
 
@@ -205,11 +206,15 @@ func devSubmit(jobSpecFile, workpoolSpecFile, project, db string) error {
 	fmt.Printf("workpool %s written\n", workpoolID)
 
 	jobID := uuid.New().String()
+	now := time.Now()
 	job := v100.Job{
 		JobID:      jobID,
 		Name:       jobSpec.Name,
 		WorkpoolID: workpoolID,
+		CreatedAt:  now,
+		TaskCount:  len(jobSpec.Tasks),
 		Resources:  jobSpec.Resources,
+		Labels:     jobSpec.Labels,
 	}
 
 	// Pre-generate task IDs outside the transaction so retries are idempotent.
@@ -249,9 +254,11 @@ func devSubmit(jobSpecFile, workpoolSpecFile, project, db string) error {
 	if err := summaryStore.Create(ctx, &monitor.JobSummary{
 		JobID:      jobID,
 		WorkpoolID: workpoolID,
-		Expiry:     time.Now().Add(7 * 24 * time.Hour),
+		CreatedAt:  now,
+		Expiry:     now.Add(7 * 24 * time.Hour),
 		Status:     monitor.JobStatusPending,
 		Tasks:      []monitor.TaskCount{{State: "pending", Count: len(jobSpec.Tasks)}},
+		Labels:     toMonitorLabels(jobSpec.Labels),
 	}); err != nil {
 		return fmt.Errorf("creating job summary: %w", err)
 	}

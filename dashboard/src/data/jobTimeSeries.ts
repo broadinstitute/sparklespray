@@ -1,9 +1,4 @@
-import type {
-  AnyEvent,
-  AnyTaskEvent,
-  TaskCompleteEvent,
-  TaskExecCompleteEvent,
-} from "../types";
+import type { AnyEvent, AnyTaskEvent, TaskStateUpdateEvent } from "../types";
 import { getJobTaskCount } from "./events";
 
 function formatTime(ms: number): string {
@@ -23,9 +18,8 @@ export interface CountPoint {
 export interface RatePoint {
   time: number;
   label: string;
-  completedSuccess: number; // tasks/min
+  completedSuccess: number;
   completedError: number;
-  orphaned: number;
   failed: number;
 }
 
@@ -39,7 +33,7 @@ export function computeJobTimeSeries(
   maxTimeMs?: number
 ): { counts: CountPoint[]; rates: RatePoint[] } {
   const allJobEvents = events
-    .filter((e) => "job_id" in e && (e as any).job_id === jobId)
+    .filter((e) => "job_id" in e && (e as AnyTaskEvent).job_id === jobId)
     .sort((a, b) => a.timestamp.localeCompare(b.timestamp)) as AnyTaskEvent[];
 
   if (allJobEvents.length === 0) return { counts: [], rates: [] };
@@ -57,9 +51,6 @@ export function computeJobTimeSeries(
   const bucketSize = (maxTime - minTime) / NUM_BUCKETS;
   const bucketSizeMin = bucketSize / 60_000;
 
-  // Track exit codes for classifying task_complete as success/error
-  const taskExitCodes = new Map<string, number>();
-
   interface Transition {
     time: number;
     taskId: string;
@@ -68,21 +59,24 @@ export function computeJobTimeSeries(
   const transitions: Transition[] = [];
 
   for (const event of allJobEvents) {
+    if (event.type !== "task_state_update") continue;
+    const tsu = event as TaskStateUpdateEvent;
     const t = new Date(event.timestamp).getTime();
-    if (event.type === "task_claimed") {
-      transitions.push({ time: t, taskId: event.task_id, newState: "running" });
-    } else if (event.type === "task_exec_complete") {
-      taskExitCodes.set(
-        event.task_id,
-        (event as TaskExecCompleteEvent).exit_code ?? 0
-      );
-    } else if (event.type === "task_complete") {
-      taskExitCodes.set(event.task_id, (event as TaskCompleteEvent).exit_code);
-      transitions.push({ time: t, taskId: event.task_id, newState: "done" });
-    } else if (event.type === "task_failed") {
-      transitions.push({ time: t, taskId: event.task_id, newState: "done" });
-    } else if (event.type === "task_orphaned") {
-      transitions.push({ time: t, taskId: event.task_id, newState: "pending" });
+    if (
+      tsu.new_state === "claimed" ||
+      tsu.new_state === "running" ||
+      tsu.new_state === "writing"
+    ) {
+      transitions.push({ time: t, taskId: tsu.task_id, newState: "running" });
+    } else if (
+      tsu.new_state === "success" ||
+      tsu.new_state === "error" ||
+      tsu.new_state === "failed" ||
+      tsu.new_state === "killed"
+    ) {
+      transitions.push({ time: t, taskId: tsu.task_id, newState: "done" });
+    } else if (tsu.old_state !== "pending" && tsu.new_state === "pending") {
+      transitions.push({ time: t, taskId: tsu.task_id, newState: "pending" });
     }
   }
   transitions.sort((a, b) => a.time - b.time);
@@ -100,7 +94,7 @@ export function computeJobTimeSeries(
       );
       transIdx++;
     }
-    let pending = totalTasks - taskState.size; // tasks not yet seen in events
+    let pending = totalTasks - taskState.size;
     let running = 0;
     for (const s of taskState.values()) {
       if (s === "pending") pending++;
@@ -114,23 +108,22 @@ export function computeJobTimeSeries(
     label: formatTime(minTime + (i + 0.5) * bucketSize),
     completedSuccess: 0,
     completedError: 0,
-    orphaned: 0,
     failed: 0,
   }));
 
   for (const event of allJobEvents) {
+    if (event.type !== "task_state_update") continue;
+    const tsu = event as TaskStateUpdateEvent;
     const t = new Date(event.timestamp).getTime();
     const bi = Math.min(
       Math.floor((t - minTime) / bucketSize),
       NUM_BUCKETS - 1
     );
-    if (event.type === "task_complete") {
-      const exitCode = taskExitCodes.get(event.task_id) ?? 0;
-      if (exitCode === 0) rates[bi].completedSuccess += 1 / bucketSizeMin;
-      else rates[bi].completedError += 1 / bucketSizeMin;
-    } else if (event.type === "task_orphaned") {
-      rates[bi].orphaned += 1 / bucketSizeMin;
-    } else if (event.type === "task_failed") {
+    if (tsu.new_state === "success") {
+      rates[bi].completedSuccess += 1 / bucketSizeMin;
+    } else if (tsu.new_state === "error") {
+      rates[bi].completedError += 1 / bucketSizeMin;
+    } else if (tsu.new_state === "failed" || tsu.new_state === "killed") {
       rates[bi].failed += 1 / bucketSizeMin;
     }
   }
@@ -138,7 +131,6 @@ export function computeJobTimeSeries(
   for (const r of rates) {
     r.completedSuccess = Math.round(r.completedSuccess * 100) / 100;
     r.completedError = Math.round(r.completedError * 100) / 100;
-    r.orphaned = Math.round(r.orphaned * 100) / 100;
     r.failed = Math.round(r.failed * 100) / 100;
   }
 

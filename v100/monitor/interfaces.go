@@ -225,6 +225,12 @@ func IsTerminalJobStatus(s JobStatus) bool {
 	return false
 }
 
+// Label is a user-defined key/value tag attached to a job.
+type Label struct {
+	Name  string `firestore:"name"  json:"name"`
+	Value string `firestore:"value" json:"value"`
+}
+
 // TaskCount is one entry in a JobSummary's task-state breakdown.
 type TaskCount struct {
 	State string `firestore:"state" json:"state"`
@@ -236,9 +242,11 @@ type TaskCount struct {
 type JobSummary struct {
 	JobID      string      `firestore:"job_id"`
 	WorkpoolID string      `firestore:"workpool_id"`
+	CreatedAt  time.Time   `firestore:"created_at"`
 	Expiry     time.Time   `firestore:"expiry"`
 	Status     JobStatus   `firestore:"status"`
 	Tasks      []TaskCount `firestore:"tasks"`
+	Labels     []Label     `firestore:"labels"`
 }
 
 // JobSummaryHistory is an append-only snapshot written each time the monitor
@@ -246,10 +254,12 @@ type JobSummary struct {
 type JobSummaryHistory struct {
 	JobID      string      `firestore:"job_id"`
 	WorkpoolID string      `firestore:"workpool_id"`
+	CreatedAt  time.Time   `firestore:"created_at"`
 	Timestamp  time.Time   `firestore:"timestamp"`
 	Expiry     time.Time   `firestore:"expiry"`
 	Status     JobStatus   `firestore:"status"`
 	Tasks      []TaskCount `firestore:"tasks"`
+	Labels     []Label     `firestore:"labels"`
 }
 
 // JobSummaryStore reads and writes JobSummary and JobSummaryHistory documents.

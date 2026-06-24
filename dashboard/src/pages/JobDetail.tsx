@@ -1,20 +1,20 @@
 import { useState, useEffect, useMemo } from "react";
 import { useParams, Link, useLocation } from "react-router-dom";
-import { getJobTasks, getJobTaskCount, extractTimings } from "../data/events";
+import { getJobTasks, getJobTaskCount } from "../data/events";
 import type { TaskStatus } from "../data/events";
 import { computeJobTimeSeries } from "../data/jobTimeSeries";
 import { useEvents, mergeEvents } from "../data/EventProvider";
-import type { AnyEvent, JobDetail } from "../types";
+import type { AnyEvent, JobDetail, TaskStateUpdateEvent } from "../types";
 import MultiLineChart from "../components/MultiLineChart";
 import TabBar from "../components/TabBar";
 
 const STATUS_COLORS: Record<TaskStatus, { bg: string; text: string }> = {
   pending: { bg: "#e3f2fd", text: "#1565c0" },
   claimed: { bg: "#fff3e0", text: "#e65100" },
-  exec_started: { bg: "#f3e5f5", text: "#6a1b9a" },
-  exec_complete: { bg: "#e8f5e9", text: "#2e7d32" },
-  complete: { bg: "#e0f2f1", text: "#00695c" },
-  orphaned: { bg: "#fbe9e7", text: "#bf360c" },
+  running: { bg: "#f3e5f5", text: "#6a1b9a" },
+  writing: { bg: "#e8f5e9", text: "#2e7d32" },
+  success: { bg: "#e0f2f1", text: "#00695c" },
+  error: { bg: "#fbe9e7", text: "#bf360c" },
   failed: { bg: "#ffebee", text: "#b71c1c" },
   killed: { bg: "#eeeeee", text: "#555555" },
 };
@@ -99,7 +99,7 @@ function JobDetailsPanel({
         ([k]) => !HIDDEN_LABEL_KEYS.has(k)
       )
     : [];
-  const clusterId = jobDetail?.cluster_id;
+  const clusterId = jobDetail?.workpool_id;
 
   return (
     <div
@@ -157,20 +157,12 @@ function JobDetailsPanel({
       <DetailRow
         label="submitted"
         value={
-          jobDetail ? new Date(jobDetail.submit_time).toLocaleString() : dash
+          jobDetail ? new Date(jobDetail.created_at).toLocaleString() : dash
         }
       />
       <DetailRow
         label="tasks"
         value={jobDetail ? jobDetail.task_count : dash}
-      />
-      <DetailRow
-        label="max workers to start"
-        value={jobDetail ? jobDetail.target_node_count : dash}
-      />
-      <DetailRow
-        label="max preemptable"
-        value={jobDetail ? jobDetail.max_preemptable_attempts : dash}
       />
       <DetailRow
         label="cluster"
@@ -239,10 +231,8 @@ export default function JobDetail() {
     jobId,
   ]);
   const jobSummaryLastUpdated = useMemo(() => {
-    const summary = jobs.find((j) => j.jobID === jobId);
-    return summary?.lastUpdated
-      ? new Date(summary.lastUpdated).getTime()
-      : undefined;
+    const summary = jobs.find((j) => j.job_id === jobId);
+    return summary ? Date.now() : undefined;
   }, [jobs, jobId]);
   const { counts, rates } = useMemo(
     () =>
@@ -321,21 +311,22 @@ export default function JobDetail() {
     statusCounts[t.status] = (statusCounts[t.status] ?? 0) + 1;
 
   const statusOrder: TaskStatus[] = [
-    "complete",
+    "success",
+    "error",
     "failed",
     "killed",
-    "exec_complete",
-    "exec_started",
+    "writing",
+    "running",
     "claimed",
-    "orphaned",
     "pending",
   ];
 
   const doneTasks =
-    (statusCounts.complete ?? 0) +
+    (statusCounts.success ?? 0) +
+    (statusCounts.error ?? 0) +
     (statusCounts.failed ?? 0) +
     (statusCounts.killed ?? 0);
-  const jobStarted = localEvents.find((e) => e.type === "job_started");
+  const jobStarted = localEvents.find((e) => e.type === "job_created");
   const elapsedMin = jobStarted
     ? (Date.now() - new Date(jobStarted.timestamp).getTime()) / 60_000
     : 0;
@@ -415,7 +406,6 @@ export default function JobDetail() {
                       label: "Completed (error)",
                       color: "#f44336",
                     },
-                    { key: "orphaned", label: "Orphaned", color: "#f59e0b" },
                     { key: "failed", label: "Failed", color: "#b71c1c" },
                   ]}
                 />
@@ -483,16 +473,6 @@ export default function JobDetail() {
                     color: "#555",
                   }}
                 >
-                  Exit Code
-                </th>
-                <th
-                  style={{
-                    padding: "8px 16px",
-                    textAlign: "left",
-                    fontWeight: 600,
-                    color: "#555",
-                  }}
-                >
                   Last Event
                 </th>
               </tr>
@@ -500,10 +480,6 @@ export default function JobDetail() {
             <tbody>
               {tasks.map((task, i) => {
                 const lastEvent = task.events[task.events.length - 1];
-                const timings = extractTimings(task.events);
-                const exitCode = timings.exitCode;
-                const exitCodeDefined = exitCode !== undefined;
-                const exitOk = exitCode === 0;
                 return (
                   <tr
                     key={task.taskId}
@@ -526,24 +502,12 @@ export default function JobDetail() {
                     </td>
                     <td style={{ padding: "8px 16px", color: "#777" }}>
                       {
-                        task.events.filter((e) => e.type === "task_claimed")
-                          .length
+                        task.events.filter(
+                          (e) =>
+                            e.type === "task_state_update" &&
+                            (e as TaskStateUpdateEvent).new_state === "claimed"
+                        ).length
                       }
-                    </td>
-                    <td style={{ padding: "8px 16px" }}>
-                      {exitCodeDefined ? (
-                        <span
-                          style={{
-                            fontFamily: "monospace",
-                            fontWeight: 600,
-                            color: exitOk ? "#2e7d32" : "#c62828",
-                          }}
-                        >
-                          {exitCode}
-                        </span>
-                      ) : (
-                        <span style={{ color: "#ccc" }}>—</span>
-                      )}
                     </td>
                     <td
                       style={{
@@ -552,7 +516,9 @@ export default function JobDetail() {
                         fontSize: "0.8rem",
                       }}
                     >
-                      {new Date(lastEvent.timestamp).toLocaleString()}
+                      {lastEvent
+                        ? new Date(lastEvent.timestamp).toLocaleString()
+                        : "—"}
                     </td>
                   </tr>
                 );

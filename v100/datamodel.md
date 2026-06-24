@@ -15,7 +15,10 @@ One document per submitted job. The document ID is the `job_id`.
 | `job_id`      | string          | Unique identifier for the job                                                                                          |
 | `name`        | string          | Human-readable label for the job (set at submission time)                                                              |
 | `workpool_id` | string          | The workpool this job's tasks should be executed in                                                                    |
+| `created_at`  | timestamp       | When the job was submitted                                                                                             |
+| `task_count`  | int             | Number of tasks in this job (denormalized at submission time)                                                          |
 | `resources`   | []ResourceEntry | Per-task resource requirements (e.g. `slots=1,mem=8`). Workers verify they can satisfy these before claiming any task. |
+| `labels`      | []Label         | User-defined key/value tags attached at submission time (e.g. `experiment=v3`, `owner=alice`)                          |
 
 **ResourceEntry** (embedded object):
 
@@ -24,27 +27,36 @@ One document per submitted job. The document ID is the `job_id`.
 | `name`  | string  | Resource name (e.g. `slots`, `mem`) |
 | `value` | float64 | Required quantity of that resource  |
 
+**Label** (embedded object) — user-defined tag; used on `Jobs` and `JobSummary`:
+
+| Field   | Type   | Description |
+| ------- | ------ | ----------- |
+| `name`  | string | Tag name    |
+| `value` | string | Tag value   |
+
 ---
 
 ### `Tasks`
 
 One document per task. The document ID is the `task_id`.
 
-| Field               | Type             | Description                                                                                |
-| ------------------- | ---------------- | ------------------------------------------------------------------------------------------ |
-| `task_id`           | string           | Unique identifier for the task                                                             |
-| `task_index`        | int              | Zero-based index of this task within its job                                               |
-| `job_id`            | string           | ID of the parent job                                                                       |
-| `workpool_id`       | string           | The workpool this task belongs to (denormalized from the job for efficient querying)       |
-| `status`            | string           | Current status — see table below                                                           |
-| `command`           | []string         | The command to execute, as an argv array (e.g. `["python", "train.py", "--epochs", "10"]`) |
-| `docker_image`      | string           | Docker image used to run the command                                                       |
-| `result_path`       | string           | GCS path (e.g. `gs://bucket/path`) where results are uploaded after the command completes  |
-| `log_path`          | string           | GCS path where the command's stdout/stderr is uploaded after the command completes         |
-| `files_to_localize` | []FileToLocalize | Files to download from GCS into the working directory before the command runs              |
-| `owning_worker_id`  | string           | ID of the worker that has claimed this task; empty when not claimed                        |
-| `failure_reason`    | string           | Human-readable reason for failure; populated when `status` is `failed`                     |
-| `exit_code`         | int              | Process exit code; populated when `status` is `error`                                      |
+| Field               | Type             | Description                                                                                                                                        |
+| ------------------- | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `task_id`           | string           | Unique identifier for the task                                                                                                                     |
+| `task_index`        | int              | Zero-based index of this task within its job                                                                                                       |
+| `job_id`            | string           | ID of the parent job                                                                                                                               |
+| `workpool_id`       | string           | The workpool this task belongs to (denormalized from the job for efficient querying)                                                               |
+| `status`            | string           | Current status — see table below                                                                                                                   |
+| `command`           | []string         | The command to execute, as an argv array (e.g. `["python", "train.py", "--epochs", "10"]`)                                                         |
+| `docker_image`      | string           | Docker image used to run the command                                                                                                               |
+| `result_path`       | string           | GCS path (e.g. `gs://bucket/path`) where results are uploaded after the command completes                                                          |
+| `log_path`          | string           | GCS path where the command's stdout/stderr is uploaded after the command completes                                                                 |
+| `files_to_localize` | []FileToLocalize | Files to download from GCS into the working directory before the command runs                                                                      |
+| `parameters`        | []TaskParameter  | User-defined key/value pairs passed to the task at submission time                                                                                 |
+| `owning_worker_id`  | string           | ID of the worker that has claimed this task; empty when not claimed                                                                                |
+| `failure_reason`    | string           | Human-readable reason for failure; populated when `status` is `failed`                                                                             |
+| `exit_code`         | int              | Process exit code; populated when `status` is `error`                                                                                              |
+| `resource_usage`    | ResourceUsage    | Summary of resources consumed by this task's container; written by the worker after the container exits (best-effort; absent if collection failed) |
 
 **FileToLocalize** (embedded object):
 
@@ -53,6 +65,28 @@ One document per task. The document ID is the `task_id`.
 | `source`        | string | GCS path of the file to download (e.g. `gs://bucket/path/file.txt`)                          |
 | `destination`   | string | Relative path under the working directory where the file is written (e.g. `inputs/file.txt`) |
 | `is_executable` | bool   | If true, the file is made executable after download. Defaults to false if omitted.           |
+
+**TaskParameter** (embedded object) — user-defined parameters attached at task submission time:
+
+| Field   | Type   | Description     |
+| ------- | ------ | --------------- |
+| `name`  | string | Parameter name  |
+| `value` | string | Parameter value |
+
+**ResourceUsage** (embedded object) — written by the worker once per task, after the Docker container exits and before `docker rm` is called. Fields are zero when the underlying cgroup or `docker inspect` data was unavailable. Collected from Linux cgroup files (v1 or v2, auto-detected) plus `docker inspect` for timing.
+
+| Field               | Type      | Description                                                                                                            |
+| ------------------- | --------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `start_time`        | timestamp | Container start time (from `docker inspect .State.StartedAt`)                                                          |
+| `end_time`          | timestamp | Container finish time (from `docker inspect .State.FinishedAt`)                                                        |
+| `elapsed_seconds`   | float64   | Wall-clock duration in seconds (`end_time - start_time`)                                                               |
+| `max_memory_bytes`  | int64     | Peak RSS of the container's cgroup (cgroup v2: `memory.peak`; cgroup v1: `memory.max_usage_in_bytes`)                  |
+| `cpu_user_usec`     | int64     | User-mode CPU time in microseconds (cgroup v2: `cpu.stat user_usec`; cgroup v1: `cpuacct.usage_user` ÷ 1000)           |
+| `cpu_system_usec`   | int64     | Kernel-mode CPU time in microseconds (cgroup v2: `cpu.stat system_usec`; cgroup v1: `cpuacct.usage_sys` ÷ 1000)        |
+| `block_read_bytes`  | int64     | Total bytes read from block devices (cgroup v2: `io.stat rbytes`; cgroup v1: `blkio.throttle.io_service_bytes Read`)   |
+| `block_write_bytes` | int64     | Total bytes written to block devices (cgroup v2: `io.stat wbytes`; cgroup v1: `blkio.throttle.io_service_bytes Write`) |
+| `exit_code`         | int       | Container exit code (from `docker inspect .State.ExitCode`)                                                            |
+| `oom_killed`        | bool      | True if the container was killed by the OOM killer (from `docker inspect .State.OOMKilled`)                            |
 
 **Status values:**
 
@@ -84,16 +118,17 @@ Terminal states — no further transitions except an administrative kill:
 
 One document per workpool. The document ID is the `workpool_id`. A workpool defines the VM configuration used to create workers that process tasks associated with that workpool.
 
-| Field           | Type          | Description                                                        |
-| --------------- | ------------- | ------------------------------------------------------------------ |
-| `workpool_id`   | string        | Unique identifier for the workpool                                 |
-| `machine_type`  | string        | GCP machine type for worker VMs (e.g. `n2-standard-4`)             |
-| `region`        | string        | GCP region for Batch jobs (e.g. `us-central1`)                     |
-| `zones`         | []string      | GCP zones to query for running VMs (e.g. `["us-central1-a"]`)      |
-| `root_dir`      | string        | Working directory on the VM where tasks are executed               |
-| `resources`     | []Resource    | Resource capacity advertised by workers created from this workpool |
-| `empty_volumes` | []EmptyVolume | Ephemeral volumes to attach to each VM                             |
-| `expiry`        | timestamp     | When this document may be garbage-collected                        |
+| Field                      | Type          | Description                                                                                                    |
+| -------------------------- | ------------- | -------------------------------------------------------------------------------------------------------------- |
+| `workpool_id`              | string        | Unique identifier for the workpool                                                                             |
+| `machine_type`             | string        | GCP machine type for worker VMs (e.g. `n2-standard-4`)                                                         |
+| `region`                   | string        | GCP region for Batch jobs (e.g. `us-central1`)                                                                 |
+| `zones`                    | []string      | GCP zones to query for running VMs (e.g. `["us-central1-a"]`)                                                  |
+| `root_dir`                 | string        | Directory on the VM that the worker uses as its working root; also where the `sparkles` binary is staged       |
+| `sparkles_worker_gcs_path` | string        | GCS path (e.g. `gs://bucket/sparkles`) of the worker binary; downloaded to `{root_dir}/sparkles` at VM startup |
+| `resources`                | []Resource    | Resource capacity advertised by workers created from this workpool                                             |
+| `empty_volumes`            | []EmptyVolume | Ephemeral volumes to attach to each VM                                                                         |
+| `expiry`                   | timestamp     | When this document may be garbage-collected                                                                    |
 
 The following provisioning and watchdog parameters are set once at workpool creation and read by the monitor to govern autoscaling behaviour:
 
@@ -151,6 +186,23 @@ One document per active worker process. The document ID is the `worker_id` (a UU
 | `heartbeat_expiry` | timestamp | Rolling deadline updated every heartbeat period; used to detect crashed workers                             |
 
 The worker updates `heartbeat_expiry` every minute while running. On a clean shutdown the worker sets both `expiry` and `heartbeat_expiry` to the current time and flips `status` to `stopped`.
+
+---
+
+### `WorkpoolSummary` _(not yet implemented)_
+
+One document per workpool, keyed by `workpool_id`. Intended to hold VM-level health metrics computed by the monitor by polling the GCP Compute and Batch APIs, similar to the old `ClusterStatus` collection. These metrics are not tracked in `WorkPools` (which only stores string status and incident counts) because they require live GCP API queries to compute.
+
+| Field                            | Type      | Description                                                        |
+| -------------------------------- | --------- | ------------------------------------------------------------------ |
+| `workpool_id`                    | string    | Workpool this summary describes                                    |
+| `last_updated`                   | timestamp | When these metrics were last computed                              |
+| `instance_in_use_count`          | int       | Number of VMs that currently have at least one running task        |
+| `idle_instance_count`            | int       | Number of VMs that are running but have no active tasks            |
+| `orphaned_task_count`            | int       | Number of tasks in an active state whose VM is no longer reachable |
+| `preemptible_instance_count`     | int       | Number of SPOT/preemptible VMs currently running                   |
+| `non_preemptible_instance_count` | int       | Number of on-demand VMs currently running                          |
+| `running_task_count`             | int       | Total tasks currently in `claimed`, `running`, or `writing` state  |
 
 ---
 
@@ -251,13 +303,15 @@ One document per job, keyed by `job_id`. This is the **mutable** counterpart to 
 
 Any question about job progress — "is this job still running?", "how many tasks failed?" — should be answered by reading `JobSummary`, not by scanning `Tasks` or adding derived fields to `Jobs`.
 
-| Field         | Type        | Description                                                  |
-| ------------- | ----------- | ------------------------------------------------------------ |
-| `job_id`      | string      | ID of the job this summary describes                         |
-| `workpool_id` | string      | Workpool the job is running in                               |
-| `expiry`      | timestamp   | When this document may be garbage-collected                  |
-| `status`      | string      | Rolled-up job status — see table below                       |
-| `tasks`       | []TaskCount | Task counts grouped by status; one entry per non-zero status |
+| Field         | Type        | Description                                                                              |
+| ------------- | ----------- | ---------------------------------------------------------------------------------------- |
+| `job_id`      | string      | ID of the job this summary describes                                                     |
+| `workpool_id` | string      | Workpool the job is running in                                                           |
+| `created_at`  | timestamp   | When the job was submitted (copied from `Jobs.created_at` at submission time)            |
+| `expiry`      | timestamp   | When this document may be garbage-collected                                              |
+| `status`      | string      | Rolled-up job status — see table below                                                   |
+| `tasks`       | []TaskCount | Task counts grouped by status; one entry per non-zero status                             |
+| `labels`      | []Label     | User-defined tags (copied from `Jobs.labels` at submission time; not updated thereafter) |
 
 **TaskCount** (embedded object):
 
@@ -285,16 +339,18 @@ Any question about job progress — "is this job still running?", "how many task
 
 An append-only log of `JobSummary` snapshots. Each document is a point-in-time copy written by the monitor process whenever it updates `JobSummary`. The document ID is a UUID assigned at write time.
 
-| Field         | Type        | Description                                                          |
-| ------------- | ----------- | -------------------------------------------------------------------- |
-| `job_id`      | string      | ID of the job this snapshot describes                                |
-| `workpool_id` | string      | Workpool the job is running in                                       |
-| `timestamp`   | timestamp   | When this snapshot was recorded                                      |
-| `expiry`      | timestamp   | When this document may be garbage-collected                          |
-| `status`      | string      | Job status at the time of the snapshot (same values as `JobSummary`) |
-| `tasks`       | []TaskCount | Task counts at the time of the snapshot                              |
+| Field         | Type        | Description                                                              |
+| ------------- | ----------- | ------------------------------------------------------------------------ |
+| `job_id`      | string      | ID of the job this snapshot describes                                    |
+| `workpool_id` | string      | Workpool the job is running in                                           |
+| `created_at`  | timestamp   | When the job was originally submitted (copied from `JobSummary`)         |
+| `timestamp`   | timestamp   | When this snapshot was recorded                                          |
+| `expiry`      | timestamp   | When this document may be garbage-collected                              |
+| `status`      | string      | Job status at the time of the snapshot (same values as `JobSummary`)     |
+| `tasks`       | []TaskCount | Task counts at the time of the snapshot                                  |
+| `labels`      | []Label     | User-defined tags at the time of the snapshot (copied from `JobSummary`) |
 
-**TaskCount** is the same embedded object as in `JobSummary`.
+**TaskCount** and **Label** are the same embedded objects as in `JobSummary`.
 
 ---
 

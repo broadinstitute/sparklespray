@@ -1,19 +1,31 @@
-import { useState, useEffect, useMemo, useRef } from "react";
-import { useParams, Link } from "react-router-dom";
-import { mergeEvents } from "../data/EventProvider";
-import { computeClusterTimeSeries } from "../data/clusterTimeSeries";
-import type { AnyEvent } from "../types";
-import MultiLineChart from "../components/MultiLineChart";
+import { useState, useEffect } from "react";
+import { useParams } from "react-router-dom";
 
-const CLUSTER_EVENT_TYPES =
-  "worker_started,worker_stopped,cluster_started,cluster_stopped";
-const POLL_MS = 5_000;
-const PAGE_LIMIT = 1000;
+const POLL_MS = 30_000;
+
+interface WorkpoolDetail {
+  workpool_id: string;
+  machine_type: string;
+  region: string;
+  status: string;
+  status_message: string;
+  last_incident_at: string | null;
+  incident_count: number;
+  expiry: string;
+}
+
+interface WorkerInfo {
+  worker_id: string;
+  status: string;
+  instance_name: string;
+  heartbeat_expiry: string;
+}
 
 export default function ClusterDetail() {
   const { clusterId } = useParams<{ clusterId: string }>();
-  const [localEvents, setLocalEvents] = useState<AnyEvent[]>([]);
-  const cursorRef = useRef<string | null>(null);
+  const [workpool, setWorkpool] = useState<WorkpoolDetail | null>(null);
+  const [workers, setWorkers] = useState<WorkerInfo[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!clusterId) return;
@@ -22,25 +34,13 @@ export default function ClusterDetail() {
     async function poll() {
       while (!cancelled) {
         try {
-          const params = new URLSearchParams({
-            cluster_id: clusterId!,
-            types: CLUSTER_EVENT_TYPES,
-            limit: String(PAGE_LIMIT),
-          });
-          if (cursorRef.current) params.set("after", cursorRef.current);
-
-          const res = await fetch(`/api/v1/events?${params}`);
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          const data: {
-            events: AnyEvent[];
-            next_after?: string;
-          } = await res.json();
-
-          if (data.events.length > 0) {
-            setLocalEvents((prev) => mergeEvents(prev, data.events));
-            if (data.next_after) cursorRef.current = data.next_after;
-            if (data.events.length >= PAGE_LIMIT) continue;
-          }
+          const [wpRes, wRes] = await Promise.all([
+            fetch(`/api/v1/workpool/${clusterId}`),
+            fetch(`/api/v1/workpool/${clusterId}/workers?status=started`),
+          ]);
+          if (wpRes.ok) setWorkpool(await wpRes.json());
+          if (wRes.ok) setWorkers(await wRes.json());
+          setLoading(false);
         } catch (err) {
           console.error("[ClusterDetail] poll error:", err);
         }
@@ -54,34 +54,27 @@ export default function ClusterDetail() {
     };
   }, [clusterId]);
 
-  const { counts, rates } = useMemo(
-    () =>
-      clusterId
-        ? computeClusterTimeSeries(localEvents, clusterId)
-        : { counts: [], rates: [] },
-    [localEvents, clusterId]
-  );
-
   if (!clusterId) {
     return (
       <div style={{ padding: "2rem", fontFamily: "monospace" }}>
-        Invalid cluster ID.
+        Invalid workpool ID.
       </div>
     );
   }
 
-  if (counts.length === 0) {
+  if (loading) {
+    return (
+      <div style={{ padding: "2rem", fontFamily: "monospace" }}>Loading…</div>
+    );
+  }
+
+  if (!workpool) {
     return (
       <div style={{ padding: "2rem", fontFamily: "monospace" }}>
-        <p style={{ marginTop: "1rem" }}>
-          No worker events found for cluster: <strong>{clusterId}</strong>
-        </p>
+        Workpool not found: <strong>{clusterId}</strong>
       </div>
     );
   }
-
-  const currentWorkers = counts[counts.length - 1]?.running ?? 0;
-  const peakWorkers = Math.max(...counts.map((p) => p.running));
 
   return (
     <div
@@ -92,40 +85,12 @@ export default function ClusterDetail() {
         fontFamily: "monospace",
       }}
     >
-      {/* Header */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          marginBottom: "1.5rem",
-        }}
-      >
-        <h1 style={{ margin: 0, fontSize: "1.3rem", fontWeight: 700 }}>
-          {clusterId}
-        </h1>
-        <Link
-          to={`/clusters/${clusterId}/logs`}
-          style={{
-            fontSize: "0.8rem",
-            padding: "0.35rem 0.85rem",
-            border: "1px solid #c5cae9",
-            borderRadius: 6,
-            background: "#f5f5ff",
-            color: "#1a237e",
-            textDecoration: "none",
-            fontWeight: 500,
-          }}
-        >
-          View logs
-        </Link>
-      </div>
+      <h1 style={{ margin: "0 0 1.5rem", fontSize: "1.3rem", fontWeight: 700 }}>
+        {clusterId}
+      </h1>
 
-      {/* Summary bar */}
       <div
         style={{
-          display: "flex",
-          gap: "2rem",
           background: "#f8f9fa",
           border: "1px solid #e0e0e0",
           borderRadius: 8,
@@ -134,43 +99,135 @@ export default function ClusterDetail() {
           fontSize: "0.85rem",
         }}
       >
-        <span>
-          <span style={{ color: "#888" }}>workers running </span>
-          <span style={{ fontWeight: 600 }}>{currentWorkers}</span>
-        </span>
-        <span>
-          <span style={{ color: "#888" }}>peak </span>
-          <span style={{ fontWeight: 600 }}>{peakWorkers}</span>
-        </span>
+        <div style={{ display: "flex", gap: "2rem", flexWrap: "wrap" }}>
+          <span>
+            <span style={{ color: "#888" }}>status </span>
+            <span style={{ fontWeight: 600 }}>{workpool.status || "—"}</span>
+          </span>
+          <span>
+            <span style={{ color: "#888" }}>machine type </span>
+            <span style={{ fontWeight: 600 }}>
+              {workpool.machine_type || "—"}
+            </span>
+          </span>
+          <span>
+            <span style={{ color: "#888" }}>region </span>
+            <span style={{ fontWeight: 600 }}>{workpool.region || "—"}</span>
+          </span>
+          <span>
+            <span style={{ color: "#888" }}>active workers </span>
+            <span style={{ fontWeight: 600 }}>{workers.length}</span>
+          </span>
+        </div>
+        {workpool.status_message && (
+          <div style={{ marginTop: "0.5rem", color: "#666" }}>
+            {workpool.status_message}
+          </div>
+        )}
+        {workpool.incident_count > 0 && (
+          <div
+            style={{ marginTop: "0.5rem", color: "#b71c1c", fontWeight: 600 }}
+          >
+            ⚠ {workpool.incident_count} incident
+            {workpool.incident_count !== 1 ? "s" : ""}
+            {workpool.last_incident_at && (
+              <span style={{ fontWeight: 400, marginLeft: 8, color: "#888" }}>
+                last: {new Date(workpool.last_incident_at).toLocaleString()}
+              </span>
+            )}
+          </div>
+        )}
       </div>
 
-      {/* Charts */}
-      <div
-        style={{
-          background: "#f8f9fa",
-          border: "1px solid #e0e0e0",
-          borderRadius: 8,
-          padding: "1rem 1.5rem",
-        }}
-      >
-        <MultiLineChart
-          data={counts}
-          title="Workers Running"
-          yLabel="workers"
-          stacked={false}
-          series={[{ key: "running", label: "Running", color: "#2e7d32" }]}
-        />
-        <div style={{ height: "1.25rem" }} />
-        <MultiLineChart
-          data={rates}
-          title="Worker Change Rate"
-          yLabel="workers/min"
-          series={[
-            { key: "started", label: "Started", color: "#1565c0" },
-            { key: "stopped", label: "Stopped", color: "#e53935" },
-          ]}
-        />
-      </div>
+      {workers.length > 0 && (
+        <div
+          style={{
+            border: "1px solid #e0e0e0",
+            borderRadius: 8,
+            overflow: "hidden",
+            fontSize: "0.85rem",
+          }}
+        >
+          <div
+            style={{
+              padding: "8px 16px",
+              background: "#f8f9fa",
+              borderBottom: "1px solid #e0e0e0",
+              fontWeight: 600,
+              color: "#555",
+              fontSize: "0.75rem",
+              letterSpacing: "0.1em",
+            }}
+          >
+            ACTIVE WORKERS
+          </div>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr
+                style={{
+                  background: "#fafafa",
+                  borderBottom: "1px solid #eee",
+                }}
+              >
+                <th
+                  style={{
+                    padding: "6px 16px",
+                    textAlign: "left",
+                    fontWeight: 500,
+                    color: "#777",
+                    fontSize: "0.78rem",
+                  }}
+                >
+                  Worker ID
+                </th>
+                <th
+                  style={{
+                    padding: "6px 16px",
+                    textAlign: "left",
+                    fontWeight: 500,
+                    color: "#777",
+                    fontSize: "0.78rem",
+                  }}
+                >
+                  Instance
+                </th>
+                <th
+                  style={{
+                    padding: "6px 16px",
+                    textAlign: "left",
+                    fontWeight: 500,
+                    color: "#777",
+                    fontSize: "0.78rem",
+                  }}
+                >
+                  Heartbeat Expires
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {workers.map((w, i) => (
+                <tr
+                  key={w.worker_id}
+                  style={{
+                    borderBottom:
+                      i < workers.length - 1 ? "1px solid #f0f0f0" : "none",
+                  }}
+                >
+                  <td style={{ padding: "7px 16px", color: "#222" }}>
+                    {w.worker_id}
+                  </td>
+                  <td style={{ padding: "7px 16px", color: "#555" }}>
+                    {w.instance_name || "—"}
+                  </td>
+                  <td style={{ padding: "7px 16px", color: "#888" }}>
+                    {new Date(w.heartbeat_expiry).toLocaleString()}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

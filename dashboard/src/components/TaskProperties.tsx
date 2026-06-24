@@ -67,30 +67,23 @@ export default function TaskProperties({
   timings,
   status,
 }: Props) {
-  const {
-    claimed,
-    exec_started,
-    exec_complete,
-    complete,
-    exitCode,
-    maxMemInGb,
-  } = timings;
+  const { claimed, running, writing, done } = timings;
 
   let duration: string | undefined;
-  if (exec_started && exec_complete) {
-    duration = formatDuration(exec_complete.getTime() - exec_started.getTime());
-  } else if (claimed && complete) {
-    duration = formatDuration(complete.getTime() - claimed.getTime());
+  if (running && writing) {
+    duration = formatDuration(writing.getTime() - running.getTime());
+  } else if (claimed && done) {
+    duration = formatDuration(done.getTime() - claimed.getTime());
   }
 
   const localizeDuration =
-    exec_started && claimed
-      ? formatDuration(exec_started.getTime() - claimed.getTime())
+    running && claimed
+      ? formatDuration(running.getTime() - claimed.getTime())
       : undefined;
 
   const uploadDuration =
-    complete && exec_complete
-      ? formatDuration(complete.getTime() - exec_complete.getTime())
+    done && writing
+      ? formatDuration(done.getTime() - writing.getTime())
       : undefined;
 
   return (
@@ -182,35 +175,6 @@ export default function TaskProperties({
             />
           )}
           <Row label="Status" value={status} />
-          {exitCode !== undefined && (
-            <Row
-              label="Exit Code"
-              value={
-                <>
-                  {exitCode === 0 ? "0 (success)" : `${exitCode} (error)`}
-                  {exitCode === 137 && (
-                    <span
-                      style={{
-                        marginLeft: 10,
-                        background: "#dc3545",
-                        color: "#fff",
-                        borderRadius: 4,
-                        padding: "2px 8px",
-                        fontSize: "0.8em",
-                        fontWeight: 600,
-                        letterSpacing: "0.02em",
-                      }}
-                    >
-                      Likely killed due to memory exhaustion
-                    </span>
-                  )}
-                </>
-              }
-            />
-          )}
-          {maxMemInGb !== undefined && (
-            <Row label="Peak Memory" value={`${maxMemInGb.toFixed(3)} GB`} />
-          )}
           {localizeDuration && (
             <Row label="Localization" value={localizeDuration} />
           )}
@@ -222,23 +186,20 @@ export default function TaskProperties({
               value={new Date(claimed).toLocaleString()}
             />
           )}
-          {exec_started && (
+          {running && (
             <Row
-              label="Exec Started At"
-              value={new Date(exec_started).toLocaleString()}
+              label="Running At"
+              value={new Date(running).toLocaleString()}
             />
           )}
-          {exec_complete && (
+          {writing && (
             <Row
-              label="Exec Complete At"
-              value={new Date(exec_complete).toLocaleString()}
+              label="Writing At"
+              value={new Date(writing).toLocaleString()}
             />
           )}
-          {complete && (
-            <Row
-              label="Completed At"
-              value={new Date(complete).toLocaleString()}
-            />
+          {done && (
+            <Row label="Completed At" value={new Date(done).toLocaleString()} />
           )}
         </tbody>
       </table>

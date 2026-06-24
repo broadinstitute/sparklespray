@@ -6,8 +6,6 @@
  *
  * simulateStdoutLines is no longer used; task output now comes from GET /api/v1/task/{id}/log.
  */
-import type { TimingWindows } from "./events";
-
 export interface TimeSeriesPoint {
   time: number; // unix ms
   label: string; // formatted time
@@ -36,89 +34,22 @@ function formatTime(ms: number): string {
   });
 }
 
-function linspace(start: number, end: number, n: number): number[] {
-  return Array.from(
-    { length: n },
-    (_, i) => start + ((end - start) * i) / (n - 1)
-  );
-}
-
 export function simulateMemory(
-  taskId: string,
-  timings: TimingWindows,
-  simTime?: Date
+  _taskId: string,
+  _running?: Date,
+  _done?: Date,
+  _simTime?: Date
 ): TimeSeriesPoint[] {
-  const { exec_started, exec_complete } = timings;
-  if (!exec_started) return [];
-
-  const rng = seededRng(taskId + ":mem");
-  const fallbackEnd =
-    exec_complete ??
-    (simTime && simTime > exec_started
-      ? simTime
-      : new Date(exec_started.getTime() + 5 * 60_000));
-  const execEnd = fallbackEnd;
-  const maxMem = timings.maxMemInGb ?? 2.0;
-
-  const stagedMs = exec_started.getTime();
-  const execMs = execEnd.getTime();
-  const duration = execMs - stagedMs;
-  const times = linspace(stagedMs, execMs, 20);
-  return times.map((t) => {
-    // ramp up to peak at midpoint, then stay near peak
-    const progress = (t - stagedMs) / duration;
-    const rampShape =
-      progress < 0.5
-        ? Math.sin(((progress / 0.5) * Math.PI) / 2)
-        : 0.9 + 0.1 * Math.sin(((progress - 0.5) / 0.5) * Math.PI);
-    const noise = (rng() - 0.5) * 0.08 * maxMem;
-    const value = Math.max(0, rampShape * maxMem + noise);
-    return {
-      time: t,
-      label: formatTime(t),
-      value: Math.round(value * 100) / 100,
-    };
-  });
+  return [];
 }
 
 export function simulateCpu(
-  taskId: string,
-  timings: TimingWindows,
-  simTime?: Date
+  _taskId: string,
+  _claimed?: Date,
+  _done?: Date,
+  _simTime?: Date
 ): TimeSeriesPoint[] {
-  const { claimed, exec_started, exec_complete, complete } = timings;
-  if (!claimed) return [];
-
-  const rng = seededRng(taskId + ":cpu");
-  const start = claimed.getTime();
-  const simMs = simTime?.getTime();
-  const end =
-    complete?.getTime() ??
-    exec_complete?.getTime() ??
-    (simMs && simMs > start
-      ? simMs
-      : exec_started
-      ? exec_started.getTime() + 5 * 60_000
-      : start + 10 * 60_000);
-  const stagedMs = exec_started?.getTime();
-  const executedMs = exec_complete?.getTime();
-
-  const times = linspace(start, end, 30);
-  return times.map((t) => {
-    let base = 0;
-    if (stagedMs && executedMs && t >= stagedMs && t <= executedMs) {
-      base = 95;
-    } else if (stagedMs && !executedMs && t >= stagedMs) {
-      base = 95; // partial run
-    }
-    const noise = base > 0 ? (rng() - 0.5) * 10 : rng() * 2;
-    const value = Math.max(0, Math.min(100, base + noise));
-    return {
-      time: t,
-      label: formatTime(t),
-      value: Math.round(value * 10) / 10,
-    };
-  });
+  return [];
 }
 
 export interface VolumeDataPoint {
@@ -149,10 +80,10 @@ export interface ResourceDataPoint {
 
 export function simulateResourceUsage(
   taskId: string,
-  timings: TimingWindows,
+  exec_started: Date | undefined,
+  exec_complete?: Date,
   simTime?: Date
 ): ResourceDataPoint[] {
-  const { exec_started, exec_complete } = timings;
   if (!exec_started) return [];
 
   const rng = seededRng(taskId + ":resource");
@@ -165,7 +96,7 @@ export function simulateResourceUsage(
   const endMs = Math.min(fallbackEnd.getTime(), simTime?.getTime() ?? Infinity);
   if (endMs <= startMs) return [];
 
-  const maxMem = timings.maxMemInGb ?? 2.0;
+  const maxMem = 2.0;
   const systemMemGb = Math.max(8, Math.ceil(maxMem / 8) * 8) * 2;
   const maxProcesses = 1 + Math.floor(rng() * 7);
 
@@ -306,10 +237,10 @@ function fillTemplate(tpl: string, rng: () => number, taskId: string): string {
 
 export function simulateStdoutLines(
   taskId: string,
-  timings: TimingWindows,
+  exec_started: Date | undefined,
+  exec_complete?: Date,
   simTime?: Date
 ): StdoutLine[] {
-  const { exec_started, exec_complete } = timings;
   if (!exec_started) return [];
 
   const rng = seededRng(taskId + ":stdout");
