@@ -104,6 +104,10 @@ func (q *mockTaskQueue) RecordKilled(_ context.Context, taskID string, _ bool) e
 	return nil
 }
 
+func (q *mockTaskQueue) RecordResourceUsage(_ context.Context, _ string, _ *ResourceUsage) error {
+	return nil
+}
+
 // --- recordingDockerCommand ---
 
 // recordingDockerCommand writes the invocation as "image extraArgs... command" to
@@ -113,18 +117,18 @@ type recordingDockerCommand struct {
 	blockC chan struct{} // if non-nil, blocks until closed
 }
 
-func (r *recordingDockerCommand) run(_ context.Context, imageName string, command []string, workDir string, extraDockerArgs []string, tel *TaskEventLog) error {
+func (r *recordingDockerCommand) run(_ context.Context, imageName string, command []string, workDir string, extraDockerArgs []string, tel *TaskEventLog) (*ResourceUsage, error) {
 	parts := append([]string{imageName}, extraDockerArgs...)
 	parts = append(parts, command...)
 	if err := tel.WriteOutput(strings.Join(parts, " ")); err != nil {
-		return fmt.Errorf("recordingDockerCommand: writing log: %w", err)
+		return nil, fmt.Errorf("recordingDockerCommand: writing log: %w", err)
 	}
 
 	if r.blockC != nil {
 		<-r.blockC
 	}
 
-	return r.err
+	return nil, r.err
 }
 
 // --- mockTransferClient ---
@@ -323,14 +327,14 @@ func TestWorkerMainLoop_FilesToLocalizeManifest(t *testing.T) {
 	}
 	var gotFile1, gotFile2 fileRead
 
-	verifyingDocker := func(_ context.Context, _ string, _ []string, workDir string, _ []string, tel *TaskEventLog) error {
+	verifyingDocker := func(_ context.Context, _ string, _ []string, workDir string, _ []string, tel *TaskEventLog) (*ResourceUsage, error) {
 		data1, err := os.ReadFile(filepath.Join(workDir, "file1.txt"))
 		gotFile1 = fileRead{string(data1), err}
 
 		data2, err := os.ReadFile(filepath.Join(workDir, "file2.txt"))
 		gotFile2 = fileRead{string(data2), err}
 
-		return tel.WriteOutput("ok")
+		return nil, tel.WriteOutput("ok")
 	}
 
 	cfg := makeConfig(t, q, tc, &recordingDockerCommand{})

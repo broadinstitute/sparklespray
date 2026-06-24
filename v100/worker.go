@@ -141,8 +141,10 @@ func executeTask(task *Task, resources Resources, completions chan<- taskComplet
 	}()
 }
 
-func executeDockerCommand(ctx context.Context, imageName string, command []string, workDir string, extraDockerArgs []string, tel *TaskEventLog) error {
-	args := append([]string{"run", "--rm", "-w", workDir}, extraDockerArgs...)
+func executeDockerCommand(ctx context.Context, imageName string, command []string, workDir string, extraDockerArgs []string, tel *TaskEventLog) (*ResourceUsage, error) {
+	containerName := "sparkles-" + uuid.New().String()[:8]
+
+	args := append([]string{"run", "--name", containerName, "-w", workDir}, extraDockerArgs...)
 	args = append(args, imageName)
 	args = append(args, command...)
 
@@ -179,10 +181,16 @@ func executeDockerCommand(ctx context.Context, imageName string, command []strin
 	pw.Close()
 	pipeErr := <-pipeErrCh
 
-	if runErr != nil {
-		return fmt.Errorf("could not run docker command (%s): %w", strings.Join(args, " "), runErr)
+	// Collect resource usage while the container still exists, then remove it.
+	ru := collectDockerResourceUsage(containerName)
+	if rmOut, rmErr := exec.Command("docker", "rm", "-f", containerName).CombinedOutput(); rmErr != nil {
+		log.Printf("docker rm %s: %v: %s", containerName, rmErr, rmOut)
 	}
-	return pipeErr
+
+	if runErr != nil {
+		return ru, fmt.Errorf("could not run docker command (%s): %w", strings.Join(args, " "), runErr)
+	}
+	return ru, pipeErr
 }
 
 type WorkerLoopConfig struct {
@@ -195,7 +203,7 @@ type WorkerLoopConfig struct {
 	BindMounts           []string
 	Registry             *taskRegistry
 	FSClient             *firestore.Client
-	ExecuteDockerCommand func(ctx context.Context, imageName string, command []string, workDir string, extraDockerArgs []string, tel *TaskEventLog) error
+	ExecuteDockerCommand func(ctx context.Context, imageName string, command []string, workDir string, extraDockerArgs []string, tel *TaskEventLog) (*ResourceUsage, error)
 }
 
 // ErrTaskKilled is returned by the task callback when a task was cancelled via a kill_job message.
@@ -335,8 +343,13 @@ func workerMainLoop(ctx context.Context, cfg *WorkerLoopConfig) error {
 					tel.Close()
 					return fmt.Errorf("marking task %s running: %w", t.TaskID, err)
 				}
-				dockerExecErr := cfg.ExecuteDockerCommand(taskCtx, t.DockerImage, t.Command, paths.taskWorkDir, extraDockerArgs, tel)
+				ru, dockerExecErr := cfg.ExecuteDockerCommand(taskCtx, t.DockerImage, t.Command, paths.taskWorkDir, extraDockerArgs, tel)
 				killed := cfg.Registry.wasKilled(t.TaskID)
+				if ru != nil {
+					if err := cfg.Queue.RecordResourceUsage(ctx, t.TaskID, ru); err != nil {
+						log.Printf("recording resource usage for task %s: %v", t.TaskID, err)
+					}
+				}
 				flushErr := tel.Flush()
 				var uploadResultsErr error
 				if !killed {
@@ -389,7 +402,8 @@ func (ws *workerState) mainLoop(ctx context.Context, resources *Resources) error
 
 // executeCommandDirect runs a command directly without Docker.
 // The image name and extra docker args are ignored.
-func executeCommandDirect(ctx context.Context, _ string, command []string, workDir string, _ []string, tel *TaskEventLog) error {
+// Resource usage is timing-only (no cgroup data available in this mode).
+func executeCommandDirect(ctx context.Context, _ string, command []string, workDir string, _ []string, tel *TaskEventLog) (*ResourceUsage, error) {
 	cmd := exec.CommandContext(ctx, command[0], command[1:]...)
 	cmd.Dir = workDir
 
@@ -420,14 +434,21 @@ func executeCommandDirect(ctx context.Context, _ string, command []string, workD
 		}
 	}()
 
+	start := time.Now()
 	runErr := cmd.Run()
+	end := time.Now()
 	pw.Close()
 	pipeErr := <-pipeErrCh
 
-	if runErr != nil {
-		return fmt.Errorf("could not run command (%s): %w", strings.Join(command, " "), runErr)
+	ru := &ResourceUsage{
+		StartTime:      start,
+		EndTime:        end,
+		ElapsedSeconds: end.Sub(start).Seconds(),
 	}
-	return pipeErr
+	if runErr != nil {
+		return ru, fmt.Errorf("could not run command (%s): %w", strings.Join(command, " "), runErr)
+	}
+	return ru, pipeErr
 }
 
 // WorkerRunConfig holds all parameters for running a worker programmatically.

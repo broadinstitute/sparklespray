@@ -108,6 +108,21 @@ type FileToLocalize struct {
 	IsExecutable bool   `firestore:"is_executable" json:"is_executable"`
 }
 
+// ResourceUsage holds a summary of resources consumed by a single task execution.
+// Fields are zero when the metric could not be collected (e.g. cgroup unavailable).
+type ResourceUsage struct {
+	StartTime       time.Time `firestore:"start_time"`
+	EndTime         time.Time `firestore:"end_time"`
+	ElapsedSeconds  float64   `firestore:"elapsed_seconds"`
+	MaxMemoryBytes  int64     `firestore:"max_memory_bytes"`
+	CPUUserUSec     int64     `firestore:"cpu_user_usec"`
+	CPUSystemUSec   int64     `firestore:"cpu_system_usec"`
+	BlockReadBytes  int64     `firestore:"block_read_bytes"`
+	BlockWriteBytes int64     `firestore:"block_write_bytes"`
+	ExitCode        int       `firestore:"exit_code"`
+	OOMKilled       bool      `firestore:"oom_killed"`
+}
+
 type Task struct {
 	JobID       string   `firestore:"job_id"`
 	TaskID      string   `firestore:"task_id"`
@@ -126,6 +141,7 @@ type Task struct {
 	OwningWorkerID          string           `firestore:"owning_worker_id"`
 	FailureReason           string           `firestore:"failure_reason"`
 	ExitCode                int              `firestore:"exit_code"`
+	ResourceUsage           *ResourceUsage   `firestore:"resource_usage"`
 }
 
 type TaskQueue interface {
@@ -140,6 +156,9 @@ type TaskQueue interface {
 	// handles the race where a task is claimed between the CLI's query and kill.
 	// Pass onlyIfPending=false from the worker, where the task is known to be active.
 	RecordKilled(ctx context.Context, taskID string, onlyIfPending bool) error
+	// RecordResourceUsage persists a ResourceUsage summary. Best-effort: callers
+	// should log but not fail on error.
+	RecordResourceUsage(ctx context.Context, taskID string, ru *ResourceUsage) error
 }
 
 type FirestoreTaskQueue struct {
@@ -319,6 +338,15 @@ func (q *FirestoreTaskQueue) RecordKilled(ctx context.Context, taskID string, on
 		OldState: oldState,
 		NewState: StatusKilled,
 	})
+}
+
+// RecordResourceUsage persists a ResourceUsage summary for the given task.
+// It is best-effort: callers should log but not fail on error.
+func (q *FirestoreTaskQueue) RecordResourceUsage(ctx context.Context, taskID string, ru *ResourceUsage) error {
+	_, err := q.taskDoc(taskID).Update(ctx, []firestore.Update{
+		{Path: "resource_usage", Value: ru},
+	})
+	return err
 }
 
 // RecordFailed marks a task as failed due to an infrastructure or system error.
