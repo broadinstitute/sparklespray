@@ -70,6 +70,14 @@ export interface JobDetail {
   metadata: Record<string, string>;
 }
 
+export interface JobSummaryHistoryEntry {
+  job_id: string;
+  workpool_id: string;
+  timestamp: string;
+  status: string;
+  tasks: { state: string; count: number }[];
+}
+
 export interface TaskSummaryRecord {
   task_id: string;
   task_index: number;

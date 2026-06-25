@@ -967,7 +967,12 @@ export default function JobList() {
                       <th className="jl-th jl-th-index" />
                       <th className="jl-th">Identifier</th>
                       <th className="jl-th jl-th-pool">Worker Pool</th>
-                      <th className="jl-th jl-th-stats">tasks / ok / fail</th>
+                      <th
+                        className="jl-th jl-th-stats"
+                        title="active = pending + claimed + running + writing&#10;ok = success&#10;fail = error + failed + killed"
+                      >
+                        active / ok / fail
+                      </th>
                       <th className="jl-th jl-th-time">Start Time (local)</th>
                     </tr>
                   </thead>
@@ -1051,12 +1056,25 @@ export default function JobList() {
   );
 }
 
+const ACTIVE_STATES = new Set(["pending", "claimed", "running", "writing"]);
+
 function JobStatsChip({ job }: { job: BackendJobSummary }) {
   const { taskCount: total, successCount: ok, failureCount: fail } = job;
+  const active = job.tasks
+    .filter((t) => ACTIVE_STATES.has(t.state))
+    .reduce((sum, t) => sum + t.count, 0);
   let cls = "jl-chip";
   if (fail > 0) cls += " jl-chip-red";
   else if (total > 0 && total === ok) cls += " jl-chip-green";
-  return <span className={cls}>{`${total} / ${ok} / ${fail}`}</span>;
+  const tip =
+    "active = pending + claimed + running + writing\n" +
+    "ok = success\n" +
+    "fail = error + failed + killed";
+  return (
+    <span className={cls} title={tip}>
+      {`${active} / ${ok} / ${fail}`}
+    </span>
+  );
 }
 
 // ColorSwatch used in sidebar (kept for completeness)

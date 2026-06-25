@@ -27,6 +27,7 @@ const simWorkpoolID = "simulate-pool"
 type simConfig struct {
 	workpoolID        string
 	tasksPerJob       int
+	maxJobs           int
 	meanJobInterval   time.Duration
 	meanLocalization  time.Duration
 	meanExecution     time.Duration
@@ -46,6 +47,7 @@ func runDevSimulate(c *cli.Context) error {
 	cfg := simConfig{
 		workpoolID:        simWorkpoolID,
 		tasksPerJob:       c.Int("tasks-per-job"),
+		maxJobs:           c.Int("max-jobs"),
 		meanJobInterval:   c.Duration("mean-job-interval"),
 		meanLocalization:  c.Duration("mean-localization"),
 		meanExecution:     c.Duration("mean-execution"),
@@ -143,10 +145,17 @@ func runDevSimulate(c *cli.Context) error {
 
 func runSimJobSubmitter(ctx context.Context, cfg simConfig, fsClient *firestore.Client, ep *v100.EventPublisher, jobSummaries *monitor.FirestoreJobSummaryStore) {
 	jobCounter := 0
+	first := true
 	for ctx.Err() == nil {
-		if !simSleep(ctx, jitter(cfg.meanJobInterval, cfg.timingVariancePct)) {
+		if cfg.maxJobs > 0 && jobCounter >= cfg.maxJobs {
 			return
 		}
+		if !first {
+			if !simSleep(ctx, jitter(cfg.meanJobInterval, cfg.timingVariancePct)) {
+				return
+			}
+		}
+		first = false
 
 		jobCounter++
 		jobID := uuid.New().String()
@@ -170,14 +179,17 @@ func runSimJobSubmitter(ctx context.Context, cfg simConfig, fsClient *firestore.
 				return err
 			}
 			for i, taskID := range taskIDs {
+				base := fmt.Sprintf("gs://sim-bucket/jobs/%s/tasks/%s", jobID, taskID)
 				task := v100.Task{
 					JobID:       jobID,
 					TaskID:      taskID,
 					TaskIndex:   i,
 					WorkpoolID:  cfg.workpoolID,
 					Status:      v100.StatusPending,
-					Command:     []string{"echo", "simulated"},
+					Command:     []string{"echo", "simulated", fmt.Sprintf("task-%d", i)},
 					DockerImage: "simulated",
+					LogPath:     base + "/output.log",
+					ResultPath:  base + "/result",
 				}
 				if err := tx.Set(fsClient.Collection(v100.TaskCollection).Doc(taskID), task); err != nil {
 					return err

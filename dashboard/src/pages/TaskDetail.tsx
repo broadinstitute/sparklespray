@@ -28,7 +28,20 @@ export default function TaskDetail() {
   const [taskInfo, setTaskInfo] = useState<{
     command: string;
     dockerImage: string;
-    logUrl: string;
+    logPath: string;
+    resultPath: string;
+    exitCode: number | null;
+    failureReason: string;
+    parameters: { name: string; value: string }[];
+    resourceUsage: {
+      elapsed_seconds: number;
+      max_memory_bytes: number;
+      cpu_user_usec: number;
+      cpu_system_usec: number;
+      block_read_bytes: number;
+      block_write_bytes: number;
+      oom_killed: boolean;
+    } | null;
   } | null>(null);
   const logBottomRef = useRef<HTMLDivElement>(null);
 
@@ -56,13 +69,29 @@ export default function TaskDetail() {
       .then((r) => r.json())
       .then((d) =>
         setTaskInfo({
-          command: d.command ?? "missing",
-          dockerImage: d.docker_image ?? "missing",
-          logUrl: d.log_path ?? "",
+          command: Array.isArray(d.command)
+            ? d.command.join(" ")
+            : d.command ?? "",
+          dockerImage: d.docker_image ?? "",
+          logPath: d.log_path ?? "",
+          resultPath: d.result_path ?? "",
+          exitCode: d.exit_code != null ? d.exit_code : null,
+          failureReason: d.failure_reason ?? "",
+          parameters: Array.isArray(d.parameters) ? d.parameters : [],
+          resourceUsage: d.resource_usage ?? null,
         })
       )
       .catch(() =>
-        setTaskInfo({ command: "missing", dockerImage: "missing", logUrl: "" })
+        setTaskInfo({
+          command: "",
+          dockerImage: "",
+          logPath: "",
+          resultPath: "",
+          exitCode: null,
+          failureReason: "",
+          parameters: [],
+          resourceUsage: null,
+        })
       );
   }, [taskId]);
 
@@ -144,9 +173,6 @@ export default function TaskDetail() {
   }
 
   const statusStyle = STATUS_COLORS[status] ?? { bg: "#eee", text: "#333" };
-  const command = taskInfo?.command ?? "…";
-  const dockerImage = taskInfo?.dockerImage ?? "…";
-  const logUrl = taskInfo?.logUrl ?? "";
 
   return (
     <div
@@ -204,9 +230,14 @@ export default function TaskDetail() {
       {activeTab === "overview" && (
         <>
           <TaskProperties
-            command={command}
-            dockerImage={dockerImage}
-            logUrl={logUrl}
+            command={taskInfo?.command ?? ""}
+            dockerImage={taskInfo?.dockerImage ?? ""}
+            logPath={taskInfo?.logPath ?? ""}
+            resultPath={taskInfo?.resultPath ?? ""}
+            exitCode={taskInfo?.exitCode ?? null}
+            failureReason={taskInfo?.failureReason ?? ""}
+            parameters={taskInfo?.parameters ?? []}
+            resourceUsage={taskInfo?.resourceUsage ?? null}
             timings={timings}
             status={status}
           />

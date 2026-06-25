@@ -437,6 +437,30 @@ func (s *dashboardServer) handleGetJob(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// ----- GET /api/v1/job/{job_id}/summary -----
+
+func (s *dashboardServer) handleGetJobSummary(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	jobID := r.PathValue("job_id")
+	snap, err := s.fs.Collection("JobSummary").Doc(jobID).Get(ctx)
+	if err != nil {
+		if grpcstatus.Code(err) == codes.NotFound {
+			writeError(w, http.StatusNotFound, "NOT_FOUND", "job summary not found")
+			return
+		}
+		log.Printf("dashboard: GetJobSummary %s: %v", jobID, err)
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to get job summary")
+		return
+	}
+	var js monitor.JobSummary
+	if err := snap.DataTo(&js); err != nil {
+		log.Printf("dashboard: GetJobSummary DataTo: %v", err)
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to parse job summary")
+		return
+	}
+	writeJSON(w, http.StatusOK, jobSummaryToResponse(&js))
+}
+
 // ----- GET /api/v1/job/{job_id}/summary-history -----
 
 type jobSummaryHistoryEntryResponse struct {
@@ -1182,6 +1206,7 @@ func runDevDashboardBackend(c *cli.Context) error {
 	mux.HandleFunc("GET /api/v1/workpool/{workpool_id}/workers", srv.handleListWorkers)
 	mux.HandleFunc("GET /api/v1/jobs", srv.handleListJobs)
 	mux.HandleFunc("GET /api/v1/job/{job_id}", srv.handleGetJob)
+	mux.HandleFunc("GET /api/v1/job/{job_id}/summary", srv.handleGetJobSummary)
 	mux.HandleFunc("GET /api/v1/job/{job_id}/summary-history", srv.handleGetJobSummaryHistory)
 	mux.HandleFunc("GET /api/v1/job/{job_id}/tasks", srv.handleGetJobTasks)
 	mux.HandleFunc("GET /api/v1/task/{task_id}", srv.handleGetTask)

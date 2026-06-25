@@ -23,6 +23,17 @@ func Command() cli.Command {
 				Action: runDevSubmit,
 			},
 			{
+				Name:      "export",
+				ArgsUsage: "<collection>",
+				Usage:     "Dump Firestore collection contents as JSON (one doc per line)",
+				Flags: []cli.Flag{
+					cli.StringFlag{Name: "project"},
+					cli.StringFlag{Name: "db", Value: defaultDB},
+					cli.StringSliceFlag{Name: "filter", Usage: "field=value filter (repeatable)"},
+				},
+				Action: runDevExport,
+			},
+			{
 				Name:  "dumpdb",
 				Usage: "Print all tasks and workpools from Firestore",
 				Flags: []cli.Flag{
@@ -50,7 +61,8 @@ func Command() cli.Command {
 					cli.StringFlag{Name: "project"},
 					cli.StringFlag{Name: "db", Value: defaultDB},
 					cli.IntFlag{Name: "tasks-per-job", Value: 10, Usage: "number of tasks per submitted job"},
-					cli.DurationFlag{Name: "mean-job-interval", Value: 30 * time.Second, Usage: "mean time between job submissions"},
+					cli.IntFlag{Name: "max-jobs", Value: 5, Usage: "stop submitting after this many jobs (0 = unlimited)"},
+					cli.DurationFlag{Name: "mean-job-interval", Value: 240 * time.Second, Usage: "mean time between job submissions"},
 					cli.DurationFlag{Name: "mean-localization", Value: 5 * time.Second, Usage: "mean time in claimed state (staging)"},
 					cli.DurationFlag{Name: "mean-execution", Value: 60 * time.Second, Usage: "mean time in running state"},
 					cli.DurationFlag{Name: "mean-upload", Value: 5 * time.Second, Usage: "mean time in writing state (result upload)"},

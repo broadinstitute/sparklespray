@@ -1,4 +1,9 @@
-import type { AnyEvent, AnyTaskEvent, TaskStateUpdateEvent } from "../types";
+import type {
+  AnyEvent,
+  AnyTaskEvent,
+  TaskStateUpdateEvent,
+  JobSummaryHistoryEntry,
+} from "../types";
 import { getJobTaskCount } from "./events";
 
 function formatTime(ms: number): string {
@@ -132,6 +137,68 @@ export function computeJobTimeSeries(
     r.completedSuccess = Math.round(r.completedSuccess * 100) / 100;
     r.completedError = Math.round(r.completedError * 100) / 100;
     r.failed = Math.round(r.failed * 100) / 100;
+  }
+
+  return { counts, rates };
+}
+
+// Derives the same CountPoint/RatePoint series from JobSummaryHistory snapshots
+// instead of raw events. Each snapshot is a point-in-time state breakdown.
+export function computeTimeSeriesFromHistory(
+  history: JobSummaryHistoryEntry[]
+): { counts: CountPoint[]; rates: RatePoint[] } {
+  if (history.length === 0) return { counts: [], rates: [] };
+
+  const activeStates = new Set(["claimed", "running", "writing"]);
+  const doneStates = new Set(["success", "error", "failed", "killed"]);
+
+  const counts: CountPoint[] = history.map((h) => {
+    const t = new Date(h.timestamp).getTime();
+    let pending = 0;
+    let running = 0;
+    for (const tc of h.tasks) {
+      if (tc.state === "pending") pending += tc.count;
+      else if (activeStates.has(tc.state)) running += tc.count;
+    }
+    return { time: t, label: formatTime(t), pending, running };
+  });
+
+  const rates: RatePoint[] = [];
+  for (let i = 1; i < history.length; i++) {
+    const prev = history[i - 1];
+    const curr = history[i];
+    const dt =
+      (new Date(curr.timestamp).getTime() -
+        new Date(prev.timestamp).getTime()) /
+      60_000;
+    if (dt <= 0) continue;
+
+    const prevDone = new Map<string, number>();
+    for (const tc of prev.tasks) {
+      if (doneStates.has(tc.state)) prevDone.set(tc.state, tc.count);
+    }
+    let deltaSuccess = 0;
+    let deltaError = 0;
+    let deltaFailed = 0;
+    for (const tc of curr.tasks) {
+      const delta = tc.count - (prevDone.get(tc.state) ?? 0);
+      if (delta <= 0) continue;
+      if (tc.state === "success") deltaSuccess += delta;
+      else if (tc.state === "error") deltaError += delta;
+      else if (tc.state === "failed" || tc.state === "killed")
+        deltaFailed += delta;
+    }
+    const t =
+      (new Date(prev.timestamp).getTime() +
+        new Date(curr.timestamp).getTime()) /
+      2;
+    rates.push({
+      time: t,
+      label: formatTime(t),
+      completedSuccess: Math.round((deltaSuccess / dt) * 100) / 100,
+      completedError: Math.round((deltaError / dt) * 100) / 100,
+      failed: Math.round((deltaFailed / dt) * 100) / 100,
+    });
   }
 
   return { counts, rates };

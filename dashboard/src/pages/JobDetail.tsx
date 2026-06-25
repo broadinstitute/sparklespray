@@ -1,10 +1,16 @@
 import { useState, useEffect, useMemo } from "react";
 import { useParams, Link, useLocation } from "react-router-dom";
-import { getJobTasks, getJobTaskCount } from "../data/events";
+import { getJobTasks } from "../data/events";
 import type { TaskStatus } from "../data/events";
-import { computeJobTimeSeries } from "../data/jobTimeSeries";
+import { computeTimeSeriesFromHistory } from "../data/jobTimeSeries";
 import { useEvents, mergeEvents } from "../data/EventProvider";
-import type { AnyEvent, JobDetail, TaskStateUpdateEvent } from "../types";
+import type {
+  AnyEvent,
+  BackendJobSummary,
+  JobSummaryHistoryEntry,
+  JobDetail,
+  TaskStateUpdateEvent,
+} from "../types";
 import MultiLineChart from "../components/MultiLineChart";
 import TabBar from "../components/TabBar";
 
@@ -211,14 +217,77 @@ function StatusBadge({ status }: { status: TaskStatus }) {
   );
 }
 
+function useJobSummary(
+  jobId: string | undefined
+): BackendJobSummary | undefined {
+  const [summary, setSummary] = useState<BackendJobSummary | undefined>();
+  useEffect(() => {
+    if (!jobId) return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const r = await fetch(`/api/v1/job/${jobId}/summary`);
+        if (!r.ok || cancelled) return;
+        const raw = await r.json();
+        if (cancelled) return;
+        const taskCount = (raw.tasks as {
+          state: string;
+          count: number;
+        }[]).reduce((s, t) => s + t.count, 0);
+        const successCount =
+          (raw.tasks as { state: string; count: number }[]).find(
+            (t) => t.state === "success"
+          )?.count ?? 0;
+        const failureCount = (raw.tasks as { state: string; count: number }[])
+          .filter((t) => ["error", "failed", "killed"].includes(t.state))
+          .reduce((s, t) => s + t.count, 0);
+        setSummary({ ...raw, taskCount, successCount, failureCount });
+      } catch (_) {}
+    };
+    poll();
+    const id = setInterval(poll, 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [jobId]);
+  return summary;
+}
+
+function useJobSummaryHistory(
+  jobId: string | undefined
+): JobSummaryHistoryEntry[] {
+  const [history, setHistory] = useState<JobSummaryHistoryEntry[]>([]);
+  useEffect(() => {
+    if (!jobId) return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const r = await fetch(`/api/v1/job/${jobId}/summary-history`);
+        if (!r.ok || cancelled) return;
+        const data = await r.json();
+        if (!cancelled) setHistory(data);
+      } catch (_) {}
+    };
+    poll();
+    const id = setInterval(poll, 10000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [jobId]);
+  return history;
+}
+
 export default function JobDetail() {
   const { jobId } = useParams<{ jobId: string }>();
   const location = useLocation();
-  const { addJobEventListener, jobCache, jobs } = useEvents();
+  const { addJobEventListener, jobCache } = useEvents();
   const [localEvents, setLocalEvents] = useState<AnyEvent[]>([]);
 
   const isTasksTab = location.pathname.endsWith("/tasks");
 
+  // Events are only used for the tasks tab (per-task status + attempt counts).
   useEffect(() => {
     if (!jobId) return;
     return addJobEventListener(jobId, (newEvents) =>
@@ -230,20 +299,13 @@ export default function JobDetail() {
     localEvents,
     jobId,
   ]);
-  const jobSummaryLastUpdated = useMemo(() => {
-    const summary = jobs.find((j) => j.job_id === jobId);
-    return summary ? Date.now() : undefined;
-  }, [jobs, jobId]);
+
+  const jobSummary = useJobSummary(jobId);
+  const summaryHistory = useJobSummaryHistory(jobId);
+
   const { counts, rates } = useMemo(
-    () =>
-      jobId
-        ? computeJobTimeSeries(localEvents, jobId, jobSummaryLastUpdated)
-        : { counts: [], rates: [] },
-    [localEvents, jobId, jobSummaryLastUpdated]
-  );
-  const totalTasks = useMemo(
-    () => (jobId ? getJobTaskCount(localEvents, jobId) : 0),
-    [localEvents, jobId]
+    () => computeTimeSeriesFromHistory(summaryHistory),
+    [summaryHistory]
   );
 
   if (!jobId) {
@@ -264,52 +326,6 @@ export default function JobDetail() {
     },
   ];
 
-  if (tasks.length === 0) {
-    return (
-      <div style={{ padding: "2rem", fontFamily: "monospace" }}>
-        <h1
-          style={{ margin: "0 0 1.5rem", fontSize: "1.3rem", fontWeight: 700 }}
-        >
-          {jobId}
-        </h1>
-        <TabBar tabs={jobTabs} />
-        <div
-          style={{
-            display: "flex",
-            gap: "1.5rem",
-            alignItems: "flex-start",
-            marginTop: "1rem",
-          }}
-        >
-          <JobDetailsPanel
-            jobDetail={jobCache[jobId]}
-            statusCounts={{}}
-            statusOrder={[]}
-            ratePerMin={0}
-            etaDate={null}
-            totalTasks={0}
-            doneTasks={0}
-          />
-          <div
-            style={{
-              flex: 1,
-              minWidth: 0,
-              color: "#888",
-              fontFamily: "monospace",
-              paddingTop: "0.5rem",
-            }}
-          >
-            Waiting for tasks…
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  const statusCounts: Partial<Record<TaskStatus, number>> = {};
-  for (const t of tasks)
-    statusCounts[t.status] = (statusCounts[t.status] ?? 0) + 1;
-
   const statusOrder: TaskStatus[] = [
     "success",
     "error",
@@ -321,16 +337,24 @@ export default function JobDetail() {
     "pending",
   ];
 
+  const statusCounts: Partial<Record<TaskStatus, number>> = {};
+  for (const tc of jobSummary?.tasks ?? []) {
+    if (tc.state as TaskStatus) statusCounts[tc.state as TaskStatus] = tc.count;
+  }
+
+  const totalTasks = jobSummary?.taskCount ?? 0;
   const doneTasks =
     (statusCounts.success ?? 0) +
     (statusCounts.error ?? 0) +
     (statusCounts.failed ?? 0) +
     (statusCounts.killed ?? 0);
-  const jobStarted = localEvents.find((e) => e.type === "job_created");
-  const elapsedMin = jobStarted
-    ? (Date.now() - new Date(jobStarted.timestamp).getTime()) / 60_000
+
+  const createdAt = jobCache[jobId]?.created_at;
+  const elapsedMin = createdAt
+    ? (Date.now() - new Date(createdAt).getTime()) / 60_000
     : 0;
-  const ratePerMin = elapsedMin > 0 ? doneTasks / elapsedMin : 0;
+  const ratePerMin =
+    elapsedMin > 0 && doneTasks > 0 ? doneTasks / elapsedMin : 0;
   const remaining = totalTasks - doneTasks;
   const etaDate =
     ratePerMin > 0
