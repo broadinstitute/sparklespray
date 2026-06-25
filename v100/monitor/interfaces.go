@@ -200,6 +200,48 @@ type TaskStore interface {
 	CountByJob(ctx context.Context, jobID string) (map[string]int, error)
 }
 
+// ----- WorkPool summary types -----
+
+// StatusCount is one entry in a WorkPoolSummary's per-status breakdown.
+type StatusCount struct {
+	Status string `firestore:"status" json:"status"`
+	Count  int    `firestore:"count"  json:"count"`
+}
+
+// WorkPoolSummary holds evolving runtime metrics for a workpool, recomputed
+// by the monitor on each provisioning poll.
+type WorkPoolSummary struct {
+	WorkpoolID                    string        `firestore:"workpool_id"`
+	Expiry                        time.Time     `firestore:"expiry"`
+	LastUpdated                   time.Time     `firestore:"last_updated"`
+	ExpectedPreemptibleVMCount    int           `firestore:"expected_preemptible_vm_count"`
+	ExpectedNonpreemptibleVMCount int           `firestore:"expected_nonpreemptible_vm_count"`
+	UnhealthyBatchCount           int           `firestore:"unhealthy_batch_count"`
+	BatchAPIRequestCounts         []StatusCount `firestore:"batch_api_request_counts"`
+	Workers                       []StatusCount `firestore:"workers"`
+	Tasks                         []StatusCount `firestore:"tasks"`
+}
+
+// WorkPoolSummaryHistory is an append-only snapshot written each time the monitor
+// updates a WorkPoolSummary.
+type WorkPoolSummaryHistory struct {
+	WorkpoolID                    string        `firestore:"workpool_id"`
+	Timestamp                     time.Time     `firestore:"timestamp"`
+	Expiry                        time.Time     `firestore:"expiry"`
+	ExpectedPreemptibleVMCount    int           `firestore:"expected_preemptible_vm_count"`
+	ExpectedNonpreemptibleVMCount int           `firestore:"expected_nonpreemptible_vm_count"`
+	UnhealthyBatchCount           int           `firestore:"unhealthy_batch_count"`
+	BatchAPIRequestCounts         []StatusCount `firestore:"batch_api_request_counts"`
+	Workers                       []StatusCount `firestore:"workers"`
+	Tasks                         []StatusCount `firestore:"tasks"`
+}
+
+// WorkPoolSummaryStore writes WorkPoolSummary and WorkPoolSummaryHistory documents.
+type WorkPoolSummaryStore interface {
+	Save(ctx context.Context, summary *WorkPoolSummary) error
+	SaveHistory(ctx context.Context, history *WorkPoolSummaryHistory) error
+}
+
 // ----- Job summary types -----
 
 // JobStatus is the rolled-up lifecycle state of a job.

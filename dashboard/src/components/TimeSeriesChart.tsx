@@ -7,7 +7,7 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from "recharts";
-import type { TimeSeriesPoint } from "../data/simulate";
+import type { TimeSeriesPoint } from "../types";
 
 interface Props {
   data: TimeSeriesPoint[];

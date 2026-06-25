@@ -136,8 +136,9 @@ type workpoolDetailResponse struct {
 	SparklesWorkerGCSPath string               `json:"sparkles_worker_gcs_path"`
 	Resources             []v100.ResourceEntry `json:"resources"`
 	EmptyVolumes          []v100.EmptyVolume   `json:"empty_volumes"`
-	MaxWorkerCount        int                  `json:"max_worker_count"`
-	Status                string               `json:"status"`
+	MaxWorkerCount                int                  `json:"max_worker_count"`
+	MaxPreemptibleWorkerAttempts  int                  `json:"max_preemptible_worker_attempts"`
+	Status                        string               `json:"status"`
 	StatusMessage         string               `json:"status_message"`
 	LastIncidentAt        *string              `json:"last_incident_at"`
 	IncidentCount         int                  `json:"incident_count"`
@@ -172,8 +173,9 @@ func (s *dashboardServer) handleGetWorkpool(w http.ResponseWriter, r *http.Reque
 		SparklesWorkerGCSPath: wp.SparklesWorkerGCSPath,
 		Resources:             wp.Resources,
 		EmptyVolumes:          wp.EmptyVolumes,
-		MaxWorkerCount:        wp.MaxWorkerCount,
-		Status:                wp.Status,
+		MaxWorkerCount:               wp.MaxWorkerCount,
+		MaxPreemptibleWorkerAttempts: wp.MaxPreemptibleWorkerAttempts,
+		Status:                       wp.Status,
 		StatusMessage:         wp.StatusMessage,
 		IncidentCount:         wp.IncidentCount,
 		Expiry:                wp.Expiry,
@@ -183,6 +185,121 @@ func (s *dashboardServer) handleGetWorkpool(w http.ResponseWriter, r *http.Reque
 		resp.LastIncidentAt = &s
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// ----- GET /api/v1/workpool/{workpool_id}/summary -----
+
+type statusCountResponse struct {
+	Status string `json:"status"`
+	Count  int    `json:"count"`
+}
+
+type workpoolSummaryDetailResponse struct {
+	WorkpoolID                    string                `json:"workpool_id"`
+	LastUpdated                   time.Time             `json:"last_updated"`
+	ExpectedPreemptibleVMCount    int                   `json:"expected_preemptible_vm_count"`
+	ExpectedNonpreemptibleVMCount int                   `json:"expected_nonpreemptible_vm_count"`
+	UnhealthyBatchCount           int                   `json:"unhealthy_batch_count"`
+	BatchAPIRequestCounts         []statusCountResponse `json:"batch_api_request_counts"`
+	Workers                       []statusCountResponse `json:"workers"`
+	Tasks                         []statusCountResponse `json:"tasks"`
+}
+
+func (s *dashboardServer) handleGetWorkpoolSummary(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	workpoolID := r.PathValue("workpool_id")
+	snap, err := s.fs.Collection(monitor.CollectionWorkPoolSummary).Doc(workpoolID).Get(ctx)
+	if err != nil {
+		if grpcstatus.Code(err) == codes.NotFound {
+			writeError(w, http.StatusNotFound, "NOT_FOUND", "workpool summary not found")
+			return
+		}
+		log.Printf("dashboard: GetWorkpoolSummary %s: %v", workpoolID, err)
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to get workpool summary")
+		return
+	}
+	var ws monitor.WorkPoolSummary
+	if err := snap.DataTo(&ws); err != nil {
+		log.Printf("dashboard: GetWorkpoolSummary DataTo: %v", err)
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to parse workpool summary")
+		return
+	}
+	resp := workpoolSummaryDetailResponse{
+		WorkpoolID:                    ws.WorkpoolID,
+		LastUpdated:                   ws.LastUpdated,
+		ExpectedPreemptibleVMCount:    ws.ExpectedPreemptibleVMCount,
+		ExpectedNonpreemptibleVMCount: ws.ExpectedNonpreemptibleVMCount,
+		UnhealthyBatchCount:           ws.UnhealthyBatchCount,
+	}
+	for _, sc := range ws.BatchAPIRequestCounts {
+		resp.BatchAPIRequestCounts = append(resp.BatchAPIRequestCounts, statusCountResponse{Status: sc.Status, Count: sc.Count})
+	}
+	for _, sc := range ws.Workers {
+		resp.Workers = append(resp.Workers, statusCountResponse{Status: sc.Status, Count: sc.Count})
+	}
+	for _, sc := range ws.Tasks {
+		resp.Tasks = append(resp.Tasks, statusCountResponse{Status: sc.Status, Count: sc.Count})
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// ----- GET /api/v1/workpool/{workpool_id}/summary-history -----
+
+type workpoolSummaryHistoryEntryResponse struct {
+	WorkpoolID                    string                `json:"workpool_id"`
+	Timestamp                     time.Time             `json:"timestamp"`
+	ExpectedPreemptibleVMCount    int                   `json:"expected_preemptible_vm_count"`
+	ExpectedNonpreemptibleVMCount int                   `json:"expected_nonpreemptible_vm_count"`
+	UnhealthyBatchCount           int                   `json:"unhealthy_batch_count"`
+	BatchAPIRequestCounts         []statusCountResponse `json:"batch_api_request_counts"`
+	Workers                       []statusCountResponse `json:"workers"`
+	Tasks                         []statusCountResponse `json:"tasks"`
+}
+
+func (s *dashboardServer) handleGetWorkpoolSummaryHistory(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	workpoolID := r.PathValue("workpool_id")
+	iter := s.fs.Collection(monitor.CollectionWorkPoolSummaryHistory).
+		Where("workpool_id", "==", workpoolID).
+		OrderBy("timestamp", firestore.Asc).
+		Documents(ctx)
+	defer iter.Stop()
+
+	result := []workpoolSummaryHistoryEntryResponse{}
+	for {
+		snap, err := iter.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			log.Printf("dashboard: GetWorkpoolSummaryHistory %s: %v", workpoolID, err)
+			writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to get workpool summary history")
+			return
+		}
+		var h monitor.WorkPoolSummaryHistory
+		if err := snap.DataTo(&h); err != nil {
+			log.Printf("dashboard: GetWorkpoolSummaryHistory DataTo: %v", err)
+			continue
+		}
+		entry := workpoolSummaryHistoryEntryResponse{
+			WorkpoolID:                    h.WorkpoolID,
+			Timestamp:                     h.Timestamp,
+			ExpectedPreemptibleVMCount:    h.ExpectedPreemptibleVMCount,
+			ExpectedNonpreemptibleVMCount: h.ExpectedNonpreemptibleVMCount,
+			UnhealthyBatchCount:           h.UnhealthyBatchCount,
+		}
+		for _, sc := range h.BatchAPIRequestCounts {
+			entry.BatchAPIRequestCounts = append(entry.BatchAPIRequestCounts, statusCountResponse{Status: sc.Status, Count: sc.Count})
+		}
+		for _, sc := range h.Workers {
+			entry.Workers = append(entry.Workers, statusCountResponse{Status: sc.Status, Count: sc.Count})
+		}
+		for _, sc := range h.Tasks {
+			entry.Tasks = append(entry.Tasks, statusCountResponse{Status: sc.Status, Count: sc.Count})
+		}
+		result = append(result, entry)
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 // ----- GET /api/v1/workpool/{workpool_id}/batches -----
@@ -288,6 +405,68 @@ func (s *dashboardServer) handleListWorkers(w http.ResponseWriter, r *http.Reque
 		})
 	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+// ----- GET /api/v1/worker/{worker_id} -----
+
+func (s *dashboardServer) handleGetWorker(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	workerID := r.PathValue("worker_id")
+	snap, err := s.fs.Collection("Workers").Doc(workerID).Get(ctx)
+	if err != nil {
+		if grpcstatus.Code(err) == codes.NotFound {
+			writeError(w, http.StatusNotFound, "NOT_FOUND", "worker not found")
+			return
+		}
+		log.Printf("dashboard: GetWorker %s: %v", workerID, err)
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to get worker")
+		return
+	}
+	var wr v100.WorkerRecord
+	if err := snap.DataTo(&wr); err != nil {
+		log.Printf("dashboard: GetWorker DataTo: %v", err)
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to parse worker")
+		return
+	}
+	writeJSON(w, http.StatusOK, workerResponse{
+		WorkerID:        wr.WorkerID,
+		WorkpoolID:      wr.WorkpoolID,
+		BatchID:         wr.BatchID,
+		InstanceName:    wr.InstanceName,
+		Status:          wr.Status,
+		Expiry:          wr.Expiry,
+		HeartbeatExpiry: wr.HeartbeatExpiry,
+	})
+}
+
+// ----- GET /api/v1/batch/{batch_id} -----
+
+func (s *dashboardServer) handleGetBatch(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	batchID := r.PathValue("batch_id")
+	store := monitor.NewFirestoreBatchRequestStore(s.fs)
+	batch, err := store.Get(ctx, batchID)
+	if err != nil {
+		if grpcstatus.Code(err) == codes.NotFound {
+			writeError(w, http.StatusNotFound, "NOT_FOUND", "batch not found")
+			return
+		}
+		log.Printf("dashboard: GetBatch %s: %v", batchID, err)
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to get batch")
+		return
+	}
+	writeJSON(w, http.StatusOK, batchRequestResponse{
+		BatchID:               batch.BatchID,
+		JobID:                 batch.JobID,
+		WorkpoolID:            batch.WorkpoolID,
+		ExpectedVMCount:       batch.ExpectedVMCount,
+		Preemptible:           batch.Preemptible,
+		SubmittedAt:           batch.SubmittedAt,
+		RunningSince:          batch.RunningSince,
+		RegisteredWorkerCount: batch.RegisteredWorkerCount,
+		Status:                string(batch.Status),
+		Unhealthy:             batch.Unhealthy,
+	})
 }
 
 // ----- GET /api/v1/jobs -----
@@ -1204,6 +1383,10 @@ func runDevDashboardBackend(c *cli.Context) error {
 	mux.HandleFunc("GET /api/v1/workpool/{workpool_id}", srv.handleGetWorkpool)
 	mux.HandleFunc("GET /api/v1/workpool/{workpool_id}/batches", srv.handleListBatches)
 	mux.HandleFunc("GET /api/v1/workpool/{workpool_id}/workers", srv.handleListWorkers)
+	mux.HandleFunc("GET /api/v1/worker/{worker_id}", srv.handleGetWorker)
+	mux.HandleFunc("GET /api/v1/batch/{batch_id}", srv.handleGetBatch)
+	mux.HandleFunc("GET /api/v1/workpool/{workpool_id}/summary", srv.handleGetWorkpoolSummary)
+	mux.HandleFunc("GET /api/v1/workpool/{workpool_id}/summary-history", srv.handleGetWorkpoolSummaryHistory)
 	mux.HandleFunc("GET /api/v1/jobs", srv.handleListJobs)
 	mux.HandleFunc("GET /api/v1/job/{job_id}", srv.handleGetJob)
 	mux.HandleFunc("GET /api/v1/job/{job_id}/summary", srv.handleGetJobSummary)

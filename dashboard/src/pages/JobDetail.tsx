@@ -175,7 +175,7 @@ function JobDetailsPanel({
         value={
           clusterId ? (
             <Link
-              to={`/clusters/${clusterId}`}
+              to={`/workpools/${clusterId}`}
               style={{ color: "#1565c0", textDecoration: "none" }}
             >
               {clusterId}

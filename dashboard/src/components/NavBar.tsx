@@ -36,6 +36,31 @@ function parseBreadcrumbs(pathname: string): BreadcrumbSegment[] {
     } else {
       items.push({ label: jobId });
     }
+  } else if (segs[0] === "workpools" && segs[1]) {
+    const workpoolId = segs[1];
+    if (segs[2] === "workers" && segs[3]) {
+      items.push({ label: workpoolId, href: `/workpools/${workpoolId}` });
+      items.push({
+        label: "workers",
+        href: `/workpools/${workpoolId}/workers`,
+      });
+      items.push({ label: segs[3] });
+    } else if (segs[2] === "workers") {
+      items.push({ label: workpoolId, href: `/workpools/${workpoolId}` });
+      items.push({ label: "workers" });
+    } else if (segs[2] === "batches" && segs[3]) {
+      items.push({ label: workpoolId, href: `/workpools/${workpoolId}` });
+      items.push({
+        label: "batches",
+        href: `/workpools/${workpoolId}/batches`,
+      });
+      items.push({ label: segs[3] });
+    } else if (segs[2] === "batches") {
+      items.push({ label: workpoolId, href: `/workpools/${workpoolId}` });
+      items.push({ label: "batches" });
+    } else {
+      items.push({ label: workpoolId });
+    }
   } else if (segs[0] === "clusters" && segs[1]) {
     items.push({ label: segs[1] });
   }

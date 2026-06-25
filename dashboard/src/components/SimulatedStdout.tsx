@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import type { StdoutLine } from "../data/simulate";
+import type { StdoutLine } from "../types";
 
 interface Props {
   lines: StdoutLine[];

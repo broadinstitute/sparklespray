@@ -116,6 +116,8 @@ func runDevSimulate(c *cli.Context) error {
 
 	jobSummaries := monitor.NewFirestoreJobSummaryStore(fsClient)
 	taskStore := monitor.NewFirestoreTaskStore(fsClient)
+	workerStore := monitor.NewFirestoreWorkerStore(fsClient)
+	workPoolSummaryStore := monitor.NewFirestoreWorkPoolSummaryStore(fsClient)
 
 	var wg sync.WaitGroup
 
@@ -137,6 +139,12 @@ func runDevSimulate(c *cli.Context) error {
 	go func() {
 		defer wg.Done()
 		runSimJobSummaryUpdater(ctx, cfg.workpoolID, jobSummaries, taskStore, ep)
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		runSimWorkPoolSummaryUpdater(ctx, cfg.workpoolID, batchStore, taskStore, workerStore, workPoolSummaryStore)
 	}()
 
 	wg.Wait()
@@ -424,6 +432,94 @@ func runSimJobSummaryUpdater(ctx context.Context, workpoolID string, jobSummarie
 			}
 		}
 	}
+}
+
+func runSimWorkPoolSummaryUpdater(ctx context.Context, workpoolID string, batchStore *monitor.FirestoreBatchRequestStore, taskStore *monitor.FirestoreTaskStore, workerStore *monitor.FirestoreWorkerStore, workPoolSummaryStore *monitor.FirestoreWorkPoolSummaryStore) {
+	ticker := time.NewTicker(3 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			summary, err := simComputeWorkPoolSummary(ctx, workpoolID, batchStore, taskStore, workerStore)
+			if err != nil {
+				log.Printf("simulate: computing workpool summary: %v", err)
+				continue
+			}
+			if err := workPoolSummaryStore.Save(ctx, summary); err != nil {
+				log.Printf("simulate: saving workpool summary: %v", err)
+				continue
+			}
+			history := &monitor.WorkPoolSummaryHistory{
+				WorkpoolID:                    summary.WorkpoolID,
+				Timestamp:                     time.Now(),
+				Expiry:                        summary.Expiry,
+				ExpectedPreemptibleVMCount:    summary.ExpectedPreemptibleVMCount,
+				ExpectedNonpreemptibleVMCount: summary.ExpectedNonpreemptibleVMCount,
+				UnhealthyBatchCount:           summary.UnhealthyBatchCount,
+				BatchAPIRequestCounts:         summary.BatchAPIRequestCounts,
+				Workers:                       summary.Workers,
+				Tasks:                         summary.Tasks,
+			}
+			if err := workPoolSummaryStore.SaveHistory(ctx, history); err != nil {
+				log.Printf("simulate: saving workpool summary history: %v", err)
+			}
+		}
+	}
+}
+
+func simComputeWorkPoolSummary(ctx context.Context, workpoolID string, batchStore *monitor.FirestoreBatchRequestStore, taskStore *monitor.FirestoreTaskStore, workerStore *monitor.FirestoreWorkerStore) (*monitor.WorkPoolSummary, error) {
+	batches, err := batchStore.ListAllByWorkpool(ctx, workpoolID)
+	if err != nil {
+		return nil, fmt.Errorf("listing batches: %w", err)
+	}
+	var preemptibleVMs, nonPreemptibleVMs, unhealthyCount int
+	batchStatusMap := make(map[string]int)
+	for _, b := range batches {
+		if b.Preemptible {
+			preemptibleVMs += b.ExpectedVMCount
+		} else {
+			nonPreemptibleVMs += b.ExpectedVMCount
+		}
+		if b.Unhealthy {
+			unhealthyCount++
+		}
+		batchStatusMap[string(b.Status)]++
+	}
+
+	taskCounts, err := taskStore.CountByWorkpool(ctx, workpoolID)
+	if err != nil {
+		return nil, fmt.Errorf("counting tasks: %w", err)
+	}
+
+	workerCounts, err := workerStore.CountByStatusForWorkpool(ctx, workpoolID)
+	if err != nil {
+		return nil, fmt.Errorf("counting workers: %w", err)
+	}
+
+	now := time.Now()
+	return &monitor.WorkPoolSummary{
+		WorkpoolID:                    workpoolID,
+		Expiry:                        now.Add(7 * 24 * time.Hour),
+		LastUpdated:                   now,
+		ExpectedPreemptibleVMCount:    preemptibleVMs,
+		ExpectedNonpreemptibleVMCount: nonPreemptibleVMs,
+		UnhealthyBatchCount:           unhealthyCount,
+		BatchAPIRequestCounts:         simStatusCountsFromMap(batchStatusMap),
+		Workers:                       simStatusCountsFromMap(workerCounts),
+		Tasks:                         simStatusCountsFromMap(taskCounts),
+	}, nil
+}
+
+func simStatusCountsFromMap(m map[string]int) []monitor.StatusCount {
+	var result []monitor.StatusCount
+	for status, count := range m {
+		if count > 0 {
+			result = append(result, monitor.StatusCount{Status: status, Count: count})
+		}
+	}
+	return result
 }
 
 // simComputeJobStatus mirrors the unexported monitor.computeJobStatus.

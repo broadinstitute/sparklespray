@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import type { ResourceDataPoint, VolumeDataPoint } from "./simulate";
+import type { ResourceDataPoint, VolumeDataPoint } from "../types";
 
 interface ResourceUsageUpdate {
   type: "metric_update";

@@ -266,6 +266,29 @@ func (s *FirestoreBatchRequestStore) ListByWorkpool(ctx context.Context, workpoo
 	return batches, nil
 }
 
+func (s *FirestoreBatchRequestStore) ListAllByWorkpool(ctx context.Context, workpoolID string) ([]*BatchAPIRequest, error) {
+	iter := s.fs.Collection(batchRequestCollection).
+		Where("workpool_id", "==", workpoolID).
+		Documents(ctx)
+
+	var batches []*BatchAPIRequest
+	for {
+		snap, err := iter.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		var f firestoreBatchRequest
+		if err := snap.DataTo(&f); err != nil {
+			return nil, err
+		}
+		batches = append(batches, toBatchRequest(&f))
+	}
+	return batches, nil
+}
+
 func (s *FirestoreBatchRequestStore) SumPreemptibleVMCount(ctx context.Context, workpoolID string) (int, error) {
 	iter := s.fs.Collection(batchRequestCollection).
 		Where("workpool_id", "==", workpoolID).
@@ -297,6 +320,7 @@ type firestoreWorker struct {
 	WorkpoolID      string    `firestore:"workpool_id"`
 	BatchID         string    `firestore:"batch_id"`
 	InstanceName    string    `firestore:"instance_name"`
+	Status          string    `firestore:"status"`
 	HeartbeatExpiry time.Time `firestore:"heartbeat_expiry"`
 }
 
@@ -340,6 +364,29 @@ func (s *FirestoreWorkerStore) CountActive(ctx context.Context, workpoolID strin
 		count++
 	}
 	return count, nil
+}
+
+func (s *FirestoreWorkerStore) CountByStatusForWorkpool(ctx context.Context, workpoolID string) (map[string]int, error) {
+	iter := s.fs.Collection(workerCollection).
+		Where("workpool_id", "==", workpoolID).
+		Documents(ctx)
+
+	counts := make(map[string]int)
+	for {
+		snap, err := iter.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		var f firestoreWorker
+		if err := snap.DataTo(&f); err != nil {
+			return nil, err
+		}
+		counts[f.Status]++
+	}
+	return counts, nil
 }
 
 func collectWorkers(iter *firestore.DocumentIterator) ([]*Worker, error) {
@@ -468,6 +515,29 @@ func (s *FirestoreTaskStore) CountByJob(ctx context.Context, jobID string) (map[
 	return counts, nil
 }
 
+func (s *FirestoreTaskStore) CountByWorkpool(ctx context.Context, workpoolID string) (map[string]int, error) {
+	iter := s.fs.Collection(taskCollection).
+		Where("workpool_id", "==", workpoolID).
+		Documents(ctx)
+
+	counts := make(map[string]int)
+	for {
+		snap, err := iter.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		var f firestoreTask
+		if err := snap.DataTo(&f); err != nil {
+			return nil, err
+		}
+		counts[f.Status]++
+	}
+	return counts, nil
+}
+
 // ----- FirestoreJobSummaryStore -----
 
 const jobSummaryCollection = "JobSummary"
@@ -523,5 +593,34 @@ func (s *FirestoreJobSummaryStore) Save(ctx context.Context, summary *JobSummary
 
 func (s *FirestoreJobSummaryStore) SaveHistory(ctx context.Context, history *JobSummaryHistory) error {
 	_, _, err := s.fs.Collection(jobSummaryHistoryCollection).Add(ctx, history)
+	return err
+}
+
+// ----- FirestoreWorkPoolSummaryStore -----
+
+const workPoolSummaryCollection = "WorkPoolSummary"
+const workPoolSummaryHistoryCollection = "WorkPoolSummaryHistory"
+
+// Exported for use by functional tests and the dashboard backend.
+const (
+	CollectionWorkPoolSummary        = workPoolSummaryCollection
+	CollectionWorkPoolSummaryHistory = workPoolSummaryHistoryCollection
+)
+
+type FirestoreWorkPoolSummaryStore struct {
+	fs *firestore.Client
+}
+
+func NewFirestoreWorkPoolSummaryStore(fs *firestore.Client) *FirestoreWorkPoolSummaryStore {
+	return &FirestoreWorkPoolSummaryStore{fs: fs}
+}
+
+func (s *FirestoreWorkPoolSummaryStore) Save(ctx context.Context, summary *WorkPoolSummary) error {
+	_, err := s.fs.Collection(workPoolSummaryCollection).Doc(summary.WorkpoolID).Set(ctx, summary)
+	return err
+}
+
+func (s *FirestoreWorkPoolSummaryStore) SaveHistory(ctx context.Context, history *WorkPoolSummaryHistory) error {
+	_, _, err := s.fs.Collection(workPoolSummaryHistoryCollection).Add(ctx, history)
 	return err
 }

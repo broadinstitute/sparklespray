@@ -78,6 +78,72 @@ export interface JobSummaryHistoryEntry {
   tasks: { state: string; count: number }[];
 }
 
+export interface WorkPoolDetail {
+  workpool_id: string;
+  machine_type: string;
+  region: string;
+  zones: string[];
+  root_dir: string;
+  sparkles_worker_gcs_path: string;
+  resources: { name: string; value: number }[];
+  empty_volumes: { mount_point: string; type: string; size_in_gb: number }[];
+  max_worker_count: number;
+  max_preemptible_worker_attempts: number;
+  status: string;
+  status_message: string;
+  last_incident_at: string | null;
+  incident_count: number;
+  expiry: string;
+}
+
+export interface WorkPoolSummaryHistoryEntry {
+  workpool_id: string;
+  timestamp: string;
+  expected_preemptible_vm_count: number;
+  expected_nonpreemptible_vm_count: number;
+  unhealthy_batch_count: number;
+  batch_api_request_counts: { status: string; count: number }[];
+  workers: { status: string; count: number }[];
+  tasks: { status: string; count: number }[];
+}
+
+export interface TimeSeriesPoint {
+  time: number;
+  label: string;
+  value: number;
+}
+
+export interface VolumeDataPoint {
+  location: string;
+  totalGb: number;
+  usedGb: number;
+}
+
+export interface ResourceDataPoint {
+  time: number;
+  label: string;
+  processCount: number;
+  totalMemoryGb: number;
+  totalDataGb: number;
+  totalSharedGb: number;
+  totalResidentGb: number;
+  cpuUser: number;
+  cpuSystem: number;
+  cpuIdle: number;
+  cpuIowait: number;
+  memTotalGb: number;
+  memAvailableGb: number;
+  memFreeGb: number;
+  memPressureSomeAvg10: number;
+  memPressureFullAvg10: number;
+  volumes: VolumeDataPoint[];
+}
+
+export interface StdoutLine {
+  time: number;
+  text: string;
+}
+
 export interface TaskSummaryRecord {
   task_id: string;
   task_index: number;

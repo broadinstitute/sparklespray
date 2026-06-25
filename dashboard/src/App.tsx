@@ -6,6 +6,9 @@ import JobDetail from "./pages/JobDetail";
 import JobList from "./pages/JobList";
 import ClusterDetail from "./pages/ClusterDetail";
 import ClusterLogs from "./pages/ClusterLogs";
+import WorkPoolDetail from "./pages/WorkPoolDetail";
+import WorkerDetail from "./pages/WorkerDetail";
+import BatchDetail from "./pages/BatchDetail";
 import PerfOverview from "./pages/PerfOverview";
 import NotImplemented from "./pages/NotImplemented";
 
@@ -28,6 +31,23 @@ function AppRoutes() {
             element={<TaskDetail />}
           />
           <Route path="/jobs/:jobId/summary" element={<PerfOverview />} />
+          <Route path="/workpools/:workpoolId" element={<WorkPoolDetail />} />
+          <Route
+            path="/workpools/:workpoolId/workers"
+            element={<WorkPoolDetail />}
+          />
+          <Route
+            path="/workpools/:workpoolId/workers/:workerId"
+            element={<WorkerDetail />}
+          />
+          <Route
+            path="/workpools/:workpoolId/batches"
+            element={<WorkPoolDetail />}
+          />
+          <Route
+            path="/workpools/:workpoolId/batches/:batchId"
+            element={<BatchDetail />}
+          />
           <Route path="/clusters/:clusterId" element={<ClusterDetail />} />
           <Route path="/clusters/:clusterId/logs" element={<ClusterLogs />} />
           <Route path="*" element={<NotImplemented />} />

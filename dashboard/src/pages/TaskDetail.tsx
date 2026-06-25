@@ -9,15 +9,18 @@ import MultiLineChart from "../components/MultiLineChart";
 import EventLog from "../components/EventLog";
 import TabBar from "../components/TabBar";
 
-const STATUS_COLORS: Record<string, { bg: string; text: string }> = {
-  pending: { bg: "#e3f2fd", text: "#1565c0" },
-  claimed: { bg: "#fff3e0", text: "#e65100" },
-  running: { bg: "#f3e5f5", text: "#6a1b9a" },
-  writing: { bg: "#e8f5e9", text: "#2e7d32" },
-  success: { bg: "#e0f2f1", text: "#00695c" },
-  error: { bg: "#fbe9e7", text: "#bf360c" },
-  failed: { bg: "#ffebee", text: "#b71c1c" },
-  killed: { bg: "#eeeeee", text: "#555555" },
+const MONO = "'IBM Plex Mono', monospace";
+const SANS = "'IBM Plex Sans', sans-serif";
+
+const STATUS_PILL: Record<string, { bg: string; text: string; dot: string }> = {
+  success: { bg: "#e7f5ec", text: "#1a7f44", dot: "#2ea05f" },
+  error: { bg: "#fdecea", text: "#c62828", dot: "#f44336" },
+  failed: { bg: "#fdecea", text: "#c62828", dot: "#f44336" },
+  killed: { bg: "#f5f5f5", text: "#616161", dot: "#9e9e9e" },
+  running: { bg: "#e8f0fe", text: "#1565c0", dot: "#2f6fdb" },
+  writing: { bg: "#e8f5e9", text: "#2e7d32", dot: "#4caf50" },
+  claimed: { bg: "#fff3e0", text: "#e65100", dot: "#fb8c00" },
+  pending: { bg: "#f5f5f5", text: "#757575", dot: "#bdbdbd" },
 };
 
 export default function TaskDetail() {
@@ -172,37 +175,61 @@ export default function TaskDetail() {
     );
   }
 
-  const statusStyle = STATUS_COLORS[status] ?? { bg: "#eee", text: "#333" };
+  const pill = STATUS_PILL[status] ?? {
+    bg: "#f5f5f5",
+    text: "#555",
+    dot: "#9e9e9e",
+  };
 
   return (
-    <div
-      style={{
-        padding: "2rem",
-        fontFamily: "monospace",
-      }}
-    >
+    <div style={{ padding: "2rem", fontFamily: MONO }}>
       {/* Job-level tabs */}
       <TabBar tabs={jobTabs} />
 
       {/* Task header */}
-      <div style={{ marginBottom: "1.5rem" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
-          <h1 style={{ margin: 0, fontSize: "1.4rem", fontWeight: 700 }}>
-            {taskId}
-          </h1>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 14,
+          marginBottom: "1.5rem",
+          flexWrap: "wrap",
+        }}
+      >
+        <h1
+          style={{
+            margin: 0,
+            font: `500 22px ${MONO}`,
+            color: "#16191d",
+            letterSpacing: "-0.01em",
+          }}
+        >
+          {taskId}
+        </h1>
+        <span
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 7,
+            height: 24,
+            padding: "0 11px",
+            borderRadius: 999,
+            background: pill.bg,
+            color: pill.text,
+            font: `600 12px ${SANS}`,
+          }}
+        >
           <span
             style={{
-              background: statusStyle.bg,
-              color: statusStyle.text,
-              borderRadius: 6,
-              padding: "2px 12px",
-              fontWeight: 600,
-              fontSize: "0.85rem",
+              width: 7,
+              height: 7,
+              borderRadius: "50%",
+              background: pill.dot,
+              flexShrink: 0,
             }}
-          >
-            {status}
-          </span>
-        </div>
+          />
+          {status}
+        </span>
       </div>
 
       {/* Task-level tabs */}
