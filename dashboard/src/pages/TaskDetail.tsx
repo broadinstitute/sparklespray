@@ -35,7 +35,7 @@ export default function TaskDetail() {
     resultPath: string;
     exitCode: number | null;
     failureReason: string;
-    parameters: { name: string; value: string }[];
+    labels: { name: string; value: string }[];
     resourceUsage: {
       elapsed_seconds: number;
       max_memory_bytes: number;
@@ -80,7 +80,7 @@ export default function TaskDetail() {
           resultPath: d.result_path ?? "",
           exitCode: d.exit_code != null ? d.exit_code : null,
           failureReason: d.failure_reason ?? "",
-          parameters: Array.isArray(d.parameters) ? d.parameters : [],
+          labels: Array.isArray(d.labels) ? d.labels : [],
           resourceUsage: d.resource_usage ?? null,
         })
       )
@@ -92,7 +92,7 @@ export default function TaskDetail() {
           resultPath: "",
           exitCode: null,
           failureReason: "",
-          parameters: [],
+          labels: [],
           resourceUsage: null,
         })
       );
@@ -263,7 +263,7 @@ export default function TaskDetail() {
             resultPath={taskInfo?.resultPath ?? ""}
             exitCode={taskInfo?.exitCode ?? null}
             failureReason={taskInfo?.failureReason ?? ""}
-            parameters={taskInfo?.parameters ?? []}
+            labels={taskInfo?.labels ?? []}
             resourceUsage={taskInfo?.resourceUsage ?? null}
             timings={timings}
             status={status}

@@ -27,7 +27,7 @@ One document per submitted job. The document ID is the `job_id`.
 | `name`  | string  | Resource name (e.g. `slots`, `mem`) |
 | `value` | float64 | Required quantity of that resource  |
 
-**Label** (embedded object) — user-defined tag; used on `Jobs` and `JobSummary`:
+**Label** (embedded object) — user-defined tag; used on `Jobs`, `JobSummary`, `Tasks`, and `WorkPools`:
 
 | Field   | Type   | Description |
 | ------- | ------ | ----------- |
@@ -52,7 +52,7 @@ One document per task. The document ID is the `task_id`.
 | `result_path`       | string           | GCS path (e.g. `gs://bucket/path`) where results are uploaded after the command completes                                                          |
 | `log_path`          | string           | GCS path where the command's stdout/stderr is uploaded after the command completes                                                                 |
 | `files_to_localize` | []FileToLocalize | Files to download from GCS into the working directory before the command runs                                                                      |
-| `parameters`        | []TaskParameter  | User-defined key/value pairs passed to the task at submission time                                                                                 |
+| `labels`            | []Label          | User-defined key/value pairs passed to the task at submission time                                                                                 |
 | `owning_worker_id`  | string           | ID of the worker that has claimed this task; empty when not claimed                                                                                |
 | `failure_reason`    | string           | Human-readable reason for failure; populated when `status` is `failed`                                                                             |
 | `exit_code`         | int              | Process exit code; populated when `status` is `error`                                                                                              |
@@ -65,13 +65,6 @@ One document per task. The document ID is the `task_id`.
 | `source`        | string | GCS path of the file to download (e.g. `gs://bucket/path/file.txt`)                          |
 | `destination`   | string | Relative path under the working directory where the file is written (e.g. `inputs/file.txt`) |
 | `is_executable` | bool   | If true, the file is made executable after download. Defaults to false if omitted.           |
-
-**TaskParameter** (embedded object) — user-defined parameters attached at task submission time:
-
-| Field   | Type   | Description     |
-| ------- | ------ | --------------- |
-| `name`  | string | Parameter name  |
-| `value` | string | Parameter value |
 
 **ResourceUsage** (embedded object) — written by the worker once per task, after the Docker container exits and before `docker rm` is called. Fields are zero when the underlying cgroup or `docker inspect` data was unavailable. Collected from Linux cgroup files (v1 or v2, auto-detected) plus `docker inspect` for timing.
 
@@ -128,6 +121,7 @@ One document per workpool. The document ID is the `workpool_id`. A workpool defi
 | `sparkles_worker_gcs_path` | string        | GCS path (e.g. `gs://bucket/sparkles`) of the worker binary; downloaded to `{root_dir}/sparkles` at VM startup |
 | `resources`                | []Resource    | Resource capacity advertised by workers created from this workpool                                             |
 | `empty_volumes`            | []EmptyVolume | Ephemeral volumes to attach to each VM                                                                         |
+| `labels`                   | []Label       | User-defined key/value tags attached at creation time (e.g. `team=ml`, `env=prod`)                             |
 | `expiry`                   | timestamp     | When this document may be garbage-collected                                                                    |
 
 The following provisioning and watchdog parameters are set once at workpool creation and read by the monitor to govern autoscaling behaviour:

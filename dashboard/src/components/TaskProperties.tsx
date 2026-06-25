@@ -21,7 +21,7 @@ interface Props {
   resultPath: string;
   exitCode: number | null;
   failureReason: string;
-  parameters: { name: string; value: string }[];
+  labels: { name: string; value: string }[];
   resourceUsage: ResourceUsage | null;
   timings: TimingWindows;
   status: string;
@@ -482,7 +482,7 @@ export default function TaskProperties({
   resultPath,
   exitCode,
   failureReason,
-  parameters,
+  labels,
   resourceUsage,
   timings,
   status,
@@ -564,9 +564,9 @@ export default function TaskProperties({
       ),
     });
   }
-  if (parameters.length > 0) {
+  if (labels.length > 0) {
     detailRows.push({
-      label: "parameters",
+      label: "labels",
       value: (
         <div
           style={{
@@ -575,7 +575,7 @@ export default function TaskProperties({
             gap: "4px 12px",
           }}
         >
-          {parameters.map((p) => (
+          {labels.map((p) => (
             <>
               <span
                 key={p.name + "-k"}

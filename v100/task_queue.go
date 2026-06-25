@@ -62,11 +62,6 @@ type Label struct {
 	Value string `firestore:"value" json:"value"`
 }
 
-type TaskParameter struct {
-	Name  string `firestore:"name"  json:"name"`
-	Value string `firestore:"value" json:"value"`
-}
-
 type EmptyVolume struct {
 	MountPoint string `firestore:"mount_point" json:"mountPoint"`
 	Type       string `firestore:"type"        json:"type"`
@@ -80,6 +75,7 @@ type WorkPool struct {
 	SparklesWorkerGCSPath string          `firestore:"sparkles_worker_gcs_path"`
 	Resources             []ResourceEntry `firestore:"resources"`
 	EmptyVolumes          []EmptyVolume   `firestore:"empty_volumes"`
+	Labels                []Label         `firestore:"labels"`
 	Expiry       time.Time       `firestore:"expiry"`
 	Region       string          `firestore:"region"`
 	Zones        []string        `firestore:"zones"`
@@ -151,7 +147,7 @@ type Task struct {
 	// write them to cloud storage as a manifest and read them from there instead.
 	FilesToLocalizeManifest string           `firestore:"files_to_localize_manifest"`
 	FilesToLocalize         []FileToLocalize `firestore:"files_to_localize"`
-	Parameters              []TaskParameter  `firestore:"parameters"`
+	Labels                  []Label          `firestore:"labels"`
 	OwningWorkerID          string           `firestore:"owning_worker_id"`
 	FailureReason           string           `firestore:"failure_reason"`
 	ExitCode                int              `firestore:"exit_code"`

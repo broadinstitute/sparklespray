@@ -467,6 +467,15 @@ function WorkPoolPropertiesPanel({
           ))}
         </>
       )}
+
+      {detail.labels?.length > 0 && (
+        <>
+          <SectionHeader>Labels</SectionHeader>
+          {detail.labels.map((l) => (
+            <DetailRow key={l.name} label={l.name} value={l.value} />
+          ))}
+        </>
+      )}
     </div>
   );
 }

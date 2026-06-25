@@ -76,14 +76,15 @@ func newSubID() string {
 // ----- GET /api/v1/workpools -----
 
 type workpoolSummaryResponse struct {
-	WorkpoolID     string    `json:"workpool_id"`
-	MachineType    string    `json:"machine_type"`
-	Region         string    `json:"region"`
-	Status         string    `json:"status"`
-	StatusMessage  string    `json:"status_message"`
-	LastIncidentAt *string   `json:"last_incident_at"`
-	IncidentCount  int       `json:"incident_count"`
-	Expiry         time.Time `json:"expiry"`
+	WorkpoolID     string          `json:"workpool_id"`
+	MachineType    string          `json:"machine_type"`
+	Region         string          `json:"region"`
+	Status         string          `json:"status"`
+	StatusMessage  string          `json:"status_message"`
+	LastIncidentAt *string         `json:"last_incident_at"`
+	IncidentCount  int             `json:"incident_count"`
+	Labels         []labelResponse `json:"labels"`
+	Expiry         time.Time       `json:"expiry"`
 }
 
 func (s *dashboardServer) handleListWorkpools(w http.ResponseWriter, r *http.Request) {
@@ -107,6 +108,10 @@ func (s *dashboardServer) handleListWorkpools(w http.ResponseWriter, r *http.Req
 			log.Printf("dashboard: ListWorkpools DataTo: %v", err)
 			continue
 		}
+		wpLabels := make([]labelResponse, len(wp.Labels))
+		for i, l := range wp.Labels {
+			wpLabels[i] = labelResponse{Name: l.Name, Value: l.Value}
+		}
 		resp := workpoolSummaryResponse{
 			WorkpoolID:    wp.WorkpoolID,
 			MachineType:   wp.MachineType,
@@ -114,6 +119,7 @@ func (s *dashboardServer) handleListWorkpools(w http.ResponseWriter, r *http.Req
 			Status:        wp.Status,
 			StatusMessage: wp.StatusMessage,
 			IncidentCount: wp.IncidentCount,
+			Labels:        wpLabels,
 			Expiry:        wp.Expiry,
 		}
 		if !wp.LastIncidentAt.IsZero() {
@@ -136,9 +142,10 @@ type workpoolDetailResponse struct {
 	SparklesWorkerGCSPath string               `json:"sparkles_worker_gcs_path"`
 	Resources             []v100.ResourceEntry `json:"resources"`
 	EmptyVolumes          []v100.EmptyVolume   `json:"empty_volumes"`
-	MaxWorkerCount                int                  `json:"max_worker_count"`
-	MaxPreemptibleWorkerAttempts  int                  `json:"max_preemptible_worker_attempts"`
-	Status                        string               `json:"status"`
+	Labels                []labelResponse      `json:"labels"`
+	MaxWorkerCount               int            `json:"max_worker_count"`
+	MaxPreemptibleWorkerAttempts int            `json:"max_preemptible_worker_attempts"`
+	Status                string               `json:"status"`
 	StatusMessage         string               `json:"status_message"`
 	LastIncidentAt        *string              `json:"last_incident_at"`
 	IncidentCount         int                  `json:"incident_count"`
@@ -164,21 +171,26 @@ func (s *dashboardServer) handleGetWorkpool(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to parse workpool")
 		return
 	}
+	detailLabels := make([]labelResponse, len(wp.Labels))
+	for i, l := range wp.Labels {
+		detailLabels[i] = labelResponse{Name: l.Name, Value: l.Value}
+	}
 	resp := workpoolDetailResponse{
-		WorkpoolID:            wp.WorkpoolID,
-		MachineType:           wp.MachineType,
-		Region:                wp.Region,
-		Zones:                 wp.Zones,
-		RootDir:               wp.RootDir,
-		SparklesWorkerGCSPath: wp.SparklesWorkerGCSPath,
-		Resources:             wp.Resources,
-		EmptyVolumes:          wp.EmptyVolumes,
+		WorkpoolID:                   wp.WorkpoolID,
+		MachineType:                  wp.MachineType,
+		Region:                       wp.Region,
+		Zones:                        wp.Zones,
+		RootDir:                      wp.RootDir,
+		SparklesWorkerGCSPath:        wp.SparklesWorkerGCSPath,
+		Resources:                    wp.Resources,
+		EmptyVolumes:                 wp.EmptyVolumes,
+		Labels:                       detailLabels,
 		MaxWorkerCount:               wp.MaxWorkerCount,
 		MaxPreemptibleWorkerAttempts: wp.MaxPreemptibleWorkerAttempts,
 		Status:                       wp.Status,
-		StatusMessage:         wp.StatusMessage,
-		IncidentCount:         wp.IncidentCount,
-		Expiry:                wp.Expiry,
+		StatusMessage:                wp.StatusMessage,
+		IncidentCount:                wp.IncidentCount,
+		Expiry:                       wp.Expiry,
 	}
 	if !wp.LastIncidentAt.IsZero() {
 		s := wp.LastIncidentAt.Format(time.RFC3339)
@@ -713,26 +725,21 @@ type resourceUsageResponse struct {
 	OOMKilled       bool      `json:"oom_killed"`
 }
 
-type taskParameterResponse struct {
-	Name  string `json:"name"`
-	Value string `json:"value"`
-}
-
 type taskResponse struct {
-	TaskID         string                  `json:"task_id"`
-	TaskIndex      int                     `json:"task_index"`
-	JobID          string                  `json:"job_id"`
-	WorkpoolID     string                  `json:"workpool_id"`
-	Status         string                  `json:"status"`
-	Command        []string                `json:"command"`
-	DockerImage    string                  `json:"docker_image"`
-	ResultPath     string                  `json:"result_path,omitempty"`
-	LogPath        string                  `json:"log_path,omitempty"`
-	OwningWorkerID string                  `json:"owning_worker_id,omitempty"`
-	FailureReason  string                  `json:"failure_reason,omitempty"`
-	Parameters     []taskParameterResponse `json:"parameters"`
-	ExitCode       *int                    `json:"exit_code,omitempty"`
-	ResourceUsage  *resourceUsageResponse  `json:"resource_usage,omitempty"`
+	TaskID         string                 `json:"task_id"`
+	TaskIndex      int                    `json:"task_index"`
+	JobID          string                 `json:"job_id"`
+	WorkpoolID     string                 `json:"workpool_id"`
+	Status         string                 `json:"status"`
+	Command        []string               `json:"command"`
+	DockerImage    string                 `json:"docker_image"`
+	ResultPath     string                 `json:"result_path,omitempty"`
+	LogPath        string                 `json:"log_path,omitempty"`
+	OwningWorkerID string                 `json:"owning_worker_id,omitempty"`
+	FailureReason  string                 `json:"failure_reason,omitempty"`
+	Labels         []labelResponse        `json:"labels"`
+	ExitCode       *int                   `json:"exit_code,omitempty"`
+	ResourceUsage  *resourceUsageResponse `json:"resource_usage,omitempty"`
 }
 
 type taskSummaryResponse struct {
@@ -762,9 +769,9 @@ func (s *dashboardServer) handleGetTask(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to parse task")
 		return
 	}
-	params := make([]taskParameterResponse, len(task.Parameters))
-	for i, p := range task.Parameters {
-		params[i] = taskParameterResponse{Name: p.Name, Value: p.Value}
+	labels := make([]labelResponse, len(task.Labels))
+	for i, l := range task.Labels {
+		labels[i] = labelResponse{Name: l.Name, Value: l.Value}
 	}
 	resp := taskResponse{
 		TaskID:         task.TaskID,
@@ -778,7 +785,7 @@ func (s *dashboardServer) handleGetTask(w http.ResponseWriter, r *http.Request) 
 		LogPath:        task.LogPath,
 		OwningWorkerID: task.OwningWorkerID,
 		FailureReason:  task.FailureReason,
-		Parameters:     params,
+		Labels:         labels,
 	}
 	// ExitCode: only include for completed tasks (terminal states record it meaningfully).
 	if !v100.IsActiveStatus(task.Status) && task.Status != v100.StatusPending {
