@@ -93,6 +93,7 @@ func runDevSimulate(c *cli.Context) error {
 		Zones:          []string{"us-central1-a"},
 		Expiry:         time.Now().Add(7 * 24 * time.Hour),
 		MaxWorkerCount: cfg.workerCount,
+		Status:         "ok",
 	}
 	if _, err := fsClient.Collection(v100.WorkpoolCollection).Doc(cfg.workpoolID).Set(ctx, workpool); err != nil {
 		return fmt.Errorf("writing workpool: %w", err)
@@ -144,7 +145,7 @@ func runDevSimulate(c *cli.Context) error {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		runSimWorkPoolSummaryUpdater(ctx, cfg.workpoolID, batchStore, taskStore, workerStore, workPoolSummaryStore)
+		runSimWorkPoolSummaryUpdater(ctx, cfg.workpoolID, fsClient, batchStore, taskStore, workerStore, workPoolSummaryStore)
 	}()
 
 	wg.Wait()
@@ -434,7 +435,7 @@ func runSimJobSummaryUpdater(ctx context.Context, workpoolID string, jobSummarie
 	}
 }
 
-func runSimWorkPoolSummaryUpdater(ctx context.Context, workpoolID string, batchStore *monitor.FirestoreBatchRequestStore, taskStore *monitor.FirestoreTaskStore, workerStore *monitor.FirestoreWorkerStore, workPoolSummaryStore *monitor.FirestoreWorkPoolSummaryStore) {
+func runSimWorkPoolSummaryUpdater(ctx context.Context, workpoolID string, fsClient *firestore.Client, batchStore *monitor.FirestoreBatchRequestStore, taskStore *monitor.FirestoreTaskStore, workerStore *monitor.FirestoreWorkerStore, workPoolSummaryStore *monitor.FirestoreWorkPoolSummaryStore) {
 	ticker := time.NewTicker(3 * time.Second)
 	defer ticker.Stop()
 	for {
@@ -455,15 +456,23 @@ func runSimWorkPoolSummaryUpdater(ctx context.Context, workpoolID string, batchS
 				WorkpoolID:                    summary.WorkpoolID,
 				Timestamp:                     time.Now(),
 				Expiry:                        summary.Expiry,
-				ExpectedPreemptibleVMCount:    summary.ExpectedPreemptibleVMCount,
-				ExpectedNonpreemptibleVMCount: summary.ExpectedNonpreemptibleVMCount,
+				ExpectedPreemptibleWorkers:    summary.ExpectedPreemptibleWorkers,
+				ExpectedNonpreemptibleWorkers: summary.ExpectedNonpreemptibleWorkers,
 				UnhealthyBatchCount:           summary.UnhealthyBatchCount,
 				BatchAPIRequestCounts:         summary.BatchAPIRequestCounts,
-				Workers:                       summary.Workers,
+				PreemptibleWorkers:            summary.PreemptibleWorkers,
+				NonpreemptibleWorkers:         summary.NonpreemptibleWorkers,
 				Tasks:                         summary.Tasks,
 			}
 			if err := workPoolSummaryStore.SaveHistory(ctx, history); err != nil {
 				log.Printf("simulate: saving workpool summary history: %v", err)
+			}
+			_, err = fsClient.Collection(v100.WorkpoolCollection).Doc(workpoolID).Update(ctx, []firestore.Update{
+				{Path: "status", Value: "ok"},
+				{Path: "expiry", Value: time.Now().Add(7 * 24 * time.Hour)},
+			})
+			if err != nil {
+				log.Printf("simulate: updating workpool status: %v", err)
 			}
 		}
 	}
@@ -474,18 +483,20 @@ func simComputeWorkPoolSummary(ctx context.Context, workpoolID string, batchStor
 	if err != nil {
 		return nil, fmt.Errorf("listing batches: %w", err)
 	}
-	var preemptibleVMs, nonPreemptibleVMs, unhealthyCount int
+	var expectedPreemptible, expectedNonPreemptible, unhealthyCount int
 	batchStatusMap := make(map[string]int)
+	batchPreemptible := make(map[string]bool)
 	for _, b := range batches {
 		if b.Preemptible {
-			preemptibleVMs += b.ExpectedVMCount
+			expectedPreemptible += b.ExpectedVMCount
 		} else {
-			nonPreemptibleVMs += b.ExpectedVMCount
+			expectedNonPreemptible += b.ExpectedVMCount
 		}
 		if b.Unhealthy {
 			unhealthyCount++
 		}
 		batchStatusMap[string(b.Status)]++
+		batchPreemptible[b.BatchID] = b.Preemptible
 	}
 
 	taskCounts, err := taskStore.CountByWorkpool(ctx, workpoolID)
@@ -493,9 +504,18 @@ func simComputeWorkPoolSummary(ctx context.Context, workpoolID string, batchStor
 		return nil, fmt.Errorf("counting tasks: %w", err)
 	}
 
-	workerCounts, err := workerStore.CountByStatusForWorkpool(ctx, workpoolID)
+	workers, err := workerStore.ListAllForWorkpool(ctx, workpoolID)
 	if err != nil {
-		return nil, fmt.Errorf("counting workers: %w", err)
+		return nil, fmt.Errorf("listing workers: %w", err)
+	}
+	preemptibleWorkerCounts := make(map[string]int)
+	nonPreemptibleWorkerCounts := make(map[string]int)
+	for _, w := range workers {
+		if batchPreemptible[w.BatchID] {
+			preemptibleWorkerCounts[w.Status]++
+		} else {
+			nonPreemptibleWorkerCounts[w.Status]++
+		}
 	}
 
 	now := time.Now()
@@ -503,11 +523,12 @@ func simComputeWorkPoolSummary(ctx context.Context, workpoolID string, batchStor
 		WorkpoolID:                    workpoolID,
 		Expiry:                        now.Add(7 * 24 * time.Hour),
 		LastUpdated:                   now,
-		ExpectedPreemptibleVMCount:    preemptibleVMs,
-		ExpectedNonpreemptibleVMCount: nonPreemptibleVMs,
+		ExpectedPreemptibleWorkers:    expectedPreemptible,
+		ExpectedNonpreemptibleWorkers: expectedNonPreemptible,
 		UnhealthyBatchCount:           unhealthyCount,
 		BatchAPIRequestCounts:         simStatusCountsFromMap(batchStatusMap),
-		Workers:                       simStatusCountsFromMap(workerCounts),
+		PreemptibleWorkers:            simStatusCountsFromMap(preemptibleWorkerCounts),
+		NonpreemptibleWorkers:         simStatusCountsFromMap(nonPreemptibleWorkerCounts),
 		Tasks:                         simStatusCountsFromMap(taskCounts),
 	}, nil
 }

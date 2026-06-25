@@ -195,18 +195,19 @@ One document per workpool, keyed by `workpool_id`. `WorkPoolSummary` is owned ex
 
 Any question about workpool health — "how many VMs are expected?", "are there unhealthy batches?" — should be answered by reading `WorkPoolSummary`, not by scanning `BatchAPIRequests`, `Workers`, or `Tasks` directly.
 
-| Field                              | Type          | Description                                                                                                   |
-| ---------------------------------- | ------------- | ------------------------------------------------------------------------------------------------------------- |
-| `workpool_id`                      | string        | Workpool this summary describes                                                                               |
-| `expiry`                           | timestamp     | When this document may be garbage-collected                                                                   |
-| `last_updated`                     | timestamp     | When these metrics were last computed by the monitor                                                          |
-| `expected_preemptible_vm_count`    | int           | Sum of `expected_vm_count` across all `BatchAPIRequests` where `preemptible=true`                             |
-| `expected_nonpreemptible_vm_count` | int           | Sum of `expected_vm_count` across all `BatchAPIRequests` where `preemptible=false`                            |
-| `unhealthy_batch_count`            | int           | Number of `BatchAPIRequests` documents with `unhealthy=true`                                                  |
-| `batch_api_request_counts`         | []StatusCount | Per-status counts of `BatchAPIRequests` documents; one entry per non-zero status (`pending`, `started`, etc.) |
-| `workers`                          | []StatusCount | Per-status counts of `Workers` documents; one entry per non-zero status (`started`, `stopped`)                |
-| `tasks`                            | []StatusCount | Per-status counts of `Tasks` documents belonging to this workpool; one entry per non-zero status              |
-| `expiry`                           | timestamp     | When this document may be deleted (7-day TTL)                                                                 |
+| Field                             | Type          | Description                                                                                                   |
+| --------------------------------- | ------------- | ------------------------------------------------------------------------------------------------------------- |
+| `workpool_id`                     | string        | Workpool this summary describes                                                                               |
+| `expiry`                          | timestamp     | When this document may be garbage-collected                                                                   |
+| `last_updated`                    | timestamp     | When these metrics were last computed by the monitor                                                          |
+| `expected_preemptible_workers`    | int           | Sum of `expected_vm_count` across all `BatchAPIRequests` where `preemptible=true`                             |
+| `expected_nonpreemptible_workers` | int           | Sum of `expected_vm_count` across all `BatchAPIRequests` where `preemptible=false`                            |
+| `unhealthy_batch_count`           | int           | Number of `BatchAPIRequests` documents with `unhealthy=true`                                                  |
+| `batch_api_request_counts`        | []StatusCount | Per-status counts of `BatchAPIRequests` documents; one entry per non-zero status (`pending`, `started`, etc.) |
+| `preemptible_workers`             | []StatusCount | Per-status counts of preemptible `Workers` documents; one entry per non-zero status (`started`, `stopped`)    |
+| `nonpreemptible_workers`          | []StatusCount | Per-status counts of non-preemptible `Workers` documents; one entry per non-zero status                       |
+| `tasks`                           | []StatusCount | Per-status counts of `Tasks` documents belonging to this workpool; one entry per non-zero status              |
+| `expiry`                          | timestamp     | When this document may be deleted (7-day TTL)                                                                 |
 
 **StatusCount** (embedded object):
 
@@ -221,18 +222,19 @@ Any question about workpool health — "how many VMs are expected?", "are there 
 
 An append-only log of `WorkPoolSummary` snapshots. Each document is a point-in-time copy written by the monitor process whenever it updates `WorkPoolSummary`. The document ID is a UUID assigned at write time.
 
-| Field                              | Type          | Description                                                                         |
-| ---------------------------------- | ------------- | ----------------------------------------------------------------------------------- |
-| `workpool_id`                      | string        | Workpool this snapshot describes                                                    |
-| `timestamp`                        | timestamp     | When this snapshot was recorded                                                     |
-| `expiry`                           | timestamp     | When this document may be garbage-collected                                         |
-| `expected_preemptible_vm_count`    | int           | Copied from `WorkPoolSummary` at snapshot time                                      |
-| `expected_nonpreemptible_vm_count` | int           | Copied from `WorkPoolSummary` at snapshot time                                      |
-| `unhealthy_batch_count`            | int           | Copied from `WorkPoolSummary` at snapshot time                                      |
-| `batch_api_request_counts`         | []StatusCount | Per-status counts of `BatchAPIRequests` at the time of the snapshot                 |
-| `workers`                          | []StatusCount | Per-status counts of `Workers` at the time of the snapshot                          |
-| `tasks`                            | []StatusCount | Per-status counts of `Tasks` belonging to this workpool at the time of the snapshot |
-| `expiry`                           | timestamp     | When this document may be deleted (7-day TTL)                                       |
+| Field                             | Type          | Description                                                                         |
+| --------------------------------- | ------------- | ----------------------------------------------------------------------------------- |
+| `workpool_id`                     | string        | Workpool this snapshot describes                                                    |
+| `timestamp`                       | timestamp     | When this snapshot was recorded                                                     |
+| `expiry`                          | timestamp     | When this document may be garbage-collected                                         |
+| `expected_preemptible_workers`    | int           | Copied from `WorkPoolSummary` at snapshot time                                      |
+| `expected_nonpreemptible_workers` | int           | Copied from `WorkPoolSummary` at snapshot time                                      |
+| `unhealthy_batch_count`           | int           | Copied from `WorkPoolSummary` at snapshot time                                      |
+| `batch_api_request_counts`        | []StatusCount | Per-status counts of `BatchAPIRequests` at the time of the snapshot                 |
+| `preemptible_workers`             | []StatusCount | Per-status counts of preemptible `Workers` at the time of the snapshot              |
+| `nonpreemptible_workers`          | []StatusCount | Per-status counts of non-preemptible `Workers` at the time of the snapshot          |
+| `tasks`                           | []StatusCount | Per-status counts of `Tasks` belonging to this workpool at the time of the snapshot |
+| `expiry`                          | timestamp     | When this document may be deleted (7-day TTL)                                       |
 
 **StatusCount** is the same embedded object as in `WorkPoolSummary`.
 

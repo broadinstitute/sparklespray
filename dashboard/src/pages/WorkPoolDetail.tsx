@@ -182,52 +182,58 @@ interface ChartPoint {
 function computeWorkPoolTimeSeries(
   history: WorkPoolSummaryHistoryEntry[]
 ): {
-  vmCounts: ChartPoint[];
+  workerCounts: ChartPoint[];
   taskCounts: ChartPoint[];
   taskTerminalDeltas: ChartPoint[];
-  workerCounts: ChartPoint[];
   taskStatuses: string[];
   terminalTaskStatuses: string[];
-  workerStatuses: string[];
 } {
   const empty = {
-    vmCounts: [],
+    workerCounts: [],
     taskCounts: [],
     taskTerminalDeltas: [],
-    workerCounts: [],
     taskStatuses: [],
     terminalTaskStatuses: [],
-    workerStatuses: [],
   };
   if (history.length === 0) return empty;
 
   const TERMINAL_TASK = new Set(["error", "failed", "success", "killed"]);
-  const TERMINAL_WORKER = new Set(["stopped"]);
 
   const taskStatusSet = new Set<string>();
   const terminalTaskStatusSet = new Set<string>();
-  const workerStatusSet = new Set<string>();
 
   for (const h of history) {
-    for (const tc of h.tasks) {
+    for (const tc of h.tasks ?? []) {
       if (TERMINAL_TASK.has(tc.status)) terminalTaskStatusSet.add(tc.status);
       else taskStatusSet.add(tc.status);
     }
-    for (const wc of h.workers)
-      if (!TERMINAL_WORKER.has(wc.status)) workerStatusSet.add(wc.status);
   }
 
   const taskStatuses = Array.from(taskStatusSet);
   const terminalTaskStatuses = Array.from(terminalTaskStatusSet);
-  const workerStatuses = Array.from(workerStatusSet);
 
-  const vmCounts: ChartPoint[] = history.map((h) => {
+  // Combined worker chart: started_preemptible, started_nonpreemptible,
+  // pending_preemptible (expected - started), pending_nonpreemptible
+  const workerCounts: ChartPoint[] = history.map((h) => {
     const t = new Date(h.timestamp).getTime();
+    const startedP =
+      (h.preemptible_workers ?? []).find((w) => w.status === "started")
+        ?.count ?? 0;
+    const startedNP =
+      (h.nonpreemptible_workers ?? []).find((w) => w.status === "started")
+        ?.count ?? 0;
+    const pendingP = Math.max(0, h.expected_preemptible_workers - startedP);
+    const pendingNP = Math.max(
+      0,
+      h.expected_nonpreemptible_workers - startedNP
+    );
     return {
       time: t,
       label: formatTime(t),
-      preemptible: h.expected_preemptible_vm_count,
-      nonPreemptible: h.expected_nonpreemptible_vm_count,
+      started_preemptible: startedP,
+      started_nonpreemptible: startedNP,
+      pending_preemptible: pendingP,
+      pending_nonpreemptible: pendingNP,
     };
   });
 
@@ -235,7 +241,7 @@ function computeWorkPoolTimeSeries(
     const t = new Date(h.timestamp).getTime();
     const pt: ChartPoint = { time: t, label: formatTime(t) };
     for (const s of taskStatuses) pt[s] = 0;
-    for (const tc of h.tasks)
+    for (const tc of h.tasks ?? [])
       if (!TERMINAL_TASK.has(tc.status)) pt[tc.status] = tc.count;
     return pt;
   });
@@ -248,29 +254,21 @@ function computeWorkPoolTimeSeries(
     const t = new Date(curr.timestamp).getTime();
     const pt: ChartPoint = { time: t, label: formatTime(t) };
     for (const s of terminalTaskStatuses) {
-      const prevCount = prev.tasks.find((tc) => tc.status === s)?.count ?? 0;
-      const currCount = curr.tasks.find((tc) => tc.status === s)?.count ?? 0;
+      const prevCount =
+        (prev.tasks ?? []).find((tc) => tc.status === s)?.count ?? 0;
+      const currCount =
+        (curr.tasks ?? []).find((tc) => tc.status === s)?.count ?? 0;
       pt[s] = Math.max(0, currCount - prevCount);
     }
     taskTerminalDeltas.push(pt);
   }
 
-  const workerCounts: ChartPoint[] = history.map((h) => {
-    const t = new Date(h.timestamp).getTime();
-    const pt: ChartPoint = { time: t, label: formatTime(t) };
-    for (const s of workerStatuses) pt[s] = 0;
-    for (const wc of h.workers) pt[wc.status] = wc.count;
-    return pt;
-  });
-
   return {
-    vmCounts,
+    workerCounts,
     taskCounts,
     taskTerminalDeltas,
-    workerCounts,
     taskStatuses,
     terminalTaskStatuses,
-    workerStatuses,
   };
 }
 
@@ -483,13 +481,11 @@ function OverviewTab({
   history: WorkPoolSummaryHistoryEntry[];
 }) {
   const {
-    vmCounts,
+    workerCounts,
     taskCounts,
     taskTerminalDeltas,
-    workerCounts,
     taskStatuses,
     terminalTaskStatuses,
-    workerStatuses,
   } = useMemo(() => computeWorkPoolTimeSeries(history), [history]);
 
   const taskSeriesConfig = taskStatuses.map((s) => ({
@@ -504,13 +500,7 @@ function OverviewTab({
     color: TASK_COLORS[s] ?? "#888",
   }));
 
-  const workerSeriesConfig = workerStatuses.map((s) => ({
-    key: s,
-    label: s,
-    color: WORKER_COLORS[s] ?? "#888",
-  }));
-
-  const hasCharts = vmCounts.length > 0;
+  const hasCharts = workerCounts.length > 0;
 
   // suppress unused warning
   void workpoolId;
@@ -530,16 +520,30 @@ function OverviewTab({
             }}
           >
             <MultiLineChart
-              data={vmCounts}
-              title="Expected VMs"
-              yLabel="VMs"
+              data={workerCounts}
+              title="Workers"
+              yLabel="workers"
               stacked
               series={[
-                { key: "preemptible", label: "Preemptible", color: "#6a1b9a" },
                 {
-                  key: "nonPreemptible",
-                  label: "Non-preemptible",
+                  key: "started_preemptible",
+                  label: "Started (preemptible)",
+                  color: "#6a1b9a",
+                },
+                {
+                  key: "started_nonpreemptible",
+                  label: "Started (non-preemptible)",
                   color: "#1565c0",
+                },
+                {
+                  key: "pending_preemptible",
+                  label: "Pending (preemptible)",
+                  color: "#ce93d8",
+                },
+                {
+                  key: "pending_nonpreemptible",
+                  label: "Pending (non-preemptible)",
+                  color: "#90caf9",
                 },
               ]}
             />
@@ -569,15 +573,6 @@ function OverviewTab({
                   <div style={{ height: "1.25rem" }} />
                 </>
               )}
-            {workerSeriesConfig.length > 0 && (
-              <MultiLineChart
-                data={workerCounts}
-                title="Workers by Status"
-                yLabel="workers"
-                stacked
-                series={workerSeriesConfig}
-              />
-            )}
           </div>
         ) : (
           <div

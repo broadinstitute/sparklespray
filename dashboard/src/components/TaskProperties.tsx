@@ -208,10 +208,11 @@ interface LifecycleStep {
   deltaMs: number | null;
   terminal: boolean;
   terminalOk: boolean;
+  terminalReached: boolean;
 }
 
 function LifecycleDot({ step }: { step: LifecycleStep }) {
-  if (step.terminal) {
+  if (step.terminal && step.terminalReached) {
     const bg = step.terminalOk ? "#1a7f44" : "#c62828";
     return (
       <span
@@ -304,6 +305,7 @@ function LifecycleStepper({
       deltaMs: null,
       terminal: false,
       terminalOk: false,
+      terminalReached: false,
     },
     {
       label: "Running",
@@ -313,6 +315,7 @@ function LifecycleStepper({
         claimed && running ? running.getTime() - claimed.getTime() : null,
       terminal: false,
       terminalOk: false,
+      terminalReached: false,
     },
     {
       label: "Writing",
@@ -322,6 +325,7 @@ function LifecycleStepper({
         running && writing ? writing.getTime() - running.getTime() : null,
       terminal: false,
       terminalOk: false,
+      terminalReached: false,
     },
     {
       label: terminalLabel,
@@ -334,6 +338,9 @@ function LifecycleStepper({
           ? done.getTime() - claimed.getTime()
           : null,
       terminal: true,
+      terminalReached: ["success", "error", "failed", "killed"].includes(
+        status
+      ),
       terminalOk: status === "success",
     },
   ];

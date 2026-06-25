@@ -408,10 +408,18 @@ func collectWorkers(iter *firestore.DocumentIterator) ([]*Worker, error) {
 			WorkpoolID:      f.WorkpoolID,
 			BatchID:         f.BatchID,
 			InstanceName:    f.InstanceName,
+			Status:          f.Status,
 			HeartbeatExpiry: f.HeartbeatExpiry,
 		})
 	}
 	return workers, nil
+}
+
+func (s *FirestoreWorkerStore) ListAllForWorkpool(ctx context.Context, workpoolID string) ([]*Worker, error) {
+	iter := s.fs.Collection(workerCollection).
+		Where("workpool_id", "==", workpoolID).
+		Documents(ctx)
+	return collectWorkers(iter)
 }
 
 // ----- FirestoreTaskStore -----

@@ -197,11 +197,12 @@ type statusCountResponse struct {
 type workpoolSummaryDetailResponse struct {
 	WorkpoolID                    string                `json:"workpool_id"`
 	LastUpdated                   time.Time             `json:"last_updated"`
-	ExpectedPreemptibleVMCount    int                   `json:"expected_preemptible_vm_count"`
-	ExpectedNonpreemptibleVMCount int                   `json:"expected_nonpreemptible_vm_count"`
+	ExpectedPreemptibleWorkers    int                   `json:"expected_preemptible_workers"`
+	ExpectedNonpreemptibleWorkers int                   `json:"expected_nonpreemptible_workers"`
 	UnhealthyBatchCount           int                   `json:"unhealthy_batch_count"`
 	BatchAPIRequestCounts         []statusCountResponse `json:"batch_api_request_counts"`
-	Workers                       []statusCountResponse `json:"workers"`
+	PreemptibleWorkers            []statusCountResponse `json:"preemptible_workers"`
+	NonpreemptibleWorkers         []statusCountResponse `json:"nonpreemptible_workers"`
 	Tasks                         []statusCountResponse `json:"tasks"`
 }
 
@@ -227,15 +228,18 @@ func (s *dashboardServer) handleGetWorkpoolSummary(w http.ResponseWriter, r *htt
 	resp := workpoolSummaryDetailResponse{
 		WorkpoolID:                    ws.WorkpoolID,
 		LastUpdated:                   ws.LastUpdated,
-		ExpectedPreemptibleVMCount:    ws.ExpectedPreemptibleVMCount,
-		ExpectedNonpreemptibleVMCount: ws.ExpectedNonpreemptibleVMCount,
+		ExpectedPreemptibleWorkers:    ws.ExpectedPreemptibleWorkers,
+		ExpectedNonpreemptibleWorkers: ws.ExpectedNonpreemptibleWorkers,
 		UnhealthyBatchCount:           ws.UnhealthyBatchCount,
 	}
 	for _, sc := range ws.BatchAPIRequestCounts {
 		resp.BatchAPIRequestCounts = append(resp.BatchAPIRequestCounts, statusCountResponse{Status: sc.Status, Count: sc.Count})
 	}
-	for _, sc := range ws.Workers {
-		resp.Workers = append(resp.Workers, statusCountResponse{Status: sc.Status, Count: sc.Count})
+	for _, sc := range ws.PreemptibleWorkers {
+		resp.PreemptibleWorkers = append(resp.PreemptibleWorkers, statusCountResponse{Status: sc.Status, Count: sc.Count})
+	}
+	for _, sc := range ws.NonpreemptibleWorkers {
+		resp.NonpreemptibleWorkers = append(resp.NonpreemptibleWorkers, statusCountResponse{Status: sc.Status, Count: sc.Count})
 	}
 	for _, sc := range ws.Tasks {
 		resp.Tasks = append(resp.Tasks, statusCountResponse{Status: sc.Status, Count: sc.Count})
@@ -248,11 +252,12 @@ func (s *dashboardServer) handleGetWorkpoolSummary(w http.ResponseWriter, r *htt
 type workpoolSummaryHistoryEntryResponse struct {
 	WorkpoolID                    string                `json:"workpool_id"`
 	Timestamp                     time.Time             `json:"timestamp"`
-	ExpectedPreemptibleVMCount    int                   `json:"expected_preemptible_vm_count"`
-	ExpectedNonpreemptibleVMCount int                   `json:"expected_nonpreemptible_vm_count"`
+	ExpectedPreemptibleWorkers    int                   `json:"expected_preemptible_workers"`
+	ExpectedNonpreemptibleWorkers int                   `json:"expected_nonpreemptible_workers"`
 	UnhealthyBatchCount           int                   `json:"unhealthy_batch_count"`
 	BatchAPIRequestCounts         []statusCountResponse `json:"batch_api_request_counts"`
-	Workers                       []statusCountResponse `json:"workers"`
+	PreemptibleWorkers            []statusCountResponse `json:"preemptible_workers"`
+	NonpreemptibleWorkers         []statusCountResponse `json:"nonpreemptible_workers"`
 	Tasks                         []statusCountResponse `json:"tasks"`
 }
 
@@ -284,15 +289,18 @@ func (s *dashboardServer) handleGetWorkpoolSummaryHistory(w http.ResponseWriter,
 		entry := workpoolSummaryHistoryEntryResponse{
 			WorkpoolID:                    h.WorkpoolID,
 			Timestamp:                     h.Timestamp,
-			ExpectedPreemptibleVMCount:    h.ExpectedPreemptibleVMCount,
-			ExpectedNonpreemptibleVMCount: h.ExpectedNonpreemptibleVMCount,
+			ExpectedPreemptibleWorkers:    h.ExpectedPreemptibleWorkers,
+			ExpectedNonpreemptibleWorkers: h.ExpectedNonpreemptibleWorkers,
 			UnhealthyBatchCount:           h.UnhealthyBatchCount,
 		}
 		for _, sc := range h.BatchAPIRequestCounts {
 			entry.BatchAPIRequestCounts = append(entry.BatchAPIRequestCounts, statusCountResponse{Status: sc.Status, Count: sc.Count})
 		}
-		for _, sc := range h.Workers {
-			entry.Workers = append(entry.Workers, statusCountResponse{Status: sc.Status, Count: sc.Count})
+		for _, sc := range h.PreemptibleWorkers {
+			entry.PreemptibleWorkers = append(entry.PreemptibleWorkers, statusCountResponse{Status: sc.Status, Count: sc.Count})
+		}
+		for _, sc := range h.NonpreemptibleWorkers {
+			entry.NonpreemptibleWorkers = append(entry.NonpreemptibleWorkers, statusCountResponse{Status: sc.Status, Count: sc.Count})
 		}
 		for _, sc := range h.Tasks {
 			entry.Tasks = append(entry.Tasks, statusCountResponse{Status: sc.Status, Count: sc.Count})

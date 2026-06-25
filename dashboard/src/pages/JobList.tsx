@@ -1,5 +1,5 @@
 import { useState, useMemo, useRef, useCallback, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import { useEvents } from "../data/EventProvider";
 import type { BackendJobSummary } from "../types";
 
@@ -165,54 +165,78 @@ function WorkerPoolCard({ pool }: { pool: WorkerPool }) {
       }}
     >
       {/* Header */}
-      <div
-        style={{
-          padding: "8px 10px",
-          background: col.bg,
-          borderBottom: `1px solid ${col.border}`,
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-        }}
+      <Link
+        to={`/workpools/${wp.workpool_id}`}
+        style={{ textDecoration: "none" }}
       >
-        <span
+        <div
           style={{
-            width: 8,
-            height: 8,
-            borderRadius: "50%",
-            background:
-              wp.status === "ok" || wp.status === "active" ? C_OK : C_BAD,
-            flexShrink: 0,
-          }}
-        />
-        <span
-          style={{
-            fontSize: 13,
-            fontWeight: 700,
-            fontFamily: MONO,
-            color: col.text,
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-            flex: 1,
+            padding: "8px 10px",
+            background: col.bg,
+            borderBottom: `1px solid ${col.border}`,
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            cursor: "pointer",
           }}
         >
-          {wp.workpool_id}
-        </span>
-        {wp.machine_type && (
+          {(() => {
+            const st = wp.status || "unknown";
+            const ok = st === "ok" || st === "active";
+            const halted = st === "halted";
+            const color = ok ? C_OK : halted ? C_BAD : C_BAD_SOFT;
+            const bg = ok
+              ? "oklch(92% 0.08 145)"
+              : halted
+              ? "oklch(92% 0.08 25)"
+              : "oklch(92% 0.06 60)";
+            return (
+              <span
+                style={{
+                  fontSize: 10,
+                  fontFamily: MONO,
+                  fontWeight: 700,
+                  color,
+                  background: bg,
+                  borderRadius: 3,
+                  padding: "1px 6px",
+                  flexShrink: 0,
+                  letterSpacing: 0.3,
+                }}
+              >
+                {st}
+              </span>
+            );
+          })()}
           <span
             style={{
-              fontSize: 11,
+              fontSize: 13,
+              fontWeight: 700,
               fontFamily: MONO,
               color: col.text,
-              opacity: 0.75,
-              flexShrink: 0,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              flex: 1,
             }}
           >
-            {wp.machine_type}
+            {wp.workpool_id}
           </span>
-        )}
-      </div>
+          {wp.machine_type && (
+            <span
+              style={{
+                fontSize: 11,
+                fontFamily: MONO,
+                color: col.text,
+                opacity: 0.75,
+                flexShrink: 0,
+              }}
+            >
+              {wp.machine_type}
+            </span>
+          )}
+        </div>
+      </Link>
 
       {/* Incident alert */}
       {hasIncident && (
@@ -289,20 +313,16 @@ function WorkerPoolCard({ pool }: { pool: WorkerPool }) {
           ))}
         </div>
 
-        {/* Status */}
-        {wp.status && (
+        {wp.region && (
           <div
             style={{
               fontSize: 11,
               fontFamily: MONO,
-              color: "#888",
+              color: "#aaa",
               marginTop: 4,
             }}
           >
-            status: <span style={{ color: "#333" }}>{wp.status}</span>
-            {wp.region && (
-              <span style={{ marginLeft: 8, color: "#aaa" }}>{wp.region}</span>
-            )}
+            {wp.region}
           </div>
         )}
       </div>

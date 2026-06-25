@@ -99,11 +99,12 @@ export interface WorkPoolDetail {
 export interface WorkPoolSummaryHistoryEntry {
   workpool_id: string;
   timestamp: string;
-  expected_preemptible_vm_count: number;
-  expected_nonpreemptible_vm_count: number;
+  expected_preemptible_workers: number;
+  expected_nonpreemptible_workers: number;
   unhealthy_batch_count: number;
   batch_api_request_counts: { status: string; count: number }[];
-  workers: { status: string; count: number }[];
+  preemptible_workers: { status: string; count: number }[];
+  nonpreemptible_workers: { status: string; count: number }[];
   tasks: { status: string; count: number }[];
 }
 

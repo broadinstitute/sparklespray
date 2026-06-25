@@ -102,6 +102,7 @@ type Worker struct {
 	WorkpoolID      string
 	BatchID         string    // which batch submitted this worker
 	InstanceName    string    // GCP instance name recorded at startup; enables surgical VM termination
+	Status          string    // "started" or "stopped"
 	HeartbeatExpiry time.Time // rolling deadline; used to detect crashed/preempted workers
 }
 
@@ -211,15 +212,16 @@ type StatusCount struct {
 // WorkPoolSummary holds evolving runtime metrics for a workpool, recomputed
 // by the monitor on each provisioning poll.
 type WorkPoolSummary struct {
-	WorkpoolID                    string        `firestore:"workpool_id"`
-	Expiry                        time.Time     `firestore:"expiry"`
-	LastUpdated                   time.Time     `firestore:"last_updated"`
-	ExpectedPreemptibleVMCount    int           `firestore:"expected_preemptible_vm_count"`
-	ExpectedNonpreemptibleVMCount int           `firestore:"expected_nonpreemptible_vm_count"`
-	UnhealthyBatchCount           int           `firestore:"unhealthy_batch_count"`
-	BatchAPIRequestCounts         []StatusCount `firestore:"batch_api_request_counts"`
-	Workers                       []StatusCount `firestore:"workers"`
-	Tasks                         []StatusCount `firestore:"tasks"`
+	WorkpoolID                  string        `firestore:"workpool_id"`
+	Expiry                      time.Time     `firestore:"expiry"`
+	LastUpdated                 time.Time     `firestore:"last_updated"`
+	ExpectedPreemptibleWorkers  int           `firestore:"expected_preemptible_workers"`
+	ExpectedNonpreemptibleWorkers int         `firestore:"expected_nonpreemptible_workers"`
+	UnhealthyBatchCount         int           `firestore:"unhealthy_batch_count"`
+	BatchAPIRequestCounts       []StatusCount `firestore:"batch_api_request_counts"`
+	PreemptibleWorkers          []StatusCount `firestore:"preemptible_workers"`
+	NonpreemptibleWorkers       []StatusCount `firestore:"nonpreemptible_workers"`
+	Tasks                       []StatusCount `firestore:"tasks"`
 }
 
 // WorkPoolSummaryHistory is an append-only snapshot written each time the monitor
@@ -228,11 +230,12 @@ type WorkPoolSummaryHistory struct {
 	WorkpoolID                    string        `firestore:"workpool_id"`
 	Timestamp                     time.Time     `firestore:"timestamp"`
 	Expiry                        time.Time     `firestore:"expiry"`
-	ExpectedPreemptibleVMCount    int           `firestore:"expected_preemptible_vm_count"`
-	ExpectedNonpreemptibleVMCount int           `firestore:"expected_nonpreemptible_vm_count"`
+	ExpectedPreemptibleWorkers    int           `firestore:"expected_preemptible_workers"`
+	ExpectedNonpreemptibleWorkers int           `firestore:"expected_nonpreemptible_workers"`
 	UnhealthyBatchCount           int           `firestore:"unhealthy_batch_count"`
 	BatchAPIRequestCounts         []StatusCount `firestore:"batch_api_request_counts"`
-	Workers                       []StatusCount `firestore:"workers"`
+	PreemptibleWorkers            []StatusCount `firestore:"preemptible_workers"`
+	NonpreemptibleWorkers         []StatusCount `firestore:"nonpreemptible_workers"`
 	Tasks                         []StatusCount `firestore:"tasks"`
 }
 
