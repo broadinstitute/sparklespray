@@ -32,7 +32,9 @@ type firestoreWorkPool struct {
 	Expiry                time.Time     `firestore:"expiry"`
 	RootDir               string        `firestore:"root_dir"`
 	SparklesWorkerGCSPath string        `firestore:"sparkles_worker_gcs_path"`
-	EmptyVolumes          []EmptyVolume `firestore:"empty_volumes"`
+	EmptyVolumes          []EmptyVolume   `firestore:"empty_volumes"`
+	Resources             []ResourceEntry `firestore:"resources"`
+	ServiceAccount        string          `firestore:"service_account"`
 
 	MaxWorkerCount               int `firestore:"max_worker_count"`
 	MaxPreemptibleWorkerAttempts int `firestore:"max_preemptible_worker_attempts"`
@@ -68,6 +70,8 @@ func toWorkPool(f *firestoreWorkPool) *WorkPool {
 		RootDir:                      f.RootDir,
 		SparklesWorkerGCSPath:        f.SparklesWorkerGCSPath,
 		EmptyVolumes:                 f.EmptyVolumes,
+		Resources:                    f.Resources,
+		ServiceAccount:               f.ServiceAccount,
 		MaxWorkerCount:               f.MaxWorkerCount,
 		MaxPreemptibleWorkerAttempts: f.MaxPreemptibleWorkerAttempts,
 		MaxWorkersPerRequest:         f.MaxWorkersPerRequest,

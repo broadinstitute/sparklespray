@@ -120,6 +120,9 @@ func (a *Monitor) submitBatch(ctx context.Context, pool *WorkPool, vmCount int, 
 		RootDir:               pool.RootDir,
 		SparklesWorkerGCSPath: pool.SparklesWorkerGCSPath,
 		EmptyVolumes:          pool.EmptyVolumes,
+		Resources:             pool.Resources,
+		ServiceAccount:        pool.ServiceAccount,
+		DBName:                a.dbName,
 	})
 	if err != nil {
 		return fmt.Errorf("create GCP batch job: %w", err)

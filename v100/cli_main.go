@@ -27,7 +27,7 @@ const defaultDB = "sparkles"
 func NewApp() *cli.App {
 	app := cli.NewApp()
 	app.Name = "sparkles"
-	app.Version = "1.0.0"
+	app.Version = "dev"
 	app.Compiled = time.Now()
 	app.Authors = []cli.Author{
 		{
@@ -44,8 +44,12 @@ func NewApp() *cli.App {
 				cli.StringFlag{Name: "db", Value: defaultDB},
 				cli.StringFlag{Name: "workpool"},
 				cli.StringFlag{Name: "resources"},
+				cli.StringFlag{Name: "batch", Usage: "batch ID for this worker"},
+				cli.IntFlag{Name: "linger", Usage: "seconds to keep polling after the queue is empty (leader worker only)"},
 				cli.BoolFlag{Name: "no-gcp", Usage: "local development mode: skip GCP metadata server"},
 				cli.BoolFlag{Name: "no-docker", Usage: "run task commands directly without Docker (ignores image name)"},
+				cli.StringSliceFlag{Name: "bind-mount", Usage: "additional Docker bind mounts (host:container), may be repeated"},
+				cli.StringFlag{Name: "work-dir", Usage: "parent directory for task working directories (default: OS temp dir)"},
 			},
 			Action: runWorker,
 		},
@@ -141,7 +145,7 @@ func runMonitor(c *cli.Context) error {
 
 	jobSummaries := monitor.NewFirestoreJobSummaryStore(fsClient)
 
-	m := monitor.New(scheduler.RealClock, batchAPI, pools, batches, workers, tasks, pubsubReceiver)
+	m := monitor.New(scheduler.RealClock, batchAPI, pools, batches, workers, tasks, pubsubReceiver, db)
 	m.SetVerbose(c.Bool("verbose"))
 	m.SetJobEventReceiver(jobEventReceiver)
 	m.SetJobSummaryStore(jobSummaries)

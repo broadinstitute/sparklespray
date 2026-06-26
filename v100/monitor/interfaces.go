@@ -60,6 +60,8 @@ type WorkPool struct {
 	RootDir               string
 	SparklesWorkerGCSPath string
 	EmptyVolumes          []EmptyVolume
+	Resources             []ResourceEntry
+	ServiceAccount        string
 
 	// Provisioning parameters
 	MaxWorkerCount               int
@@ -121,6 +123,13 @@ type VMInfo struct {
 	Zone         string
 }
 
+// ResourceEntry is a named float resource requirement. Field names and tags match
+// v100.ResourceEntry so Firestore documents round-trip correctly.
+type ResourceEntry struct {
+	Name  string  `firestore:"name"  json:"name"`
+	Value float64 `firestore:"value" json:"value"`
+}
+
 // EmptyVolume describes a new scratch disk to attach and mount on each worker VM.
 // Field names and tags match v100.EmptyVolume so Firestore documents round-trip correctly.
 type EmptyVolume struct {
@@ -131,16 +140,20 @@ type EmptyVolume struct {
 
 // WorkerJobSpec holds all parameters needed to create a GCP Batch job for workers.
 type WorkerJobSpec struct {
-	WorkpoolID   string
-	BatchID      string
-	Region       string
-	MachineType  string
-	VMCount      int
-	Preemptible  bool
+	WorkpoolID            string
+	BatchID               string
+	Region                string
+	MachineType           string
+	VMCount               int
+	Preemptible           bool
 	SparklesWorkerGCSPath string
 	Command               string
-	RootDir      string
-	EmptyVolumes []EmptyVolume
+	RootDir               string
+	EmptyVolumes          []EmptyVolume
+	ServiceAccount        string
+	DBName                string
+	Resources             []ResourceEntry
+	LingerTime            time.Duration
 }
 
 // ----- External service interfaces -----
@@ -212,16 +225,16 @@ type StatusCount struct {
 // WorkPoolSummary holds evolving runtime metrics for a workpool, recomputed
 // by the monitor on each provisioning poll.
 type WorkPoolSummary struct {
-	WorkpoolID                  string        `firestore:"workpool_id"`
-	Expiry                      time.Time     `firestore:"expiry"`
-	LastUpdated                 time.Time     `firestore:"last_updated"`
-	ExpectedPreemptibleWorkers  int           `firestore:"expected_preemptible_workers"`
-	ExpectedNonpreemptibleWorkers int         `firestore:"expected_nonpreemptible_workers"`
-	UnhealthyBatchCount         int           `firestore:"unhealthy_batch_count"`
-	BatchAPIRequestCounts       []StatusCount `firestore:"batch_api_request_counts"`
-	PreemptibleWorkers          []StatusCount `firestore:"preemptible_workers"`
-	NonpreemptibleWorkers       []StatusCount `firestore:"nonpreemptible_workers"`
-	Tasks                       []StatusCount `firestore:"tasks"`
+	WorkpoolID                    string        `firestore:"workpool_id"`
+	Expiry                        time.Time     `firestore:"expiry"`
+	LastUpdated                   time.Time     `firestore:"last_updated"`
+	ExpectedPreemptibleWorkers    int           `firestore:"expected_preemptible_workers"`
+	ExpectedNonpreemptibleWorkers int           `firestore:"expected_nonpreemptible_workers"`
+	UnhealthyBatchCount           int           `firestore:"unhealthy_batch_count"`
+	BatchAPIRequestCounts         []StatusCount `firestore:"batch_api_request_counts"`
+	PreemptibleWorkers            []StatusCount `firestore:"preemptible_workers"`
+	NonpreemptibleWorkers         []StatusCount `firestore:"nonpreemptible_workers"`
+	Tasks                         []StatusCount `firestore:"tasks"`
 }
 
 // WorkPoolSummaryHistory is an append-only snapshot written each time the monitor

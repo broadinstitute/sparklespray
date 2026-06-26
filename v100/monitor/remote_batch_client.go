@@ -66,27 +66,26 @@ type remoteLabel struct {
 }
 
 type remoteCreateJobBody struct {
-	Region       string        `json:"region"`
-	MachineType  string        `json:"machineType"`
-	VMCount      int           `json:"vmCount"`
-	Preemptible  bool          `json:"preemptible"`
+	Region                string        `json:"region"`
+	MachineType           string        `json:"machineType"`
+	VMCount               int           `json:"vmCount"`
+	Preemptible           bool          `json:"preemptible"`
 	SparklesWorkerGCSPath string        `json:"sparklesWorkerGCSPath"`
 	Command               string        `json:"command"`
-	EmptyVolumes []EmptyVolume `json:"emptyVolumes"`
-	Labels       []remoteLabel `json:"labels"`
+	EmptyVolumes          []EmptyVolume `json:"emptyVolumes"`
+	Labels                []remoteLabel `json:"labels"`
 }
 
 func (c *RemoteBatchAPIClient) CreateJob(ctx context.Context, spec *WorkerJobSpec) (string, error) {
 	body := remoteCreateJobBody{
-		Region:       spec.Region,
-		MachineType:  spec.MachineType,
-		VMCount:      spec.VMCount,
-		Preemptible:  spec.Preemptible,
+		Region:                spec.Region,
+		MachineType:           spec.MachineType,
+		VMCount:               spec.VMCount,
+		Preemptible:           spec.Preemptible,
 		SparklesWorkerGCSPath: spec.SparklesWorkerGCSPath,
-		Command:      spec.Command,
-		EmptyVolumes: spec.EmptyVolumes,
+		Command:               spec.Command,
+		EmptyVolumes:          spec.EmptyVolumes,
 		Labels: []remoteLabel{
-			{Name: labelBatch, Value: spec.BatchID},
 			{Name: labelWorkpool, Value: spec.WorkpoolID},
 		},
 	}

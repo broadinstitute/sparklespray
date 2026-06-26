@@ -73,6 +73,7 @@ type WorkPool struct {
 	MachineType  string          `firestore:"machine_type"`
 	RootDir               string          `firestore:"root_dir"`
 	SparklesWorkerGCSPath string          `firestore:"sparkles_worker_gcs_path"`
+	ServiceAccount        string          `firestore:"service_account"`
 	Resources             []ResourceEntry `firestore:"resources"`
 	EmptyVolumes          []EmptyVolume   `firestore:"empty_volumes"`
 	Labels                []Label         `firestore:"labels"`

@@ -43,6 +43,7 @@ type Monitor struct {
 	jobSummaries  JobSummaryStore
 	jobTerminated JobTerminatedPublisher
 	verbose       bool
+	dbName        string
 }
 
 // SetVerbose enables or disables verbose poll logging.
@@ -73,6 +74,7 @@ func New(
 	workers WorkerStore,
 	tasks TaskStore,
 	pubsub PubSubReceiver,
+	dbName string,
 ) *Monitor {
 	return &Monitor{
 		clock:    clock,
@@ -82,6 +84,7 @@ func New(
 		workers:  workers,
 		tasks:    tasks,
 		pubsub:   pubsub,
+		dbName:   dbName,
 	}
 }
 

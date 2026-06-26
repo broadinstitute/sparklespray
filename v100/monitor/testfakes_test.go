@@ -563,7 +563,7 @@ func newWorld() *World {
 	tasks := newFakeTaskStore()
 	pubsub := newFakePubSubReceiver()
 
-	a := New(clock, batchAPI, pools, batches, workers, tasks, pubsub)
+	a := New(clock, batchAPI, pools, batches, workers, tasks, pubsub, "test-db")
 
 	return &World{
 		Clock:    clock,

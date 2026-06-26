@@ -139,7 +139,7 @@ func newMonitorWithStores(
 	tasks monitor.TaskStore,
 ) (*monitor.Monitor, *capturingJobTerminatedPublisher) {
 	pub := &capturingJobTerminatedPublisher{}
-	m := monitor.New(clock, &noopBatchAPIClient{}, pools, batches, workers, tasks, newNoopPubSubReceiver())
+	m := monitor.New(clock, &noopBatchAPIClient{}, pools, batches, workers, tasks, newNoopPubSubReceiver(), "test-db")
 	m.SetJobTerminatedPublisher(pub)
 	return m, pub
 }

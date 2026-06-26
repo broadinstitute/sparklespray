@@ -3,14 +3,25 @@ package dev
 import (
 	"context"
 	"fmt"
+	"math/rand/v2"
 	"time"
 
 	"cloud.google.com/go/firestore"
 	v100 "github.com/broadinstitute/sparklespray/v100"
 	"github.com/broadinstitute/sparklespray/v100/monitor"
-	"github.com/google/uuid"
 	"github.com/urfave/cli"
 )
+
+const batchIDChars = "abcdefghijklmnopqrstuvwxyz0123456789"
+
+func createBatchID() string {
+	const idLen = 30
+	b := make([]byte, idLen)
+	for i := range b {
+		b[i] = batchIDChars[rand.IntN(len(batchIDChars))]
+	}
+	return "sparkles-" + string(b)
+}
 
 func runDevAddWorker(c *cli.Context) error {
 	specFile := c.Args().Get(0)
@@ -41,7 +52,7 @@ func runDevAddWorker(c *cli.Context) error {
 		return fmt.Errorf("creating batch API client: %w", err)
 	}
 
-	batchID := uuid.New().String()
+	batchID := createBatchID()
 	jobID, err := batchClient.CreateJob(ctx, &monitor.WorkerJobSpec{
 		WorkpoolID:            workpoolID,
 		BatchID:               batchID,
@@ -52,6 +63,10 @@ func runDevAddWorker(c *cli.Context) error {
 		RootDir:               workpoolSpec.RootDir,
 		SparklesWorkerGCSPath: workpoolSpec.SparklesWorkerGCSPath,
 		EmptyVolumes:          toMonitorEmptyVolumes(workpoolSpec.EmptyVolumes),
+		Resources:             toMonitorResources(workpoolSpec.Resources),
+		ServiceAccount:        workpoolSpec.ServiceAccount,
+		DBName:                db,
+		LingerTime:            time.Duration(workpoolSpec.LingerTimeSec) * time.Second,
 	})
 	if err != nil {
 		return fmt.Errorf("creating batch job: %w", err)
@@ -86,6 +101,15 @@ func toMonitorLabels(ls []v100.Label) []monitor.Label {
 	out := make([]monitor.Label, len(ls))
 	for i, l := range ls {
 		out[i] = monitor.Label{Name: l.Name, Value: l.Value}
+	}
+	return out
+}
+
+// toMonitorResources converts v100.ResourceEntry to monitor.ResourceEntry.
+func toMonitorResources(rs []v100.ResourceEntry) []monitor.ResourceEntry {
+	out := make([]monitor.ResourceEntry, len(rs))
+	for i, r := range rs {
+		out[i] = monitor.ResourceEntry{Name: r.Name, Value: r.Value}
 	}
 	return out
 }

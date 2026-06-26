@@ -88,6 +88,8 @@ func runWorker(c *cli.Context) error {
 	workpoolID := c.String("workpool")
 	noGCP := c.Bool("no-gcp")
 	noDocker := c.Bool("no-docker")
+	bindMounts := c.StringSlice("bind-mount")
+	workDirParent := c.String("work-dir")
 
 	if project == "" {
 		return fmt.Errorf("--project is required")
@@ -107,7 +109,10 @@ func runWorker(c *cli.Context) error {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	ws, err := startWorker(ctx, project, db, workerID, workpoolID, noGCP, noDocker)
+	batchID := c.String("batch")
+	lingerTime := time.Duration(c.Int("linger")) * time.Second
+
+	ws, err := startWorker(ctx, project, db, workerID, workpoolID, batchID, noGCP, noDocker, bindMounts, workDirParent, lingerTime)
 	if err != nil {
 		return err
 	}
@@ -204,16 +209,86 @@ type WorkerLoopConfig struct {
 	Registry             *taskRegistry
 	FSClient             *firestore.Client
 	ExecuteDockerCommand func(ctx context.Context, imageName string, command []string, workDir string, extraDockerArgs []string, tel *TaskEventLog) (*ResourceUsage, error)
+	LingerTime           time.Duration
 }
 
 // ErrTaskKilled is returned by the task callback when a task was cancelled via a kill_job message.
 var ErrTaskKilled = errors.New("task killed")
+
+const UnknownLeader = 0
+const IsLeader = 1
+const IsNotLeader = 2
+
+func getPendingTask(ctx context.Context, lingerTime time.Duration, WorkpoolID string, Queue TaskQueue, isLeader func() bool) (*Task, error) {
+	lingerDeadline := time.Now().Add(lingerTime)
+	leaderStatus := UnknownLeader
+
+	for {
+		// first, find a job which has at least one task
+		pendingTask, err := Queue.GetFirstPendingTask(ctx, WorkpoolID)
+		if err != nil {
+			return nil, fmt.Errorf("getting first pending task: %w", err)
+		}
+
+		if pendingTask != nil {
+			return pendingTask, nil
+		}
+
+		// if we're the leader linger, if we're not, exit loop immediately
+		if leaderStatus == UnknownLeader {
+			if isLeader() {
+				leaderStatus = IsLeader
+			} else {
+				leaderStatus = IsNotLeader
+			}
+		}
+
+		if time.Now().After(lingerDeadline) || leaderStatus != IsNotLeader {
+			// if our deadline expired, or we're not the leader, abort loop
+			break
+		}
+
+		// poll every second if we're the leader until we hit our deadline
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(time.Second):
+		}
+	}
+
+	return nil, nil
+}
+
+// checks to see if this worker is one with the lowest ID among the running in this workpool. this is used
+// to do a sort of best-effort "leader" election, where the leader is the one node that will hang around
+// for any future requests for work. In order to be considered, it must be for this workpoolID and with
+// a non-expired heartbeat
+func isWorkerWithLowestID(ctx context.Context, fsClient *firestore.Client, workerID string, workpoolID string) bool {
+	now := time.Now()
+	docs, err := fsClient.Collection(workerCollection).
+		Where("workpool_id", "==", workpoolID).
+		Where("heartbeat_expiry", ">", now).
+		OrderBy("__name__", firestore.Asc).
+		Limit(1).
+		Select("__name__").
+		Documents(ctx).GetAll()
+	if err != nil {
+		log.Printf("isWorkerWithLowestID: querying workers: %v", err)
+		return false
+	}
+	if len(docs) == 0 {
+		log.Printf("Internal error: isWorkerWithLowestID found no matching IDs")
+		return false
+	}
+	return docs[0].Ref.ID == workerID
+}
 
 func workerMainLoop(ctx context.Context, cfg *WorkerLoopConfig) error {
 	completions := make(chan taskCompletion, 100)
 	runningCount := 0
 	curResources := cfg.Resources
 
+	log.Printf("Starting workerMainLoop, querying for tasks...")
 	// curResources is the single-goroutine mutable running total of available capacity.
 	// Only waitForCompletion and the claim path touch it, both on this goroutine.
 	waitForCompletion := func() error {
@@ -250,12 +325,15 @@ func workerMainLoop(ctx context.Context, cfg *WorkerLoopConfig) error {
 		}
 	}
 
+	isLeader := func() bool {
+		return isWorkerWithLowestID(ctx, cfg.FSClient, cfg.WorkerID, cfg.WorkpoolID)
+	}
+
 	// loop until we're out of jobs with tasks
 	for {
-		// first, find a job which has at least one task
-		pendingTask, err := cfg.Queue.GetFirstPendingTask(ctx, cfg.WorkpoolID)
+		pendingTask, err := getPendingTask(ctx, cfg.LingerTime, cfg.WorkpoolID, cfg.Queue, isLeader)
 		if err != nil {
-			return fmt.Errorf("getting first pending task: %w", err)
+			return fmt.Errorf("getting pending task %s: %w", cfg.WorkpoolID, err)
 		}
 		if pendingTask == nil {
 			break
@@ -370,12 +448,16 @@ func workerMainLoop(ctx context.Context, cfg *WorkerLoopConfig) error {
 		}
 	}
 
+	log.Printf("No more tasks in queue. Waiting for running tasks to complete...")
+
 	// drain all remaining running tasks
 	for runningCount > 0 {
 		if err := waitForCompletion(); err != nil {
 			return err
 		}
 	}
+
+	log.Printf("Worker main loop complete")
 
 	return nil
 }
@@ -397,6 +479,7 @@ func (ws *workerState) mainLoop(ctx context.Context, resources *Resources) error
 		Registry:             ws.registry,
 		FSClient:             ws.fsClient,
 		ExecuteDockerCommand: execFn,
+		LingerTime:           ws.lingerTime,
 	})
 }
 
@@ -459,9 +542,13 @@ type WorkerRunConfig struct {
 	WorkpoolID string
 	// Resources is a comma-separated list of name=value pairs (e.g. "slots=1").
 	// Defaults to "slots=1" if empty.
-	Resources string
-	NoGCP     bool
-	NoDocker  bool
+	Resources     string
+	NoGCP         bool
+	NoDocker      bool
+	BindMounts    []string
+	WorkDirParent string
+	BatchID       string
+	LingerTime    time.Duration
 }
 
 // RunWorker starts a worker and blocks until ctx is cancelled or all pending
@@ -474,7 +561,7 @@ func RunWorker(ctx context.Context, cfg WorkerRunConfig) error {
 	}
 
 	log.Printf("Starting worker %s in workpool %s", cfg.WorkerID, cfg.WorkpoolID)
-	ws, err := startWorker(ctx, cfg.Project, cfg.DB, cfg.WorkerID, cfg.WorkpoolID, cfg.NoGCP, cfg.NoDocker)
+	ws, err := startWorker(ctx, cfg.Project, cfg.DB, cfg.WorkerID, cfg.WorkpoolID, cfg.BatchID, cfg.NoGCP, cfg.NoDocker, cfg.BindMounts, cfg.WorkDirParent, cfg.LingerTime)
 	if err != nil {
 		return fmt.Errorf("starting worker: %w", err)
 	}
@@ -645,6 +732,7 @@ type workerState struct {
 	workpoolID     string
 	bindMounts     []string
 	workDirParent  string
+	lingerTime     time.Duration
 	noDocker       bool
 }
 
@@ -655,7 +743,7 @@ func (ws *workerState) cleanup() {
 	ws.fsClient.Close()
 }
 
-func startWorker(ctx context.Context, project, db, workerID, workpoolID string, noGCP, noDocker bool) (*workerState, error) {
+func startWorker(ctx context.Context, project, db, workerID, workpoolID, batchID string, noGCP, noDocker bool, bindMounts []string, workDirParent string, lingerTime time.Duration) (*workerState, error) {
 	var fsClient *firestore.Client
 	var err error
 	if db != "" {
@@ -687,7 +775,7 @@ func startWorker(ctx context.Context, project, db, workerID, workpoolID string, 
 		return nil, fmt.Errorf("creating storage client: %w", err)
 	}
 
-	var instanceName, batchID string
+	var instanceName string
 	if !noGCP {
 		instanceName, err = metadata.InstanceNameWithContext(ctx)
 		if err != nil {
@@ -695,13 +783,6 @@ func startWorker(ctx context.Context, project, db, workerID, workpoolID string, 
 			fsClient.Close()
 			gcsClient.Close()
 			return nil, fmt.Errorf("reading instance name from metadata server: %w", err)
-		}
-		batchID, err = metadata.GetWithContext(ctx, "instance/labels/sparkles-worker-batch")
-		if err != nil {
-			psClient.Close()
-			fsClient.Close()
-			gcsClient.Close()
-			return nil, fmt.Errorf("reading batch ID from instance labels: %w", err)
 		}
 	}
 
@@ -805,6 +886,9 @@ func startWorker(ctx context.Context, project, db, workerID, workpoolID string, 
 		project:        project,
 		workerID:       workerID,
 		workpoolID:     workpoolID,
+		bindMounts:     bindMounts,
+		workDirParent:  workDirParent,
+		lingerTime:     lingerTime,
 		noDocker:       noDocker,
 	}, nil
 }

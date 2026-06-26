@@ -3,6 +3,9 @@ package monitor
 import (
 	"context"
 	"fmt"
+	"log"
+	"strings"
+	"time"
 
 	"google.golang.org/api/batch/v1"
 	"google.golang.org/api/compute/v1"
@@ -10,8 +13,7 @@ import (
 )
 
 const (
-	labelBatch    = "sparkles-worker-batch"
-	labelWorkpool = "sparkles-worker-workpool"
+	labelWorkpool = "sparkles-workpool"
 
 	pubsubNotificationTopic = "batch-api-notifications"
 
@@ -42,7 +44,40 @@ func NewGCPBatchAPIClient(ctx context.Context, project string, opts ...option.Cl
 	}, nil
 }
 
+// validGoogleLabel reports whether s is a valid GCP label value:
+// lowercase letters, digits, and hyphens only, starting with a letter.
+func validGoogleLabel(s string) bool {
+	if len(s) == 0 || s[0] < 'a' || s[0] > 'z' {
+		return false
+	}
+	for _, c := range s {
+		if !((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-') {
+			return false
+		}
+	}
+	return true
+}
+
+func formatResources(resources []ResourceEntry) string {
+	parts := make([]string, len(resources))
+	for i, r := range resources {
+		parts[i] = fmt.Sprintf("%s=%g", r.Name, r.Value)
+	}
+	return strings.Join(parts, ",")
+}
+
 func (c *GCPBatchAPIClient) CreateJob(ctx context.Context, spec *WorkerJobSpec) (string, error) {
+	if len(spec.Resources) == 0 {
+		return "", fmt.Errorf("workpool %s has no resources configured", spec.WorkpoolID)
+	}
+
+	if !validGoogleLabel(spec.WorkpoolID) {
+		return "", fmt.Errorf("workpool %s must be all lowercase, only be letters or numbers or '-' and start with a letter.", spec.WorkpoolID)
+	}
+
+	if spec.ServiceAccount == "" {
+		return "", fmt.Errorf("workpool %s has no service account configured", spec.WorkpoolID)
+	}
 
 	if spec.Region == "" {
 		return "", fmt.Errorf("workpool %s has no region configured", spec.WorkpoolID)
@@ -70,11 +105,10 @@ func (c *GCPBatchAPIClient) CreateJob(ctx context.Context, spec *WorkerJobSpec) 
 		})
 	}
 
+	workerArgs := fmt.Sprintf("--batch %s --project %s --db %s --workpool %s --work-dir %s --resources %s --linger %d", spec.BatchID, c.project, spec.DBName, spec.WorkpoolID, spec.RootDir, formatResources(spec.Resources), spec.LingerTime/time.Second)
+	log.Printf("worker args: %s", workerArgs)
+
 	job := &batch.Job{
-		Labels: map[string]string{
-			labelBatch:    spec.BatchID,
-			labelWorkpool: spec.WorkpoolID,
-		},
 		TaskGroups: []*batch.TaskGroup{
 			{
 				TaskCount: int64(spec.VMCount),
@@ -90,14 +124,15 @@ func (c *GCPBatchAPIClient) CreateJob(ctx context.Context, spec *WorkerJobSpec) 
 									spec.SparklesWorkerGCSPath,
 									spec.RootDir + "/sparkles",
 								},
+								Volumes: []string{spec.RootDir + ":" + spec.RootDir},
 							},
 						},
 						{
 							// Make the binary executable and run it.
 							Script: &batch.Script{
 								Text: fmt.Sprintf(
-									"chmod +x %s/sparkles && exec %s/sparkles --root-dir %s",
-									spec.RootDir, spec.RootDir, spec.RootDir,
+									"chmod +x %s/sparkles && exec %s/sparkles worker %s",
+									spec.RootDir, spec.RootDir, workerArgs,
 								),
 							},
 						},
@@ -115,16 +150,34 @@ func (c *GCPBatchAPIClient) CreateJob(ctx context.Context, spec *WorkerJobSpec) 
 					},
 				},
 			},
+			ServiceAccount: &batch.ServiceAccount{
+				Email: spec.ServiceAccount,
+			},
+			Labels: map[string]string{
+				labelWorkpool: spec.WorkpoolID,
+			},
+		},
+		LogsPolicy: &batch.LogsPolicy{
+			Destination: "CLOUD_LOGGING",
 		},
 		Notifications: []*batch.JobNotification{
 			{
 				PubsubTopic: fmt.Sprintf("projects/%s/topics/%s", c.project, pubsubNotificationTopic),
+				Message: &batch.Message{
+					Type: "JOB_STATE_CHANGED",
+				},
+			},
+			{
+				PubsubTopic: fmt.Sprintf("projects/%s/topics/%s", c.project, pubsubNotificationTopic),
+				Message: &batch.Message{
+					Type: "TASK_STATE_CHANGED",
+				},
 			},
 		},
 	}
 
 	parent := fmt.Sprintf("projects/%s/locations/%s", c.project, spec.Region)
-	created, err := c.batchSvc.Projects.Locations.Jobs.Create(parent, job).Context(ctx).Do()
+	created, err := c.batchSvc.Projects.Locations.Jobs.Create(parent, job).JobId(spec.BatchID).Context(ctx).Do()
 	if err != nil {
 		return "", fmt.Errorf("batch create job: %w", err)
 	}

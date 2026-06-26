@@ -44,8 +44,9 @@ type WorkpoolSpec struct {
 	SparklesWorkerGCSPath string              `json:"sparklesWorkerGCSPath"`
 	Resources             []v100.ResourceEntry  `json:"resources"`
 	EmptyVolumes          []v100.EmptyVolume    `json:"emptyVolumes"`
-	Region       string              `json:"region"`
-	Zones        []string            `json:"zones"`
+	Region         string   `json:"region"`
+	Zones          []string `json:"zones"`
+	ServiceAccount string   `json:"serviceAccount"`
 
 	MaxWorkerCount               int `json:"maxWorkerCount"`
 	MaxPreemptibleWorkerAttempts int `json:"maxPreemptibleWorkerAttempts"`
@@ -58,6 +59,7 @@ type WorkpoolSpec struct {
 	VMShutdownGracePeriodSec    int `json:"vmShutdownGracePeriodSec"`
 	MaxZombiesBeforeAbort       int `json:"maxZombiesBeforeAbort"`
 	MaxConsecutiveFailedBatches int `json:"maxConsecutiveFailedBatches"`
+	LingerTimeSec               int `json:"lingerTimeSec"`
 }
 
 func runDevSubmit(c *cli.Context) error {
@@ -180,6 +182,7 @@ func devSubmit(jobSpecFile, workpoolSpecFile, project, db string) error {
 		MachineType:           workpoolSpec.MachineType,
 		RootDir:               workpoolSpec.RootDir,
 		SparklesWorkerGCSPath: workpoolSpec.SparklesWorkerGCSPath,
+		ServiceAccount:        workpoolSpec.ServiceAccount,
 		Resources:             workpoolSpec.Resources,
 		EmptyVolumes:          workpoolSpec.EmptyVolumes,
 		Expiry:       time.Now().Add(7 * 24 * time.Hour),

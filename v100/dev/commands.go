@@ -84,6 +84,14 @@ func Command() cli.Command {
 				Action: runDevDashboardBackend,
 			},
 			{
+				Name:  "create-topics",
+				Usage: "Create all Pub/Sub topics and subscriptions required by sparklespray",
+				Flags: []cli.Flag{
+					cli.StringFlag{Name: "project"},
+				},
+				Action: runDevCreateTopics,
+			},
+			{
 				Name:  "batchapi-emulator",
 				Usage: "Run a local batch API emulator for testing",
 				Flags: []cli.Flag{

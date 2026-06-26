@@ -1,12 +1,16 @@
 {
   "id": "sample-workpool",
-  "machineType": "n1-standard-4",
-  "rootDir": "/tmp/sparkles",
-  "region": "emulator",
-  "zones": ["emulator-zone-a", "emulator-zone-b", "emulator-zone-c"],
+  "machineType": "n2-standard-4",
+  "rootDir": "/mnt/sparkles",
+  "region": "us-central1",
+  "zones": ["us-central1-a", "us-central1-b", "us-central1-c", "us-central1-f"],
   "maxWorkerCount": 4,
   "maxPreemptibleWorkerAttempts": 0,
   "maxWorkersPerRequest": 2,
-  "resources": [],
-  "emptyVolumes": []
+  "resources": [{ "name": "slots", "value": 1 }],
+  "emptyVolumes": [],
+  "sparklesWorkerGCSPath": "gs://sparkles-test-0625/bin/sparkles-linux-amd64-dev",
+  "serviceAccount": "sparkles-lnibyae4xk@sparkles-test-0625.iam.gserviceaccount.com",
+  "dbName": "sparkles",
+  "lingerTimeSec": 600
 }
