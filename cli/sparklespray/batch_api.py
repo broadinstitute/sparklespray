@@ -339,6 +339,17 @@ def is_job_successful(job: batch.Job):
 import re
 
 
+def print_job_failure_debug(job: batch.Job):
+    print(f"\nBatch job {job.name} FAILED (state: {job.status.state.name})")
+    if job.status.status_events:
+        print("  Status events:")
+        for event in job.status.status_events:
+            print(f"    [{event.event_time}] {event.type_}: {event.description}")
+    else:
+        print("  No status events available.")
+    attempt_to_print_log_url(job.name)
+
+
 def attempt_to_print_log_url(batch_job_name):
     m = re.match("projects/([^/]+)/locations/([^/]+)/jobs/([^/]+)", batch_job_name)
     if m is None:
@@ -358,6 +369,7 @@ class ClusterAPI:
     ):
         self.batch_service = batch_service_client
         self.compute_engine_client = compute_engine_client
+        self._reported_failed_jobs: set = set()
 
     def create_job(
         self,
@@ -406,6 +418,9 @@ class ClusterAPI:
         #     breakpoint()
         node_reqs = []
         for job in jobs:
+            if job.status.state == batch.JobStatus.State.FAILED and job.name not in self._reported_failed_jobs:
+                self._reported_failed_jobs.add(job.name)
+                print_job_failure_debug(job)
             assert len(job.task_groups) == 1
             # tasks = self._get_tasks_for_job(job)
             node_reqs.extend(to_node_reqs(job))

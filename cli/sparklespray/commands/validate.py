@@ -54,7 +54,7 @@ def validate_cmd(jq: JobQueue, io: IO, config: Config, cluster_api: ClusterAPI):
 
     print("Verifying we can access google's Batch apis by creating test job")
     from ..worker_job import create_test_job
-    from ..batch_api import is_job_complete, is_job_successful
+    from ..batch_api import is_job_complete, is_job_successful, print_job_failure_debug
     from ..gcp_utils import make_unique_label
 
     job = create_test_job(
@@ -70,9 +70,9 @@ def validate_cmd(jq: JobQueue, io: IO, config: Config, cluster_api: ClusterAPI):
     while True:
         status = cluster_api.get_job_status(operation_id)
         if is_job_complete(status):
-            assert is_job_successful(
-                status
-            ), f"Job did not complete successfully: {status}"
+            if not is_job_successful(status):
+                print_job_failure_debug(status)
+                assert False, f"Job did not complete successfully"
             break
         else:
             print(".", end="", flush=True)
