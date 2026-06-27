@@ -4,7 +4,7 @@
   "rootDir": "/mnt/sparkles",
   "region": "us-central1",
   "zones": ["us-central1-a", "us-central1-b", "us-central1-c", "us-central1-f"],
-  "maxWorkerCount": 4,
+  "maxWorkerCount": 2,
   "maxPreemptibleWorkerAttempts": 0,
   "maxWorkersPerRequest": 2,
   "resources": [{ "name": "slots", "value": 1 }],

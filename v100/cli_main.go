@@ -46,6 +46,7 @@ func NewApp() *cli.App {
 				cli.StringFlag{Name: "resources"},
 				cli.StringFlag{Name: "batch", Usage: "batch ID for this worker"},
 				cli.IntFlag{Name: "linger", Usage: "seconds to keep polling after the queue is empty (leader worker only)"},
+				cli.BoolFlag{Name: "stream", Usage: "stream task output to Firestore immediately when a task starts"},
 				cli.BoolFlag{Name: "no-gcp", Usage: "local development mode: skip GCP metadata server"},
 				cli.BoolFlag{Name: "no-docker", Usage: "run task commands directly without Docker (ignores image name)"},
 				cli.StringSliceFlag{Name: "bind-mount", Usage: "additional Docker bind mounts (host:container), may be repeated"},

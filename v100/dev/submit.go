@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	"cloud.google.com/go/firestore"
@@ -23,11 +24,11 @@ import (
 
 // JobSpec is the JSON schema for the job spec file passed to "dev submit".
 type JobSpec struct {
-	Name            string              `json:"name"`
+	Name            string                `json:"name"`
 	Resources       []v100.ResourceEntry  `json:"resources"`
 	FilesToLocalize []v100.FileToLocalize `json:"filesToLocalize"`
 	Labels          []v100.Label          `json:"labels"`
-	Tasks           []JobSpecTask       `json:"tasks"`
+	Tasks           []JobSpecTask         `json:"tasks"`
 }
 
 // JobSpecTask describes a single task within a JobSpec.
@@ -38,15 +39,15 @@ type JobSpecTask struct {
 
 // WorkpoolSpec is the JSON schema for the workpool spec file passed to "dev submit".
 type WorkpoolSpec struct {
-	ID                    string              `json:"id"`
-	MachineType           string              `json:"machineType"`
-	RootDir               string              `json:"rootDir"`
-	SparklesWorkerGCSPath string              `json:"sparklesWorkerGCSPath"`
-	Resources             []v100.ResourceEntry  `json:"resources"`
-	EmptyVolumes          []v100.EmptyVolume    `json:"emptyVolumes"`
-	Region         string   `json:"region"`
-	Zones          []string `json:"zones"`
-	ServiceAccount string   `json:"serviceAccount"`
+	ID                    string               `json:"id"`
+	MachineType           string               `json:"machineType"`
+	RootDir               string               `json:"rootDir"`
+	SparklesWorkerGCSPath string               `json:"sparklesWorkerGCSPath"`
+	Resources             []v100.ResourceEntry `json:"resources"`
+	EmptyVolumes          []v100.EmptyVolume   `json:"emptyVolumes"`
+	Region                string               `json:"region"`
+	Zones                 []string             `json:"zones"`
+	ServiceAccount        string               `json:"serviceAccount"`
 
 	MaxWorkerCount               int `json:"maxWorkerCount"`
 	MaxPreemptibleWorkerAttempts int `json:"maxPreemptibleWorkerAttempts"`
@@ -76,7 +77,11 @@ func runDevSubmit(c *cli.Context) error {
 	if project == "" {
 		return fmt.Errorf("--project is required")
 	}
-	return devSubmit(jobSpecFile, workpoolSpecFile, project, c.String("db"))
+	gcsPrefix := c.String("gcs-prefix")
+	if gcsPrefix == "" {
+		return fmt.Errorf("--gcs-prefix is required")
+	}
+	return devSubmit(jobSpecFile, workpoolSpecFile, project, c.String("db"), gcsPrefix)
 }
 
 func readJSON[T any](path string) (*T, error) {
@@ -103,7 +108,7 @@ func resolveWorkpoolID(workpoolSpec *WorkpoolSpec) (string, error) {
 	return hex.EncodeToString(sum[:]), nil
 }
 
-func devSubmit(jobSpecFile, workpoolSpecFile, project, db string) error {
+func devSubmit(jobSpecFile, workpoolSpecFile, project, db, gcsPrefix string) error {
 	jobSpec, err := readJSON[JobSpec](jobSpecFile)
 	if err != nil {
 		return err
@@ -185,9 +190,9 @@ func devSubmit(jobSpecFile, workpoolSpecFile, project, db string) error {
 		ServiceAccount:        workpoolSpec.ServiceAccount,
 		Resources:             workpoolSpec.Resources,
 		EmptyVolumes:          workpoolSpec.EmptyVolumes,
-		Expiry:       time.Now().Add(7 * 24 * time.Hour),
-		Region:       workpoolSpec.Region,
-		Zones:        workpoolSpec.Zones,
+		Expiry:                time.Now().Add(7 * 24 * time.Hour),
+		Region:                workpoolSpec.Region,
+		Zones:                 workpoolSpec.Zones,
 
 		MaxWorkerCount:               workpoolSpec.MaxWorkerCount,
 		MaxPreemptibleWorkerAttempts: workpoolSpec.MaxPreemptibleWorkerAttempts,
@@ -231,6 +236,7 @@ func devSubmit(jobSpecFile, workpoolSpecFile, project, db string) error {
 			return err
 		}
 		for i, t := range jobSpec.Tasks {
+			taskPrefix := fmt.Sprintf("%s/%s/%d", gcsPrefix, jobSpec.Name, i)
 			task := v100.Task{
 				JobID:           jobID,
 				TaskID:          taskIDs[i],
@@ -240,6 +246,8 @@ func devSubmit(jobSpecFile, workpoolSpecFile, project, db string) error {
 				Command:         t.Command,
 				DockerImage:     t.DockerImage,
 				FilesToLocalize: jobSpec.FilesToLocalize,
+				ResultPath:      taskPrefix,
+				LogPath:         taskPrefix + "/stdout.txt",
 			}
 			if err := tx.Set(fsClient.Collection(v100.TaskCollection).Doc(taskIDs[i]), task); err != nil {
 				return err
@@ -273,6 +281,77 @@ func devSubmit(jobSpecFile, workpoolSpecFile, project, db string) error {
 	if err := ep.PublishJobCreated(ctx, v100.JobCreatedEvent{JobID: jobID, WorkpoolID: workpoolID}); err != nil {
 		log.Printf("devSubmit: publishing job_created event: %v", err)
 	}
+
+	terminalStatuses := map[string]bool{
+		v100.StatusSuccess: true,
+		v100.StatusError:   true,
+		v100.StatusFailed:  true,
+		v100.StatusKilled:  true,
+	}
+
+	lastFetchedTime := now
+	printNewLogEntries := func() {
+		logDocs, err := fsClient.Collection("TaskLog").
+			Where("timestamp", ">", lastFetchedTime).
+			OrderBy("timestamp", firestore.Asc).
+			Documents(ctx).GetAll()
+		if err != nil {
+			log.Printf("querying TaskLog: %v", err)
+			return
+		}
+		for _, doc := range logDocs {
+			var entry v100.OutputTaskEvent
+			if err := doc.DataTo(&entry); err != nil {
+				continue
+			}
+			lastFetchedTime = entry.Timestamp
+			if entry.Type == "output" {
+				fmt.Printf("%s [%s] %s: %s", entry.Timestamp.Format("15:04:05"), entry.Type, entry.TaskID, entry.Content)
+			} else {
+				fmt.Printf("%s [%s] %s\n", entry.Timestamp.Format("15:04:05"), entry.Type, entry.TaskID)
+			}
+		}
+	}
+
+	for {
+		printNewLogEntries()
+
+		docs, err := fsClient.Collection(v100.TaskCollection).
+			Where("job_id", "==", jobID).
+			Documents(ctx).GetAll()
+		if err != nil {
+			return fmt.Errorf("querying tasks: %w", err)
+		}
+
+		counts := make(map[string]int)
+		for _, doc := range docs {
+			var t v100.Task
+			if err := doc.DataTo(&t); err != nil {
+				continue
+			}
+			counts[t.Status]++
+		}
+
+		parts := make([]string, 0, len(counts))
+		for status, count := range counts {
+			parts = append(parts, fmt.Sprintf("%s: %d", status, count))
+		}
+		fmt.Printf("%s %s\n", time.Now().Format("15:04:05"), strings.Join(parts, ", "))
+
+		totalTerminal := 0
+		for status, count := range counts {
+			if terminalStatuses[status] {
+				totalTerminal += count
+			}
+		}
+		if totalTerminal == len(docs) {
+			break
+		}
+
+		time.Sleep(3 * time.Second)
+	}
+
+	printNewLogEntries()
 
 	return nil
 }

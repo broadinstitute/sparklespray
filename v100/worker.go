@@ -111,8 +111,9 @@ func runWorker(c *cli.Context) error {
 
 	batchID := c.String("batch")
 	lingerTime := time.Duration(c.Int("linger")) * time.Second
+	streamLogs := c.Bool("stream")
 
-	ws, err := startWorker(ctx, project, db, workerID, workpoolID, batchID, noGCP, noDocker, bindMounts, workDirParent, lingerTime)
+	ws, err := startWorker(ctx, project, db, workerID, workpoolID, batchID, noGCP, noDocker, streamLogs, bindMounts, workDirParent, lingerTime)
 	if err != nil {
 		return err
 	}
@@ -149,7 +150,7 @@ func executeTask(task *Task, resources Resources, completions chan<- taskComplet
 func executeDockerCommand(ctx context.Context, imageName string, command []string, workDir string, extraDockerArgs []string, tel *TaskEventLog) (*ResourceUsage, error) {
 	containerName := "sparkles-" + uuid.New().String()[:8]
 
-	args := append([]string{"run", "--name", containerName, "-w", workDir}, extraDockerArgs...)
+	args := append([]string{"docker", "run", "--name", containerName, "-w", workDir}, extraDockerArgs...)
 	args = append(args, imageName)
 	args = append(args, command...)
 
@@ -208,8 +209,9 @@ type WorkerLoopConfig struct {
 	BindMounts           []string
 	Registry             *taskRegistry
 	FSClient             *firestore.Client
-	ExecuteDockerCommand func(ctx context.Context, imageName string, command []string, workDir string, extraDockerArgs []string, tel *TaskEventLog) (*ResourceUsage, error)
-	LingerTime           time.Duration
+	ExecuteDockerCommand    func(ctx context.Context, imageName string, command []string, workDir string, extraDockerArgs []string, tel *TaskEventLog) (*ResourceUsage, error)
+	LingerTime              time.Duration
+	StartStreamingAtStart   bool
 }
 
 // ErrTaskKilled is returned by the task callback when a task was cancelled via a kill_job message.
@@ -416,6 +418,13 @@ func workerMainLoop(ctx context.Context, cfg *WorkerLoopConfig) error {
 					return fmt.Errorf("opening task event log for %s: %w", t.TaskID, err)
 				}
 				cfg.Registry.register(t.TaskID, t.JobID, tel, cancel)
+
+				if cfg.StartStreamingAtStart {
+					if err := tel.StartStreaming(); err != nil {
+						return fmt.Errorf("failed to start streaming %s: %w", t.TaskID, err)
+					}
+				}
+
 				defer cfg.Registry.unregister(t.TaskID)
 				if err := cfg.Queue.UpdateState(ctx, t.TaskID, StatusClaimed, StatusRunning); err != nil {
 					tel.Close()
@@ -478,8 +487,9 @@ func (ws *workerState) mainLoop(ctx context.Context, resources *Resources) error
 		BindMounts:           ws.bindMounts,
 		Registry:             ws.registry,
 		FSClient:             ws.fsClient,
-		ExecuteDockerCommand: execFn,
-		LingerTime:           ws.lingerTime,
+		ExecuteDockerCommand:  execFn,
+		LingerTime:            ws.lingerTime,
+		StartStreamingAtStart: ws.streamLogs,
 	})
 }
 
@@ -549,6 +559,7 @@ type WorkerRunConfig struct {
 	WorkDirParent string
 	BatchID       string
 	LingerTime    time.Duration
+	StreamLogs    bool
 }
 
 // RunWorker starts a worker and blocks until ctx is cancelled or all pending
@@ -561,7 +572,7 @@ func RunWorker(ctx context.Context, cfg WorkerRunConfig) error {
 	}
 
 	log.Printf("Starting worker %s in workpool %s", cfg.WorkerID, cfg.WorkpoolID)
-	ws, err := startWorker(ctx, cfg.Project, cfg.DB, cfg.WorkerID, cfg.WorkpoolID, cfg.BatchID, cfg.NoGCP, cfg.NoDocker, cfg.BindMounts, cfg.WorkDirParent, cfg.LingerTime)
+	ws, err := startWorker(ctx, cfg.Project, cfg.DB, cfg.WorkerID, cfg.WorkpoolID, cfg.BatchID, cfg.NoGCP, cfg.NoDocker, cfg.StreamLogs, cfg.BindMounts, cfg.WorkDirParent, cfg.LingerTime)
 	if err != nil {
 		return fmt.Errorf("starting worker: %w", err)
 	}
@@ -733,6 +744,7 @@ type workerState struct {
 	bindMounts     []string
 	workDirParent  string
 	lingerTime     time.Duration
+	streamLogs     bool
 	noDocker       bool
 }
 
@@ -743,7 +755,7 @@ func (ws *workerState) cleanup() {
 	ws.fsClient.Close()
 }
 
-func startWorker(ctx context.Context, project, db, workerID, workpoolID, batchID string, noGCP, noDocker bool, bindMounts []string, workDirParent string, lingerTime time.Duration) (*workerState, error) {
+func startWorker(ctx context.Context, project, db, workerID, workpoolID, batchID string, noGCP, noDocker, streamLogs bool, bindMounts []string, workDirParent string, lingerTime time.Duration) (*workerState, error) {
 	var fsClient *firestore.Client
 	var err error
 	if db != "" {
@@ -889,6 +901,7 @@ func startWorker(ctx context.Context, project, db, workerID, workpoolID, batchID
 		bindMounts:     bindMounts,
 		workDirParent:  workDirParent,
 		lingerTime:     lingerTime,
+		streamLogs:     streamLogs,
 		noDocker:       noDocker,
 	}, nil
 }

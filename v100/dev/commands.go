@@ -19,6 +19,7 @@ func Command() cli.Command {
 				Flags: []cli.Flag{
 					cli.StringFlag{Name: "project"},
 					cli.StringFlag{Name: "db", Value: defaultDB},
+					cli.StringFlag{Name: "gcs-prefix", Usage: "GCS prefix for task result and log paths (e.g. gs://my-bucket/results)"},
 				},
 				Action: runDevSubmit,
 			},
