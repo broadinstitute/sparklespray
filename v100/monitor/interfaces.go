@@ -25,6 +25,8 @@ const (
 	BatchStatusStarted   BatchStatus = "started"
 	BatchStatusFailed    BatchStatus = "failed"
 	BatchStatusCompleted BatchStatus = "completed"
+	// BatchStatusDeleted marks a batch whose GCP Batch job no longer exists (404 from the API).
+	BatchStatusDeleted BatchStatus = "deleted"
 )
 
 // BatchJobStatus is the status returned by the GCP Batch API.
@@ -36,6 +38,9 @@ const (
 	BatchJobStatusRunning   BatchJobStatus = "RUNNING"
 	BatchJobStatusSucceeded BatchJobStatus = "SUCCEEDED"
 	BatchJobStatusFailed    BatchJobStatus = "FAILED"
+	// BatchJobStatusDeleted is a synthetic status returned when the GCP Batch API responds
+	// with 404 — the job no longer exists (e.g. it was manually deleted or expired).
+	BatchJobStatusDeleted BatchJobStatus = "DELETED"
 )
 
 // TaskStatus mirrors the active task states from datamodel.md.
@@ -169,6 +174,7 @@ type BatchAPIClient interface {
 	ListRunningVMs(ctx context.Context, filterLabelName, filterLabelValue string, zones []string) (map[string]VMInfo, error)
 	TerminateVM(ctx context.Context, zone, instanceName string) error
 	TerminateJob(ctx context.Context, jobID string) error
+	PrintBatchDebuggingInfo(ctx context.Context, jobID string) error
 }
 
 // WorkPoolStore reads and writes WorkPool documents.
@@ -364,4 +370,11 @@ type JobEventReceiver interface {
 // or a fatal Err that the monitor should propagate.
 type PubSubReceiver interface {
 	Notifications() <-chan Notification
+}
+
+// ExpiryStore deletes documents whose expiry timestamp is before now.
+type ExpiryStore interface {
+	// DeleteExpired removes all documents in the named collection with expiry < now.
+	// Returns the count of deleted documents.
+	DeleteExpired(ctx context.Context, collection string, now time.Time) (int, error)
 }

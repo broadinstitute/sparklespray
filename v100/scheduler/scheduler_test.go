@@ -193,21 +193,28 @@ func TestMultipleEntriesSoonestDueFirst(t *testing.T) {
 	s.Add(minDelay, 10*time.Second, func() { callsA++ })
 	s.Add(minDelay, 30*time.Second, func() { callsB++ })
 
-	// At t=10s: only A is due (maxDelay=10s). B is not due until t=30s.
+	// At t=0: both A and B are immediately due on first run.
 	timerCh, runDue := s.GetNextCallback()
+	<-timerCh
+	runDue()
+	assert.Equal(t, 1, callsA, "entry A should have run at t=0")
+	assert.Equal(t, 1, callsB, "entry B should have run at t=0")
+
+	// At t=10s: only A is due again (maxDelay=10s from lastRan=t0). B is not due until t=30s.
+	timerCh, runDue = s.GetNextCallback()
 	clock.Advance(10 * time.Second)
 	<-timerCh
 	runDue()
-	assert.Equal(t, 1, callsA, "entry A should have run")
-	assert.Equal(t, 0, callsB, "entry B should not have run yet")
+	assert.Equal(t, 2, callsA, "entry A should have run again")
+	assert.Equal(t, 1, callsB, "entry B should not have run yet")
 
-	// At t=30s: B is due (30s from registration). A is also due again (10s from lastRan=t10).
+	// At t=30s: B is due (30s from lastRan=t0). A is also due again (10s from lastRan=t10).
 	timerCh, runDue = s.GetNextCallback()
 	clock.Advance(20 * time.Second)
 	<-timerCh
 	runDue()
-	assert.Equal(t, 2, callsA, "entry A should have run again")
-	assert.Equal(t, 1, callsB, "entry B should have run")
+	assert.Equal(t, 3, callsA, "entry A should have run again")
+	assert.Equal(t, 2, callsB, "entry B should have run")
 }
 
 func TestInFlightLeadingEdgeSchedulesTrailingForLateNotify(t *testing.T) {
@@ -246,13 +253,23 @@ func TestStepLoopIntegration(t *testing.T) {
 	notify := s.Add(minDelay, maxDelay, func() { log = append(log, "A") })
 	s.Add(minDelay, maxDelay, func() { log = append(log, "B") })
 
-	// Notification fires on leading edge via the notify channel.
-	notify()
+	// At t=0: both A and B are immediately due. Timer fires, no advance needed.
 	notified := stepLoop(s, clock, 0)
+	assert.False(t, notified)
+	assert.ElementsMatch(t, []string{"A", "B"}, log)
+
+	// Advance past the minDelay cooldown, then trigger A via notify.
+	// The cooldown has elapsed so notify fires on the leading edge via the notify channel.
+	log = nil
+	clock.Advance(minDelay)
+	notify()
+	notified = stepLoop(s, clock, 0)
 	assert.True(t, notified)
 	assert.Equal(t, []string{"A"}, log)
 
-	// Advance past both maxDelays — scheduled timer fires both.
+	// Advance by maxDelay from the current position (epoch+minDelay).
+	// That brings the clock to epoch+minDelay+maxDelay, where B (due at epoch+maxDelay)
+	// and A (due at epoch+minDelay+maxDelay) are both past their next scheduled run.
 	log = nil
 	stepLoop(s, clock, maxDelay)
 	assert.ElementsMatch(t, []string{"A", "B"}, log)

@@ -2,6 +2,7 @@ package monitor
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"cloud.google.com/go/firestore"
@@ -12,14 +13,18 @@ const batchRequestCollection = "BatchAPIRequests"
 const workpoolCollection = "WorkPools"
 const workerCollection = "Workers"
 const taskCollection = "Tasks"
+const eventsCollection = "Events"
+const taskLogCollection = "TaskLog"
 
 // Exported for use by functional tests.
 const (
-	CollectionWorkPools   = workpoolCollection
-	CollectionBatches     = batchRequestCollection
-	CollectionWorkers     = workerCollection
-	CollectionTasks       = taskCollection
-	CollectionJobSummary  = jobSummaryCollection
+	CollectionWorkPools              = workpoolCollection
+	CollectionBatches                = batchRequestCollection
+	CollectionWorkers                = workerCollection
+	CollectionTasks                  = taskCollection
+	CollectionJobSummary             = jobSummaryCollection
+	CollectionEvents                 = eventsCollection
+	CollectionTaskLog                = taskLogCollection
 )
 
 // firestoreWorkPool is the Firestore representation of a workpool document.
@@ -635,4 +640,56 @@ func (s *FirestoreWorkPoolSummaryStore) Save(ctx context.Context, summary *WorkP
 func (s *FirestoreWorkPoolSummaryStore) SaveHistory(ctx context.Context, history *WorkPoolSummaryHistory) error {
 	_, _, err := s.fs.Collection(workPoolSummaryHistoryCollection).Add(ctx, history)
 	return err
+}
+
+// ----- FirestoreExpiryStore -----
+
+type FirestoreExpiryStore struct {
+	fs *firestore.Client
+}
+
+func NewFirestoreExpiryStore(fs *firestore.Client) *FirestoreExpiryStore {
+	return &FirestoreExpiryStore{fs: fs}
+}
+
+// DeleteExpired deletes all documents in collection where expiry < now.
+// Documents are deleted in batches of 500 (Firestore batch write limit).
+// Returns the total count of deleted documents.
+func (s *FirestoreExpiryStore) DeleteExpired(ctx context.Context, collection string, now time.Time) (int, error) {
+	iter := s.fs.Collection(collection).
+		Where("expiry", "<", now).
+		Documents(ctx)
+	defer iter.Stop()
+
+	const maxBatch = 500
+	total := 0
+	for {
+		var refs []*firestore.DocumentRef
+		done := false
+		for len(refs) < maxBatch {
+			snap, err := iter.Next()
+			if err == iterator.Done {
+				done = true
+				break
+			}
+			if err != nil {
+				return total, fmt.Errorf("iterate %s: %w", collection, err)
+			}
+			refs = append(refs, snap.Ref)
+		}
+		if len(refs) > 0 {
+			bw := s.fs.Batch()
+			for _, ref := range refs {
+				bw.Delete(ref)
+			}
+			if _, err := bw.Commit(ctx); err != nil {
+				return total, fmt.Errorf("batch delete %s: %w", collection, err)
+			}
+			total += len(refs)
+		}
+		if done {
+			break
+		}
+	}
+	return total, nil
 }

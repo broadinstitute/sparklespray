@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"log"
 
 	"cloud.google.com/go/pubsub/v2"
@@ -15,12 +16,6 @@ import (
 const batchAPINotificationsSubscription = "batch-api-notifications"
 const sparklesEventsTopic = "sparkles-events"
 const monitorEventsSubscription = "monitor-events-in"
-
-// batchNotificationMessage is the JSON payload published by GCP Batch API
-// state-change notifications.
-type batchNotificationMessage struct {
-	JobName string `json:"jobName"`
-}
 
 // GCPPubSubReceiver implements PubSubReceiver by pulling from a GCP Pub/Sub
 // subscription. It reverse-looks up the internal batch_id from the GCP job
@@ -88,18 +83,32 @@ func NewGCPPubSubReceiver(ctx context.Context, project string, batches BatchRequ
 		err := sub.Receive(ctx, func(ctx context.Context, msg *pubsub.Message) {
 			msg.Ack()
 
-			var n batchNotificationMessage
-			if err := json.Unmarshal(msg.Data, &n); err != nil {
-				log.Printf("pubsub: failed to parse notification: %v", err)
-				return
+			attrs := make([]string, 0, len(msg.Attributes))
+			for k, v := range msg.Attributes {
+				attrs = append(attrs, k+"="+v)
 			}
-			if n.JobName == "" {
+			log.Printf("pubsub: message arrived with attributes: %v", attrs)
+
+			jobName := msg.Attributes["JobName"]
+			if jobName == "" {
+				if taskName := msg.Attributes["TaskName"]; taskName != "" {
+					if prefix, _, ok := strings.Cut(taskName, "/taskGroups/"); ok {
+						jobName = prefix
+					}
+				}
+			}
+			if jobName == "" {
+				attrs := make([]string, 0, len(msg.Attributes))
+				for k, v := range msg.Attributes {
+					attrs = append(attrs, k+"="+v)
+				}
+				log.Printf("pubsub: missing JobName/TaskName attribute, data was: \"%s\", attributes: %v", msg.Data, attrs)
 				return
 			}
 
-			batch, err := batches.GetByJobID(ctx, n.JobName)
+			batch, err := batches.GetByJobID(ctx, jobName)
 			if err != nil {
-				log.Printf("pubsub: lookup batch for job %s: %v", n.JobName, err)
+				log.Printf("pubsub: lookup batch for job %s: %v", jobName, err)
 				return
 			}
 			if batch == nil {

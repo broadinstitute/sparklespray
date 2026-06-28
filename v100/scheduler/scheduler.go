@@ -144,12 +144,12 @@ type schedEntry struct {
 // nextDue returns when this entry should next run via the scheduled path.
 // Must be called with e.mu held.
 func (e *schedEntry) nextDue() time.Time {
-	base := e.registeredAt
-	if !e.lastRan.IsZero() {
-		base = e.lastRan
+	if e.lastRan.IsZero() {
+		// Never run: fire immediately at registration time.
+		return e.registeredAt
 	}
-	maxDue := base.Add(e.maxDelay)
 
+	maxDue := e.lastRan.Add(e.maxDelay)
 	if !e.trailingAt.IsZero() && e.trailingAt.Before(maxDue) {
 		return e.trailingAt
 	}

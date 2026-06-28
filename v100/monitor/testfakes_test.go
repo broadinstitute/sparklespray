@@ -189,6 +189,10 @@ func (f *FakeBatchAPIClient) TerminateJob(ctx context.Context, jobID string) err
 	return nil
 }
 
+func (f *FakeBatchAPIClient) PrintBatchDebuggingInfo(ctx context.Context, jobID string) error {
+	return nil
+}
+
 // ActiveVMCount returns the number of VMs currently tracked for a job.
 func (f *FakeBatchAPIClient) ActiveVMCount(jobID string) int {
 	f.mu.Lock()

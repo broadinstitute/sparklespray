@@ -32,6 +32,7 @@ const heartbeatPeriod = 1 * time.Minute
 const workerOutTopic = "sparkles-events"
 const workerInTopic = "sparkles-worker-in"
 const workerCollection = "Workers"
+const dockerExecutable = "/usr/bin/docker"
 
 type WorkerRecord struct {
 	WorkerID        string    `firestore:"worker_id"`
@@ -150,11 +151,11 @@ func executeTask(task *Task, resources Resources, completions chan<- taskComplet
 func executeDockerCommand(ctx context.Context, imageName string, command []string, workDir string, extraDockerArgs []string, tel *TaskEventLog) (*ResourceUsage, error) {
 	containerName := "sparkles-" + uuid.New().String()[:8]
 
-	args := append([]string{"docker", "run", "--name", containerName, "-w", workDir}, extraDockerArgs...)
+	args := append([]string{"run", "--name", containerName, "-w", workDir}, extraDockerArgs...)
 	args = append(args, imageName)
 	args = append(args, command...)
 
-	cmd := exec.CommandContext(ctx, "docker", args...)
+	cmd := exec.CommandContext(ctx, dockerExecutable, args...)
 
 	pr, pw := io.Pipe()
 	cmd.Stdout = pw
@@ -189,7 +190,7 @@ func executeDockerCommand(ctx context.Context, imageName string, command []strin
 
 	// Collect resource usage while the container still exists, then remove it.
 	ru := collectDockerResourceUsage(containerName)
-	if rmOut, rmErr := exec.Command("docker", "rm", "-f", containerName).CombinedOutput(); rmErr != nil {
+	if rmOut, rmErr := exec.Command(dockerExecutable, "rm", "-f", containerName).CombinedOutput(); rmErr != nil {
 		log.Printf("docker rm %s: %v: %s", containerName, rmErr, rmOut)
 	}
 
@@ -200,18 +201,18 @@ func executeDockerCommand(ctx context.Context, imageName string, command []strin
 }
 
 type WorkerLoopConfig struct {
-	WorkpoolID           string
-	WorkerID             string
-	Queue                TaskQueue
-	Resources            *Resources
-	TransferClient       TransferClient
-	WorkDirParent        string
-	BindMounts           []string
-	Registry             *taskRegistry
-	FSClient             *firestore.Client
-	ExecuteDockerCommand    func(ctx context.Context, imageName string, command []string, workDir string, extraDockerArgs []string, tel *TaskEventLog) (*ResourceUsage, error)
-	LingerTime              time.Duration
-	StartStreamingAtStart   bool
+	WorkpoolID            string
+	WorkerID              string
+	Queue                 TaskQueue
+	Resources             *Resources
+	TransferClient        TransferClient
+	WorkDirParent         string
+	BindMounts            []string
+	Registry              *taskRegistry
+	FSClient              *firestore.Client
+	ExecuteDockerCommand  func(ctx context.Context, imageName string, command []string, workDir string, extraDockerArgs []string, tel *TaskEventLog) (*ResourceUsage, error)
+	LingerTime            time.Duration
+	StartStreamingAtStart bool
 }
 
 // ErrTaskKilled is returned by the task callback when a task was cancelled via a kill_job message.
@@ -238,14 +239,19 @@ func getPendingTask(ctx context.Context, lingerTime time.Duration, WorkpoolID st
 
 		// if we're the leader linger, if we're not, exit loop immediately
 		if leaderStatus == UnknownLeader {
-			if isLeader() {
+			if lingerTime == 0 {
+				// if the linger time is 0, then it doesn't matter if we're the leader
+				// or not. Skip the check. This is really this way to make it make writing
+				// a unit test slightly easier
+				leaderStatus = IsNotLeader
+			} else if isLeader() {
 				leaderStatus = IsLeader
 			} else {
 				leaderStatus = IsNotLeader
 			}
 		}
 
-		if time.Now().After(lingerDeadline) || leaderStatus != IsNotLeader {
+		if time.Now().After(lingerDeadline) || leaderStatus == IsNotLeader {
 			// if our deadline expired, or we're not the leader, abort loop
 			break
 		}
@@ -270,204 +276,250 @@ func isWorkerWithLowestID(ctx context.Context, fsClient *firestore.Client, worke
 	docs, err := fsClient.Collection(workerCollection).
 		Where("workpool_id", "==", workpoolID).
 		Where("heartbeat_expiry", ">", now).
-		OrderBy("__name__", firestore.Asc).
-		Limit(1).
 		Select("__name__").
 		Documents(ctx).GetAll()
 	if err != nil {
 		log.Printf("isWorkerWithLowestID: querying workers: %v", err)
 		return false
 	}
-	if len(docs) == 0 {
-		log.Printf("Internal error: isWorkerWithLowestID found no matching IDs")
-		return false
+	for _, doc := range docs {
+		if doc.Ref.ID < workerID {
+			return false
+		}
 	}
-	return docs[0].Ref.ID == workerID
+	return true
 }
 
-func workerMainLoop(ctx context.Context, cfg *WorkerLoopConfig) error {
-	completions := make(chan taskCompletion, 100)
-	runningCount := 0
-	curResources := cfg.Resources
+type loopState struct {
+	completions  chan taskCompletion
+	runningCount int
+	curResources *Resources
+}
 
-	log.Printf("Starting workerMainLoop, querying for tasks...")
-	// curResources is the single-goroutine mutable running total of available capacity.
-	// Only waitForCompletion and the claim path touch it, both on this goroutine.
-	waitForCompletion := func() error {
-		select {
-		case c := <-completions:
-			curResources = curResources.Add(c.resources)
-			runningCount--
-			if errors.Is(c.err, ErrTaskKilled) {
-				if err := cfg.Queue.RecordKilled(ctx, c.taskID, false); err != nil {
-					log.Printf("recording task %s as killed: %v", c.taskID, err)
-					return err
-				}
-			} else if c.err != nil {
-				log.Printf("task %s failed: %v", c.taskID, c.err)
-				var exitErr *exec.ExitError
-				if errors.As(c.err, &exitErr) {
-					if err := cfg.Queue.RecordError(ctx, c.taskID, exitErr.ExitCode()); err != nil {
-						log.Printf("recording task %s error (exit %d): %v", c.taskID, exitErr.ExitCode(), err)
-						return err
-					}
-				} else if err := cfg.Queue.RecordFailed(ctx, c.taskID, c.err.Error(), StatusClaimed); err != nil {
-					log.Printf("recording task %s as failed: %v", c.taskID, err)
-					return err
-				}
-			} else {
-				if err := cfg.Queue.UpdateState(ctx, c.taskID, StatusWriting, StatusSuccess); err != nil {
-					log.Printf("recording task %s as success: %v", c.taskID, err)
-					return err
-				}
+func (ls *loopState) waitForCompletion(ctx context.Context, queue TaskQueue) error {
+	select {
+	case c := <-ls.completions:
+		ls.curResources = ls.curResources.Add(c.resources)
+		ls.runningCount--
+		if errors.Is(c.err, ErrTaskKilled) {
+			if err := queue.RecordKilled(ctx, c.taskID, false); err != nil {
+				log.Printf("recording task %s as killed: %v", c.taskID, err)
+				return err
 			}
-			return nil
-		case <-ctx.Done():
-			return ctx.Err()
+		} else if c.err != nil {
+			log.Printf("task %s failed: %v", c.taskID, c.err)
+			var exitErr *exec.ExitError
+			if errors.As(c.err, &exitErr) {
+				if err := queue.RecordError(ctx, c.taskID, exitErr.ExitCode()); err != nil {
+					log.Printf("recording task %s error (exit %d): %v", c.taskID, exitErr.ExitCode(), err)
+					return err
+				}
+			} else if err := queue.RecordFailed(ctx, c.taskID, c.err.Error(), StatusClaimed); err != nil {
+				log.Printf("recording task %s as failed: %v", c.taskID, err)
+				return err
+			}
+		} else {
+			if err := queue.UpdateState(ctx, c.taskID, StatusWriting, StatusSuccess); err != nil {
+				log.Printf("recording task %s as success: %v", c.taskID, err)
+				return err
+			}
+		}
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (ls *loopState) drainCompletions(ctx context.Context, queue TaskQueue) error {
+	for len(ls.completions) > 0 {
+		if err := ls.waitForCompletion(ctx, queue); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func loadJobResources(job *Job) Resources {
+	jobResources := NewResources()
+	for _, entry := range job.Resources {
+		jobResources.Set(entry.Name, entry.Value)
+	}
+	return jobResources
+}
+
+func failAllTasksForJob(ctx context.Context, queue TaskQueue, job *Job, workerID string) error {
+	for {
+		task, err := queue.ClaimTask(ctx, job.JobID, workerID)
+		if err != nil {
+			return fmt.Errorf("claiming task to fail for job %s: %w", job.JobID, err)
+		}
+		if task == nil {
+			break
+		}
+		if err := queue.RecordFailed(ctx, task.TaskID, "Task requires more resources than allowed by worker pool", StatusClaimed); err != nil {
+			return fmt.Errorf("recording task %s as failed: %w", task.TaskID, err)
+		}
+	}
+	return nil
+}
+
+func executeTaskBody(ctx context.Context, cfg *WorkerLoopConfig, t *Task) error {
+	log.Printf("Executing task %s", t.TaskID)
+	taskCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	files, err := resolveFilesToLocalize(taskCtx, cfg.TransferClient, t)
+	if err != nil {
+		return fmt.Errorf("resolving files to localize: %w", err)
+	}
+	paths, err := prepareWorkDir(taskCtx, cfg.TransferClient, cfg.WorkDirParent, files)
+	if err != nil {
+		return err
+	}
+
+	log.Printf("Prepared input files and the working dir %s", t.TaskID)
+	extraDockerArgs := buildDockerArgs(cfg.BindMounts, t)
+	tel, err := OpenTaskEventLog(ctx, paths.logPath, t.TaskID, paths.taskWorkDir, cfg.FSClient)
+	if err != nil {
+		return fmt.Errorf("opening task event log for %s: %w", t.TaskID, err)
+	}
+	cfg.Registry.register(t.TaskID, t.JobID, tel, cancel)
+
+	if cfg.StartStreamingAtStart {
+		if err := tel.StartStreaming(); err != nil {
+			return fmt.Errorf("failed to start streaming %s: %w", t.TaskID, err)
 		}
 	}
 
+	defer cfg.Registry.unregister(t.TaskID)
+	if err := cfg.Queue.UpdateState(ctx, t.TaskID, StatusClaimed, StatusRunning); err != nil {
+		tel.Close()
+		return fmt.Errorf("marking task %s running: %w", t.TaskID, err)
+	}
+	log.Printf("Task %s: Executing (%s) %s", t.TaskID, t.DockerImage, strings.Join(t.Command, " "))
+	ru, dockerExecErr := cfg.ExecuteDockerCommand(taskCtx, t.DockerImage, t.Command, paths.taskWorkDir, extraDockerArgs, tel)
+	if dockerExecErr != nil {
+		log.Printf("failed to exec: %s", dockerExecErr)
+	}
+	log.Printf("Task %s: Docker exec completed with err = %s", t.TaskID, dockerExecErr)
+	killed := cfg.Registry.wasKilled(t.TaskID)
+	if ru != nil {
+		if err := cfg.Queue.RecordResourceUsage(ctx, t.TaskID, ru); err != nil {
+			log.Printf("recording resource usage for task %s: %v", t.TaskID, err)
+		}
+	}
+	flushErr := tel.Flush()
+	var uploadResultsErr error
+	if !killed {
+		if err := cfg.Queue.UpdateState(ctx, t.TaskID, StatusRunning, StatusWriting); err != nil {
+			tel.Close()
+			return fmt.Errorf("marking task %s writing: %w", t.TaskID, err)
+		}
+		uploadResultsErr = uploadResults(ctx, cfg.TransferClient, paths, t.ResultPath, t.LogPath)
+	}
+	log.Printf("Task %s: Uploaded results", t.TaskID)
+	closeErr := tel.Close()
+	cleanupErr := cleanupWorkDir(paths)
+	log.Printf("Task %s: Cleaned up workdir %s", t.TaskID, paths.workDir)
+	if killed {
+		_ = mergeErrors(flushErr, closeErr, cleanupErr)
+		return ErrTaskKilled
+	}
+	finalErr := mergeErrors(dockerExecErr, flushErr, uploadResultsErr, closeErr, cleanupErr)
+	log.Printf("Task %s: execution returning err = %s", t.TaskID, finalErr)
+	return finalErr
+}
+
+func getJobWithPendingTask(ctx context.Context, cfg *WorkerLoopConfig, isLeader func() bool) (*Job, error) {
+	pendingTask, err := getPendingTask(ctx, cfg.LingerTime, cfg.WorkpoolID, cfg.Queue, isLeader)
+	if err != nil {
+		return nil, fmt.Errorf("getting pending task for workpool %s: %w", cfg.WorkpoolID, err)
+	}
+	if pendingTask == nil {
+		return nil, nil
+	}
+	job, err := cfg.Queue.GetJob(ctx, pendingTask.JobID)
+	if err != nil {
+		return nil, fmt.Errorf("getting job %s: %w", pendingTask.JobID, err)
+	}
+	return job, nil
+}
+
+func processJob(ctx context.Context, cfg *WorkerLoopConfig, ls *loopState, job *Job) error {
+	jobResources := loadJobResources(job)
+
+	for {
+		if err := ls.drainCompletions(ctx, cfg.Queue); err != nil {
+			return err
+		}
+
+		remaining := ls.curResources.Sub(jobResources)
+		if !remaining.IsValid() {
+			log.Printf("Insufficent resources to start a new task from job %s, waiting for a running task to complete", job.JobID)
+			if err := ls.waitForCompletion(ctx, cfg.Queue); err != nil {
+				return err
+			}
+			continue
+		}
+		log.Printf("Confirmed that we have sufficent resources to start a new task from job %s", job.JobID)
+
+		task, err := cfg.Queue.ClaimTask(ctx, job.JobID, cfg.WorkerID)
+		if err != nil {
+			return fmt.Errorf("claiming task: %w", err)
+		}
+		if task == nil {
+			log.Printf("No more tasks for job %s", job.JobID)
+			break
+		}
+
+		ls.curResources = remaining
+		ls.runningCount++
+		executeTask(task, jobResources, ls.completions, func(t *Task) error {
+			return executeTaskBody(ctx, cfg, t)
+		})
+	}
+	return nil
+}
+
+func workerMainLoop(ctx context.Context, cfg *WorkerLoopConfig) error {
+	ls := &loopState{
+		completions:  make(chan taskCompletion, 100),
+		curResources: cfg.Resources,
+	}
 	isLeader := func() bool {
 		return isWorkerWithLowestID(ctx, cfg.FSClient, cfg.WorkerID, cfg.WorkpoolID)
 	}
 
-	// loop until we're out of jobs with tasks
+	log.Printf("Starting workerMainLoop, querying for tasks...")
 	for {
-		pendingTask, err := getPendingTask(ctx, cfg.LingerTime, cfg.WorkpoolID, cfg.Queue, isLeader)
+		job, err := getJobWithPendingTask(ctx, cfg, isLeader)
 		if err != nil {
-			return fmt.Errorf("getting pending task %s: %w", cfg.WorkpoolID, err)
+			return err
 		}
-		if pendingTask == nil {
+		if job == nil {
 			break
 		}
 
-		job, err := cfg.Queue.GetJob(ctx, pendingTask.JobID)
-		if err != nil {
-			return fmt.Errorf("getting job %s: %w", pendingTask.JobID, err)
-		}
-
-		jobResources := NewResources()
-		for _, entry := range job.Resources {
-			jobResources.Set(entry.Name, entry.Value)
-		}
-
-		// check to make sure that this job can run at least one task if we used our full allocation of resources
-		if !cfg.Resources.Sub(jobResources).IsValid() {
+		if !cfg.Resources.Sub(loadJobResources(job)).IsValid() {
 			log.Printf("Job %s requires more resources than this worker can provide; failing all pending tasks", job.JobID)
-			for {
-				task, err := cfg.Queue.ClaimTask(ctx, job.JobID, cfg.WorkerID)
-				if err != nil {
-					return fmt.Errorf("claiming task to fail for job %s: %w", job.JobID, err)
-				}
-				if task == nil {
-					break
-				}
-				if err := cfg.Queue.RecordFailed(ctx, task.TaskID, "Task requires more resources than allowed by worker pool", StatusClaimed); err != nil {
-					return fmt.Errorf("recording task %s as failed: %w", task.TaskID, err)
-				}
+			if err := failAllTasksForJob(ctx, cfg.Queue, job, cfg.WorkerID); err != nil {
+				return err
 			}
-			// upon reaching here, all the tasks associated with the jobID are no longer marked pending,
-			// so when we call queue.GetFirstPendingTask, we're guarenteed to get a different job.
 			continue
 		}
 
-		for {
-			// drain any completions that have already arrived
-			for len(completions) > 0 {
-				if err := waitForCompletion(); err != nil {
-					return err
-				}
-			}
-
-			remaining := curResources.Sub(jobResources)
-			if !remaining.IsValid() {
-				// wait for a running task to free up resources
-				if err := waitForCompletion(); err != nil {
-					return err
-				}
-				continue
-			}
-
-			task, err := cfg.Queue.ClaimTask(ctx, job.JobID, cfg.WorkerID)
-			if err != nil {
-				return fmt.Errorf("claiming task: %w", err)
-			}
-			if task == nil {
-				// job's tasks were exhausted, so we're done with this job
-				break
-			}
-
-			curResources = remaining
-			runningCount++
-			executeTask(task, jobResources, completions, func(t *Task) error {
-				taskCtx, cancel := context.WithCancel(ctx)
-				defer cancel()
-
-				files, err := resolveFilesToLocalize(taskCtx, cfg.TransferClient, t)
-				if err != nil {
-					return fmt.Errorf("resolving files to localize: %w", err)
-				}
-				paths, err := prepareWorkDir(taskCtx, cfg.TransferClient, cfg.WorkDirParent, files)
-				if err != nil {
-					return err
-				}
-
-				extraDockerArgs := buildDockerArgs(cfg.BindMounts, t)
-				tel, err := OpenTaskEventLog(ctx, paths.logPath, t.TaskID, paths.taskWorkDir, cfg.FSClient)
-				if err != nil {
-					return fmt.Errorf("opening task event log for %s: %w", t.TaskID, err)
-				}
-				cfg.Registry.register(t.TaskID, t.JobID, tel, cancel)
-
-				if cfg.StartStreamingAtStart {
-					if err := tel.StartStreaming(); err != nil {
-						return fmt.Errorf("failed to start streaming %s: %w", t.TaskID, err)
-					}
-				}
-
-				defer cfg.Registry.unregister(t.TaskID)
-				if err := cfg.Queue.UpdateState(ctx, t.TaskID, StatusClaimed, StatusRunning); err != nil {
-					tel.Close()
-					return fmt.Errorf("marking task %s running: %w", t.TaskID, err)
-				}
-				ru, dockerExecErr := cfg.ExecuteDockerCommand(taskCtx, t.DockerImage, t.Command, paths.taskWorkDir, extraDockerArgs, tel)
-				killed := cfg.Registry.wasKilled(t.TaskID)
-				if ru != nil {
-					if err := cfg.Queue.RecordResourceUsage(ctx, t.TaskID, ru); err != nil {
-						log.Printf("recording resource usage for task %s: %v", t.TaskID, err)
-					}
-				}
-				flushErr := tel.Flush()
-				var uploadResultsErr error
-				if !killed {
-					if err := cfg.Queue.UpdateState(ctx, t.TaskID, StatusRunning, StatusWriting); err != nil {
-						tel.Close()
-						return fmt.Errorf("marking task %s writing: %w", t.TaskID, err)
-					}
-					uploadResultsErr = uploadResults(ctx, cfg.TransferClient, paths, t.ResultPath, t.LogPath)
-				}
-				closeErr := tel.Close()
-				cleanupErr := cleanupWorkDir(paths)
-				if killed {
-					_ = mergeErrors(flushErr, closeErr, cleanupErr)
-					return ErrTaskKilled
-				}
-				return mergeErrors(dockerExecErr, flushErr, uploadResultsErr, closeErr, cleanupErr)
-			})
-		}
-	}
-
-	log.Printf("No more tasks in queue. Waiting for running tasks to complete...")
-
-	// drain all remaining running tasks
-	for runningCount > 0 {
-		if err := waitForCompletion(); err != nil {
+		if err := processJob(ctx, cfg, ls, job); err != nil {
 			return err
 		}
 	}
 
+	log.Printf("No more tasks in queue. Waiting for running tasks to complete...")
+	for ls.runningCount > 0 {
+		if err := ls.waitForCompletion(ctx, cfg.Queue); err != nil {
+			return err
+		}
+	}
 	log.Printf("Worker main loop complete")
-
 	return nil
 }
 
@@ -478,15 +530,15 @@ func (ws *workerState) mainLoop(ctx context.Context, resources *Resources) error
 	}
 	queue := NewFirestoreTaskQueue(ws.fsClient, ws.publisher)
 	return workerMainLoop(ctx, &WorkerLoopConfig{
-		WorkpoolID:           ws.workpoolID,
-		WorkerID:             ws.workerID,
-		Queue:                queue,
-		Resources:            resources,
-		TransferClient:       ws.transferClient,
-		WorkDirParent:        ws.workDirParent,
-		BindMounts:           ws.bindMounts,
-		Registry:             ws.registry,
-		FSClient:             ws.fsClient,
+		WorkpoolID:            ws.workpoolID,
+		WorkerID:              ws.workerID,
+		Queue:                 queue,
+		Resources:             resources,
+		TransferClient:        ws.transferClient,
+		WorkDirParent:         ws.workDirParent,
+		BindMounts:            ws.bindMounts,
+		Registry:              ws.registry,
+		FSClient:              ws.fsClient,
 		ExecuteDockerCommand:  execFn,
 		LingerTime:            ws.lingerTime,
 		StartStreamingAtStart: ws.streamLogs,

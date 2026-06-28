@@ -63,7 +63,7 @@ type dockerState struct {
 }
 
 func dockerInspectState(name string) (*dockerState, error) {
-	out, err := exec.Command("docker", "inspect", "--format", "{{json .State}}", name).Output()
+	out, err := exec.Command(dockerExecutable, "inspect", "--format", "{{json .State}}", name).Output()
 	if err != nil {
 		return nil, fmt.Errorf("docker inspect: %w", err)
 	}
@@ -75,7 +75,7 @@ func dockerInspectState(name string) (*dockerState, error) {
 }
 
 func dockerInspectID(name string) (string, error) {
-	out, err := exec.Command("docker", "inspect", "--format", "{{.Id}}", name).Output()
+	out, err := exec.Command(dockerExecutable, "inspect", "--format", "{{.Id}}", name).Output()
 	if err != nil {
 		return "", fmt.Errorf("docker inspect id: %w", err)
 	}

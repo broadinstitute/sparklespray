@@ -20,8 +20,10 @@ const (
 	defaultMaxZombiesBeforeAbort       = 3
 	defaultMaxConsecutiveFailedBatches = 2
 
-	provisioningPollInterval = 5 * time.Second
-	tier1Interval            = 30 * time.Second
+	minProvisioningPollInterval = 5 * time.Second
+	maxProvisioningPollInterval = 5 * time.Minute
+	tier1Interval               = 30 * time.Second
+	expiryCleanerInterval       = 30 * time.Minute
 
 	jobSummaryMinInterval = 1 * time.Second
 	jobSummaryMaxInterval = 5 * time.Minute
@@ -42,6 +44,7 @@ type Monitor struct {
 	jobEvents     JobEventReceiver
 	jobSummaries  JobSummaryStore
 	jobTerminated JobTerminatedPublisher
+	expiry        ExpiryStore
 	verbose       bool
 	dbName        string
 }
@@ -58,6 +61,9 @@ func (a *Monitor) SetJobSummaryStore(s JobSummaryStore) { a.jobSummaries = s }
 
 // SetJobTerminatedPublisher sets the publisher used to emit job_terminated events.
 func (a *Monitor) SetJobTerminatedPublisher(p JobTerminatedPublisher) { a.jobTerminated = p }
+
+// SetExpiryStore sets the store used to garbage-collect expired documents.
+func (a *Monitor) SetExpiryStore(s ExpiryStore) { a.expiry = s }
 
 // vlogf logs only when verbose mode is on.
 func (a *Monitor) vlogf(format string, args ...any) {
@@ -112,9 +118,18 @@ func (a *Monitor) RunJobSubmission(ctx context.Context, workpoolID string) error
 func (a *Monitor) RunMonitorLoop(ctx context.Context) {
 	sched := scheduler.New(a.clock)
 
+	// Tier 2: cluster reconciler. Triggered by PubSub notifications for started batches;
+	// falls back to max_time_between_polls if no notification arrives.
+	notifyTier2 := sched.Add(defaultMinTimeBetweenPolls, defaultMaxTimeBetweenPolls, func() {
+		a.vlogf("poll: starting cluster reconciler")
+		if err := a.runClusterReconciler(ctx); err != nil {
+			log.Printf("tier2: %v", err)
+		}
+	})
+
 	// Provisioning poll: provisioning. Triggered by job_created events; falls back to 1-minute timer.
-	notifyProvisioning := sched.Add(provisioningPollInterval, provisioningPollInterval, func() {
-		a.vlogf("poll: starting provisioning poll")
+	notifyProvisioning := sched.Add(minProvisioningPollInterval, maxProvisioningPollInterval, func() {
+		a.vlogf("Checking to see if we need to provision new workers")
 		if err := a.runProvisioningPoll(ctx); err != nil {
 			log.Printf("provisioning poll: %v", err)
 		}
@@ -122,18 +137,9 @@ func (a *Monitor) RunMonitorLoop(ctx context.Context) {
 
 	// Tier 1: task recovery. Fixed 30-second interval; no notification trigger.
 	sched.Add(tier1Interval, tier1Interval, func() {
-		a.vlogf("poll: starting orphaned task requeue")
+		a.vlogf("Checking to see if any ophaned jobs need re-queueing")
 		if err := a.runRequeueOrphanedTasks(ctx); err != nil {
 			log.Printf("tier1: %v", err)
-		}
-	})
-
-	// Tier 2: cluster reconciler. Triggered by PubSub notifications for started batches;
-	// falls back to max_time_between_polls if no notification arrives.
-	notifyTier2 := sched.Add(defaultMinTimeBetweenPolls, defaultMaxTimeBetweenPolls, func() {
-		a.vlogf("poll: starting cluster reconciler")
-		if err := a.runClusterReconciler(ctx); err != nil {
-			log.Printf("tier2: %v", err)
 		}
 	})
 
@@ -145,6 +151,16 @@ func (a *Monitor) RunMonitorLoop(ctx context.Context) {
 			log.Printf("tier3: %v", err)
 		}
 	})
+
+	// Expiry cleaner: deletes documents whose expiry field is in the past. Fixed 30-minute interval.
+	if a.expiry != nil {
+		sched.Add(expiryCleanerInterval, expiryCleanerInterval, func() {
+			a.vlogf("poll: starting expiry cleaner")
+			if err := a.runExpiryCleaner(ctx); err != nil {
+				log.Printf("expiry cleaner: %v", err)
+			}
+		})
+	}
 
 	// Job summary poll: recomputes JobSummary for every non-terminal job.
 	// Triggered by job_created and task_state_update events; falls back to max interval.

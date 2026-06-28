@@ -72,6 +72,12 @@ func (a *Monitor) runTier2ForBatch(ctx context.Context, pool *WorkPool, batch *B
 		return false, fmt.Errorf("get job status: %w", err)
 	}
 
+	if apiStatus == BatchJobStatusDeleted {
+		log.Printf("tier2: batch %s: GCP job %s no longer exists (404); marking batch as deleted", batch.BatchID, batch.JobID)
+		batch.Status = BatchStatusDeleted
+		return true, a.batches.Save(ctx, batch)
+	}
+
 	// Stamp running_since the first time we observe RUNNING.
 	if apiStatus == BatchJobStatusRunning && batch.RunningSince == nil {
 		t := now
@@ -82,6 +88,9 @@ func (a *Monitor) runTier2ForBatch(ctx context.Context, pool *WorkPool, batch *B
 	}
 
 	if apiStatus == BatchJobStatusFailed {
+		if err := a.batchAPI.PrintBatchDebuggingInfo(ctx, batch.JobID); err != nil {
+			log.Printf("tier2: print batch debugging info for %s: %v", batch.JobID, err)
+		}
 		if err := a.batchAPI.TerminateJob(ctx, batch.JobID); err != nil {
 			log.Printf("tier2: terminate job %s: %v", batch.JobID, err)
 		}

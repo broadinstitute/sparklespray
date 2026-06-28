@@ -3,7 +3,6 @@ package dev
 import (
 	"context"
 	"fmt"
-	"math/rand/v2"
 	"time"
 
 	"cloud.google.com/go/firestore"
@@ -11,17 +10,6 @@ import (
 	"github.com/broadinstitute/sparklespray/v100/monitor"
 	"github.com/urfave/cli"
 )
-
-const batchIDChars = "abcdefghijklmnopqrstuvwxyz0123456789"
-
-func createBatchID() string {
-	const idLen = 30
-	b := make([]byte, idLen)
-	for i := range b {
-		b[i] = batchIDChars[rand.IntN(len(batchIDChars))]
-	}
-	return "sparkles-" + string(b)
-}
 
 func runDevAddWorker(c *cli.Context) error {
 	specFile := c.Args().Get(0)
@@ -52,7 +40,7 @@ func runDevAddWorker(c *cli.Context) error {
 		return fmt.Errorf("creating batch API client: %w", err)
 	}
 
-	batchID := createBatchID()
+	batchID := monitor.CreateBatchID()
 	jobID, err := batchClient.CreateJob(ctx, &monitor.WorkerJobSpec{
 		WorkpoolID:            workpoolID,
 		BatchID:               batchID,

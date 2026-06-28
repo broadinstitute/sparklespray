@@ -289,6 +289,27 @@ func devSubmit(jobSpecFile, workpoolSpecFile, project, db, gcsPrefix string) err
 		v100.StatusKilled:  true,
 	}
 
+	lastEventTime := now
+	printNewEvents := func() {
+		eventDocs, err := fsClient.Collection(v100.EventCollection).
+			Where("job_id", "==", jobID).
+			Where("timestamp", ">", lastEventTime).
+			OrderBy("timestamp", firestore.Asc).
+			Documents(ctx).GetAll()
+		if err != nil {
+			log.Printf("querying Events: %v", err)
+			return
+		}
+		for _, doc := range eventDocs {
+			var record v100.EventRecord
+			if err := doc.DataTo(&record); err != nil {
+				continue
+			}
+			lastEventTime = record.Timestamp
+			fmt.Printf("%s [event] %s\n", record.Timestamp.Format("15:04:05"), record.Type)
+		}
+	}
+
 	lastFetchedTime := now
 	printNewLogEntries := func() {
 		logDocs, err := fsClient.Collection("TaskLog").
@@ -314,6 +335,7 @@ func devSubmit(jobSpecFile, workpoolSpecFile, project, db, gcsPrefix string) err
 	}
 
 	for {
+		printNewEvents()
 		printNewLogEntries()
 
 		docs, err := fsClient.Collection(v100.TaskCollection).

@@ -1,6 +1,6 @@
 {
   "name": "sample-job",
-  "resources": [],
+  "resources": [{ "name": "slots", "value": 1 }],
   "filesToLocalize": [],
   "tasks": [
     {

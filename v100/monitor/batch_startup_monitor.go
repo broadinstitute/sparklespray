@@ -39,6 +39,12 @@ func (a *Monitor) checkBatchStartup(ctx context.Context, pool *WorkPool, batch *
 		return fmt.Errorf("get job status: %w", err)
 	}
 
+	if apiStatus == BatchJobStatusDeleted {
+		log.Printf("tier3: batch %s: GCP job %s no longer exists (404); marking batch as deleted", batch.BatchID, batch.JobID)
+		batch.Status = BatchStatusDeleted
+		return a.batches.Save(ctx, batch)
+	}
+
 	if apiStatus == BatchJobStatusRunning && batch.RunningSince == nil {
 		t := now
 		batch.RunningSince = &t

@@ -4,10 +4,21 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"math/rand/v2"
 	"time"
-
-	"github.com/google/uuid"
 )
+
+const batchIDChars = "abcdefghijklmnopqrstuvwxyz0123456789"
+
+// CreateBatchID generates a random batch ID for a new GCP Batch job submission.
+func CreateBatchID() string {
+	const idLen = 30
+	b := make([]byte, idLen)
+	for i := range b {
+		b[i] = batchIDChars[rand.IntN(len(batchIDChars))]
+	}
+	return "sparkles-" + string(b)
+}
 
 // runProvisioningPoll is the provisioning loop. Runs every 1 minute.
 // For each workpool it compares pending task demand against active worker supply
@@ -108,7 +119,7 @@ func (a *Monitor) runProvisioningPollForWorkpool(ctx context.Context, pool *Work
 
 // submitBatch creates a BatchAPIRequest in Firestore and the corresponding GCP Batch API job.
 func (a *Monitor) submitBatch(ctx context.Context, pool *WorkPool, vmCount int, preemptible bool, now time.Time) error {
-	batchID := uuid.New().String()
+	batchID := CreateBatchID()
 
 	jobID, err := a.batchAPI.CreateJob(ctx, &WorkerJobSpec{
 		WorkpoolID:            pool.WorkpoolID,

@@ -2,13 +2,17 @@ package monitor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
+	"net/http"
 	"strings"
 	"time"
 
 	"google.golang.org/api/batch/v1"
 	"google.golang.org/api/compute/v1"
+	"google.golang.org/api/googleapi"
+	loggingv2 "google.golang.org/api/logging/v2"
 	"google.golang.org/api/option"
 )
 
@@ -26,6 +30,7 @@ type GCPBatchAPIClient struct {
 	project    string
 	batchSvc   *batch.Service
 	computeSvc *compute.Service
+	loggingSvc *loggingv2.Service
 }
 
 func NewGCPBatchAPIClient(ctx context.Context, project string, opts ...option.ClientOption) (*GCPBatchAPIClient, error) {
@@ -37,10 +42,15 @@ func NewGCPBatchAPIClient(ctx context.Context, project string, opts ...option.Cl
 	if err != nil {
 		return nil, fmt.Errorf("creating compute service: %w", err)
 	}
+	loggingSvc, err := loggingv2.NewService(ctx, opts...)
+	if err != nil {
+		return nil, fmt.Errorf("creating logging service: %w", err)
+	}
 	return &GCPBatchAPIClient{
 		project:    project,
 		batchSvc:   batchSvc,
 		computeSvc: computeSvc,
+		loggingSvc: loggingSvc,
 	}, nil
 }
 
@@ -188,6 +198,10 @@ func (c *GCPBatchAPIClient) CreateJob(ctx context.Context, spec *WorkerJobSpec) 
 func (c *GCPBatchAPIClient) GetJobStatus(ctx context.Context, jobID string) (BatchJobStatus, error) {
 	job, err := c.batchSvc.Projects.Locations.Jobs.Get(jobID).Context(ctx).Do()
 	if err != nil {
+		var gerr *googleapi.Error
+		if errors.As(err, &gerr) && gerr.Code == http.StatusNotFound {
+			return BatchJobStatusDeleted, nil
+		}
 		return BatchJobStatusFailed, fmt.Errorf("get batch job %s: %w", jobID, err)
 	}
 	if job.Status == nil {
@@ -254,6 +268,74 @@ func (c *GCPBatchAPIClient) TerminateJob(ctx context.Context, jobID string) erro
 	_, err := c.batchSvc.Projects.Locations.Jobs.Cancel(jobID, &batch.CancelJobRequest{}).Context(ctx).Do()
 	if err != nil {
 		return fmt.Errorf("cancel batch job %s: %w", jobID, err)
+	}
+	return nil
+}
+
+func (c *GCPBatchAPIClient) PrintBatchDebuggingInfo(ctx context.Context, jobID string) error {
+	job, err := c.batchSvc.Projects.Locations.Jobs.Get(jobID).Context(ctx).Do()
+	if err != nil {
+		return fmt.Errorf("getting batch job %s: %w", jobID, err)
+	}
+
+	log.Printf("batch job %s uid=%s", jobID, job.Uid)
+
+	// Derive time bounds from status events; fall back to CreateTime for the start.
+	var startTime, endTime time.Time
+	if job.CreateTime != "" {
+		if t, err := time.Parse(time.RFC3339, job.CreateTime); err == nil {
+			startTime = t
+		}
+	}
+	if job.Status != nil {
+		for _, ev := range job.Status.StatusEvents {
+			if ev.EventTime == "" {
+				continue
+			}
+			t, err := time.Parse(time.RFC3339, ev.EventTime)
+			if err != nil {
+				continue
+			}
+			log.Printf("  status event [%s]: %s", ev.EventTime, ev.Description)
+			if startTime.IsZero() || t.Before(startTime) {
+				startTime = t
+			}
+			if t.After(endTime) {
+				endTime = t
+			}
+		}
+	}
+	if startTime.IsZero() {
+		startTime = time.Now().Add(-1 * time.Hour)
+	}
+	if endTime.IsZero() {
+		endTime = time.Now()
+	}
+
+	queryStart := startTime.Add(-5 * time.Minute).UTC().Format(time.RFC3339)
+	queryEnd := endTime.Add(5 * time.Minute).UTC().Format(time.RFC3339)
+
+	filter := fmt.Sprintf(
+		`(logName="projects/%s/logs/batch_task_logs" OR logName="projects/%s/logs/batch_agent_logs") `+
+			`labels.job_uid="%s" `+
+			`timestamp>="%s" `+
+			`timestamp<="%s" `+
+			`severity>=DEFAULT`,
+		c.project, c.project, job.Uid, queryStart, queryEnd,
+	)
+
+	resp, err := c.loggingSvc.Entries.List(&loggingv2.ListLogEntriesRequest{
+		ResourceNames: []string{fmt.Sprintf("projects/%s", c.project)},
+		Filter:        filter,
+		OrderBy:       "timestamp asc",
+	}).Context(ctx).Do()
+	if err != nil {
+		return fmt.Errorf("listing log entries for batch job %s: %w", jobID, err)
+	}
+
+	log.Printf("batch job %s: %d log entries found", jobID, len(resp.Entries))
+	for _, entry := range resp.Entries {
+		log.Printf("[%s] [%s] %s: %s", entry.Timestamp, entry.Severity, entry.LogName, entry.TextPayload)
 	}
 	return nil
 }

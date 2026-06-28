@@ -92,8 +92,9 @@ func (n *noopBatchAPIClient) GetJobStatus(_ context.Context, _ string) (monitor.
 func (n *noopBatchAPIClient) ListRunningVMs(_ context.Context, _, _ string, _ []string) (map[string]monitor.VMInfo, error) {
 	return nil, nil
 }
-func (n *noopBatchAPIClient) TerminateVM(_ context.Context, _, _ string) error  { return nil }
-func (n *noopBatchAPIClient) TerminateJob(_ context.Context, _ string) error    { return nil }
+func (n *noopBatchAPIClient) TerminateVM(_ context.Context, _, _ string) error               { return nil }
+func (n *noopBatchAPIClient) TerminateJob(_ context.Context, _ string) error                 { return nil }
+func (n *noopBatchAPIClient) PrintBatchDebuggingInfo(_ context.Context, _ string) error      { return nil }
 
 // noopPubSubReceiver returns a channel that never fires.
 type noopPubSubReceiver struct {
