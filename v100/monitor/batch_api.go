@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -278,8 +279,6 @@ func (c *GCPBatchAPIClient) PrintBatchDebuggingInfo(ctx context.Context, jobID s
 		return fmt.Errorf("getting batch job %s: %w", jobID, err)
 	}
 
-	log.Printf("batch job %s uid=%s", jobID, job.Uid)
-
 	// Derive time bounds from status events; fall back to CreateTime for the start.
 	var startTime, endTime time.Time
 	if job.CreateTime != "" {
@@ -296,7 +295,6 @@ func (c *GCPBatchAPIClient) PrintBatchDebuggingInfo(ctx context.Context, jobID s
 			if err != nil {
 				continue
 			}
-			log.Printf("  status event [%s]: %s", ev.EventTime, ev.Description)
 			if startTime.IsZero() || t.Before(startTime) {
 				startTime = t
 			}
@@ -333,9 +331,36 @@ func (c *GCPBatchAPIClient) PrintBatchDebuggingInfo(ctx context.Context, jobID s
 		return fmt.Errorf("listing log entries for batch job %s: %w", jobID, err)
 	}
 
-	log.Printf("batch job %s: %d log entries found", jobID, len(resp.Entries))
-	for _, entry := range resp.Entries {
-		log.Printf("[%s] [%s] %s: %s", entry.Timestamp, entry.Severity, entry.LogName, entry.TextPayload)
+	if err := os.MkdirAll("batch-api-errors", 0o755); err != nil {
+		return fmt.Errorf("creating batch-api-errors dir: %w", err)
 	}
+	base := fmt.Sprintf("batch-api-errors/%s", time.Now().UTC().Format("20060102-150405"))
+	var f *os.File
+	filename := base
+	for i := 1; ; i++ {
+		f, err = os.OpenFile(filename, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+		if err == nil {
+			break
+		}
+		if !os.IsExist(err) {
+			return fmt.Errorf("creating debug file: %w", err)
+		}
+		filename = fmt.Sprintf("%s-%d", base, i)
+	}
+	defer f.Close()
+
+	fmt.Fprintf(f, "jobID: %s\n", jobID)
+	fmt.Fprintf(f, "uid: %s\n\n", job.Uid)
+	if job.Status != nil {
+		for _, ev := range job.Status.StatusEvents {
+			fmt.Fprintf(f, "  status event [%s]: %s\n", ev.EventTime, ev.Description)
+		}
+	}
+	fmt.Fprintf(f, "\n%d log entries found\n\n", len(resp.Entries))
+	for _, entry := range resp.Entries {
+		fmt.Fprintf(f, "[%s] [%s] %s: %s\n", entry.Timestamp, entry.Severity, entry.LogName, entry.TextPayload)
+	}
+
+	log.Printf("batch job %s: full debug info written to %s", jobID, filename)
 	return nil
 }
