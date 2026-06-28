@@ -72,6 +72,7 @@ func NewApp() *cli.App {
 				cli.StringFlag{Name: "project", Usage: "GCP project ID (required)"},
 				cli.StringFlag{Name: "db", Value: defaultDB, Usage: "Firestore database"},
 				cli.BoolFlag{Name: "verbose, v", Usage: "log a message at the start of every poll"},
+				cli.IntFlag{Name: "linger", Value: 0, Usage: "exit after this many minutes with no active tasks (0 = run forever)"},
 			},
 			Action: runMonitor,
 		},
@@ -151,6 +152,9 @@ func runMonitor(c *cli.Context) error {
 	m.SetJobEventReceiver(jobEventReceiver)
 	m.SetJobSummaryStore(jobSummaries)
 	m.SetJobTerminatedPublisher(ep)
+	if linger := c.Int("linger"); linger > 0 {
+		m.SetLingerDuration(time.Duration(linger) * time.Minute)
+	}
 	m.RunMonitorLoop(ctx)
 	return nil
 }

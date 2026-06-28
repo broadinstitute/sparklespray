@@ -25,15 +25,23 @@ func CreateBatchID() string {
 // and submits BatchAPIRequests to close the gap, preferring preemptible VMs up to the
 // workpool's budget before falling back to non-preemptible.
 func (a *Monitor) runProvisioningPoll(ctx context.Context) error {
+	// TODO: need some way to determine that we're done worrying about a pool...
+
 	pools, err := a.pools.ListAll(ctx)
 	if err != nil {
 		return fmt.Errorf("list workpools: %w", err)
 	}
-	a.vlogf("provisioning poll: Found %d workpools", len(pools))
 
-	for _, pool := range pools {
-		if err := a.runProvisioningPollForWorkpool(ctx, pool); err != nil {
-			log.Printf("provisioning poll: workpool %s: %v", pool.WorkpoolID, err)
+	if len(pools) > 0 {
+		// if there's active pools, that counts as activity
+		a.lastActivity = time.Now()
+
+		a.vlogf("provisioning poll: Found %d workpools", len(pools))
+
+		for _, pool := range pools {
+			if err := a.runProvisioningPollForWorkpool(ctx, pool); err != nil {
+				log.Printf("provisioning poll: workpool %s: %v", pool.WorkpoolID, err)
+			}
 		}
 	}
 	return nil

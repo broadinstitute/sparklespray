@@ -34,19 +34,21 @@ var activeTasks = []TaskStatus{TaskStatusClaimed, TaskStatusRunning, TaskStatusW
 
 // Monitor runs provisioning, watchdog, and job-summary bookkeeping logic.
 type Monitor struct {
-	clock         scheduler.Clock
-	batchAPI      BatchAPIClient
-	pools         WorkPoolStore
-	batches       BatchRequestStore
-	workers       WorkerStore
-	tasks         TaskStore
-	pubsub        PubSubReceiver
-	jobEvents     JobEventReceiver
-	jobSummaries  JobSummaryStore
-	jobTerminated JobTerminatedPublisher
-	expiry        ExpiryStore
-	verbose       bool
-	dbName        string
+	clock          scheduler.Clock
+	batchAPI       BatchAPIClient
+	pools          WorkPoolStore
+	batches        BatchRequestStore
+	workers        WorkerStore
+	tasks          TaskStore
+	pubsub         PubSubReceiver
+	jobEvents      JobEventReceiver
+	jobSummaries   JobSummaryStore
+	jobTerminated  JobTerminatedPublisher
+	expiry         ExpiryStore
+	verbose        bool
+	dbName         string
+	lingerDuration time.Duration
+	lastActivity   time.Time
 }
 
 // SetVerbose enables or disables verbose poll logging.
@@ -64,6 +66,10 @@ func (a *Monitor) SetJobTerminatedPublisher(p JobTerminatedPublisher) { a.jobTer
 
 // SetExpiryStore sets the store used to garbage-collect expired documents.
 func (a *Monitor) SetExpiryStore(s ExpiryStore) { a.expiry = s }
+
+// SetLingerDuration sets how long the monitor runs without any workpool having
+// pending or running tasks before shutting down. Zero means run forever.
+func (a *Monitor) SetLingerDuration(d time.Duration) { a.lingerDuration = d }
 
 // vlogf logs only when verbose mode is on.
 func (a *Monitor) vlogf(format string, args ...any) {
@@ -116,7 +122,22 @@ func (a *Monitor) RunJobSubmission(ctx context.Context, workpoolID string) error
 // RunMonitorLoop runs the monitor until ctx is cancelled.
 // Blocks; run in a dedicated goroutine.
 func (a *Monitor) RunMonitorLoop(ctx context.Context) {
+
 	sched := scheduler.New(a.clock)
+
+	if a.lingerDuration > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithCancel(ctx)
+		a.lastActivity = time.Now()
+		sched.Add(defaultMinTimeBetweenPolls, defaultMinTimeBetweenPolls, func() {
+			now := time.Now()
+			// if it's been too long since the monitor did anything, shutdown
+			if now.Sub(a.lastActivity) > a.lingerDuration {
+				cancel()
+			}
+		})
+		defer cancel()
+	}
 
 	// Tier 2: cluster reconciler. Triggered by PubSub notifications for started batches;
 	// falls back to max_time_between_polls if no notification arrives.
@@ -129,7 +150,7 @@ func (a *Monitor) RunMonitorLoop(ctx context.Context) {
 
 	// Provisioning poll: provisioning. Triggered by job_created events; falls back to 1-minute timer.
 	notifyProvisioning := sched.Add(minProvisioningPollInterval, maxProvisioningPollInterval, func() {
-		a.vlogf("Checking to see if we need to provision new workers")
+		a.vlogf("Checking for workpools which need new workers")
 		if err := a.runProvisioningPoll(ctx); err != nil {
 			log.Printf("provisioning poll: %v", err)
 		}
@@ -137,7 +158,7 @@ func (a *Monitor) RunMonitorLoop(ctx context.Context) {
 
 	// Tier 1: task recovery. Fixed 30-second interval; no notification trigger.
 	sched.Add(tier1Interval, tier1Interval, func() {
-		a.vlogf("Checking to see if any ophaned jobs need re-queueing")
+		a.vlogf("Checking for ophaned jobs")
 		if err := a.runRequeueOrphanedTasks(ctx); err != nil {
 			log.Printf("tier1: %v", err)
 		}
@@ -146,7 +167,7 @@ func (a *Monitor) RunMonitorLoop(ctx context.Context) {
 	// Tier 3: batch startup monitor. Triggered by PubSub notifications for pending batches;
 	// same fallback timing as tier 2.
 	notifyTier3 := sched.Add(defaultMinTimeBetweenPolls, defaultMaxTimeBetweenPolls, func() {
-		a.vlogf("poll: starting batch startup monitor")
+		a.vlogf("Checking to see if workers successfully starting")
 		if err := a.runBatchStartupMonitor(ctx); err != nil {
 			log.Printf("tier3: %v", err)
 		}
