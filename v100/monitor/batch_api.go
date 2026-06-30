@@ -122,7 +122,8 @@ func (c *GCPBatchAPIClient) CreateJob(ctx context.Context, spec *WorkerJobSpec) 
 	job := &batch.Job{
 		TaskGroups: []*batch.TaskGroup{
 			{
-				TaskCount: int64(spec.VMCount),
+				TaskCount:        int64(spec.VMCount),
+				TaskCountPerNode: 1,
 				TaskSpec: &batch.TaskSpec{
 					Volumes: volumes,
 					Runnables: []*batch.Runnable{
