@@ -107,16 +107,16 @@ func New(
 // RunJobSubmission updates workpool status when a new job is submitted.
 // Should be called from job submission logic before tasks are enqueued.
 func (a *Monitor) RunJobSubmission(ctx context.Context, workpoolID string) error {
-	pool, err := a.pools.Get(ctx, workpoolID)
+	ws, err := a.pools.Get(ctx, workpoolID)
 	if err != nil {
 		return fmt.Errorf("get workpool %s: %w", workpoolID, err)
 	}
 
-	if pool.State == WorkPoolStatusIdle || pool.State == WorkPoolStatusHalted {
-		pool.State = WorkPoolStatusOK
-		pool.StateMessage = ""
-		pool.IncidentCount = 0
-		if err := a.pools.Save(ctx, pool); err != nil {
+	if ws.State.State == WorkPoolStatusIdle || ws.State.State == WorkPoolStatusHalted {
+		ws.State.State = WorkPoolStatusOK
+		ws.State.StateMessage = ""
+		ws.State.IncidentCount = 0
+		if err := a.pools.SaveState(ctx, ws.State); err != nil {
 			return fmt.Errorf("save workpool %s: %w", workpoolID, err)
 		}
 	}
@@ -304,20 +304,20 @@ func (a *Monitor) routeNotification(ctx context.Context, batchID string, notifyT
 	}
 }
 
-// recordIncident updates the workpool's status fields for a watchdog anomaly.
-// Mutates pool in place; callers must Save the pool after calling this.
-func recordIncident(pool *WorkPool, message string, now time.Time) {
-	if pool.State != WorkPoolStatusHalted {
-		pool.State = WorkPoolStatusUnhealthy
+// recordIncident updates the workpool state for a watchdog anomaly.
+// Mutates state in place; callers must SaveState after calling this.
+func recordIncident(state *WorkPoolState, message string, now time.Time) {
+	if state.State != WorkPoolStatusHalted {
+		state.State = WorkPoolStatusUnhealthy
 	}
-	pool.StateMessage = message
-	pool.LastIncidentAt = now
-	pool.IncidentCount++
+	state.StateMessage = message
+	state.LastIncidentAt = now
+	state.IncidentCount++
 }
 
 // checkHaltThreshold transitions the workpool to halted if the last N classified batches
-// all failed. Saves the pool if it transitions.
-func (a *Monitor) checkHaltThreshold(ctx context.Context, pool *WorkPool) error {
+// all failed. Saves state if it transitions.
+func (a *Monitor) checkHaltThreshold(ctx context.Context, pool *WorkPool, state *WorkPoolState) error {
 	n := pool.MaxConsecutiveFailedBatches
 	if n <= 0 {
 		n = defaultMaxConsecutiveFailedBatches
@@ -345,11 +345,11 @@ func (a *Monitor) checkHaltThreshold(ctx context.Context, pool *WorkPool) error 
 			}
 		}
 		if allFailed {
-			pool.State = WorkPoolStatusHalted
-			pool.StateMessage = fmt.Sprintf(
+			state.State = WorkPoolStatusHalted
+			state.StateMessage = fmt.Sprintf(
 				"Last %d batches all failed — possible configuration problem", n)
-			pool.LastIncidentAt = a.clock.Now()
-			if err := a.pools.Save(ctx, pool); err != nil {
+			state.LastIncidentAt = a.clock.Now()
+			if err := a.pools.SaveState(ctx, state); err != nil {
 				return fmt.Errorf("save workpool %s: %w", pool.WorkpoolID, err)
 			}
 		}

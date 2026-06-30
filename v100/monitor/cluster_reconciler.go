@@ -15,18 +15,18 @@ func (a *Monitor) runClusterReconciler(ctx context.Context) error {
 		return fmt.Errorf("list workpools: %w", err)
 	}
 
-	for _, pool := range pools {
-		if err := a.reconcileWorkpool(ctx, pool); err != nil {
-			log.Printf("tier2: workpool %s: %v", pool.WorkpoolID, err)
+	for _, ws := range pools {
+		if err := a.reconcileWorkpool(ctx, ws); err != nil {
+			log.Printf("tier2: workpool %s: %v", ws.Pool.WorkpoolID, err)
 		}
 	}
 	return nil
 }
 
-func (a *Monitor) reconcileWorkpool(ctx context.Context, pool *WorkPool) error {
+func (a *Monitor) reconcileWorkpool(ctx context.Context, ws *WorkPoolWithState) error {
 	now := a.clock.Now()
 
-	activeBatches, err := a.batches.ListByWorkpool(ctx, pool.WorkpoolID, []BatchStatus{
+	activeBatches, err := a.batches.ListByWorkpool(ctx, ws.Pool.WorkpoolID, []BatchStatus{
 		BatchStatusPending, BatchStatusStarted,
 	})
 	if err != nil {
@@ -34,29 +34,27 @@ func (a *Monitor) reconcileWorkpool(ctx context.Context, pool *WorkPool) error {
 	}
 
 	for _, batch := range activeBatches {
-		done, err := a.runTier2ForBatch(ctx, pool, batch, now)
+		done, err := a.runTier2ForBatch(ctx, ws, batch, now)
 		if err != nil {
 			log.Printf("tier2: batch %s: %v", batch.BatchID, err)
 		}
 		if done {
-			// batch was failed/completed; pool may have been updated — reload for next batch
-			// so we don't overwrite a halted status with a stale copy.
-			updated, err := a.pools.Get(ctx, pool.WorkpoolID)
+			// batch was failed/completed; reload pool state so we don't overwrite a halted status.
+			ws, err = a.pools.Get(ctx, ws.Pool.WorkpoolID)
 			if err != nil {
 				return fmt.Errorf("reload workpool after batch %s: %w", batch.BatchID, err)
 			}
-			pool = updated
 		}
 	}
 
 	// Transition to idle if no VMs remain anywhere in the workpool.
-	workpoolVMs, err := a.batchAPI.ListRunningVMs(ctx, "sparkles-worker-workpool", pool.WorkpoolID, pool.Zones)
+	workpoolVMs, err := a.batchAPI.ListRunningVMs(ctx, "sparkles-worker-workpool", ws.Pool.WorkpoolID, ws.Pool.Zones)
 	if err != nil {
 		return fmt.Errorf("list workpool VMs: %w", err)
 	}
-	if len(workpoolVMs) == 0 && (pool.State == WorkPoolStatusOK || pool.State == WorkPoolStatusUnhealthy) {
-		pool.State = WorkPoolStatusIdle
-		if err := a.pools.Save(ctx, pool); err != nil {
+	if len(workpoolVMs) == 0 && (ws.State.State == WorkPoolStatusOK || ws.State.State == WorkPoolStatusUnhealthy) {
+		ws.State.State = WorkPoolStatusIdle
+		if err := a.pools.SaveState(ctx, ws.State); err != nil {
 			return fmt.Errorf("save pool (idle transition): %w", err)
 		}
 	}
@@ -66,7 +64,7 @@ func (a *Monitor) reconcileWorkpool(ctx context.Context, pool *WorkPool) error {
 
 // runTier2ForBatch processes one batch. Returns (done=true) if the batch was terminated
 // and the caller should reload the workpool before continuing.
-func (a *Monitor) runTier2ForBatch(ctx context.Context, pool *WorkPool, batch *BatchAPIRequest, now time.Time) (done bool, err error) {
+func (a *Monitor) runTier2ForBatch(ctx context.Context, ws *WorkPoolWithState, batch *BatchAPIRequest, now time.Time) (done bool, err error) {
 	apiStatus, err := a.batchAPI.GetJobStatus(ctx, batch.JobID)
 	if err != nil {
 		return false, fmt.Errorf("get job status: %w", err)
@@ -96,14 +94,14 @@ func (a *Monitor) runTier2ForBatch(ctx context.Context, pool *WorkPool, batch *B
 		}
 		batch.Status = BatchStatusFailed
 		batch.Unhealthy = true
-		recordIncident(pool, fmt.Sprintf("Batch job %s reported failure by Batch API", batch.JobID), now)
+		recordIncident(ws.State, fmt.Sprintf("Batch job %s reported failure by Batch API", batch.JobID), now)
 		if err := a.batches.Save(ctx, batch); err != nil {
 			return true, fmt.Errorf("save batch: %w", err)
 		}
-		if err := a.pools.Save(ctx, pool); err != nil {
+		if err := a.pools.SaveState(ctx, ws.State); err != nil {
 			return true, fmt.Errorf("save pool: %w", err)
 		}
-		return true, a.checkHaltThreshold(ctx, pool)
+		return true, a.checkHaltThreshold(ctx, ws.Pool, ws.State)
 	}
 
 	if apiStatus == BatchJobStatusSucceeded {
@@ -112,11 +110,11 @@ func (a *Monitor) runTier2ForBatch(ctx context.Context, pool *WorkPool, batch *B
 	}
 
 	// Job is QUEUED/SCHEDULED/RUNNING — reconcile VMs against Firestore.
-	return false, a.reconcileVMs(ctx, pool, batch, apiStatus, now)
+	return false, a.reconcileVMs(ctx, ws, batch, apiStatus, now)
 }
 
-func (a *Monitor) reconcileVMs(ctx context.Context, pool *WorkPool, batch *BatchAPIRequest, apiStatus BatchJobStatus, now time.Time) error {
-	gcpVMs, err := a.batchAPI.ListRunningVMs(ctx, "sparkles-worker-batch", batch.BatchID, pool.Zones)
+func (a *Monitor) reconcileVMs(ctx context.Context, ws *WorkPoolWithState, batch *BatchAPIRequest, apiStatus BatchJobStatus, now time.Time) error {
+	gcpVMs, err := a.batchAPI.ListRunningVMs(ctx, "sparkles-worker-batch", batch.BatchID, ws.Pool.Zones)
 	if err != nil {
 		return fmt.Errorf("list running VMs: %w", err)
 	}
@@ -138,16 +136,16 @@ func (a *Monitor) reconcileVMs(ctx context.Context, pool *WorkPool, batch *Batch
 		}
 		batch.Status = BatchStatusFailed
 		batch.Unhealthy = true
-		recordIncident(pool,
+		recordIncident(ws.State,
 			fmt.Sprintf("Over-provisioning: %d VMs running, expected %d", len(gcpVMs), batch.ExpectedVMCount),
 			now)
 		if err := a.batches.Save(ctx, batch); err != nil {
 			return fmt.Errorf("save batch: %w", err)
 		}
-		if err := a.pools.Save(ctx, pool); err != nil {
+		if err := a.pools.SaveState(ctx, ws.State); err != nil {
 			return fmt.Errorf("save pool: %w", err)
 		}
-		return a.checkHaltThreshold(ctx, pool)
+		return a.checkHaltThreshold(ctx, ws.Pool, ws.State)
 	}
 
 	// Anomaly 2: startup failure after the grace period.
@@ -161,20 +159,20 @@ func (a *Monitor) reconcileVMs(ctx context.Context, pool *WorkPool, batch *Batch
 			}
 			batch.Status = BatchStatusFailed
 			batch.Unhealthy = true
-			recordIncident(pool,
+			recordIncident(ws.State,
 				fmt.Sprintf("Batch %s: no worker registered within grace period", batch.BatchID),
 				now)
 			if err := a.batches.Save(ctx, batch); err != nil {
 				return fmt.Errorf("save batch: %w", err)
 			}
-			if err := a.pools.Save(ctx, pool); err != nil {
+			if err := a.pools.SaveState(ctx, ws.State); err != nil {
 				return fmt.Errorf("save pool: %w", err)
 			}
-			return a.checkHaltThreshold(ctx, pool)
+			return a.checkHaltThreshold(ctx, ws.Pool, ws.State)
 		}
 
 		// Some workers registered; surgically terminate the VMs that never did.
-		batchDirty, poolDirty := false, false
+		batchDirty, stateDirty := false, false
 		for instanceName, vmInfo := range gcpVMs {
 			if !registeredInstances[instanceName] {
 				if err := a.batchAPI.TerminateVM(ctx, vmInfo.Zone, instanceName); err != nil {
@@ -182,8 +180,8 @@ func (a *Monitor) reconcileVMs(ctx context.Context, pool *WorkPool, batch *Batch
 				}
 				batch.Unhealthy = true
 				batchDirty = true
-				recordIncident(pool, fmt.Sprintf("VM %s failed to start a worker", instanceName), now)
-				poolDirty = true
+				recordIncident(ws.State, fmt.Sprintf("VM %s failed to start a worker", instanceName), now)
+				stateDirty = true
 			}
 		}
 		if batchDirty {
@@ -191,8 +189,8 @@ func (a *Monitor) reconcileVMs(ctx context.Context, pool *WorkPool, batch *Batch
 				return fmt.Errorf("save batch: %w", err)
 			}
 		}
-		if poolDirty {
-			if err := a.pools.Save(ctx, pool); err != nil {
+		if stateDirty {
+			if err := a.pools.SaveState(ctx, ws.State); err != nil {
 				return fmt.Errorf("save pool: %w", err)
 			}
 		}
@@ -201,7 +199,7 @@ func (a *Monitor) reconcileVMs(ctx context.Context, pool *WorkPool, batch *Batch
 	// Anomaly 3: zombie workers — heartbeat expired but VM still running.
 	// heartbeat_expiry is set to current time on both clean shutdown and crash, so
 	// vm_shutdown_grace_period applies uniformly from that point.
-	gracePeriod := param(pool.VMShutdownGracePeriod, defaultVMShutdownGracePeriod)
+	gracePeriod := param(ws.Pool.VMShutdownGracePeriod, defaultVMShutdownGracePeriod)
 	zombieDeadline := now.Add(-gracePeriod)
 
 	var zombies []*Worker
@@ -213,7 +211,7 @@ func (a *Monitor) reconcileVMs(ctx context.Context, pool *WorkPool, batch *Batch
 		}
 	}
 
-	maxZombies := param(pool.MaxZombiesBeforeAbort, defaultMaxZombiesBeforeAbort)
+	maxZombies := param(ws.Pool.MaxZombiesBeforeAbort, defaultMaxZombiesBeforeAbort)
 
 	if len(zombies) > maxZombies {
 		if err := a.batchAPI.TerminateJob(ctx, batch.JobID); err != nil {
@@ -221,37 +219,37 @@ func (a *Monitor) reconcileVMs(ctx context.Context, pool *WorkPool, batch *Batch
 		}
 		batch.Status = BatchStatusFailed
 		batch.Unhealthy = true
-		recordIncident(pool,
+		recordIncident(ws.State,
 			fmt.Sprintf("Too many zombie workers (%d), aborting batch", len(zombies)),
 			now)
 		if err := a.batches.Save(ctx, batch); err != nil {
 			return fmt.Errorf("save batch: %w", err)
 		}
-		if err := a.pools.Save(ctx, pool); err != nil {
+		if err := a.pools.SaveState(ctx, ws.State); err != nil {
 			return fmt.Errorf("save pool: %w", err)
 		}
-		return a.checkHaltThreshold(ctx, pool)
+		return a.checkHaltThreshold(ctx, ws.Pool, ws.State)
 	}
 
-	batchDirty, poolDirty := false, false
+	batchDirty, stateDirty := false, false
 	for _, z := range zombies {
 		if err := a.batchAPI.TerminateVM(ctx, gcpVMs[z.InstanceName].Zone, z.InstanceName); err != nil {
 			log.Printf("tier2: terminate zombie VM %s: %v", z.InstanceName, err)
 		}
 		batch.Unhealthy = true
 		batchDirty = true
-		recordIncident(pool,
+		recordIncident(ws.State,
 			fmt.Sprintf("Terminated zombie worker %s on %s", z.WorkerID, z.InstanceName),
 			now)
-		poolDirty = true
+		stateDirty = true
 	}
 	if batchDirty {
 		if err := a.batches.Save(ctx, batch); err != nil {
 			return fmt.Errorf("save batch: %w", err)
 		}
 	}
-	if poolDirty {
-		if err := a.pools.Save(ctx, pool); err != nil {
+	if stateDirty {
+		if err := a.pools.SaveState(ctx, ws.State); err != nil {
 			return fmt.Errorf("save pool: %w", err)
 		}
 	}

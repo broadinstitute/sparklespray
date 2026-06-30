@@ -159,8 +159,8 @@ func TestProvision_PartialPreemptibleBudget_SplitBatches(t *testing.T) {
 func TestProvision_HaltedWorkpool_NoProvisioning(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
-	pool.Status = WorkPoolStatusHalted
 	w.Pools.Add(pool)
+	w.Pools.AddState(&WorkPoolState{WorkpoolID: "pool-1", State: WorkPoolStatusHalted})
 	for i := 0; i < 10; i++ {
 		w.Tasks.Add(&Task{TaskID: taskID(i), WorkpoolID: "pool-1", Status: TaskStatusPending})
 	}
@@ -173,15 +173,15 @@ func TestProvision_HaltedWorkpool_NoProvisioning(t *testing.T) {
 func TestProvision_IdleToOkTransitionOnFirstBatch(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
-	pool.Status = WorkPoolStatusIdle
 	pool.MaxPreemptibleWorkerAttempts = 0
 	w.Pools.Add(pool)
+	w.Pools.AddState(&WorkPoolState{WorkpoolID: "pool-1", State: WorkPoolStatusIdle})
 	w.Tasks.Add(&Task{TaskID: "t1", WorkpoolID: "pool-1", Status: TaskStatusPending})
 
 	err := w.A.runProvisioningPoll(context.Background())
 	require.NoError(t, err)
 	assert.Len(t, w.BatchAPI.CreatedJobs, 1)
-	assert.Equal(t, WorkPoolStatusOK, w.Pools.MustGet("pool-1").Status)
+	assert.Equal(t, WorkPoolStatusOK, w.Pools.MustGetState("pool-1").State)
 }
 
 // ---- helpers ----

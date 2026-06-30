@@ -27,15 +27,15 @@ func TestAdapterRoundTrips(t *testing.T) {
 			Region:     "us-central1",
 		})
 
-		pool, err := pools.Get(ctx, poolID)
+		ws, err := pools.Get(ctx, poolID)
 		if err != nil {
 			t.Fatalf("Get: %v", err)
 		}
-		if pool.WorkpoolID != poolID {
-			t.Errorf("WorkpoolID: want %s, got %s", poolID, pool.WorkpoolID)
+		if ws.Pool.WorkpoolID != poolID {
+			t.Errorf("WorkpoolID: want %s, got %s", poolID, ws.Pool.WorkpoolID)
 		}
-		if pool.Region != "us-central1" {
-			t.Errorf("Region: want us-central1, got %s", pool.Region)
+		if ws.Pool.Region != "us-central1" {
+			t.Errorf("Region: want us-central1, got %s", ws.Pool.Region)
 		}
 
 		all, err := pools.ListAll(ctx)
@@ -44,7 +44,7 @@ func TestAdapterRoundTrips(t *testing.T) {
 		}
 		found := false
 		for _, p := range all {
-			if p.WorkpoolID == poolID {
+			if p.Pool.WorkpoolID == poolID {
 				found = true
 			}
 		}
@@ -52,21 +52,23 @@ func TestAdapterRoundTrips(t *testing.T) {
 			t.Errorf("ListAll: pool %s not found", poolID)
 		}
 
-		pool.State = monitor.WorkPoolStatusOK
-		pool.StateMessage = "all good"
-		pool.IncidentCount = 3
-		if err := pools.Save(ctx, pool); err != nil {
-			t.Fatalf("Save: %v", err)
+		if err := pools.SaveState(ctx, &monitor.WorkPoolState{
+			WorkpoolID:   poolID,
+			State:        monitor.WorkPoolStatusOK,
+			StateMessage: "all good",
+			IncidentCount: 3,
+		}); err != nil {
+			t.Fatalf("SaveState: %v", err)
 		}
 		updated, err := pools.Get(ctx, poolID)
 		if err != nil {
-			t.Fatalf("Get after Save: %v", err)
+			t.Fatalf("Get after SaveState: %v", err)
 		}
-		if updated.State != monitor.WorkPoolStatusOK {
-			t.Errorf("State after Save: want ok, got %s", updated.State)
+		if updated.State.State != monitor.WorkPoolStatusOK {
+			t.Errorf("State after SaveState: want ok, got %s", updated.State.State)
 		}
-		if updated.IncidentCount != 3 {
-			t.Errorf("IncidentCount after Save: want 3, got %d", updated.IncidentCount)
+		if updated.State.IncidentCount != 3 {
+			t.Errorf("IncidentCount after SaveState: want 3, got %d", updated.State.IncidentCount)
 		}
 	})
 

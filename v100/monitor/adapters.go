@@ -77,28 +77,19 @@ func toWorkPool(f *firestoreWorkPool) *WorkPool {
 		VMShutdownGracePeriod:        secToDur(f.VMShutdownGracePeriodSec, defaultVMShutdownGracePeriod),
 		MaxZombiesBeforeAbort:        f.MaxZombiesBeforeAbort,
 		MaxConsecutiveFailedBatches:  f.MaxConsecutiveFailedBatches,
-		// State fields are zero-valued here; populated by merging WorkPoolSummary in Get/ListAll.
 	}
 }
 
-// mergeStateIntoPool copies mutable state fields from a WorkPoolSummary into a WorkPool.
-// Called after loading config from WorkPools so the in-memory WorkPool carries current state.
-func mergeStateIntoPool(pool *WorkPool, summary *WorkPoolSummary) {
-	pool.State = summary.State
-	pool.StateMessage = summary.StateMessage
-	pool.LastIncidentAt = summary.LastIncidentAt
-	pool.IncidentCount = summary.IncidentCount
+func toWorkPoolState(workpoolID string, summary *WorkPoolSummary) *WorkPoolState {
+	return &WorkPoolState{
+		WorkpoolID:     workpoolID,
+		State:          summary.State,
+		StateMessage:   summary.StateMessage,
+		LastIncidentAt: summary.LastIncidentAt,
+		IncidentCount:  summary.IncidentCount,
+	}
 }
 
-// workPoolSummaryState is a partial WorkPoolSummary used only for merging state fields
-// back from a WorkPool into an existing WorkPoolSummary document without overwriting
-// the computed metrics fields.
-type workPoolSummaryState struct {
-	State          string    `firestore:"state"`
-	StateMessage   string    `firestore:"state_message"`
-	LastIncidentAt time.Time `firestore:"last_incident_at"`
-	IncidentCount  int       `firestore:"incident_count"`
-}
 
 // ----- FirestoreWorkPoolStore -----
 
@@ -110,7 +101,7 @@ func NewFirestoreWorkPoolStore(fs *firestore.Client) *FirestoreWorkPoolStore {
 	return &FirestoreWorkPoolStore{fs: fs}
 }
 
-func (s *FirestoreWorkPoolStore) ListAll(ctx context.Context) ([]*WorkPool, error) {
+func (s *FirestoreWorkPoolStore) ListAll(ctx context.Context) ([]*WorkPoolWithState, error) {
 	iter := s.fs.Collection(workpoolCollection).Documents(ctx)
 	var pools []*WorkPool
 	for {
@@ -128,20 +119,24 @@ func (s *FirestoreWorkPoolStore) ListAll(ctx context.Context) ([]*WorkPool, erro
 		pools = append(pools, toWorkPool(&f))
 	}
 
-	// Merge mutable state from WorkPoolSummary into each pool.
 	summaries, err := s.loadAllSummaryStates(ctx)
 	if err != nil {
 		return nil, err
 	}
+	result := make([]*WorkPoolWithState, 0, len(pools))
 	for _, pool := range pools {
+		var state *WorkPoolState
 		if summary, ok := summaries[pool.WorkpoolID]; ok {
-			mergeStateIntoPool(pool, summary)
+			state = toWorkPoolState(pool.WorkpoolID, summary)
+		} else {
+			state = &WorkPoolState{WorkpoolID: pool.WorkpoolID}
 		}
+		result = append(result, &WorkPoolWithState{Pool: pool, State: state})
 	}
-	return pools, nil
+	return result, nil
 }
 
-func (s *FirestoreWorkPoolStore) Get(ctx context.Context, workpoolID string) (*WorkPool, error) {
+func (s *FirestoreWorkPoolStore) Get(ctx context.Context, workpoolID string) (*WorkPoolWithState, error) {
 	snap, err := s.fs.Collection(workpoolCollection).Doc(workpoolID).Get(ctx)
 	if err != nil {
 		return nil, err
@@ -152,28 +147,30 @@ func (s *FirestoreWorkPoolStore) Get(ctx context.Context, workpoolID string) (*W
 	}
 	pool := toWorkPool(&f)
 
-	// Merge mutable state from WorkPoolSummary.
+	var state *WorkPoolState
 	summSnap, err := s.fs.Collection(workPoolSummaryCollection).Doc(workpoolID).Get(ctx)
 	if err == nil {
 		var summary WorkPoolSummary
 		if err := summSnap.DataTo(&summary); err == nil {
-			mergeStateIntoPool(pool, &summary)
+			state = toWorkPoolState(workpoolID, &summary)
 		}
 	}
-	// If WorkPoolSummary doesn't exist yet, pool retains zero-value state (idle).
-	return pool, nil
+	if state == nil {
+		state = &WorkPoolState{WorkpoolID: workpoolID}
+	}
+	return &WorkPoolWithState{Pool: pool, State: state}, nil
 }
 
-// Save writes the mutable state fields from pool into WorkPoolSummary using a
+// SaveState writes the mutable state fields into WorkPoolSummary using a partial
 // merge so that the computed metrics fields are not overwritten.
-func (s *FirestoreWorkPoolStore) Save(ctx context.Context, pool *WorkPool) error {
-	state := workPoolSummaryState{
-		State:          string(pool.State),
-		StateMessage:   pool.StateMessage,
-		LastIncidentAt: pool.LastIncidentAt,
-		IncidentCount:  pool.IncidentCount,
+func (s *FirestoreWorkPoolStore) SaveState(ctx context.Context, state *WorkPoolState) error {
+	data := map[string]any{
+		"state":            string(state.State),
+		"state_message":    state.StateMessage,
+		"last_incident_at": state.LastIncidentAt,
+		"incident_count":   state.IncidentCount,
 	}
-	_, err := s.fs.Collection(workPoolSummaryCollection).Doc(pool.WorkpoolID).Set(ctx, state, firestore.MergeAll)
+	_, err := s.fs.Collection(workPoolSummaryCollection).Doc(state.WorkpoolID).Set(ctx, data, firestore.MergeAll)
 	return err
 }
 

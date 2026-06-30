@@ -211,19 +211,29 @@ func vmName(batchID string, n int) string {
 // ---- FakeWorkPoolStore ----
 
 type FakeWorkPoolStore struct {
-	mu    sync.Mutex
-	pools map[string]*WorkPool
+	mu     sync.Mutex
+	pools  map[string]*WorkPool
+	states map[string]*WorkPoolState
 }
 
 func newFakeWorkPoolStore() *FakeWorkPoolStore {
-	return &FakeWorkPoolStore{pools: make(map[string]*WorkPool)}
+	return &FakeWorkPoolStore{
+		pools:  make(map[string]*WorkPool),
+		states: make(map[string]*WorkPoolState),
+	}
 }
 
 func (s *FakeWorkPoolStore) Add(pool *WorkPool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	cp := copyPool(pool)
-	s.pools[pool.WorkpoolID] = cp
+	s.pools[pool.WorkpoolID] = copyPool(pool)
+}
+
+func (s *FakeWorkPoolStore) AddState(state *WorkPoolState) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cp := *state
+	s.states[state.WorkpoolID] = &cp
 }
 
 func (s *FakeWorkPoolStore) MustGet(workpoolID string) *WorkPool {
@@ -236,30 +246,51 @@ func (s *FakeWorkPoolStore) MustGet(workpoolID string) *WorkPool {
 	return copyPool(p)
 }
 
-func (s *FakeWorkPoolStore) ListAll(ctx context.Context) ([]*WorkPool, error) {
+func (s *FakeWorkPoolStore) MustGetState(workpoolID string) *WorkPoolState {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	var result []*WorkPool
+	st := s.states[workpoolID]
+	if st == nil {
+		return &WorkPoolState{WorkpoolID: workpoolID}
+	}
+	cp := *st
+	return &cp
+}
+
+func (s *FakeWorkPoolStore) makeWS(p *WorkPool) *WorkPoolWithState {
+	st := s.states[p.WorkpoolID]
+	if st == nil {
+		st = &WorkPoolState{WorkpoolID: p.WorkpoolID}
+	}
+	stCp := *st
+	return &WorkPoolWithState{Pool: copyPool(p), State: &stCp}
+}
+
+func (s *FakeWorkPoolStore) ListAll(ctx context.Context) ([]*WorkPoolWithState, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var result []*WorkPoolWithState
 	for _, p := range s.pools {
-		result = append(result, copyPool(p))
+		result = append(result, s.makeWS(p))
 	}
 	return result, nil
 }
 
-func (s *FakeWorkPoolStore) Get(ctx context.Context, workpoolID string) (*WorkPool, error) {
+func (s *FakeWorkPoolStore) Get(ctx context.Context, workpoolID string) (*WorkPoolWithState, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	p := s.pools[workpoolID]
 	if p == nil {
 		return nil, fmt.Errorf("workpool %s not found", workpoolID)
 	}
-	return copyPool(p), nil
+	return s.makeWS(p), nil
 }
 
-func (s *FakeWorkPoolStore) Save(ctx context.Context, pool *WorkPool) error {
+func (s *FakeWorkPoolStore) SaveState(ctx context.Context, state *WorkPoolState) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.pools[pool.WorkpoolID] = copyPool(pool)
+	cp := *state
+	s.states[state.WorkpoolID] = &cp
 	return nil
 }
 
@@ -628,6 +659,13 @@ func defaultPool(workpoolID string) *WorkPool {
 		WorkpoolID:                   workpoolID,
 		MaxWorkerCount:               100,
 		MaxPreemptibleWorkerAttempts: 50,
-		State:                        WorkPoolStatusOK,
+	}
+}
+
+// defaultState returns a WorkPoolState with OK status for tests.
+func defaultState(workpoolID string) *WorkPoolState {
+	return &WorkPoolState{
+		WorkpoolID: workpoolID,
+		State:      WorkPoolStatusOK,
 	}
 }

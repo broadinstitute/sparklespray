@@ -31,17 +31,18 @@ func TestTier2_FailedBatch_MarksFailedAndUnhealthy(t *testing.T) {
 	assert.Equal(t, BatchStatusFailed, b.Status)
 	assert.True(t, b.Unhealthy)
 	assert.Contains(t, w.BatchAPI.TerminatedJobs, "job-1")
-	p := w.Pools.MustGet("pool-1")
+	ps := w.Pools.MustGetState("pool-1")
 	// After termination VMs are gone → idle transition fires on top of unhealthy.
-	assert.Equal(t, WorkPoolStatusIdle, p.Status)
+	assert.Equal(t, WorkPoolStatusIdle, ps.State)
 	// IncidentCount proves recordIncident was called even though status is now idle.
-	assert.Greater(t, p.IncidentCount, 0)
+	assert.Greater(t, ps.IncidentCount, 0)
 }
 
 func TestTier2_SucceededBatch_MarksCompleted(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
 	w.Pools.Add(pool)
+	w.Pools.AddState(&WorkPoolState{WorkpoolID: "pool-1", State: WorkPoolStatusOK})
 
 	w.Batches.Add(&BatchAPIRequest{
 		BatchID:    "b1",
@@ -57,7 +58,7 @@ func TestTier2_SucceededBatch_MarksCompleted(t *testing.T) {
 	b := w.Batches.MustGet("b1")
 	assert.Equal(t, BatchStatusCompleted, b.Status)
 	// Succeeded job clears VMs → idle transition fires.
-	assert.Equal(t, WorkPoolStatusIdle, w.Pools.MustGet("pool-1").Status)
+	assert.Equal(t, WorkPoolStatusIdle, w.Pools.MustGetState("pool-1").State)
 }
 
 func TestTier2_FailedBatchTriggersHaltThreshold(t *testing.T) {
@@ -90,7 +91,7 @@ func TestTier2_FailedBatchTriggersHaltThreshold(t *testing.T) {
 	err := w.A.runClusterReconciler(context.Background())
 	require.NoError(t, err)
 
-	assert.Equal(t, WorkPoolStatusHalted, w.Pools.MustGet("pool-1").Status)
+	assert.Equal(t, WorkPoolStatusHalted, w.Pools.MustGetState("pool-1").State)
 }
 
 // ---- Anomaly 1: over-provisioning ----
@@ -119,10 +120,10 @@ func TestTier2_Anomaly1_MoreVMsThanExpected_AbortBatch(t *testing.T) {
 	assert.Equal(t, BatchStatusFailed, b.Status)
 	assert.True(t, b.Unhealthy)
 	assert.Contains(t, w.BatchAPI.TerminatedJobs, "job-1")
-	p := w.Pools.MustGet("pool-1")
+	ps := w.Pools.MustGetState("pool-1")
 	// TerminateJob clears VMs → idle transition follows.
-	assert.Equal(t, WorkPoolStatusIdle, p.Status)
-	assert.Greater(t, p.IncidentCount, 0)
+	assert.Equal(t, WorkPoolStatusIdle, ps.State)
+	assert.Greater(t, ps.IncidentCount, 0)
 }
 
 func TestTier2_Anomaly1_ExactVMCount_NoTermination(t *testing.T) {
@@ -390,8 +391,8 @@ func TestTier2_Anomaly3_WithinGracePeriod_NoAction(t *testing.T) {
 func TestTier2_IdleTransition_NoVMsRemain_OKtoIdle(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
-	pool.Status = WorkPoolStatusOK
 	w.Pools.Add(pool)
+	w.Pools.AddState(&WorkPoolState{WorkpoolID: "pool-1", State: WorkPoolStatusOK})
 
 	// A completed batch; no VMs running for the workpool.
 	w.Batches.Add(&BatchAPIRequest{
@@ -405,27 +406,27 @@ func TestTier2_IdleTransition_NoVMsRemain_OKtoIdle(t *testing.T) {
 	err := w.A.runClusterReconciler(context.Background())
 	require.NoError(t, err)
 
-	assert.Equal(t, WorkPoolStatusIdle, w.Pools.MustGet("pool-1").Status)
+	assert.Equal(t, WorkPoolStatusIdle, w.Pools.MustGetState("pool-1").State)
 }
 
 func TestTier2_IdleTransition_UnhealthyNoVMs_TransitionsToIdle(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
-	pool.Status = WorkPoolStatusUnhealthy
 	w.Pools.Add(pool)
+	w.Pools.AddState(&WorkPoolState{WorkpoolID: "pool-1", State: WorkPoolStatusUnhealthy})
 
 	// No active batches in the store.
 	err := w.A.runClusterReconciler(context.Background())
 	require.NoError(t, err)
 
-	assert.Equal(t, WorkPoolStatusIdle, w.Pools.MustGet("pool-1").Status)
+	assert.Equal(t, WorkPoolStatusIdle, w.Pools.MustGetState("pool-1").State)
 }
 
 func TestTier2_IdleTransition_VMsStillPresent_StatusUnchanged(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
-	pool.Status = WorkPoolStatusOK
 	w.Pools.Add(pool)
+	w.Pools.AddState(&WorkPoolState{WorkpoolID: "pool-1", State: WorkPoolStatusOK})
 
 	runningSince := epoch
 	w.Batches.Add(&BatchAPIRequest{
@@ -442,7 +443,7 @@ func TestTier2_IdleTransition_VMsStillPresent_StatusUnchanged(t *testing.T) {
 	require.NoError(t, err)
 
 	// VMs are still running so no idle transition.
-	assert.Equal(t, WorkPoolStatusOK, w.Pools.MustGet("pool-1").Status)
+	assert.Equal(t, WorkPoolStatusOK, w.Pools.MustGetState("pool-1").State)
 }
 
 // ---- running_since stamping via Tier 2 ----

@@ -13,15 +13,17 @@ func (a *Monitor) runWorkPoolSummaryPoll(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	for _, pool := range pools {
-		if err := a.updateWorkPoolSummary(ctx, pool); err != nil {
-			log.Printf("workpool summary poll: pool %s: %v", pool.WorkpoolID, err)
+	for _, ws := range pools {
+		if err := a.updateWorkPoolSummary(ctx, ws); err != nil {
+			log.Printf("workpool summary poll: pool %s: %v", ws.Pool.WorkpoolID, err)
 		}
 	}
 	return nil
 }
 
-func (a *Monitor) updateWorkPoolSummary(ctx context.Context, pool *WorkPool) error {
+func (a *Monitor) updateWorkPoolSummary(ctx context.Context, ws *WorkPoolWithState) error {
+	pool := ws.Pool
+	state := ws.State
 	now := time.Now()
 
 	// Collect all batches and derive counts.
@@ -81,10 +83,10 @@ func (a *Monitor) updateWorkPoolSummary(ctx context.Context, pool *WorkPool) err
 		MaxPreemptibleWorkerAttempts:  pool.MaxPreemptibleWorkerAttempts,
 		Expiry:                        now.Add(7 * 24 * time.Hour),
 		LastUpdated:                   now,
-		State:                         pool.State,
-		StateMessage:                  pool.StateMessage,
-		LastIncidentAt:                pool.LastIncidentAt,
-		IncidentCount:                 pool.IncidentCount,
+		State:                         state.State,
+		StateMessage:                  state.StateMessage,
+		LastIncidentAt:                state.LastIncidentAt,
+		IncidentCount:                 state.IncidentCount,
 		ExpectedPreemptibleWorkers:    expectedPreemptible,
 		ExpectedNonpreemptibleWorkers: expectedNonpreemptible,
 		UnhealthyBatchCount:           unhealthyCount,
@@ -101,10 +103,10 @@ func (a *Monitor) updateWorkPoolSummary(ctx context.Context, pool *WorkPool) err
 		WorkpoolID:                    pool.WorkpoolID,
 		Timestamp:                     now,
 		Expiry:                        now.Add(7 * 24 * time.Hour),
-		State:                         pool.State,
-		StateMessage:                  pool.StateMessage,
-		LastIncidentAt:                pool.LastIncidentAt,
-		IncidentCount:                 pool.IncidentCount,
+		State:                         state.State,
+		StateMessage:                  state.StateMessage,
+		LastIncidentAt:                state.LastIncidentAt,
+		IncidentCount:                 state.IncidentCount,
 		ExpectedPreemptibleWorkers:    expectedPreemptible,
 		ExpectedNonpreemptibleWorkers: expectedNonpreemptible,
 		UnhealthyBatchCount:           unhealthyCount,

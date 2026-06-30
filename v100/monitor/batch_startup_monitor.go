@@ -16,16 +16,16 @@ func (a *Monitor) runBatchStartupMonitor(ctx context.Context) error {
 		return fmt.Errorf("list workpools: %w", err)
 	}
 
-	for _, pool := range pools {
-		pendingBatches, err := a.batches.ListByWorkpool(ctx, pool.WorkpoolID, []BatchStatus{BatchStatusPending})
+	for _, ws := range pools {
+		pendingBatches, err := a.batches.ListByWorkpool(ctx, ws.Pool.WorkpoolID, []BatchStatus{BatchStatusPending})
 		if err != nil {
-			log.Printf("tier3: list pending batches for workpool %s: %v", pool.WorkpoolID, err)
+			log.Printf("tier3: list pending batches for workpool %s: %v", ws.Pool.WorkpoolID, err)
 			continue
 		}
 
 		now := a.clock.Now()
 		for _, batch := range pendingBatches {
-			if err := a.checkBatchStartup(ctx, pool, batch, now); err != nil {
+			if err := a.checkBatchStartup(ctx, ws, batch, now); err != nil {
 				log.Printf("tier3: batch %s: %v", batch.BatchID, err)
 			}
 		}
@@ -33,7 +33,7 @@ func (a *Monitor) runBatchStartupMonitor(ctx context.Context) error {
 	return nil
 }
 
-func (a *Monitor) checkBatchStartup(ctx context.Context, pool *WorkPool, batch *BatchAPIRequest, now time.Time) error {
+func (a *Monitor) checkBatchStartup(ctx context.Context, ws *WorkPoolWithState, batch *BatchAPIRequest, now time.Time) error {
 	apiStatus, err := a.batchAPI.GetJobStatus(ctx, batch.JobID)
 	if err != nil {
 		return fmt.Errorf("get job status: %w", err)
@@ -56,27 +56,27 @@ func (a *Monitor) checkBatchStartup(ctx context.Context, pool *WorkPool, batch *
 	if apiStatus == BatchJobStatusFailed {
 		batch.Status = BatchStatusFailed
 		batch.Unhealthy = true
-		recordIncident(pool, fmt.Sprintf("Batch job %s failed before any workers started", batch.JobID), now)
+		recordIncident(ws.State, fmt.Sprintf("Batch job %s failed before any workers started", batch.JobID), now)
 		if err := a.batches.Save(ctx, batch); err != nil {
 			return fmt.Errorf("save batch: %w", err)
 		}
-		if err := a.pools.Save(ctx, pool); err != nil {
+		if err := a.pools.SaveState(ctx, ws.State); err != nil {
 			return fmt.Errorf("save pool: %w", err)
 		}
-		return a.checkHaltThreshold(ctx, pool)
+		return a.checkHaltThreshold(ctx, ws.Pool, ws.State)
 	}
 
 	if apiStatus == BatchJobStatusSucceeded {
 		batch.Status = BatchStatusFailed
 		batch.Unhealthy = true
-		recordIncident(pool, fmt.Sprintf("Batch job %s completed with no workers registered", batch.JobID), now)
+		recordIncident(ws.State, fmt.Sprintf("Batch job %s completed with no workers registered", batch.JobID), now)
 		if err := a.batches.Save(ctx, batch); err != nil {
 			return fmt.Errorf("save batch: %w", err)
 		}
-		if err := a.pools.Save(ctx, pool); err != nil {
+		if err := a.pools.SaveState(ctx, ws.State); err != nil {
 			return fmt.Errorf("save pool: %w", err)
 		}
-		return a.checkHaltThreshold(ctx, pool)
+		return a.checkHaltThreshold(ctx, ws.Pool, ws.State)
 	}
 
 	if batch.RegisteredWorkerCount >= 1 {
@@ -87,16 +87,16 @@ func (a *Monitor) checkBatchStartup(ctx context.Context, pool *WorkPool, batch *
 	if batch.RunningSince == nil && now.Sub(batch.SubmittedAt) > defaultMaxTimeInQueue {
 		batch.Status = BatchStatusFailed
 		batch.Unhealthy = true
-		recordIncident(pool,
+		recordIncident(ws.State,
 			fmt.Sprintf("Batch job %s never left the queue within max_time_in_queue", batch.JobID),
 			now)
 		if err := a.batches.Save(ctx, batch); err != nil {
 			return fmt.Errorf("save batch: %w", err)
 		}
-		if err := a.pools.Save(ctx, pool); err != nil {
+		if err := a.pools.SaveState(ctx, ws.State); err != nil {
 			return fmt.Errorf("save pool: %w", err)
 		}
-		return a.checkHaltThreshold(ctx, pool)
+		return a.checkHaltThreshold(ctx, ws.Pool, ws.State)
 	}
 
 	return nil

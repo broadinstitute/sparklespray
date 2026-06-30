@@ -38,21 +38,22 @@ func (a *Monitor) runProvisioningPoll(ctx context.Context) error {
 
 		a.vlogf("provisioning poll: Found %d workpools", len(pools))
 
-		for _, pool := range pools {
-			if err := a.runProvisioningPollForWorkpool(ctx, pool); err != nil {
-				log.Printf("provisioning poll: workpool %s: %v", pool.WorkpoolID, err)
+		for _, ws := range pools {
+			if err := a.runProvisioningPollForWorkpool(ctx, ws); err != nil {
+				log.Printf("provisioning poll: workpool %s: %v", ws.Pool.WorkpoolID, err)
 			}
 		}
 	}
 	return nil
 }
 
-func (a *Monitor) runProvisioningPollForWorkpool(ctx context.Context, pool *WorkPool) error {
+func (a *Monitor) runProvisioningPollForWorkpool(ctx context.Context, ws *WorkPoolWithState) error {
 	// workpool.status is the provisioning guard: halted means stop.
-	if pool.State == WorkPoolStatusHalted {
+	if ws.State.State == WorkPoolStatusHalted {
 		return nil
 	}
 
+	pool := ws.Pool
 	now := a.clock.Now()
 
 	pendingCount, err := a.tasks.CountPending(ctx, pool.WorkpoolID)
@@ -93,16 +94,16 @@ func (a *Monitor) runProvisioningPollForWorkpool(ctx context.Context, pool *Work
 	preemptibleCount := min(toRequest, remainingPreemptible)
 	nonPreemptibleCount := toRequest - preemptibleCount
 
-	poolDirty := false
+	stateDirty := false
 
 	a.vlogf("monitor: submitting a batch request for %d preemptible VMs and %d nonpreemptible VMs (already requested %d)", preemptibleCount, nonPreemptibleCount, requestedCount)
 	if preemptibleCount > 0 {
 		if err := a.submitBatch(ctx, pool, preemptibleCount, true, now); err != nil {
 			return fmt.Errorf("submit preemptible batch: %w", err)
 		}
-		if pool.State == WorkPoolStatusIdle {
-			pool.State = WorkPoolStatusOK
-			poolDirty = true
+		if ws.State.State == WorkPoolStatusIdle {
+			ws.State.State = WorkPoolStatusOK
+			stateDirty = true
 		}
 	}
 
@@ -110,14 +111,14 @@ func (a *Monitor) runProvisioningPollForWorkpool(ctx context.Context, pool *Work
 		if err := a.submitBatch(ctx, pool, nonPreemptibleCount, false, now); err != nil {
 			return fmt.Errorf("submit non-preemptible batch: %w", err)
 		}
-		if pool.State == WorkPoolStatusIdle {
-			pool.State = WorkPoolStatusOK
-			poolDirty = true
+		if ws.State.State == WorkPoolStatusIdle {
+			ws.State.State = WorkPoolStatusOK
+			stateDirty = true
 		}
 	}
 
-	if poolDirty {
-		if err := a.pools.Save(ctx, pool); err != nil {
+	if stateDirty {
+		if err := a.pools.SaveState(ctx, ws.State); err != nil {
 			return fmt.Errorf("save pool: %w", err)
 		}
 	}

@@ -55,11 +55,9 @@ const (
 
 // ----- Data model -----
 
-// WorkPool holds the configuration of a workpool. It corresponds to the immutable
+// WorkPool holds the immutable configuration of a workpool. It corresponds to the
 // WorkPools Firestore collection (written once at creation, never updated).
-// The mutable runtime state (State, StateMessage, LastIncidentAt, IncidentCount)
-// is loaded from WorkPoolSummary and kept here for in-memory convenience during
-// a monitor poll cycle; saves go to WorkPoolSummary, not WorkPools.
+// Mutable runtime state lives in WorkPoolState, which is stored in WorkPoolSummary.
 type WorkPool struct {
 	WorkpoolID            string
 	Region                string   // GCP region for Batch jobs, e.g. "us-central1"
@@ -80,13 +78,23 @@ type WorkPool struct {
 	VMShutdownGracePeriod       time.Duration // default: 1min
 	MaxZombiesBeforeAbort       int           // default: 3
 	MaxConsecutiveFailedBatches int           // default: 2
+}
 
-	// State fields — immutable in WorkPools Firestore; loaded from WorkPoolSummary
-	// at read time and persisted back to WorkPoolSummary on Save.
-	State         WorkPoolStatus
-	StateMessage  string
+// WorkPoolState holds the mutable runtime state for a workpool. It is stored in
+// WorkPoolSummary and never written to the immutable WorkPools collection.
+type WorkPoolState struct {
+	WorkpoolID     string
+	State          WorkPoolStatus
+	StateMessage   string
 	LastIncidentAt time.Time
 	IncidentCount  int
+}
+
+// WorkPoolWithState pairs an immutable WorkPool config with its current mutable state.
+// Returned by WorkPoolStore.Get and WorkPoolStore.ListAll.
+type WorkPoolWithState struct {
+	Pool  *WorkPool
+	State *WorkPoolState
 }
 
 // BatchAPIRequest corresponds to the BatchAPIRequest Firestore collection.
@@ -177,11 +185,11 @@ type BatchAPIClient interface {
 	PrintBatchDebuggingInfo(ctx context.Context, jobID string) error
 }
 
-// WorkPoolStore reads and writes WorkPool documents.
+// WorkPoolStore reads WorkPool config and reads/writes WorkPoolState.
 type WorkPoolStore interface {
-	ListAll(ctx context.Context) ([]*WorkPool, error)
-	Get(ctx context.Context, workpoolID string) (*WorkPool, error)
-	Save(ctx context.Context, pool *WorkPool) error
+	ListAll(ctx context.Context) ([]*WorkPoolWithState, error)
+	Get(ctx context.Context, workpoolID string) (*WorkPoolWithState, error)
+	SaveState(ctx context.Context, state *WorkPoolState) error
 }
 
 // BatchRequestStore reads and writes BatchAPIRequest documents.

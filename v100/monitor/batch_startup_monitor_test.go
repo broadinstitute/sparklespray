@@ -78,7 +78,7 @@ func TestTier3_FailedJob_MarksFailedAndUnhealthy(t *testing.T) {
 	b := w.Batches.MustGet("b1")
 	assert.Equal(t, BatchStatusFailed, b.Status)
 	assert.True(t, b.Unhealthy)
-	assert.Equal(t, WorkPoolStatusUnhealthy, w.Pools.MustGet("pool-1").Status)
+	assert.Equal(t, WorkPoolStatusUnhealthy, w.Pools.MustGetState("pool-1").State)
 }
 
 func TestTier3_SucceededWithNoWorkers_MarksFailedAndUnhealthy(t *testing.T) {
@@ -102,7 +102,7 @@ func TestTier3_SucceededWithNoWorkers_MarksFailedAndUnhealthy(t *testing.T) {
 	b := w.Batches.MustGet("b1")
 	assert.Equal(t, BatchStatusFailed, b.Status)
 	assert.True(t, b.Unhealthy)
-	assert.Equal(t, WorkPoolStatusUnhealthy, w.Pools.MustGet("pool-1").Status)
+	assert.Equal(t, WorkPoolStatusUnhealthy, w.Pools.MustGetState("pool-1").State)
 }
 
 func TestTier3_WorkerRegistered_PromotesToStarted(t *testing.T) {
