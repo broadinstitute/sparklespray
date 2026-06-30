@@ -132,7 +132,6 @@ func TestTier3_WorkerRegistered_PromotesToStarted(t *testing.T) {
 func TestTier3_StuckInQueue_MarksFailedAfterMaxTimeInQueue(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
-	pool.MaxTimeInQueue = 15 * time.Minute
 	w.Pools.Add(pool)
 
 	// Submitted 20 min ago, never reached RUNNING.
@@ -157,7 +156,6 @@ func TestTier3_StuckInQueue_MarksFailedAfterMaxTimeInQueue(t *testing.T) {
 func TestTier3_NotYetPastMaxTimeInQueue_NoAction(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
-	pool.MaxTimeInQueue = 15 * time.Minute
 	w.Pools.Add(pool)
 
 	// Submitted only 5 min ago — well inside the queue deadline.

@@ -157,7 +157,6 @@ func TestTier2_Anomaly1_ExactVMCount_NoTermination(t *testing.T) {
 func TestTier2_Anomaly2_BeforeGracePeriod_NoAction(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
-	pool.MaxTimeToStartWorker = 5 * time.Minute
 	w.Pools.Add(pool)
 
 	runningSince := epoch.Add(-1 * time.Minute) // 1 min ago, well inside grace period
@@ -182,7 +181,6 @@ func TestTier2_Anomaly2_BeforeGracePeriod_NoAction(t *testing.T) {
 func TestTier2_Anomaly2_NoWorkersAfterGrace_WholeBatchTerminated(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
-	pool.MaxTimeToStartWorker = 5 * time.Minute
 	w.Pools.Add(pool)
 
 	runningSince := epoch.Add(-6 * time.Minute) // past grace period
@@ -209,7 +207,6 @@ func TestTier2_Anomaly2_NoWorkersAfterGrace_WholeBatchTerminated(t *testing.T) {
 func TestTier2_Anomaly2_SomeWorkersRegistered_SurgicalTermination(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
-	pool.MaxTimeToStartWorker = 5 * time.Minute
 	w.Pools.Add(pool)
 
 	runningSince := epoch.Add(-6 * time.Minute)
@@ -239,7 +236,6 @@ func TestTier2_Anomaly2_SomeWorkersRegistered_SurgicalTermination(t *testing.T) 
 func TestTier2_Anomaly2_RunningSinceNil_Skipped(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
-	pool.MaxTimeToStartWorker = 5 * time.Minute
 	w.Pools.Add(pool)
 
 	// Batch submitted long ago but never saw RUNNING — still QUEUED.

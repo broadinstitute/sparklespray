@@ -109,44 +109,26 @@ Terminal states — no further transitions except an administrative kill:
 
 ### `WorkPools`
 
-One document per workpool. The document ID is the `workpool_id`. A workpool defines the VM configuration used to create workers that process tasks associated with that workpool.
+One document per workpool. The document ID is the `workpool_id`. `WorkPool` is written once at creation and never updated; all evolving state lives in `WorkPoolSummary`. A workpool defines the VM configuration used to create workers that process tasks associated with that workpool.
 
-| Field                      | Type          | Description                                                                                                    |
-| -------------------------- | ------------- | -------------------------------------------------------------------------------------------------------------- |
-| `workpool_id`              | string        | Unique identifier for the workpool                                                                             |
-| `machine_type`             | string        | GCP machine type for worker VMs (e.g. `n2-standard-4`)                                                         |
-| `region`                   | string        | GCP region for Batch jobs (e.g. `us-central1`)                                                                 |
-| `zones`                    | []string      | GCP zones to query for running VMs (e.g. `["us-central1-a"]`)                                                  |
-| `root_dir`                 | string        | Directory on the VM that the worker uses as its working root; also where the `sparkles` binary is staged       |
-| `sparkles_worker_gcs_path` | string        | GCS path (e.g. `gs://bucket/sparkles`) of the worker binary; downloaded to `{root_dir}/sparkles` at VM startup |
-| `resources`                | []Resource    | Resource capacity advertised by workers created from this workpool                                             |
-| `empty_volumes`            | []EmptyVolume | Ephemeral volumes to attach to each VM                                                                         |
-| `labels`                   | []Label       | User-defined key/value tags attached at creation time (e.g. `team=ml`, `env=prod`)                             |
-| `expiry`                   | timestamp     | When this document may be garbage-collected                                                                    |
-
-The following provisioning and watchdog parameters are set once at workpool creation and read by the monitor to govern autoscaling behaviour:
-
-| Field                             | Type | Description                                                                                  |
-| --------------------------------- | ---- | -------------------------------------------------------------------------------------------- |
-| `max_worker_count`                | int  | Maximum number of VMs the monitor may have running concurrently for this workpool            |
-| `max_preemptible_worker_attempts` | int  | How many times the monitor may submit a preemptible batch before falling back to on-demand   |
-| `max_workers_per_request`         | int  | Maximum number of VMs in a single GCP Batch job submission                                   |
-| `min_time_between_polls_sec`      | int  | Minimum seconds between provisioning poll iterations                                         |
-| `max_time_between_polls_sec`      | int  | Maximum seconds between provisioning poll iterations (when idle)                             |
-| `max_time_to_start_worker_sec`    | int  | Seconds after batch submission before a VM that never registered is considered a zombie      |
-| `max_time_in_queue_sec`           | int  | Maximum seconds a task may wait in `pending` before the monitor considers the pool unhealthy |
-| `vm_shutdown_grace_period_sec`    | int  | Seconds the monitor waits after asking a VM to shut down before treating it as gone          |
-| `max_zombies_before_abort`        | int  | Number of zombie VMs tolerated in one batch before the monitor marks the batch failed        |
-| `max_consecutive_failed_batches`  | int  | Number of consecutive failed batches before the monitor halts the workpool                   |
-
-The following fields are written exclusively by the monitor process and must not be set at submission time:
-
-| Field              | Type      | Description                                                                                |
-| ------------------ | --------- | ------------------------------------------------------------------------------------------ |
-| `status`           | string    | Operational health: `idle`, `ok`, `unhealthy`, or `halted`                                 |
-| `status_message`   | string    | Human-readable description of the current status or last incident                          |
-| `last_incident_at` | timestamp | Time of the most recent watchdog incident                                                  |
-| `incident_count`   | int       | Cumulative number of incidents; the monitor halts the workpool if this exceeds a threshold |
+| Field                             | Type          | Description                                                                                                    |
+| --------------------------------- | ------------- | -------------------------------------------------------------------------------------------------------------- |
+| `workpool_id`                     | string        | Unique identifier for the workpool                                                                             |
+| `machine_type`                    | string        | GCP machine type for worker VMs (e.g. `n2-standard-4`)                                                         |
+| `region`                          | string        | GCP region for Batch jobs (e.g. `us-central1`)                                                                 |
+| `zones`                           | []string      | GCP zones to query for running VMs (e.g. `["us-central1-a"]`)                                                  |
+| `root_dir`                        | string        | Directory on the VM that the worker uses as its working root; also where the `sparkles` binary is staged       |
+| `sparkles_worker_gcs_path`        | string        | GCS path (e.g. `gs://bucket/sparkles`) of the worker binary; downloaded to `{root_dir}/sparkles` at VM startup |
+| `resources`                       | []Resource    | Resource capacity advertised by workers created from this workpool                                             |
+| `empty_volumes`                   | []EmptyVolume | Ephemeral volumes to attach to each VM                                                                         |
+| `labels`                          | []Label       | User-defined key/value tags attached at creation time (e.g. `team=ml`, `env=prod`)                             |
+| `expiry`                          | timestamp     | When this document may be garbage-collected                                                                    |
+| `max_worker_count`                | int           | Maximum number of VMs the monitor may have running concurrently for this workpool                              |
+| `max_preemptible_worker_attempts` | int           | How many times the monitor may submit a preemptible batch before falling back to on-demand                     |
+| `max_workers_per_request`         | int           | Maximum number of VMs in a single GCP Batch job submission                                                     |
+| `vm_shutdown_grace_period_sec`    | int           | Seconds the monitor waits after asking a VM to shut down before treating it as gone                            |
+| `max_zombies_before_abort`        | int           | Number of zombie VMs tolerated in one batch before the monitor marks the batch failed                          |
+| `max_consecutive_failed_batches`  | int           | Number of consecutive failed batches before the monitor halts the workpool                                     |
 
 **Resource** (embedded object) — mirrors the resource entries on `Jobs`; workers created from this workpool will advertise this capacity:
 
@@ -185,30 +167,54 @@ The worker updates `heartbeat_expiry` every minute while running. On a clean shu
 
 ### `WorkPoolSummary` _(not yet implemented)_
 
-One document per workpool, keyed by `workpool_id`. `WorkPoolSummary` is owned exclusively by the **monitor** process, which recomputes it on each provisioning poll. No other process should write to this collection.
+One document per workpool, keyed by `workpool_id`. `WorkPoolSummary` is the mutable counterpart to the immutable `WorkPool` document: a `WorkPool` is written once at creation and never updated; all evolving state lives here. `WorkPoolSummary` is owned exclusively by the **monitor** process, which recomputes it on each provisioning poll. No other process should write to this collection.
 
 Any question about workpool health — "how many VMs are expected?", "are there unhealthy batches?" — should be answered by reading `WorkPoolSummary`, not by scanning `BatchAPIRequests`, `Workers`, or `Tasks` directly.
 
-| Field                             | Type          | Description                                                                                                   |
-| --------------------------------- | ------------- | ------------------------------------------------------------------------------------------------------------- |
-| `workpool_id`                     | string        | Workpool this summary describes                                                                               |
-| `expiry`                          | timestamp     | When this document may be garbage-collected                                                                   |
-| `last_updated`                    | timestamp     | When these metrics were last computed by the monitor                                                          |
-| `expected_preemptible_workers`    | int           | Sum of `expected_vm_count` across all `BatchAPIRequests` where `preemptible=true`                             |
-| `expected_nonpreemptible_workers` | int           | Sum of `expected_vm_count` across all `BatchAPIRequests` where `preemptible=false`                            |
-| `unhealthy_batch_count`           | int           | Number of `BatchAPIRequests` documents with `unhealthy=true`                                                  |
-| `batch_api_request_counts`        | []StatusCount | Per-status counts of `BatchAPIRequests` documents; one entry per non-zero status (`pending`, `started`, etc.) |
-| `preemptible_workers`             | []StatusCount | Per-status counts of preemptible `Workers` documents; one entry per non-zero status (`started`, `stopped`)    |
-| `nonpreemptible_workers`          | []StatusCount | Per-status counts of non-preemptible `Workers` documents; one entry per non-zero status                       |
-| `tasks`                           | []StatusCount | Per-status counts of `Tasks` documents belonging to this workpool; one entry per non-zero status              |
-| `expiry`                          | timestamp     | When this document may be deleted (7-day TTL)                                                                 |
+The following fields are copied from `WorkPool` at creation time and refreshed on each monitor update, so that callers can retrieve full workpool information without fetching both documents:
 
-**StatusCount** (embedded object):
+| Field                             | Type          | Description                                                                                         |
+| --------------------------------- | ------------- | --------------------------------------------------------------------------------------------------- |
+| `workpool_id`                     | string        | Workpool this summary describes (copied from `WorkPool`)                                            |
+| `machine_type`                    | string        | GCP machine type for worker VMs (copied from `WorkPool`)                                            |
+| `region`                          | string        | GCP region for Batch jobs (copied from `WorkPool`)                                                  |
+| `zones`                           | []string      | GCP zones to query for running VMs (copied from `WorkPool`)                                         |
+| `root_dir`                        | string        | Worker root directory (copied from `WorkPool`)                                                      |
+| `sparkles_worker_gcs_path`        | string        | GCS path of the worker binary (copied from `WorkPool`)                                              |
+| `resources`                       | []Resource    | Resource capacity advertised by workers (copied from `WorkPool`)                                    |
+| `empty_volumes`                   | []EmptyVolume | Ephemeral volumes to attach to each VM (copied from `WorkPool`)                                     |
+| `labels`                          | []Label       | User-defined key/value tags (copied from `WorkPool` at creation time; not updated thereafter)       |
+| `max_worker_count`                | int           | Maximum number of VMs the monitor may have running concurrently (copied from `WorkPool`)            |
+| `max_preemptible_worker_attempts` | int           | Max preemptible batch submissions before falling back to on-demand (copied from `WorkPool`)         |
+| `max_workers_per_request`         | int           | Maximum number of VMs in a single GCP Batch job submission (copied from `WorkPool`)                 |
+| `vm_shutdown_grace_period_sec`    | int           | Seconds the monitor waits after asking a VM to shut down (copied from `WorkPool`)                   |
+| `max_zombies_before_abort`        | int           | Number of zombie VMs tolerated in one batch (copied from `WorkPool`)                                |
+| `max_consecutive_failed_batches`  | int           | Number of consecutive failed batches before the monitor halts the workpool (copied from `WorkPool`) |
 
-| Field    | Type   | Description                        |
-| -------- | ------ | ---------------------------------- |
-| `status` | string | Status value                       |
-| `count`  | int    | Number of documents in that status |
+The following fields are written exclusively by the monitor process:
+
+| Field                             | Type         | Description                                                                                                 |
+| --------------------------------- | ------------ | ----------------------------------------------------------------------------------------------------------- |
+| `expiry`                          | timestamp    | When this document may be garbage-collected                                                                 |
+| `last_updated`                    | timestamp    | When these metrics were last computed by the monitor                                                        |
+| `state`                           | string       | Operational health: `idle`, `ok`, `unhealthy`, or `halted`                                                  |
+| `state_message`                   | string       | Human-readable description of the current state or last incident                                            |
+| `last_incident_at`                | timestamp    | Time of the most recent watchdog incident                                                                   |
+| `incident_count`                  | int          | Cumulative number of incidents; the monitor halts the workpool if this exceeds a threshold                  |
+| `expected_preemptible_workers`    | int          | Sum of `expected_vm_count` across all `BatchAPIRequests` where `preemptible=true`                           |
+| `expected_nonpreemptible_workers` | int          | Sum of `expected_vm_count` across all `BatchAPIRequests` where `preemptible=false`                          |
+| `unhealthy_batch_count`           | int          | Number of `BatchAPIRequests` documents with `unhealthy=true`                                                |
+| `batch_api_request_counts`        | []StateCount | Per-state counts of `BatchAPIRequests` documents; one entry per non-zero state (`pending`, `started`, etc.) |
+| `preemptible_workers`             | []StateCount | Per-state counts of preemptible `Workers` documents; one entry per non-zero state (`started`, `stopped`)    |
+| `nonpreemptible_workers`          | []StateCount | Per-state counts of non-preemptible `Workers` documents; one entry per non-zero state                       |
+| `tasks`                           | []StateCount | Per-state counts of `Tasks` documents belonging to this workpool; one entry per non-zero state              |
+
+**StateCount** (embedded object):
+
+| Field   | Type   | Description                       |
+| ------- | ------ | --------------------------------- |
+| `state` | string | State value                       |
+| `count` | int    | Number of documents in that state |
 
 ---
 
@@ -216,21 +222,24 @@ Any question about workpool health — "how many VMs are expected?", "are there 
 
 An append-only log of `WorkPoolSummary` snapshots. Each document is a point-in-time copy written by the monitor process whenever it updates `WorkPoolSummary`. The document ID is a UUID assigned at write time.
 
-| Field                             | Type          | Description                                                                         |
-| --------------------------------- | ------------- | ----------------------------------------------------------------------------------- |
-| `workpool_id`                     | string        | Workpool this snapshot describes                                                    |
-| `timestamp`                       | timestamp     | When this snapshot was recorded                                                     |
-| `expiry`                          | timestamp     | When this document may be garbage-collected                                         |
-| `expected_preemptible_workers`    | int           | Copied from `WorkPoolSummary` at snapshot time                                      |
-| `expected_nonpreemptible_workers` | int           | Copied from `WorkPoolSummary` at snapshot time                                      |
-| `unhealthy_batch_count`           | int           | Copied from `WorkPoolSummary` at snapshot time                                      |
-| `batch_api_request_counts`        | []StatusCount | Per-status counts of `BatchAPIRequests` at the time of the snapshot                 |
-| `preemptible_workers`             | []StatusCount | Per-status counts of preemptible `Workers` at the time of the snapshot              |
-| `nonpreemptible_workers`          | []StatusCount | Per-status counts of non-preemptible `Workers` at the time of the snapshot          |
-| `tasks`                           | []StatusCount | Per-status counts of `Tasks` belonging to this workpool at the time of the snapshot |
-| `expiry`                          | timestamp     | When this document may be deleted (7-day TTL)                                       |
+| Field                             | Type         | Description                                                                        |
+| --------------------------------- | ------------ | ---------------------------------------------------------------------------------- |
+| `workpool_id`                     | string       | Workpool this snapshot describes                                                   |
+| `timestamp`                       | timestamp    | When this snapshot was recorded                                                    |
+| `expiry`                          | timestamp    | When this document may be garbage-collected                                        |
+| `state`                           | string       | Copied from `WorkPoolSummary.state` at snapshot time                               |
+| `state_message`                   | string       | Copied from `WorkPoolSummary.state_message` at snapshot time                       |
+| `last_incident_at`                | timestamp    | Copied from `WorkPoolSummary.last_incident_at` at snapshot time                    |
+| `incident_count`                  | int          | Copied from `WorkPoolSummary.incident_count` at snapshot time                      |
+| `expected_preemptible_workers`    | int          | Copied from `WorkPoolSummary` at snapshot time                                     |
+| `expected_nonpreemptible_workers` | int          | Copied from `WorkPoolSummary` at snapshot time                                     |
+| `unhealthy_batch_count`           | int          | Copied from `WorkPoolSummary` at snapshot time                                     |
+| `batch_api_request_counts`        | []StateCount | Per-state counts of `BatchAPIRequests` at the time of the snapshot                 |
+| `preemptible_workers`             | []StateCount | Per-state counts of preemptible `Workers` at the time of the snapshot              |
+| `nonpreemptible_workers`          | []StateCount | Per-state counts of non-preemptible `Workers` at the time of the snapshot          |
+| `tasks`                           | []StateCount | Per-state counts of `Tasks` belonging to this workpool at the time of the snapshot |
 
-**StatusCount** is the same embedded object as in `WorkPoolSummary`.
+**StateCount** is the same embedded object as in `WorkPoolSummary`.
 
 ---
 
@@ -331,26 +340,26 @@ One document per job, keyed by `job_id`. This is the **mutable** counterpart to 
 
 Any question about job progress — "is this job still running?", "how many tasks failed?" — should be answered by reading `JobSummary`, not by scanning `Tasks` or adding derived fields to `Jobs`.
 
-| Field         | Type        | Description                                                                              |
-| ------------- | ----------- | ---------------------------------------------------------------------------------------- |
-| `job_id`      | string      | ID of the job this summary describes                                                     |
-| `workpool_id` | string      | Workpool the job is running in                                                           |
-| `created_at`  | timestamp   | When the job was submitted (copied from `Jobs.created_at` at submission time)            |
-| `expiry`      | timestamp   | When this document may be garbage-collected                                              |
-| `status`      | string      | Rolled-up job status — see table below                                                   |
-| `tasks`       | []TaskCount | Task counts grouped by status; one entry per non-zero status                             |
-| `labels`      | []Label     | User-defined tags (copied from `Jobs.labels` at submission time; not updated thereafter) |
+| Field         | Type         | Description                                                                              |
+| ------------- | ------------ | ---------------------------------------------------------------------------------------- |
+| `job_id`      | string       | ID of the job this summary describes                                                     |
+| `workpool_id` | string       | Workpool the job is running in                                                           |
+| `created_at`  | timestamp    | When the job was submitted (copied from `Jobs.created_at` at submission time)            |
+| `expiry`      | timestamp    | When this document may be garbage-collected                                              |
+| `state`       | string       | Rolled-up job state — see table below                                                    |
+| `tasks`       | []StateCount | Task counts grouped by state; one entry per non-zero state                               |
+| `labels`      | []Label      | User-defined tags (copied from `Jobs.labels` at submission time; not updated thereafter) |
 
-**TaskCount** (embedded object):
+**StateCount** (embedded object):
 
-| Field   | Type   | Description                                                       |
-| ------- | ------ | ----------------------------------------------------------------- |
-| `state` | string | Task status value (same allowed values as the `Tasks` collection) |
-| `count` | int    | Number of tasks currently in that state                           |
+| Field   | Type   | Description                                                 |
+| ------- | ------ | ----------------------------------------------------------- |
+| `state` | string | State value (same allowed values as the `Tasks` collection) |
+| `count` | int    | Number of tasks currently in that state                     |
 
-**Status values:**
+**State values:**
 
-| Status                     | Description                                                                               |
+| State                      | Description                                                                               |
 | -------------------------- | ----------------------------------------------------------------------------------------- |
 | `pending`                  | All tasks are `pending`; no work has started                                              |
 | `in_progress`              | At least one task is active (`claimed`/`running`/`writing`); no `failed` or `error` tasks |
@@ -367,18 +376,18 @@ Any question about job progress — "is this job still running?", "how many task
 
 An append-only log of `JobSummary` snapshots. Each document is a point-in-time copy written by the monitor process whenever it updates `JobSummary`. The document ID is a UUID assigned at write time.
 
-| Field         | Type        | Description                                                              |
-| ------------- | ----------- | ------------------------------------------------------------------------ |
-| `job_id`      | string      | ID of the job this snapshot describes                                    |
-| `workpool_id` | string      | Workpool the job is running in                                           |
-| `created_at`  | timestamp   | When the job was originally submitted (copied from `JobSummary`)         |
-| `timestamp`   | timestamp   | When this snapshot was recorded                                          |
-| `expiry`      | timestamp   | When this document may be garbage-collected                              |
-| `status`      | string      | Job status at the time of the snapshot (same values as `JobSummary`)     |
-| `tasks`       | []TaskCount | Task counts at the time of the snapshot                                  |
-| `labels`      | []Label     | User-defined tags at the time of the snapshot (copied from `JobSummary`) |
+| Field         | Type         | Description                                                              |
+| ------------- | ------------ | ------------------------------------------------------------------------ |
+| `job_id`      | string       | ID of the job this snapshot describes                                    |
+| `workpool_id` | string       | Workpool the job is running in                                           |
+| `created_at`  | timestamp    | When the job was originally submitted (copied from `JobSummary`)         |
+| `timestamp`   | timestamp    | When this snapshot was recorded                                          |
+| `expiry`      | timestamp    | When this document may be garbage-collected                              |
+| `state`       | string       | Job state at the time of the snapshot (same values as `JobSummary`)      |
+| `tasks`       | []StateCount | Task counts at the time of the snapshot                                  |
+| `labels`      | []Label      | User-defined tags at the time of the snapshot (copied from `JobSummary`) |
 
-**TaskCount** and **Label** are the same embedded objects as in `JobSummary`.
+**StateCount** and **Label** are the same embedded objects as in `JobSummary`.
 
 ---
 

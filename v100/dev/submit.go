@@ -53,10 +53,6 @@ type WorkpoolSpec struct {
 	MaxPreemptibleWorkerAttempts int `json:"maxPreemptibleWorkerAttempts"`
 	MaxWorkersPerRequest         int `json:"maxWorkersPerRequest"`
 
-	MinTimeBetweenPollsSec      int `json:"minTimeBetweenPollsSec"`
-	MaxTimeBetweenPollsSec      int `json:"maxTimeBetweenPollsSec"`
-	MaxTimeToStartWorkerSec     int `json:"maxTimeToStartWorkerSec"`
-	MaxTimeInQueueSec           int `json:"maxTimeInQueueSec"`
 	VMShutdownGracePeriodSec    int `json:"vmShutdownGracePeriodSec"`
 	MaxZombiesBeforeAbort       int `json:"maxZombiesBeforeAbort"`
 	MaxConsecutiveFailedBatches int `json:"maxConsecutiveFailedBatches"`
@@ -198,10 +194,6 @@ func devSubmit(jobSpecFile, workpoolSpecFile, project, db, gcsPrefix string) err
 		MaxPreemptibleWorkerAttempts: workpoolSpec.MaxPreemptibleWorkerAttempts,
 		MaxWorkersPerRequest:         workpoolSpec.MaxWorkersPerRequest,
 
-		MinTimeBetweenPollsSec:      workpoolSpec.MinTimeBetweenPollsSec,
-		MaxTimeBetweenPollsSec:      workpoolSpec.MaxTimeBetweenPollsSec,
-		MaxTimeToStartWorkerSec:     workpoolSpec.MaxTimeToStartWorkerSec,
-		MaxTimeInQueueSec:           workpoolSpec.MaxTimeInQueueSec,
 		VMShutdownGracePeriodSec:    workpoolSpec.VMShutdownGracePeriodSec,
 		MaxZombiesBeforeAbort:       workpoolSpec.MaxZombiesBeforeAbort,
 		MaxConsecutiveFailedBatches: workpoolSpec.MaxConsecutiveFailedBatches,
@@ -267,8 +259,8 @@ func devSubmit(jobSpecFile, workpoolSpecFile, project, db, gcsPrefix string) err
 		WorkpoolID: workpoolID,
 		CreatedAt:  now,
 		Expiry:     now.Add(7 * 24 * time.Hour),
-		Status:     monitor.JobStatusPending,
-		Tasks:      []monitor.TaskCount{{State: "pending", Count: len(jobSpec.Tasks)}},
+		State:      monitor.JobStatusPending,
+		Tasks:      []monitor.StateCount{{State: "pending", Count: len(jobSpec.Tasks)}},
 		Labels:     toMonitorLabels(jobSpec.Labels),
 	}); err != nil {
 		return fmt.Errorf("creating job summary: %w", err)

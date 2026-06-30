@@ -28,15 +28,18 @@ const (
 )
 
 // firestoreWorkPool is the Firestore representation of a workpool document.
+// This is immutable — written once at creation and never updated by the monitor.
 // Duration fields are stored as seconds (int) to be JSON/Firestore friendly.
+// Mutable state (state, state_message, last_incident_at, incident_count) lives
+// in WorkPoolSummary, not here.
 type firestoreWorkPool struct {
-	WorkpoolID            string        `firestore:"workpool_id"`
-	MachineType           string        `firestore:"machine_type"`
-	Region                string        `firestore:"region"`
-	Zones                 []string      `firestore:"zones"`
-	Expiry                time.Time     `firestore:"expiry"`
-	RootDir               string        `firestore:"root_dir"`
-	SparklesWorkerGCSPath string        `firestore:"sparkles_worker_gcs_path"`
+	WorkpoolID            string          `firestore:"workpool_id"`
+	MachineType           string          `firestore:"machine_type"`
+	Region                string          `firestore:"region"`
+	Zones                 []string        `firestore:"zones"`
+	Expiry                time.Time       `firestore:"expiry"`
+	RootDir               string          `firestore:"root_dir"`
+	SparklesWorkerGCSPath string          `firestore:"sparkles_worker_gcs_path"`
 	EmptyVolumes          []EmptyVolume   `firestore:"empty_volumes"`
 	Resources             []ResourceEntry `firestore:"resources"`
 	ServiceAccount        string          `firestore:"service_account"`
@@ -45,18 +48,9 @@ type firestoreWorkPool struct {
 	MaxPreemptibleWorkerAttempts int `firestore:"max_preemptible_worker_attempts"`
 	MaxWorkersPerRequest         int `firestore:"max_workers_per_request"`
 
-	MinTimeBetweenPollsSec      int `firestore:"min_time_between_polls_sec"`
-	MaxTimeBetweenPollsSec      int `firestore:"max_time_between_polls_sec"`
-	MaxTimeToStartWorkerSec     int `firestore:"max_time_to_start_worker_sec"`
-	MaxTimeInQueueSec           int `firestore:"max_time_in_queue_sec"`
 	VMShutdownGracePeriodSec    int `firestore:"vm_shutdown_grace_period_sec"`
 	MaxZombiesBeforeAbort       int `firestore:"max_zombies_before_abort"`
 	MaxConsecutiveFailedBatches int `firestore:"max_consecutive_failed_batches"`
-
-	Status         string    `firestore:"status"`
-	StatusMessage  string    `firestore:"status_message"`
-	LastIncidentAt time.Time `firestore:"last_incident_at"`
-	IncidentCount  int       `firestore:"incident_count"`
 }
 
 func secToDur(secs int, defaultDur time.Duration) time.Duration {
@@ -80,27 +74,30 @@ func toWorkPool(f *firestoreWorkPool) *WorkPool {
 		MaxWorkerCount:               f.MaxWorkerCount,
 		MaxPreemptibleWorkerAttempts: f.MaxPreemptibleWorkerAttempts,
 		MaxWorkersPerRequest:         f.MaxWorkersPerRequest,
-		MinTimeBetweenPolls:          secToDur(f.MinTimeBetweenPollsSec, defaultMinTimeBetweenPolls),
-		MaxTimeBetweenPolls:          secToDur(f.MaxTimeBetweenPollsSec, defaultMaxTimeBetweenPolls),
-		MaxTimeToStartWorker:         secToDur(f.MaxTimeToStartWorkerSec, defaultMaxTimeToStartWorker),
-		MaxTimeInQueue:               secToDur(f.MaxTimeInQueueSec, defaultMaxTimeInQueue),
 		VMShutdownGracePeriod:        secToDur(f.VMShutdownGracePeriodSec, defaultVMShutdownGracePeriod),
 		MaxZombiesBeforeAbort:        f.MaxZombiesBeforeAbort,
 		MaxConsecutiveFailedBatches:  f.MaxConsecutiveFailedBatches,
-		Status:                       WorkPoolStatus(f.Status),
-		StatusMessage:                f.StatusMessage,
-		LastIncidentAt:               f.LastIncidentAt,
-		IncidentCount:                f.IncidentCount,
+		// State fields are zero-valued here; populated by merging WorkPoolSummary in Get/ListAll.
 	}
 }
 
-func toFirestoreWorkPoolUpdates(p *WorkPool) []firestore.Update {
-	return []firestore.Update{
-		{Path: "status", Value: string(p.Status)},
-		{Path: "status_message", Value: p.StatusMessage},
-		{Path: "last_incident_at", Value: p.LastIncidentAt},
-		{Path: "incident_count", Value: p.IncidentCount},
-	}
+// mergeStateIntoPool copies mutable state fields from a WorkPoolSummary into a WorkPool.
+// Called after loading config from WorkPools so the in-memory WorkPool carries current state.
+func mergeStateIntoPool(pool *WorkPool, summary *WorkPoolSummary) {
+	pool.State = summary.State
+	pool.StateMessage = summary.StateMessage
+	pool.LastIncidentAt = summary.LastIncidentAt
+	pool.IncidentCount = summary.IncidentCount
+}
+
+// workPoolSummaryState is a partial WorkPoolSummary used only for merging state fields
+// back from a WorkPool into an existing WorkPoolSummary document without overwriting
+// the computed metrics fields.
+type workPoolSummaryState struct {
+	State          string    `firestore:"state"`
+	StateMessage   string    `firestore:"state_message"`
+	LastIncidentAt time.Time `firestore:"last_incident_at"`
+	IncidentCount  int       `firestore:"incident_count"`
 }
 
 // ----- FirestoreWorkPoolStore -----
@@ -130,6 +127,17 @@ func (s *FirestoreWorkPoolStore) ListAll(ctx context.Context) ([]*WorkPool, erro
 		}
 		pools = append(pools, toWorkPool(&f))
 	}
+
+	// Merge mutable state from WorkPoolSummary into each pool.
+	summaries, err := s.loadAllSummaryStates(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, pool := range pools {
+		if summary, ok := summaries[pool.WorkpoolID]; ok {
+			mergeStateIntoPool(pool, summary)
+		}
+	}
 	return pools, nil
 }
 
@@ -142,12 +150,54 @@ func (s *FirestoreWorkPoolStore) Get(ctx context.Context, workpoolID string) (*W
 	if err := snap.DataTo(&f); err != nil {
 		return nil, err
 	}
-	return toWorkPool(&f), nil
+	pool := toWorkPool(&f)
+
+	// Merge mutable state from WorkPoolSummary.
+	summSnap, err := s.fs.Collection(workPoolSummaryCollection).Doc(workpoolID).Get(ctx)
+	if err == nil {
+		var summary WorkPoolSummary
+		if err := summSnap.DataTo(&summary); err == nil {
+			mergeStateIntoPool(pool, &summary)
+		}
+	}
+	// If WorkPoolSummary doesn't exist yet, pool retains zero-value state (idle).
+	return pool, nil
 }
 
+// Save writes the mutable state fields from pool into WorkPoolSummary using a
+// merge so that the computed metrics fields are not overwritten.
 func (s *FirestoreWorkPoolStore) Save(ctx context.Context, pool *WorkPool) error {
-	_, err := s.fs.Collection(workpoolCollection).Doc(pool.WorkpoolID).Update(ctx, toFirestoreWorkPoolUpdates(pool))
+	state := workPoolSummaryState{
+		State:          string(pool.State),
+		StateMessage:   pool.StateMessage,
+		LastIncidentAt: pool.LastIncidentAt,
+		IncidentCount:  pool.IncidentCount,
+	}
+	_, err := s.fs.Collection(workPoolSummaryCollection).Doc(pool.WorkpoolID).Set(ctx, state, firestore.MergeAll)
 	return err
+}
+
+// loadAllSummaryStates fetches all WorkPoolSummary documents and returns them
+// keyed by workpool_id. Used by ListAll to bulk-load state.
+func (s *FirestoreWorkPoolStore) loadAllSummaryStates(ctx context.Context) (map[string]*WorkPoolSummary, error) {
+	iter := s.fs.Collection(workPoolSummaryCollection).Documents(ctx)
+	result := make(map[string]*WorkPoolSummary)
+	for {
+		snap, err := iter.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		var summary WorkPoolSummary
+		if err := snap.DataTo(&summary); err != nil {
+			return nil, err
+		}
+		cp := summary
+		result[summary.WorkpoolID] = &cp
+	}
+	return result, nil
 }
 
 // ----- firestoreBatchRequest -----
@@ -581,7 +631,7 @@ func (s *FirestoreJobSummaryStore) ListNonTerminal(ctx context.Context) ([]*JobS
 		string(JobStatusInProgressWithFailure),
 	}
 	iter := s.fs.Collection(jobSummaryCollection).
-		Where("status", "in", nonTerminal).
+		Where("state", "in", nonTerminal).
 		Documents(ctx)
 
 	var summaries []*JobSummary

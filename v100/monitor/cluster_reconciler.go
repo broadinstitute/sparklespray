@@ -54,8 +54,8 @@ func (a *Monitor) reconcileWorkpool(ctx context.Context, pool *WorkPool) error {
 	if err != nil {
 		return fmt.Errorf("list workpool VMs: %w", err)
 	}
-	if len(workpoolVMs) == 0 && (pool.Status == WorkPoolStatusOK || pool.Status == WorkPoolStatusUnhealthy) {
-		pool.Status = WorkPoolStatusIdle
+	if len(workpoolVMs) == 0 && (pool.State == WorkPoolStatusOK || pool.State == WorkPoolStatusUnhealthy) {
+		pool.State = WorkPoolStatusIdle
 		if err := a.pools.Save(ctx, pool); err != nil {
 			return fmt.Errorf("save pool (idle transition): %w", err)
 		}
@@ -153,8 +153,7 @@ func (a *Monitor) reconcileVMs(ctx context.Context, pool *WorkPool, batch *Batch
 	// Anomaly 2: startup failure after the grace period.
 	// Grace is measured from running_since (not submitted_at) so queued VMs aren't mistaken for failures.
 	// Note: if apiStatus is SUCCEEDED here we already returned above; the check below is belt-and-suspenders.
-	maxTimeToStart := param(pool.MaxTimeToStartWorker, defaultMaxTimeToStartWorker)
-	if batch.RunningSince != nil && now.Sub(*batch.RunningSince) > maxTimeToStart && apiStatus != BatchJobStatusSucceeded {
+	if batch.RunningSince != nil && now.Sub(*batch.RunningSince) > defaultMaxTimeToStartWorker && apiStatus != BatchJobStatusSucceeded {
 		if batch.RegisteredWorkerCount == 0 {
 			// No worker ever registered — whole batch is a startup failure.
 			if err := a.batchAPI.TerminateJob(ctx, batch.JobID); err != nil {

@@ -87,17 +87,13 @@ type WorkPool struct {
 	MaxWorkersPerRequest         int `firestore:"max_workers_per_request"`
 
 	// Watchdog parameters (zero value → monitor uses its own defaults)
-	MinTimeBetweenPollsSec      int `firestore:"min_time_between_polls_sec"`
-	MaxTimeBetweenPollsSec      int `firestore:"max_time_between_polls_sec"`
-	MaxTimeToStartWorkerSec     int `firestore:"max_time_to_start_worker_sec"`
-	MaxTimeInQueueSec           int `firestore:"max_time_in_queue_sec"`
 	VMShutdownGracePeriodSec    int `firestore:"vm_shutdown_grace_period_sec"`
 	MaxZombiesBeforeAbort       int `firestore:"max_zombies_before_abort"`
 	MaxConsecutiveFailedBatches int `firestore:"max_consecutive_failed_batches"`
 
-	// Status fields (written by the monitor)
-	Status         string    `firestore:"status"`
-	StatusMessage  string    `firestore:"status_message"`
+	// State fields (written by the monitor; stored in WorkPoolSummary collection)
+	State         string    `firestore:"state"`
+	StateMessage  string    `firestore:"state_message"`
 	LastIncidentAt time.Time `firestore:"last_incident_at"`
 	IncidentCount  int       `firestore:"incident_count"`
 }

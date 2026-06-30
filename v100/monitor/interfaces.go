@@ -55,8 +55,11 @@ const (
 
 // ----- Data model -----
 
-// WorkPool holds both the configuration and runtime status of a workpool.
-// Corresponds to the WorkPools Firestore collection, extended with monitor fields.
+// WorkPool holds the configuration of a workpool. It corresponds to the immutable
+// WorkPools Firestore collection (written once at creation, never updated).
+// The mutable runtime state (State, StateMessage, LastIncidentAt, IncidentCount)
+// is loaded from WorkPoolSummary and kept here for in-memory convenience during
+// a monitor poll cycle; saves go to WorkPoolSummary, not WorkPools.
 type WorkPool struct {
 	WorkpoolID            string
 	Region                string   // GCP region for Batch jobs, e.g. "us-central1"
@@ -74,17 +77,14 @@ type WorkPool struct {
 	MaxWorkersPerRequest         int // default: 100
 
 	// Watchdog parameters
-	MinTimeBetweenPolls         time.Duration // default: 5s
-	MaxTimeBetweenPolls         time.Duration // default: 5min
-	MaxTimeToStartWorker        time.Duration // default: 5min
-	MaxTimeInQueue              time.Duration // default: 15min
 	VMShutdownGracePeriod       time.Duration // default: 1min
 	MaxZombiesBeforeAbort       int           // default: 3
 	MaxConsecutiveFailedBatches int           // default: 2
 
-	// Status fields (written by the monitor, read by the UI and provisioning guard)
-	Status         WorkPoolStatus
-	StatusMessage  string
+	// State fields — immutable in WorkPools Firestore; loaded from WorkPoolSummary
+	// at read time and persisted back to WorkPoolSummary on Save.
+	State         WorkPoolStatus
+	StateMessage  string
 	LastIncidentAt time.Time
 	IncidentCount  int
 }
@@ -222,25 +222,49 @@ type TaskStore interface {
 
 // ----- WorkPool summary types -----
 
-// StatusCount is one entry in a WorkPoolSummary's per-status breakdown.
-type StatusCount struct {
-	Status string `firestore:"status" json:"status"`
-	Count  int    `firestore:"count"  json:"count"`
+// StateCount is one entry in a per-state breakdown (used in both WorkPoolSummary and JobSummary).
+type StateCount struct {
+	State string `firestore:"state" json:"state"`
+	Count int    `firestore:"count"  json:"count"`
 }
 
-// WorkPoolSummary holds evolving runtime metrics for a workpool, recomputed
-// by the monitor on each provisioning poll.
+// WorkPoolSummary is the mutable counterpart to the immutable WorkPool document.
+// It is owned exclusively by the monitor process, which recomputes it on each
+// provisioning poll. It contains a copy of all WorkPool fields (so callers can
+// retrieve full workpool information without fetching both documents) plus all
+// mutable state written by the monitor.
 type WorkPoolSummary struct {
-	WorkpoolID                    string        `firestore:"workpool_id"`
-	Expiry                        time.Time     `firestore:"expiry"`
-	LastUpdated                   time.Time     `firestore:"last_updated"`
-	ExpectedPreemptibleWorkers    int           `firestore:"expected_preemptible_workers"`
-	ExpectedNonpreemptibleWorkers int           `firestore:"expected_nonpreemptible_workers"`
-	UnhealthyBatchCount           int           `firestore:"unhealthy_batch_count"`
-	BatchAPIRequestCounts         []StatusCount `firestore:"batch_api_request_counts"`
-	PreemptibleWorkers            []StatusCount `firestore:"preemptible_workers"`
-	NonpreemptibleWorkers         []StatusCount `firestore:"nonpreemptible_workers"`
-	Tasks                         []StatusCount `firestore:"tasks"`
+	// Fields copied from WorkPool
+	WorkpoolID                    string          `firestore:"workpool_id"`
+	MachineType                   string          `firestore:"machine_type"`
+	Region                        string          `firestore:"region"`
+	Zones                         []string        `firestore:"zones"`
+	RootDir                       string          `firestore:"root_dir"`
+	SparklesWorkerGCSPath         string          `firestore:"sparkles_worker_gcs_path"`
+	EmptyVolumes                  []EmptyVolume   `firestore:"empty_volumes"`
+	Resources                     []ResourceEntry `firestore:"resources"`
+	Labels                        []Label         `firestore:"labels"`
+	MaxWorkerCount                int             `firestore:"max_worker_count"`
+	MaxPreemptibleWorkerAttempts  int             `firestore:"max_preemptible_worker_attempts"`
+	MaxWorkersPerRequest          int             `firestore:"max_workers_per_request"`
+	VMShutdownGracePeriodSec      int             `firestore:"vm_shutdown_grace_period_sec"`
+	MaxZombiesBeforeAbort         int             `firestore:"max_zombies_before_abort"`
+	MaxConsecutiveFailedBatches   int             `firestore:"max_consecutive_failed_batches"`
+
+	// Monitor-maintained fields
+	Expiry                        time.Time      `firestore:"expiry"`
+	LastUpdated                   time.Time      `firestore:"last_updated"`
+	State                         WorkPoolStatus `firestore:"state"`
+	StateMessage                  string         `firestore:"state_message"`
+	LastIncidentAt                time.Time      `firestore:"last_incident_at"`
+	IncidentCount                 int            `firestore:"incident_count"`
+	ExpectedPreemptibleWorkers    int            `firestore:"expected_preemptible_workers"`
+	ExpectedNonpreemptibleWorkers int            `firestore:"expected_nonpreemptible_workers"`
+	UnhealthyBatchCount           int            `firestore:"unhealthy_batch_count"`
+	BatchAPIRequestCounts         []StateCount   `firestore:"batch_api_request_counts"`
+	PreemptibleWorkers            []StateCount   `firestore:"preemptible_workers"`
+	NonpreemptibleWorkers         []StateCount   `firestore:"nonpreemptible_workers"`
+	Tasks                         []StateCount   `firestore:"tasks"`
 }
 
 // WorkPoolSummaryHistory is an append-only snapshot written each time the monitor
@@ -249,16 +273,20 @@ type WorkPoolSummaryHistory struct {
 	WorkpoolID                    string        `firestore:"workpool_id"`
 	Timestamp                     time.Time     `firestore:"timestamp"`
 	Expiry                        time.Time     `firestore:"expiry"`
-	ExpectedPreemptibleWorkers    int           `firestore:"expected_preemptible_workers"`
-	ExpectedNonpreemptibleWorkers int           `firestore:"expected_nonpreemptible_workers"`
-	UnhealthyBatchCount           int           `firestore:"unhealthy_batch_count"`
-	BatchAPIRequestCounts         []StatusCount `firestore:"batch_api_request_counts"`
-	PreemptibleWorkers            []StatusCount `firestore:"preemptible_workers"`
-	NonpreemptibleWorkers         []StatusCount `firestore:"nonpreemptible_workers"`
-	Tasks                         []StatusCount `firestore:"tasks"`
+	State                         WorkPoolStatus `firestore:"state"`
+	StateMessage                  string         `firestore:"state_message"`
+	LastIncidentAt                time.Time      `firestore:"last_incident_at"`
+	IncidentCount                 int            `firestore:"incident_count"`
+	ExpectedPreemptibleWorkers    int            `firestore:"expected_preemptible_workers"`
+	ExpectedNonpreemptibleWorkers int            `firestore:"expected_nonpreemptible_workers"`
+	UnhealthyBatchCount           int            `firestore:"unhealthy_batch_count"`
+	BatchAPIRequestCounts         []StateCount   `firestore:"batch_api_request_counts"`
+	PreemptibleWorkers            []StateCount   `firestore:"preemptible_workers"`
+	NonpreemptibleWorkers         []StateCount   `firestore:"nonpreemptible_workers"`
+	Tasks                         []StateCount   `firestore:"tasks"`
 }
 
-// WorkPoolSummaryStore writes WorkPoolSummary and WorkPoolSummaryHistory documents.
+// WorkPoolSummaryStore reads and writes WorkPoolSummary and WorkPoolSummaryHistory documents.
 type WorkPoolSummaryStore interface {
 	Save(ctx context.Context, summary *WorkPoolSummary) error
 	SaveHistory(ctx context.Context, history *WorkPoolSummaryHistory) error
@@ -295,42 +323,36 @@ type Label struct {
 	Value string `firestore:"value" json:"value"`
 }
 
-// TaskCount is one entry in a JobSummary's task-state breakdown.
-type TaskCount struct {
-	State string `firestore:"state" json:"state"`
-	Count int    `firestore:"count" json:"count"`
-}
-
-// JobSummary is created at job submission (status=pending) and updated by the
+// JobSummary is created at job submission (state=pending) and updated by the
 // monitor's job-summary poll as task states change.
 type JobSummary struct {
-	JobID      string      `firestore:"job_id"`
-	WorkpoolID string      `firestore:"workpool_id"`
-	CreatedAt  time.Time   `firestore:"created_at"`
-	Expiry     time.Time   `firestore:"expiry"`
-	Status     JobStatus   `firestore:"status"`
-	Tasks      []TaskCount `firestore:"tasks"`
-	Labels     []Label     `firestore:"labels"`
+	JobID      string       `firestore:"job_id"`
+	WorkpoolID string       `firestore:"workpool_id"`
+	CreatedAt  time.Time    `firestore:"created_at"`
+	Expiry     time.Time    `firestore:"expiry"`
+	State      JobStatus    `firestore:"state"`
+	Tasks      []StateCount `firestore:"tasks"`
+	Labels     []Label      `firestore:"labels"`
 }
 
 // JobSummaryHistory is an append-only snapshot written each time the monitor
 // updates a JobSummary.
 type JobSummaryHistory struct {
-	JobID      string      `firestore:"job_id"`
-	WorkpoolID string      `firestore:"workpool_id"`
-	CreatedAt  time.Time   `firestore:"created_at"`
-	Timestamp  time.Time   `firestore:"timestamp"`
-	Expiry     time.Time   `firestore:"expiry"`
-	Status     JobStatus   `firestore:"status"`
-	Tasks      []TaskCount `firestore:"tasks"`
-	Labels     []Label     `firestore:"labels"`
+	JobID      string       `firestore:"job_id"`
+	WorkpoolID string       `firestore:"workpool_id"`
+	CreatedAt  time.Time    `firestore:"created_at"`
+	Timestamp  time.Time    `firestore:"timestamp"`
+	Expiry     time.Time    `firestore:"expiry"`
+	State      JobStatus    `firestore:"state"`
+	Tasks      []StateCount `firestore:"tasks"`
+	Labels     []Label      `firestore:"labels"`
 }
 
 // JobSummaryStore reads and writes JobSummary and JobSummaryHistory documents.
 type JobSummaryStore interface {
 	// Create writes the initial JobSummary for a new job.
 	Create(ctx context.Context, summary *JobSummary) error
-	// ListNonTerminal returns all JobSummary documents whose status is not terminal.
+	// ListNonTerminal returns all JobSummary documents whose state is not terminal.
 	ListNonTerminal(ctx context.Context) ([]*JobSummary, error)
 	// Save replaces an existing JobSummary document.
 	Save(ctx context.Context, summary *JobSummary) error

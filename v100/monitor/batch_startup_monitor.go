@@ -84,8 +84,7 @@ func (a *Monitor) checkBatchStartup(ctx context.Context, pool *WorkPool, batch *
 		return a.batches.Save(ctx, batch)
 	}
 
-	maxTimeInQueue := param(pool.MaxTimeInQueue, defaultMaxTimeInQueue)
-	if batch.RunningSince == nil && now.Sub(batch.SubmittedAt) > maxTimeInQueue {
+	if batch.RunningSince == nil && now.Sub(batch.SubmittedAt) > defaultMaxTimeInQueue {
 		batch.Status = BatchStatusFailed
 		batch.Unhealthy = true
 		recordIncident(pool,
