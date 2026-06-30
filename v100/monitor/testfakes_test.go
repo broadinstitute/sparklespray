@@ -588,6 +588,6 @@ func defaultPool(workpoolID string) *WorkPool {
 		WorkpoolID:                   workpoolID,
 		MaxWorkerCount:               100,
 		MaxPreemptibleWorkerAttempts: 50,
-		Status:                       WorkPoolStatusOK,
+		State:                        WorkPoolStatusOK,
 	}
 }

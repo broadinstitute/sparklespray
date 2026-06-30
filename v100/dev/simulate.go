@@ -93,7 +93,6 @@ func runDevSimulate(c *cli.Context) error {
 		Zones:          []string{"us-central1-a"},
 		Expiry:         time.Now().Add(7 * 24 * time.Hour),
 		MaxWorkerCount: cfg.workerCount,
-		Status:         "ok",
 	}
 	if _, err := fsClient.Collection(v100.WorkpoolCollection).Doc(cfg.workpoolID).Set(ctx, workpool); err != nil {
 		return fmt.Errorf("writing workpool: %w", err)
@@ -216,8 +215,8 @@ func runSimJobSubmitter(ctx context.Context, cfg simConfig, fsClient *firestore.
 			WorkpoolID: cfg.workpoolID,
 			CreatedAt:  now,
 			Expiry:     now.Add(7 * 24 * time.Hour),
-			Status:     monitor.JobStatusPending,
-			Tasks:      []monitor.TaskCount{{State: "pending", Count: cfg.tasksPerJob}},
+			State:      monitor.JobStatusPending,
+			Tasks:      []monitor.StateCount{{State: "pending", Count: cfg.tasksPerJob}},
 		}
 		if err := jobSummaries.Create(ctx, summary); err != nil {
 			log.Printf("simulate: creating job summary for %s: %v", jobID, err)
@@ -406,9 +405,9 @@ func runSimJobSummaryUpdater(ctx context.Context, workpoolID string, jobSummarie
 					log.Printf("simulate: counting tasks for %s: %v", summary.JobID, err)
 					continue
 				}
-				newStatus := simComputeJobStatus(counts)
+				newState := simComputeJobStatus(counts)
 				newTasks := simTaskCountsFromMap(counts)
-				summary.Status = newStatus
+				summary.State = newState
 				summary.Tasks = newTasks
 				if err := jobSummaries.Save(ctx, summary); err != nil {
 					log.Printf("simulate: saving job summary for %s: %v", summary.JobID, err)
@@ -419,13 +418,13 @@ func runSimJobSummaryUpdater(ctx context.Context, workpoolID string, jobSummarie
 					WorkpoolID: summary.WorkpoolID,
 					Timestamp:  time.Now(),
 					Expiry:     summary.Expiry,
-					Status:     newStatus,
+					State:      newState,
 					Tasks:      newTasks,
 				}
 				if err := jobSummaries.SaveHistory(ctx, history); err != nil {
 					log.Printf("simulate: saving job summary history for %s: %v", summary.JobID, err)
 				}
-				if monitor.IsTerminalJobStatus(newStatus) {
+				if monitor.IsTerminalJobStatus(newState) {
 					if err := ep.PublishJobTerminated(ctx, summary.JobID, summary.WorkpoolID); err != nil {
 						log.Printf("simulate: publishing job_terminated for %s: %v", summary.JobID, err)
 					}
@@ -468,11 +467,10 @@ func runSimWorkPoolSummaryUpdater(ctx context.Context, workpoolID string, fsClie
 				log.Printf("simulate: saving workpool summary history: %v", err)
 			}
 			_, err = fsClient.Collection(v100.WorkpoolCollection).Doc(workpoolID).Update(ctx, []firestore.Update{
-				{Path: "status", Value: "ok"},
 				{Path: "expiry", Value: time.Now().Add(7 * 24 * time.Hour)},
 			})
 			if err != nil {
-				log.Printf("simulate: updating workpool status: %v", err)
+				log.Printf("simulate: updating workpool expiry: %v", err)
 			}
 		}
 	}
@@ -533,11 +531,11 @@ func simComputeWorkPoolSummary(ctx context.Context, workpoolID string, batchStor
 	}, nil
 }
 
-func simStatusCountsFromMap(m map[string]int) []monitor.StatusCount {
-	var result []monitor.StatusCount
-	for status, count := range m {
+func simStatusCountsFromMap(m map[string]int) []monitor.StateCount {
+	var result []monitor.StateCount
+	for state, count := range m {
 		if count > 0 {
-			result = append(result, monitor.StatusCount{Status: status, Count: count})
+			result = append(result, monitor.StateCount{State: state, Count: count})
 		}
 	}
 	return result
@@ -575,11 +573,11 @@ func simComputeJobStatus(counts map[string]int) monitor.JobStatus {
 }
 
 // simTaskCountsFromMap mirrors the unexported monitor.taskCountsFromMap.
-func simTaskCountsFromMap(counts map[string]int) []monitor.TaskCount {
-	var result []monitor.TaskCount
+func simTaskCountsFromMap(counts map[string]int) []monitor.StateCount {
+	var result []monitor.StateCount
 	for state, count := range counts {
 		if count > 0 {
-			result = append(result, monitor.TaskCount{State: state, Count: count})
+			result = append(result, monitor.StateCount{State: state, Count: count})
 		}
 	}
 	return result

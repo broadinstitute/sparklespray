@@ -74,7 +74,7 @@ func runDevDumpDB(c *cli.Context) error {
 			fmt.Printf("  %s  (error reading fields: %v)\n", doc.Ref.ID, err)
 			continue
 		}
-		fmt.Printf("  %s  machine=%s  region=%s  status=%s\n", p.WorkpoolID, p.MachineType, p.Region, p.Status)
+		fmt.Printf("  %s  machine=%s  region=%s  state=%s\n", p.WorkpoolID, p.MachineType, p.Region, p.State)
 	}
 	fmt.Printf("  (%d total)\n", len(poolDocs))
 

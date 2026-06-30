@@ -49,7 +49,7 @@ func (a *Monitor) runProvisioningPoll(ctx context.Context) error {
 
 func (a *Monitor) runProvisioningPollForWorkpool(ctx context.Context, pool *WorkPool) error {
 	// workpool.status is the provisioning guard: halted means stop.
-	if pool.Status == WorkPoolStatusHalted {
+	if pool.State == WorkPoolStatusHalted {
 		return nil
 	}
 
@@ -100,8 +100,8 @@ func (a *Monitor) runProvisioningPollForWorkpool(ctx context.Context, pool *Work
 		if err := a.submitBatch(ctx, pool, preemptibleCount, true, now); err != nil {
 			return fmt.Errorf("submit preemptible batch: %w", err)
 		}
-		if pool.Status == WorkPoolStatusIdle {
-			pool.Status = WorkPoolStatusOK
+		if pool.State == WorkPoolStatusIdle {
+			pool.State = WorkPoolStatusOK
 			poolDirty = true
 		}
 	}
@@ -110,8 +110,8 @@ func (a *Monitor) runProvisioningPollForWorkpool(ctx context.Context, pool *Work
 		if err := a.submitBatch(ctx, pool, nonPreemptibleCount, false, now); err != nil {
 			return fmt.Errorf("submit non-preemptible batch: %w", err)
 		}
-		if pool.Status == WorkPoolStatusIdle {
-			pool.Status = WorkPoolStatusOK
+		if pool.State == WorkPoolStatusIdle {
+			pool.State = WorkPoolStatusOK
 			poolDirty = true
 		}
 	}

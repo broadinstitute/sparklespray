@@ -25,7 +25,6 @@ func TestAdapterRoundTrips(t *testing.T) {
 		writeWorkPool(t, ctx, fs, &fsWorkPoolDoc{
 			WorkpoolID: poolID,
 			Region:     "us-central1",
-			Status:     "idle",
 		})
 
 		pool, err := pools.Get(ctx, poolID)
@@ -53,8 +52,8 @@ func TestAdapterRoundTrips(t *testing.T) {
 			t.Errorf("ListAll: pool %s not found", poolID)
 		}
 
-		pool.Status = monitor.WorkPoolStatusOK
-		pool.StatusMessage = "all good"
+		pool.State = monitor.WorkPoolStatusOK
+		pool.StateMessage = "all good"
 		pool.IncidentCount = 3
 		if err := pools.Save(ctx, pool); err != nil {
 			t.Fatalf("Save: %v", err)
@@ -63,8 +62,8 @@ func TestAdapterRoundTrips(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Get after Save: %v", err)
 		}
-		if updated.Status != monitor.WorkPoolStatusOK {
-			t.Errorf("Status after Save: want ok, got %s", updated.Status)
+		if updated.State != monitor.WorkPoolStatusOK {
+			t.Errorf("State after Save: want ok, got %s", updated.State)
 		}
 		if updated.IncidentCount != 3 {
 			t.Errorf("IncidentCount after Save: want 3, got %d", updated.IncidentCount)
@@ -296,7 +295,7 @@ func TestAdapterRoundTrips(t *testing.T) {
 		summary := &monitor.JobSummary{
 			JobID:      jobID,
 			WorkpoolID: "pool-test",
-			Status:     monitor.JobStatusPending,
+			State:     monitor.JobStatusPending,
 			Expiry:     time.Now().Add(24 * time.Hour),
 		}
 		if err := summaries.Create(ctx, summary); err != nil {
@@ -317,7 +316,7 @@ func TestAdapterRoundTrips(t *testing.T) {
 			t.Errorf("ListNonTerminal: job %s not found", jobID)
 		}
 
-		summary.Status = monitor.JobStatusSuccess
+		summary.State = monitor.JobStatusSuccess
 		if err := summaries.Save(ctx, summary); err != nil {
 			t.Fatalf("Save: %v", err)
 		}
@@ -336,7 +335,7 @@ func TestAdapterRoundTrips(t *testing.T) {
 			JobID:      jobID,
 			WorkpoolID: "pool-test",
 			Timestamp:  time.Now(),
-			Status:     monitor.JobStatusSuccess,
+			State:     monitor.JobStatusSuccess,
 		}
 		if err := summaries.SaveHistory(ctx, history); err != nil {
 			t.Fatalf("SaveHistory: %v", err)
@@ -455,7 +454,7 @@ func TestJobSummaryPollPublishesTerminationEvent(t *testing.T) {
 	if err := summaries.Create(ctx, &monitor.JobSummary{
 		JobID:      jobID,
 		WorkpoolID: poolID,
-		Status:     monitor.JobStatusPending,
+		State:     monitor.JobStatusPending,
 		Expiry:     time.Now().Add(24 * time.Hour),
 	}); err != nil {
 		t.Fatalf("Create JobSummary: %v", err)
@@ -484,8 +483,8 @@ func TestJobSummaryPollPublishesTerminationEvent(t *testing.T) {
 	if err := snap.DataTo(&got); err != nil {
 		t.Fatalf("decoding JobSummary: %v", err)
 	}
-	if got.Status != monitor.JobStatusSuccess {
-		t.Errorf("JobSummary.Status: want %s, got %s", monitor.JobStatusSuccess, got.Status)
+	if got.State != monitor.JobStatusSuccess {
+		t.Errorf("JobSummary.State: want %s, got %s", monitor.JobStatusSuccess, got.State)
 	}
 
 	// Verify exactly one job_terminated event was published for this job.

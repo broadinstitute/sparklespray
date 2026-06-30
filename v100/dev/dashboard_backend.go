@@ -76,11 +76,11 @@ func newSubID() string {
 // ----- GET /api/v1/workpools -----
 
 type workpoolSummaryResponse struct {
-	WorkpoolID     string          `json:"workpool_id"`
-	MachineType    string          `json:"machine_type"`
-	Region         string          `json:"region"`
-	Status         string          `json:"status"`
-	StatusMessage  string          `json:"status_message"`
+	WorkpoolID    string          `json:"workpool_id"`
+	MachineType   string          `json:"machine_type"`
+	Region        string          `json:"region"`
+	State         string          `json:"state"`
+	StateMessage  string          `json:"state_message"`
 	LastIncidentAt *string         `json:"last_incident_at"`
 	IncidentCount  int             `json:"incident_count"`
 	Labels         []labelResponse `json:"labels"`
@@ -116,8 +116,8 @@ func (s *dashboardServer) handleListWorkpools(w http.ResponseWriter, r *http.Req
 			WorkpoolID:    wp.WorkpoolID,
 			MachineType:   wp.MachineType,
 			Region:        wp.Region,
-			Status:        wp.Status,
-			StatusMessage: wp.StatusMessage,
+			State:        wp.State,
+			StateMessage: wp.StateMessage,
 			IncidentCount: wp.IncidentCount,
 			Labels:        wpLabels,
 			Expiry:        wp.Expiry,
@@ -145,11 +145,11 @@ type workpoolDetailResponse struct {
 	Labels                []labelResponse      `json:"labels"`
 	MaxWorkerCount               int            `json:"max_worker_count"`
 	MaxPreemptibleWorkerAttempts int            `json:"max_preemptible_worker_attempts"`
-	Status                string               `json:"status"`
-	StatusMessage         string               `json:"status_message"`
-	LastIncidentAt        *string              `json:"last_incident_at"`
-	IncidentCount         int                  `json:"incident_count"`
-	Expiry                time.Time            `json:"expiry"`
+	State          string    `json:"state"`
+	StateMessage   string    `json:"state_message"`
+	LastIncidentAt *string   `json:"last_incident_at"`
+	IncidentCount  int       `json:"incident_count"`
+	Expiry         time.Time `json:"expiry"`
 }
 
 func (s *dashboardServer) handleGetWorkpool(w http.ResponseWriter, r *http.Request) {
@@ -187,8 +187,8 @@ func (s *dashboardServer) handleGetWorkpool(w http.ResponseWriter, r *http.Reque
 		Labels:                       detailLabels,
 		MaxWorkerCount:               wp.MaxWorkerCount,
 		MaxPreemptibleWorkerAttempts: wp.MaxPreemptibleWorkerAttempts,
-		Status:                       wp.Status,
-		StatusMessage:                wp.StatusMessage,
+		State:         wp.State,
+		StateMessage:  wp.StateMessage,
 		IncidentCount:                wp.IncidentCount,
 		Expiry:                       wp.Expiry,
 	}
@@ -202,8 +202,8 @@ func (s *dashboardServer) handleGetWorkpool(w http.ResponseWriter, r *http.Reque
 // ----- GET /api/v1/workpool/{workpool_id}/summary -----
 
 type statusCountResponse struct {
-	Status string `json:"status"`
-	Count  int    `json:"count"`
+	State string `json:"state"`
+	Count int    `json:"count"`
 }
 
 type workpoolSummaryDetailResponse struct {
@@ -245,16 +245,16 @@ func (s *dashboardServer) handleGetWorkpoolSummary(w http.ResponseWriter, r *htt
 		UnhealthyBatchCount:           ws.UnhealthyBatchCount,
 	}
 	for _, sc := range ws.BatchAPIRequestCounts {
-		resp.BatchAPIRequestCounts = append(resp.BatchAPIRequestCounts, statusCountResponse{Status: sc.Status, Count: sc.Count})
+		resp.BatchAPIRequestCounts = append(resp.BatchAPIRequestCounts, statusCountResponse{State: sc.State, Count: sc.Count})
 	}
 	for _, sc := range ws.PreemptibleWorkers {
-		resp.PreemptibleWorkers = append(resp.PreemptibleWorkers, statusCountResponse{Status: sc.Status, Count: sc.Count})
+		resp.PreemptibleWorkers = append(resp.PreemptibleWorkers, statusCountResponse{State: sc.State, Count: sc.Count})
 	}
 	for _, sc := range ws.NonpreemptibleWorkers {
-		resp.NonpreemptibleWorkers = append(resp.NonpreemptibleWorkers, statusCountResponse{Status: sc.Status, Count: sc.Count})
+		resp.NonpreemptibleWorkers = append(resp.NonpreemptibleWorkers, statusCountResponse{State: sc.State, Count: sc.Count})
 	}
 	for _, sc := range ws.Tasks {
-		resp.Tasks = append(resp.Tasks, statusCountResponse{Status: sc.Status, Count: sc.Count})
+		resp.Tasks = append(resp.Tasks, statusCountResponse{State: sc.State, Count: sc.Count})
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -306,16 +306,16 @@ func (s *dashboardServer) handleGetWorkpoolSummaryHistory(w http.ResponseWriter,
 			UnhealthyBatchCount:           h.UnhealthyBatchCount,
 		}
 		for _, sc := range h.BatchAPIRequestCounts {
-			entry.BatchAPIRequestCounts = append(entry.BatchAPIRequestCounts, statusCountResponse{Status: sc.Status, Count: sc.Count})
+			entry.BatchAPIRequestCounts = append(entry.BatchAPIRequestCounts, statusCountResponse{State: sc.State, Count: sc.Count})
 		}
 		for _, sc := range h.PreemptibleWorkers {
-			entry.PreemptibleWorkers = append(entry.PreemptibleWorkers, statusCountResponse{Status: sc.Status, Count: sc.Count})
+			entry.PreemptibleWorkers = append(entry.PreemptibleWorkers, statusCountResponse{State: sc.State, Count: sc.Count})
 		}
 		for _, sc := range h.NonpreemptibleWorkers {
-			entry.NonpreemptibleWorkers = append(entry.NonpreemptibleWorkers, statusCountResponse{Status: sc.Status, Count: sc.Count})
+			entry.NonpreemptibleWorkers = append(entry.NonpreemptibleWorkers, statusCountResponse{State: sc.State, Count: sc.Count})
 		}
 		for _, sc := range h.Tasks {
-			entry.Tasks = append(entry.Tasks, statusCountResponse{Status: sc.Status, Count: sc.Count})
+			entry.Tasks = append(entry.Tasks, statusCountResponse{State: sc.State, Count: sc.Count})
 		}
 		result = append(result, entry)
 	}
@@ -505,7 +505,7 @@ type jobSummaryResponse struct {
 	JobID      string              `json:"job_id"`
 	WorkpoolID string              `json:"workpool_id"`
 	CreatedAt  time.Time           `json:"created_at"`
-	Status     string              `json:"status"`
+	State      string              `json:"state"`
 	Tasks      []taskCountResponse `json:"tasks"`
 	Labels     []labelResponse     `json:"labels"`
 	Expiry     time.Time           `json:"expiry"`
@@ -583,7 +583,7 @@ func jobSummaryToResponse(js *monitor.JobSummary) jobSummaryResponse {
 		JobID:      js.JobID,
 		WorkpoolID: js.WorkpoolID,
 		CreatedAt:  js.CreatedAt,
-		Status:     string(js.Status),
+		State:      string(js.State),
 		Tasks:      tasks,
 		Labels:     labels,
 		Expiry:     js.Expiry,
@@ -666,7 +666,7 @@ type jobSummaryHistoryEntryResponse struct {
 	JobID      string              `json:"job_id"`
 	WorkpoolID string              `json:"workpool_id"`
 	Timestamp  time.Time           `json:"timestamp"`
-	Status     string              `json:"status"`
+	State      string              `json:"state"`
 	Tasks      []taskCountResponse `json:"tasks"`
 }
 
@@ -703,7 +703,7 @@ func (s *dashboardServer) handleGetJobSummaryHistory(w http.ResponseWriter, r *h
 			JobID:      h.JobID,
 			WorkpoolID: h.WorkpoolID,
 			Timestamp:  h.Timestamp,
-			Status:     string(h.Status),
+			State:      string(h.State),
 			Tasks:      tasks,
 		})
 	}

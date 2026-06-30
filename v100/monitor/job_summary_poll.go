@@ -30,10 +30,10 @@ func (a *Monitor) updateJobSummary(ctx context.Context, summary *JobSummary) err
 		return err
 	}
 
-	newStatus := computeJobStatus(counts)
+	newState := computeJobStatus(counts)
 	newTasks := taskCountsFromMap(counts)
 
-	summary.Status = newStatus
+	summary.State = newState
 	summary.Tasks = newTasks
 
 	if err := a.jobSummaries.Save(ctx, summary); err != nil {
@@ -46,7 +46,7 @@ func (a *Monitor) updateJobSummary(ctx context.Context, summary *JobSummary) err
 		CreatedAt:  summary.CreatedAt,
 		Timestamp:  time.Now(),
 		Expiry:     summary.Expiry,
-		Status:     newStatus,
+		State:      newState,
 		Tasks:      newTasks,
 		Labels:     summary.Labels,
 	}
@@ -54,7 +54,7 @@ func (a *Monitor) updateJobSummary(ctx context.Context, summary *JobSummary) err
 		return err
 	}
 
-	if IsTerminalJobStatus(newStatus) && a.jobTerminated != nil {
+	if IsTerminalJobStatus(newState) && a.jobTerminated != nil {
 		if err := a.jobTerminated.PublishJobTerminated(ctx, summary.JobID, summary.WorkpoolID); err != nil {
 			log.Printf("job summary poll: publish job_terminated for job %s: %v", summary.JobID, err)
 		}
@@ -95,13 +95,13 @@ func computeJobStatus(counts map[string]int) JobStatus {
 	return JobStatusSuccess
 }
 
-// taskCountsFromMap converts a status→count map to the []TaskCount slice
+// taskCountsFromMap converts a status→count map to the []StateCount slice
 // stored in JobSummary. Only statuses with non-zero counts are included.
-func taskCountsFromMap(counts map[string]int) []TaskCount {
-	var result []TaskCount
+func taskCountsFromMap(counts map[string]int) []StateCount {
+	var result []StateCount
 	for state, count := range counts {
 		if count > 0 {
-			result = append(result, TaskCount{State: state, Count: count})
+			result = append(result, StateCount{State: state, Count: count})
 		}
 	}
 	return result

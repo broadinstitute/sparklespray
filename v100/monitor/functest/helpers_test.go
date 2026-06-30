@@ -148,14 +148,11 @@ func newMonitorWithStores(
 // ----- Firestore document write helpers -----
 // These mirror the unexported structs in monitor/adapters.go.
 
+// fsWorkPoolDoc mirrors the immutable firestoreWorkPool struct (config only; no state fields).
 type fsWorkPoolDoc struct {
-	WorkpoolID    string    `firestore:"workpool_id"`
-	MachineType   string    `firestore:"machine_type"`
-	Region        string    `firestore:"region"`
-	Status        string    `firestore:"status"`
-	StatusMessage string    `firestore:"status_message"`
-	LastIncidentAt time.Time `firestore:"last_incident_at"`
-	IncidentCount  int       `firestore:"incident_count"`
+	WorkpoolID  string `firestore:"workpool_id"`
+	MachineType string `firestore:"machine_type"`
+	Region      string `firestore:"region"`
 }
 
 type fsWorkerDoc struct {

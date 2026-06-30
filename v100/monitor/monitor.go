@@ -105,9 +105,9 @@ func (a *Monitor) RunJobSubmission(ctx context.Context, workpoolID string) error
 		return fmt.Errorf("get workpool %s: %w", workpoolID, err)
 	}
 
-	if pool.Status == WorkPoolStatusIdle || pool.Status == WorkPoolStatusHalted {
-		pool.Status = WorkPoolStatusOK
-		pool.StatusMessage = ""
+	if pool.State == WorkPoolStatusIdle || pool.State == WorkPoolStatusHalted {
+		pool.State = WorkPoolStatusOK
+		pool.StateMessage = ""
 		pool.IncidentCount = 0
 		if err := a.pools.Save(ctx, pool); err != nil {
 			return fmt.Errorf("save workpool %s: %w", workpoolID, err)
@@ -282,10 +282,10 @@ func (a *Monitor) routeNotification(ctx context.Context, batchID string, notifyT
 // recordIncident updates the workpool's status fields for a watchdog anomaly.
 // Mutates pool in place; callers must Save the pool after calling this.
 func recordIncident(pool *WorkPool, message string, now time.Time) {
-	if pool.Status != WorkPoolStatusHalted {
-		pool.Status = WorkPoolStatusUnhealthy
+	if pool.State != WorkPoolStatusHalted {
+		pool.State = WorkPoolStatusUnhealthy
 	}
-	pool.StatusMessage = message
+	pool.StateMessage = message
 	pool.LastIncidentAt = now
 	pool.IncidentCount++
 }
@@ -320,8 +320,8 @@ func (a *Monitor) checkHaltThreshold(ctx context.Context, pool *WorkPool) error 
 			}
 		}
 		if allFailed {
-			pool.Status = WorkPoolStatusHalted
-			pool.StatusMessage = fmt.Sprintf(
+			pool.State = WorkPoolStatusHalted
+			pool.StateMessage = fmt.Sprintf(
 				"Last %d batches all failed — possible configuration problem", n)
 			pool.LastIncidentAt = a.clock.Now()
 			if err := a.pools.Save(ctx, pool); err != nil {
