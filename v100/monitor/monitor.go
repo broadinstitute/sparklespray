@@ -24,6 +24,9 @@ const (
 
 	jobSummaryMinInterval = 1 * time.Second
 	jobSummaryMaxInterval = 5 * time.Minute
+
+	workPoolSummaryMinInterval = 1 * time.Second
+	workPoolSummaryMaxInterval = 5 * time.Minute
 )
 
 // activeTasks is the set of task statuses that are orphaned back to pending when a worker dies.
@@ -39,9 +42,10 @@ type Monitor struct {
 	tasks          TaskStore
 	pubsub         PubSubReceiver
 	jobEvents      JobEventReceiver
-	jobSummaries   JobSummaryStore
-	jobTerminated  JobTerminatedPublisher
-	expiry         ExpiryStore
+	jobSummaries      JobSummaryStore
+	jobTerminated     JobTerminatedPublisher
+	workPoolSummaries WorkPoolSummaryStore
+	expiry            ExpiryStore
 	verbose        bool
 	dbName         string
 	lingerDuration time.Duration
@@ -57,6 +61,9 @@ func (a *Monitor) SetJobEventReceiver(r JobEventReceiver) { a.jobEvents = r }
 
 // SetJobSummaryStore sets the store used to read and write JobSummary documents.
 func (a *Monitor) SetJobSummaryStore(s JobSummaryStore) { a.jobSummaries = s }
+
+// SetWorkPoolSummaryStore sets the store used to write WorkPoolSummary documents.
+func (a *Monitor) SetWorkPoolSummaryStore(s WorkPoolSummaryStore) { a.workPoolSummaries = s }
 
 // SetJobTerminatedPublisher sets the publisher used to emit job_terminated events.
 func (a *Monitor) SetJobTerminatedPublisher(p JobTerminatedPublisher) { a.jobTerminated = p }
@@ -192,6 +199,18 @@ func (a *Monitor) RunMonitorLoop(ctx context.Context) {
 		})
 	}
 
+	// WorkPool summary poll: recomputes WorkPoolSummary for every workpool.
+	// Triggered by batch notifications and job events; falls back to max interval.
+	var notifyWorkPoolSummary func()
+	if a.workPoolSummaries != nil {
+		notifyWorkPoolSummary = sched.Add(workPoolSummaryMinInterval, workPoolSummaryMaxInterval, func() {
+			a.vlogf("poll: starting workpool summary poll")
+			if err := a.runWorkPoolSummaryPoll(ctx); err != nil {
+				log.Printf("workpool summary poll: %v", err)
+			}
+		})
+	}
+
 	// Route PubSub notifications to the appropriate tier in a background goroutine.
 	// A notification with Err set means the receive loop failed fatally; propagate it.
 	fatalErrCh := make(chan error, 1)
@@ -215,6 +234,9 @@ func (a *Monitor) RunMonitorLoop(ctx context.Context) {
 					if notifyJobSummary != nil {
 						notifyJobSummary()
 					}
+					if notifyWorkPoolSummary != nil {
+						notifyWorkPoolSummary()
+					}
 				}
 			}
 		}()
@@ -232,6 +254,9 @@ func (a *Monitor) RunMonitorLoop(ctx context.Context) {
 				}
 				a.vlogf("pubsub: received notification for batch %s", n.BatchID)
 				a.routeNotification(ctx, n.BatchID, notifyTier2, notifyTier3)
+				if notifyWorkPoolSummary != nil {
+					notifyWorkPoolSummary()
+				}
 			}
 		}
 	}()

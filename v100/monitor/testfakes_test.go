@@ -359,6 +359,19 @@ func (s *FakeBatchRequestStore) GetByJobID(ctx context.Context, jobID string) (*
 	return nil, nil
 }
 
+func (s *FakeBatchRequestStore) ListAllByWorkpool(ctx context.Context, workpoolID string) ([]*BatchAPIRequest, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var result []*BatchAPIRequest
+	for _, b := range s.batches {
+		if b.WorkpoolID == workpoolID {
+			result = append(result, copyBatch(b))
+		}
+	}
+	return result, nil
+}
+
 func (s *FakeBatchRequestStore) SumPreemptibleVMCount(ctx context.Context, workpoolID string) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -420,6 +433,20 @@ func (s *FakeWorkerStore) ListByBatch(ctx context.Context, batchID string) ([]*W
 	var result []*Worker
 	for _, w := range s.workers {
 		if w.BatchID == batchID {
+			cp := *w
+			result = append(result, &cp)
+		}
+	}
+	return result, nil
+}
+
+func (s *FakeWorkerStore) ListAllForWorkpool(ctx context.Context, workpoolID string) ([]*Worker, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var result []*Worker
+	for _, w := range s.workers {
+		if w.WorkpoolID == workpoolID {
 			cp := *w
 			result = append(result, &cp)
 		}
@@ -512,6 +539,19 @@ func (s *FakeTaskStore) ResetToPending(ctx context.Context, taskID string) error
 	t.Status = TaskStatusPending
 	t.OwningWorkerID = ""
 	return nil
+}
+
+func (s *FakeTaskStore) CountByWorkpool(ctx context.Context, workpoolID string) (map[string]int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	counts := make(map[string]int)
+	for _, t := range s.tasks {
+		if t.WorkpoolID == workpoolID {
+			counts[string(t.Status)]++
+		}
+	}
+	return counts, nil
 }
 
 func (s *FakeTaskStore) CountByJob(ctx context.Context, jobID string) (map[string]int, error) {

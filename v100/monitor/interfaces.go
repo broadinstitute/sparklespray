@@ -194,6 +194,8 @@ type BatchRequestStore interface {
 	GetByJobID(ctx context.Context, jobID string) (*BatchAPIRequest, error)
 	// ListByWorkpool returns batches filtered by status, ordered by SubmittedAt DESC.
 	ListByWorkpool(ctx context.Context, workpoolID string, statuses []BatchStatus) ([]*BatchAPIRequest, error)
+	// ListAllByWorkpool returns all BatchAPIRequests for a workpool regardless of status.
+	ListAllByWorkpool(ctx context.Context, workpoolID string) ([]*BatchAPIRequest, error)
 	// SumPreemptibleVMCount returns total ExpectedVMCount across all preemptible batches for the workpool.
 	SumPreemptibleVMCount(ctx context.Context, workpoolID string) (int, error)
 }
@@ -206,6 +208,8 @@ type WorkerStore interface {
 	ListByBatch(ctx context.Context, batchID string) ([]*Worker, error)
 	// CountActive returns workers with HeartbeatExpiry after now.
 	CountActive(ctx context.Context, workpoolID string, now time.Time) (int, error)
+	// ListAllForWorkpool returns all Workers registered for the given workpool.
+	ListAllForWorkpool(ctx context.Context, workpoolID string) ([]*Worker, error)
 }
 
 // TaskStore reads and updates Task documents.
@@ -218,6 +222,8 @@ type TaskStore interface {
 	ResetToPending(ctx context.Context, taskID string) error
 	// CountByJob returns a map from task status string to count for the given job.
 	CountByJob(ctx context.Context, jobID string) (map[string]int, error)
+	// CountByWorkpool returns a map from task status string to count for the given workpool.
+	CountByWorkpool(ctx context.Context, workpoolID string) (map[string]int, error)
 }
 
 // ----- WorkPool summary types -----
