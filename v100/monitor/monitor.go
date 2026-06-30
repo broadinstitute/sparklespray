@@ -20,10 +20,7 @@ const (
 	defaultMaxZombiesBeforeAbort       = 3
 	defaultMaxConsecutiveFailedBatches = 2
 
-	minProvisioningPollInterval = 5 * time.Second
-	maxProvisioningPollInterval = 5 * time.Minute
-	tier1Interval               = 30 * time.Second
-	expiryCleanerInterval       = 30 * time.Minute
+	expiryCleanerInterval = 30 * time.Minute
 
 	jobSummaryMinInterval = 1 * time.Second
 	jobSummaryMaxInterval = 5 * time.Minute
@@ -149,7 +146,7 @@ func (a *Monitor) RunMonitorLoop(ctx context.Context) {
 	})
 
 	// Provisioning poll: provisioning. Triggered by job_created events; falls back to 1-minute timer.
-	notifyProvisioning := sched.Add(minProvisioningPollInterval, maxProvisioningPollInterval, func() {
+	notifyProvisioning := sched.Add(defaultMinTimeBetweenPolls, defaultMaxTimeBetweenPolls, func() {
 		a.vlogf("Checking for workpools which need new workers")
 		if err := a.runProvisioningPoll(ctx); err != nil {
 			log.Printf("provisioning poll: %v", err)
@@ -157,7 +154,7 @@ func (a *Monitor) RunMonitorLoop(ctx context.Context) {
 	})
 
 	// Tier 1: task recovery. Fixed 30-second interval; no notification trigger.
-	sched.Add(tier1Interval, tier1Interval, func() {
+	sched.Add(defaultMinTimeBetweenPolls, defaultMaxTimeBetweenPolls, func() {
 		a.vlogf("Checking for ophaned jobs")
 		if err := a.runRequeueOrphanedTasks(ctx); err != nil {
 			log.Printf("tier1: %v", err)
