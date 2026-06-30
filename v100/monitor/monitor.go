@@ -42,9 +42,10 @@ type Monitor struct {
 	tasks          TaskStore
 	pubsub         PubSubReceiver
 	jobEvents      JobEventReceiver
-	jobSummaries      JobSummaryStore
-	jobTerminated     JobTerminatedPublisher
-	workPoolSummaries WorkPoolSummaryStore
+	jobSummaries         JobSummaryStore
+	jobTerminated        JobTerminatedPublisher
+	workpoolStatePublisher WorkpoolStatePublisher
+	workPoolSummaries    WorkPoolSummaryStore
 	expiry            ExpiryStore
 	verbose        bool
 	dbName         string
@@ -67,6 +68,11 @@ func (a *Monitor) SetWorkPoolSummaryStore(s WorkPoolSummaryStore) { a.workPoolSu
 
 // SetJobTerminatedPublisher sets the publisher used to emit job_terminated events.
 func (a *Monitor) SetJobTerminatedPublisher(p JobTerminatedPublisher) { a.jobTerminated = p }
+
+// SetWorkpoolStatePublisher sets the publisher used to emit workpool_state_change events.
+func (a *Monitor) SetWorkpoolStatePublisher(p WorkpoolStatePublisher) {
+	a.workpoolStatePublisher = p
+}
 
 // SetExpiryStore sets the store used to garbage-collect expired documents.
 func (a *Monitor) SetExpiryStore(s ExpiryStore) { a.expiry = s }
@@ -116,7 +122,7 @@ func (a *Monitor) RunJobSubmission(ctx context.Context, workpoolID string) error
 		ws.State.State = WorkPoolStatusOK
 		ws.State.StateMessage = ""
 		ws.State.IncidentCount = 0
-		if err := a.pools.SaveState(ctx, ws.State); err != nil {
+		if err := a.saveState(ctx, ws.State); err != nil {
 			return fmt.Errorf("save workpool %s: %w", workpoolID, err)
 		}
 	}
@@ -304,6 +310,20 @@ func (a *Monitor) routeNotification(ctx context.Context, batchID string, notifyT
 	}
 }
 
+// saveState persists workpool state and publishes a workpool_state_change event.
+// Publish errors are logged but not returned so they don't block state writes.
+func (a *Monitor) saveState(ctx context.Context, state *WorkPoolState) error {
+	if err := a.pools.SaveState(ctx, state); err != nil {
+		return err
+	}
+	if a.workpoolStatePublisher != nil {
+		if err := a.workpoolStatePublisher.PublishWorkpoolStateChange(ctx, state.WorkpoolID, string(state.State), state.StateMessage); err != nil {
+			log.Printf("saveState: publish workpool_state_change for %s: %v", state.WorkpoolID, err)
+		}
+	}
+	return nil
+}
+
 // recordIncident updates the workpool state for a watchdog anomaly.
 // Mutates state in place; callers must SaveState after calling this.
 func recordIncident(state *WorkPoolState, message string, now time.Time) {
@@ -349,7 +369,7 @@ func (a *Monitor) checkHaltThreshold(ctx context.Context, pool *WorkPool, state 
 			state.StateMessage = fmt.Sprintf(
 				"Last %d batches all failed — possible configuration problem", n)
 			state.LastIncidentAt = a.clock.Now()
-			if err := a.pools.SaveState(ctx, state); err != nil {
+			if err := a.saveState(ctx, state); err != nil {
 				return fmt.Errorf("save workpool %s: %w", pool.WorkpoolID, err)
 			}
 		}

@@ -54,7 +54,7 @@ func (a *Monitor) reconcileWorkpool(ctx context.Context, ws *WorkPoolWithState) 
 	}
 	if len(workpoolVMs) == 0 && (ws.State.State == WorkPoolStatusOK || ws.State.State == WorkPoolStatusUnhealthy) {
 		ws.State.State = WorkPoolStatusIdle
-		if err := a.pools.SaveState(ctx, ws.State); err != nil {
+		if err := a.saveState(ctx, ws.State); err != nil {
 			return fmt.Errorf("save pool (idle transition): %w", err)
 		}
 	}
@@ -98,7 +98,7 @@ func (a *Monitor) runTier2ForBatch(ctx context.Context, ws *WorkPoolWithState, b
 		if err := a.batches.Save(ctx, batch); err != nil {
 			return true, fmt.Errorf("save batch: %w", err)
 		}
-		if err := a.pools.SaveState(ctx, ws.State); err != nil {
+		if err := a.saveState(ctx, ws.State); err != nil {
 			return true, fmt.Errorf("save pool: %w", err)
 		}
 		return true, a.checkHaltThreshold(ctx, ws.Pool, ws.State)
@@ -142,7 +142,7 @@ func (a *Monitor) reconcileVMs(ctx context.Context, ws *WorkPoolWithState, batch
 		if err := a.batches.Save(ctx, batch); err != nil {
 			return fmt.Errorf("save batch: %w", err)
 		}
-		if err := a.pools.SaveState(ctx, ws.State); err != nil {
+		if err := a.saveState(ctx, ws.State); err != nil {
 			return fmt.Errorf("save pool: %w", err)
 		}
 		return a.checkHaltThreshold(ctx, ws.Pool, ws.State)
@@ -165,7 +165,7 @@ func (a *Monitor) reconcileVMs(ctx context.Context, ws *WorkPoolWithState, batch
 			if err := a.batches.Save(ctx, batch); err != nil {
 				return fmt.Errorf("save batch: %w", err)
 			}
-			if err := a.pools.SaveState(ctx, ws.State); err != nil {
+			if err := a.saveState(ctx, ws.State); err != nil {
 				return fmt.Errorf("save pool: %w", err)
 			}
 			return a.checkHaltThreshold(ctx, ws.Pool, ws.State)
@@ -190,7 +190,7 @@ func (a *Monitor) reconcileVMs(ctx context.Context, ws *WorkPoolWithState, batch
 			}
 		}
 		if stateDirty {
-			if err := a.pools.SaveState(ctx, ws.State); err != nil {
+			if err := a.saveState(ctx, ws.State); err != nil {
 				return fmt.Errorf("save pool: %w", err)
 			}
 		}
@@ -225,7 +225,7 @@ func (a *Monitor) reconcileVMs(ctx context.Context, ws *WorkPoolWithState, batch
 		if err := a.batches.Save(ctx, batch); err != nil {
 			return fmt.Errorf("save batch: %w", err)
 		}
-		if err := a.pools.SaveState(ctx, ws.State); err != nil {
+		if err := a.saveState(ctx, ws.State); err != nil {
 			return fmt.Errorf("save pool: %w", err)
 		}
 		return a.checkHaltThreshold(ctx, ws.Pool, ws.State)
@@ -249,7 +249,7 @@ func (a *Monitor) reconcileVMs(ctx context.Context, ws *WorkPoolWithState, batch
 		}
 	}
 	if stateDirty {
-		if err := a.pools.SaveState(ctx, ws.State); err != nil {
+		if err := a.saveState(ctx, ws.State); err != nil {
 			return fmt.Errorf("save pool: %w", err)
 		}
 	}

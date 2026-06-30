@@ -31,6 +31,8 @@ type EventRecord struct {
 	JobID    string `firestore:"job_id"`
 	OldState string `firestore:"old_state"`
 	NewState string `firestore:"new_state"`
+	// Workpool state change fields (populated for workpool_state_change)
+	StateMessage string `firestore:"state_message"`
 }
 
 // WorkerEvent is published to sparkles-events and recorded in Events on worker
@@ -64,6 +66,15 @@ type JobTerminatedEvent struct {
 	Type       string `json:"type"`
 	JobID      string `json:"job_id"`
 	WorkpoolID string `json:"workpool_id"`
+}
+
+// WorkpoolStateChangeEvent is published to sparkles-events and recorded in Events
+// whenever workpool state is saved.
+type WorkpoolStateChangeEvent struct {
+	Type         string `json:"type"`
+	WorkpoolID   string `json:"workpool_id"`
+	State        string `json:"state"`
+	StateMessage string `json:"state_message"`
 }
 
 // EventPublisher writes events to the sparkles-events Pub/Sub topic and
@@ -150,6 +161,28 @@ func (ep *EventPublisher) PublishJobCreated(ctx context.Context, event JobCreate
 		Expiry:     now.Add(eventTTL),
 		JobID:      event.JobID,
 		WorkpoolID: event.WorkpoolID,
+	}
+	return ep.recordAndPublish(ctx, record, event)
+}
+
+// PublishWorkpoolStateChange records and publishes a workpool state change event.
+// Satisfies the monitor.WorkpoolStatePublisher interface.
+func (ep *EventPublisher) PublishWorkpoolStateChange(ctx context.Context, workpoolID, state, stateMessage string) error {
+	event := WorkpoolStateChangeEvent{
+		Type:         "workpool_state_change",
+		WorkpoolID:   workpoolID,
+		State:        state,
+		StateMessage: stateMessage,
+	}
+	now := time.Now()
+	record := EventRecord{
+		EventID:      uuid.New().String(),
+		Type:         "workpool_state_change",
+		Timestamp:    now,
+		Expiry:       now.Add(eventTTL),
+		WorkpoolID:   workpoolID,
+		NewState:     state,
+		StateMessage: stateMessage,
 	}
 	return ep.recordAndPublish(ctx, record, event)
 }

@@ -238,12 +238,12 @@ An append-only log of every event published to `sparkles-events`. The document I
 
 Each event document contains the same fields as the corresponding Pub/Sub message, plus an `expiry` field for TTL-based garbage collection:
 
-| Field       | Type      | Description                                                                                              |
-| ----------- | --------- | -------------------------------------------------------------------------------------------------------- |
-| `event_id`  | string    | UUID uniquely identifying this event                                                                     |
-| `type`      | string    | Event type — `worker_started`, `worker_stopped`, `task_state_update`, `job_created`, or `job_terminated` |
-| `timestamp` | timestamp | When the event was recorded                                                                              |
-| `expiry`    | timestamp | When this document may be deleted (7-day TTL)                                                            |
+| Field       | Type      | Description                                                                                                                       |
+| ----------- | --------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `event_id`  | string    | UUID uniquely identifying this event                                                                                              |
+| `type`      | string    | Event type — `worker_started`, `worker_stopped`, `task_state_update`, `job_created`, `job_terminated`, or `workpool_state_change` |
+| `timestamp` | timestamp | When the event was recorded                                                                                                       |
+| `expiry`    | timestamp | When this document may be deleted (7-day TTL)                                                                                     |
 
 Additional fields present on **worker events** (`worker_started`, `worker_stopped`):
 
@@ -267,6 +267,14 @@ Additional fields present on **job events** (`job_created`, `job_terminated`):
 | ------------- | ------ | ------------------------------ |
 | `job_id`      | string | ID of the job                  |
 | `workpool_id` | string | Workpool the job is running in |
+
+Additional fields present on **workpool state change events** (`workpool_state_change`):
+
+| Field           | Type   | Description                                                                                     |
+| --------------- | ------ | ----------------------------------------------------------------------------------------------- |
+| `workpool_id`   | string | ID of the workpool whose state changed                                                          |
+| `new_state`     | string | The workpool's new state — `idle`, `ok`, `unhealthy`, or `halted`                               |
+| `state_message` | string | Human-readable description of the state or incident; empty when transitioning to `idle` or `ok` |
 
 Every write to `sparkles-events` is mirrored to this collection atomically before (or as part of) the publish, so the `Events` collection is the durable record and Pub/Sub is the real-time delivery mechanism.
 
@@ -436,6 +444,19 @@ The monitor subscribes to this topic via the `monitor-events-in` subscription an
   "workpool_id": "..."
 }
 ```
+
+**WorkpoolStateChangeEvent** — published by the monitor whenever workpool state is saved (on every transition between `idle`, `ok`, `unhealthy`, and `halted`):
+
+```json
+{
+  "type": "workpool_state_change",
+  "workpool_id": "...",
+  "state": "idle" | "ok" | "unhealthy" | "halted",
+  "state_message": "..."
+}
+```
+
+`state_message` is empty when transitioning to `idle` or `ok`; it contains a human-readable incident description when transitioning to `unhealthy` or `halted`.
 
 **TaskStateUpdate** — published on every task state transition:
 

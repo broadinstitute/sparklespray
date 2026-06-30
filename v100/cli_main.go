@@ -152,6 +152,7 @@ func runMonitor(c *cli.Context) error {
 	m.SetJobEventReceiver(jobEventReceiver)
 	m.SetJobSummaryStore(jobSummaries)
 	m.SetJobTerminatedPublisher(ep)
+	m.SetWorkpoolStatePublisher(ep)
 	if linger := c.Int("linger"); linger > 0 {
 		m.SetLingerDuration(time.Duration(linger) * time.Minute)
 	}

@@ -369,6 +369,12 @@ type JobTerminatedPublisher interface {
 	PublishJobTerminated(ctx context.Context, jobID, workpoolID string) error
 }
 
+// WorkpoolStatePublisher emits a workpool_state_change event whenever workpool
+// state is persisted. Defined here (not in v100) to avoid an import cycle.
+type WorkpoolStatePublisher interface {
+	PublishWorkpoolStateChange(ctx context.Context, workpoolID, state, stateMessage string) error
+}
+
 // Notification is delivered on the channel returned by PubSubReceiver.Notifications.
 // Exactly one of BatchID or Err is set: Err is non-nil when the receive loop fails fatally.
 type Notification struct {

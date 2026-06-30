@@ -60,7 +60,7 @@ func (a *Monitor) checkBatchStartup(ctx context.Context, ws *WorkPoolWithState, 
 		if err := a.batches.Save(ctx, batch); err != nil {
 			return fmt.Errorf("save batch: %w", err)
 		}
-		if err := a.pools.SaveState(ctx, ws.State); err != nil {
+		if err := a.saveState(ctx, ws.State); err != nil {
 			return fmt.Errorf("save pool: %w", err)
 		}
 		return a.checkHaltThreshold(ctx, ws.Pool, ws.State)
@@ -73,7 +73,7 @@ func (a *Monitor) checkBatchStartup(ctx context.Context, ws *WorkPoolWithState, 
 		if err := a.batches.Save(ctx, batch); err != nil {
 			return fmt.Errorf("save batch: %w", err)
 		}
-		if err := a.pools.SaveState(ctx, ws.State); err != nil {
+		if err := a.saveState(ctx, ws.State); err != nil {
 			return fmt.Errorf("save pool: %w", err)
 		}
 		return a.checkHaltThreshold(ctx, ws.Pool, ws.State)
@@ -93,7 +93,7 @@ func (a *Monitor) checkBatchStartup(ctx context.Context, ws *WorkPoolWithState, 
 		if err := a.batches.Save(ctx, batch); err != nil {
 			return fmt.Errorf("save batch: %w", err)
 		}
-		if err := a.pools.SaveState(ctx, ws.State); err != nil {
+		if err := a.saveState(ctx, ws.State); err != nil {
 			return fmt.Errorf("save pool: %w", err)
 		}
 		return a.checkHaltThreshold(ctx, ws.Pool, ws.State)

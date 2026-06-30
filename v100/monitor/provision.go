@@ -118,7 +118,7 @@ func (a *Monitor) runProvisioningPollForWorkpool(ctx context.Context, ws *WorkPo
 	}
 
 	if stateDirty {
-		if err := a.pools.SaveState(ctx, ws.State); err != nil {
+		if err := a.saveState(ctx, ws.State); err != nil {
 			return fmt.Errorf("save pool: %w", err)
 		}
 	}
