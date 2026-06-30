@@ -235,21 +235,10 @@ type StateCount struct {
 // mutable state written by the monitor.
 type WorkPoolSummary struct {
 	// Fields copied from WorkPool
-	WorkpoolID                    string          `firestore:"workpool_id"`
-	MachineType                   string          `firestore:"machine_type"`
-	Region                        string          `firestore:"region"`
-	Zones                         []string        `firestore:"zones"`
-	RootDir                       string          `firestore:"root_dir"`
-	SparklesWorkerGCSPath         string          `firestore:"sparkles_worker_gcs_path"`
-	EmptyVolumes                  []EmptyVolume   `firestore:"empty_volumes"`
-	Resources                     []ResourceEntry `firestore:"resources"`
-	Labels                        []Label         `firestore:"labels"`
-	MaxWorkerCount                int             `firestore:"max_worker_count"`
-	MaxPreemptibleWorkerAttempts  int             `firestore:"max_preemptible_worker_attempts"`
-	MaxWorkersPerRequest          int             `firestore:"max_workers_per_request"`
-	VMShutdownGracePeriodSec      int             `firestore:"vm_shutdown_grace_period_sec"`
-	MaxZombiesBeforeAbort         int             `firestore:"max_zombies_before_abort"`
-	MaxConsecutiveFailedBatches   int             `firestore:"max_consecutive_failed_batches"`
+	WorkpoolID                    string  `firestore:"workpool_id"`
+	MachineType                   string  `firestore:"machine_type"`
+	Labels                        []Label `firestore:"labels"`
+	MaxPreemptibleWorkerAttempts  int     `firestore:"max_preemptible_worker_attempts"`
 
 	// Monitor-maintained fields
 	Expiry                        time.Time      `firestore:"expiry"`

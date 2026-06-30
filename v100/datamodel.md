@@ -171,25 +171,14 @@ One document per workpool, keyed by `workpool_id`. `WorkPoolSummary` is the muta
 
 Any question about workpool health — "how many VMs are expected?", "are there unhealthy batches?" — should be answered by reading `WorkPoolSummary`, not by scanning `BatchAPIRequests`, `Workers`, or `Tasks` directly.
 
-The following fields are copied from `WorkPool` at creation time and refreshed on each monitor update, so that callers can retrieve full workpool information without fetching both documents:
+The following fields are copied from `WorkPool`:
 
-| Field                             | Type          | Description                                                                                         |
-| --------------------------------- | ------------- | --------------------------------------------------------------------------------------------------- |
-| `workpool_id`                     | string        | Workpool this summary describes (copied from `WorkPool`)                                            |
-| `machine_type`                    | string        | GCP machine type for worker VMs (copied from `WorkPool`)                                            |
-| `region`                          | string        | GCP region for Batch jobs (copied from `WorkPool`)                                                  |
-| `zones`                           | []string      | GCP zones to query for running VMs (copied from `WorkPool`)                                         |
-| `root_dir`                        | string        | Worker root directory (copied from `WorkPool`)                                                      |
-| `sparkles_worker_gcs_path`        | string        | GCS path of the worker binary (copied from `WorkPool`)                                              |
-| `resources`                       | []Resource    | Resource capacity advertised by workers (copied from `WorkPool`)                                    |
-| `empty_volumes`                   | []EmptyVolume | Ephemeral volumes to attach to each VM (copied from `WorkPool`)                                     |
-| `labels`                          | []Label       | User-defined key/value tags (copied from `WorkPool` at creation time; not updated thereafter)       |
-| `max_worker_count`                | int           | Maximum number of VMs the monitor may have running concurrently (copied from `WorkPool`)            |
-| `max_preemptible_worker_attempts` | int           | Max preemptible batch submissions before falling back to on-demand (copied from `WorkPool`)         |
-| `max_workers_per_request`         | int           | Maximum number of VMs in a single GCP Batch job submission (copied from `WorkPool`)                 |
-| `vm_shutdown_grace_period_sec`    | int           | Seconds the monitor waits after asking a VM to shut down (copied from `WorkPool`)                   |
-| `max_zombies_before_abort`        | int           | Number of zombie VMs tolerated in one batch (copied from `WorkPool`)                                |
-| `max_consecutive_failed_batches`  | int           | Number of consecutive failed batches before the monitor halts the workpool (copied from `WorkPool`) |
+| Field                             | Type    | Description                                                                                   |
+| --------------------------------- | ------- | --------------------------------------------------------------------------------------------- |
+| `workpool_id`                     | string  | Workpool this summary describes (copied from `WorkPool`)                                      |
+| `machine_type`                    | string  | GCP machine type for worker VMs (copied from `WorkPool`)                                      |
+| `labels`                          | []Label | User-defined key/value tags (copied from `WorkPool` at creation time; not updated thereafter) |
+| `max_preemptible_worker_attempts` | int     | Max preemptible batch submissions before falling back to on-demand (copied from `WorkPool`)   |
 
 The following fields are written exclusively by the monitor process:
 
