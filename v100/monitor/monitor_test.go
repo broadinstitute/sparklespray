@@ -9,58 +9,71 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// ---- RunJobSubmission ----
+// ---- idle→ok via runWorkPoolSummaryPoll + EventStore ----
 
-func TestJobSubmission_IdleToOK(t *testing.T) {
+func TestSummaryPoll_JobCreated_IdleToOK(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
 	w.Pools.Add(pool)
-	w.Pools.AddState(&WorkPoolState{WorkpoolID: "pool-1", State: WorkPoolStatusIdle, StateMessage: "no tasks", IncidentCount: 2})
+	w.Pools.AddState(&WorkPoolState{WorkpoolID: "pool-1", State: WorkPoolStatusIdle, StateMessage: "no tasks"})
+	w.Events.AddEvent("pool-1", epoch.Add(1*time.Minute))
 
-	err := w.A.RunJobSubmission(context.Background(), "pool-1")
+	err := w.A.runWorkPoolSummaryPoll(context.Background())
 	require.NoError(t, err)
 
 	got := w.Pools.MustGetState("pool-1")
 	assert.Equal(t, WorkPoolStatusOK, got.State)
 	assert.Empty(t, got.StateMessage)
-	assert.Equal(t, 0, got.IncidentCount)
 }
 
-func TestJobSubmission_HaltedToOK(t *testing.T) {
+func TestSummaryPoll_JobCreated_HaltedUnchanged(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
 	w.Pools.Add(pool)
-	w.Pools.AddState(&WorkPoolState{WorkpoolID: "pool-1", State: WorkPoolStatusHalted, StateMessage: "consecutive failures", IncidentCount: 5})
+	w.Pools.AddState(&WorkPoolState{WorkpoolID: "pool-1", State: WorkPoolStatusHalted, StateMessage: "consecutive failures"})
+	// Pending task prevents the halted→idle transition so we can test that
+	// a job_created event alone doesn't unblock a halted pool.
+	w.Tasks.Add(&Task{TaskID: "t1", WorkpoolID: "pool-1", Status: TaskStatusPending})
+	w.Events.AddEvent("pool-1", epoch.Add(1*time.Minute))
 
-	err := w.A.RunJobSubmission(context.Background(), "pool-1")
+	err := w.A.runWorkPoolSummaryPoll(context.Background())
 	require.NoError(t, err)
 
-	got := w.Pools.MustGetState("pool-1")
-	assert.Equal(t, WorkPoolStatusOK, got.State)
-	assert.Empty(t, got.StateMessage)
-	assert.Equal(t, 0, got.IncidentCount)
+	assert.Equal(t, WorkPoolStatusHalted, w.Pools.MustGetState("pool-1").State)
 }
 
-func TestJobSubmission_OKUnchanged(t *testing.T) {
+func TestSummaryPoll_JobCreated_OKUnchanged(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
 	w.Pools.Add(pool)
 	w.Pools.AddState(&WorkPoolState{WorkpoolID: "pool-1", State: WorkPoolStatusOK})
+	w.Events.AddEvent("pool-1", epoch.Add(1*time.Minute))
 
-	err := w.A.RunJobSubmission(context.Background(), "pool-1")
+	err := w.A.runWorkPoolSummaryPoll(context.Background())
 	require.NoError(t, err)
+
 	assert.Equal(t, WorkPoolStatusOK, w.Pools.MustGetState("pool-1").State)
 }
 
-func TestJobSubmission_UnhealthyUnchanged(t *testing.T) {
+func TestSummaryPoll_EventCursorAdvances(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
 	w.Pools.Add(pool)
-	w.Pools.AddState(&WorkPoolState{WorkpoolID: "pool-1", State: WorkPoolStatusUnhealthy})
+	w.Pools.AddState(&WorkPoolState{WorkpoolID: "pool-1", State: WorkPoolStatusIdle})
+	w.Events.AddEvent("pool-1", epoch.Add(1*time.Minute))
 
-	err := w.A.RunJobSubmission(context.Background(), "pool-1")
+	// First poll: sees the event, transitions idle → ok.
+	err := w.A.runWorkPoolSummaryPoll(context.Background())
 	require.NoError(t, err)
-	assert.Equal(t, WorkPoolStatusUnhealthy, w.Pools.MustGetState("pool-1").State)
+	assert.Equal(t, WorkPoolStatusOK, w.Pools.MustGetState("pool-1").State)
+
+	// Reset to idle manually to check the cursor.
+	w.Pools.AddState(&WorkPoolState{WorkpoolID: "pool-1", State: WorkPoolStatusIdle})
+
+	// Second poll: event is before the cursor, so no transition.
+	err = w.A.runWorkPoolSummaryPoll(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, WorkPoolStatusIdle, w.Pools.MustGetState("pool-1").State)
 }
 
 // ---- checkHaltThreshold ----

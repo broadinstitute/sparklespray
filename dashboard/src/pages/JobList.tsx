@@ -82,8 +82,8 @@ interface WorkpoolInfo {
   workpool_id: string;
   machine_type: string;
   region: string;
-  status: string;
-  status_message: string;
+  state: string;
+  state_message: string;
   last_incident_at: string | null;
   incident_count: number;
   expiry: string;
@@ -181,7 +181,7 @@ function WorkerPoolCard({ pool }: { pool: WorkerPool }) {
           }}
         >
           {(() => {
-            const st = wp.status || "unknown";
+            const st = wp.state || "unknown";
             const ok = st === "ok" || st === "active";
             const halted = st === "halted";
             const color = ok ? C_OK : halted ? C_BAD : C_BAD_SOFT;
@@ -252,10 +252,10 @@ function WorkerPoolCard({ pool }: { pool: WorkerPool }) {
           }}
         >
           ⚠ {wp.incident_count} incident{wp.incident_count !== 1 ? "s" : ""}
-          {wp.status_message && (
+          {wp.state_message && (
             <span style={{ color: "#555", fontWeight: 400 }}>
               {" — "}
-              {wp.status_message}
+              {wp.state_message}
             </span>
           )}
         </div>

@@ -210,7 +210,7 @@ type BatchRequestStore interface {
 
 // WorkerStore reads Worker documents.
 type WorkerStore interface {
-	// ListExpired returns workers whose HeartbeatExpiry is before now.
+	// ListExpired returns workers with status "started" whose HeartbeatExpiry is before now.
 	ListExpired(ctx context.Context, now time.Time) ([]*Worker, error)
 	// ListByBatch returns all workers registered for a given batch.
 	ListByBatch(ctx context.Context, batchID string) ([]*Worker, error)
@@ -218,6 +218,8 @@ type WorkerStore interface {
 	CountActive(ctx context.Context, workpoolID string, now time.Time) (int, error)
 	// ListAllForWorkpool returns all Workers registered for the given workpool.
 	ListAllForWorkpool(ctx context.Context, workpoolID string) ([]*Worker, error)
+	// MarkStopped sets the worker's status to "stopped".
+	MarkStopped(ctx context.Context, workerID string) error
 }
 
 // TaskStore reads and updates Task documents.
@@ -402,6 +404,19 @@ type JobNotification struct {
 // JobEventReceiver signals when a new job has been submitted.
 type JobEventReceiver interface {
 	JobEvents() <-chan JobNotification
+}
+
+// JobCreatedRecord is a minimal view of an Events document for job_created events.
+type JobCreatedRecord struct {
+	WorkpoolID string
+	Timestamp  time.Time
+}
+
+// EventStore queries the Events collection for job_created events.
+type EventStore interface {
+	// ListJobCreatedSince returns all job_created events with timestamp > since.
+	// If since is zero, all job_created events are returned.
+	ListJobCreatedSince(ctx context.Context, since time.Time) ([]JobCreatedRecord, error)
 }
 
 // PubSubReceiver delivers Batch API status-change notifications.

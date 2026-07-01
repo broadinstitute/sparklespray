@@ -449,7 +449,7 @@ func (s *FakeWorkerStore) ListExpired(ctx context.Context, now time.Time) ([]*Wo
 
 	var result []*Worker
 	for _, w := range s.workers {
-		if w.HeartbeatExpiry.Before(now) {
+		if w.Status == "started" && w.HeartbeatExpiry.Before(now) {
 			cp := *w
 			result = append(result, &cp)
 		}
@@ -496,6 +496,16 @@ func (s *FakeWorkerStore) CountActive(ctx context.Context, workpoolID string, no
 		}
 	}
 	return count, nil
+}
+
+func (s *FakeWorkerStore) MarkStopped(ctx context.Context, workerID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if w, ok := s.workers[workerID]; ok {
+		w.Status = "stopped"
+	}
+	return nil
 }
 
 // ---- FakeTaskStore ----
@@ -616,17 +626,73 @@ func (f *FakePubSubReceiver) Deliver(batchID string) {
 	f.ch <- Notification{BatchID: batchID}
 }
 
+// ---- FakeWorkPoolSummaryStore ----
+
+type FakeWorkPoolSummaryStore struct {
+	Summaries []*WorkPoolSummary
+	Histories []*WorkPoolSummaryHistory
+}
+
+func newFakeWorkPoolSummaryStore() *FakeWorkPoolSummaryStore {
+	return &FakeWorkPoolSummaryStore{}
+}
+
+func (f *FakeWorkPoolSummaryStore) Save(_ context.Context, s *WorkPoolSummary) error {
+	for i, existing := range f.Summaries {
+		if existing.WorkpoolID == s.WorkpoolID {
+			f.Summaries[i] = s
+			return nil
+		}
+	}
+	f.Summaries = append(f.Summaries, s)
+	return nil
+}
+
+func (f *FakeWorkPoolSummaryStore) SaveHistory(_ context.Context, h *WorkPoolSummaryHistory) error {
+	f.Histories = append(f.Histories, h)
+	return nil
+}
+
+// ---- FakeEventStore ----
+
+type FakeEventStore struct {
+	Events []JobCreatedRecord
+}
+
+func newFakeEventStore() *FakeEventStore {
+	return &FakeEventStore{}
+}
+
+func (f *FakeEventStore) ListJobCreatedSince(_ context.Context, since time.Time) ([]JobCreatedRecord, error) {
+	if since.IsZero() {
+		return f.Events, nil
+	}
+	var out []JobCreatedRecord
+	for _, e := range f.Events {
+		if e.Timestamp.After(since) {
+			out = append(out, e)
+		}
+	}
+	return out, nil
+}
+
+func (f *FakeEventStore) AddEvent(workpoolID string, ts time.Time) {
+	f.Events = append(f.Events, JobCreatedRecord{WorkpoolID: workpoolID, Timestamp: ts})
+}
+
 // ---- World: test fixture builder ----
 
 type World struct {
-	Clock    *scheduler.FakeClock
-	BatchAPI *FakeBatchAPIClient
-	Pools    *FakeWorkPoolStore
-	Batches  *FakeBatchRequestStore
-	Workers  *FakeWorkerStore
-	Tasks    *FakeTaskStore
-	PubSub   *FakePubSubReceiver
-	A        *Monitor
+	Clock          *scheduler.FakeClock
+	BatchAPI       *FakeBatchAPIClient
+	Pools          *FakeWorkPoolStore
+	Batches        *FakeBatchRequestStore
+	Workers        *FakeWorkerStore
+	Tasks          *FakeTaskStore
+	PubSub         *FakePubSubReceiver
+	WorkPoolSummaries *FakeWorkPoolSummaryStore
+	Events         *FakeEventStore
+	A              *Monitor
 }
 
 func newWorld() *World {
@@ -637,18 +703,24 @@ func newWorld() *World {
 	workers := newFakeWorkerStore()
 	tasks := newFakeTaskStore()
 	pubsub := newFakePubSubReceiver()
+	summaries := newFakeWorkPoolSummaryStore()
+	events := newFakeEventStore()
 
 	a := New(clock, batchAPI, pools, batches, workers, tasks, pubsub, "test-db")
+	a.SetWorkPoolSummaryStore(summaries)
+	a.SetEventStore(events)
 
 	return &World{
-		Clock:    clock,
-		BatchAPI: batchAPI,
-		Pools:    pools,
-		Batches:  batches,
-		Workers:  workers,
-		Tasks:    tasks,
-		PubSub:   pubsub,
-		A:        a,
+		Clock:             clock,
+		BatchAPI:          batchAPI,
+		Pools:             pools,
+		Batches:           batches,
+		Workers:           workers,
+		Tasks:             tasks,
+		PubSub:            pubsub,
+		WorkPoolSummaries: summaries,
+		Events:            events,
+		A:                 a,
 	}
 }
 

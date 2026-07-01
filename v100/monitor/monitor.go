@@ -12,8 +12,8 @@ import (
 // Default values for WorkPool watchdog parameters.
 const (
 	defaultMaxWorkersPerRequest        = 100
-	defaultMinTimeBetweenPolls         = 5 * time.Second
-	defaultMaxTimeBetweenPolls         = 5 * time.Minute
+	defaultMinTimeBetweenPolls         = 2 * time.Second
+	defaultMaxTimeBetweenPolls         = 30 * time.Second
 	defaultMaxTimeToStartWorker        = 5 * time.Minute
 	defaultMaxTimeInQueue              = 15 * time.Minute
 	defaultVMShutdownGracePeriod       = 1 * time.Minute
@@ -21,12 +21,6 @@ const (
 	defaultMaxConsecutiveFailedBatches = 2
 
 	expiryCleanerInterval = 30 * time.Minute
-
-	jobSummaryMinInterval = 1 * time.Second
-	jobSummaryMaxInterval = 5 * time.Minute
-
-	workPoolSummaryMinInterval = 1 * time.Second
-	workPoolSummaryMaxInterval = 5 * time.Minute
 )
 
 // activeTasks is the set of task statuses that are orphaned back to pending when a worker dies.
@@ -34,23 +28,25 @@ var activeTasks = []TaskStatus{TaskStatusClaimed, TaskStatusRunning, TaskStatusW
 
 // Monitor runs provisioning, watchdog, and job-summary bookkeeping logic.
 type Monitor struct {
-	clock          scheduler.Clock
-	batchAPI       BatchAPIClient
-	pools          WorkPoolStore
-	batches        BatchRequestStore
-	workers        WorkerStore
-	tasks          TaskStore
-	pubsub         PubSubReceiver
-	jobEvents      JobEventReceiver
-	jobSummaries         JobSummaryStore
-	jobTerminated        JobTerminatedPublisher
+	clock                  scheduler.Clock
+	batchAPI               BatchAPIClient
+	pools                  WorkPoolStore
+	batches                BatchRequestStore
+	workers                WorkerStore
+	tasks                  TaskStore
+	pubsub                 PubSubReceiver
+	jobEvents              JobEventReceiver
+	jobSummaries           JobSummaryStore
+	jobTerminated          JobTerminatedPublisher
 	workpoolStatePublisher WorkpoolStatePublisher
-	workPoolSummaries    WorkPoolSummaryStore
-	expiry            ExpiryStore
-	verbose        bool
-	dbName         string
-	lingerDuration time.Duration
-	lastActivity   time.Time
+	workPoolSummaries      WorkPoolSummaryStore
+	events                 EventStore
+	lastEventTime          time.Time
+	expiry                 ExpiryStore
+	verbose                bool
+	dbName                 string
+	lingerDuration         time.Duration
+	lastActivity           time.Time
 }
 
 // SetVerbose enables or disables verbose poll logging.
@@ -65,6 +61,9 @@ func (a *Monitor) SetJobSummaryStore(s JobSummaryStore) { a.jobSummaries = s }
 
 // SetWorkPoolSummaryStore sets the store used to write WorkPoolSummary documents.
 func (a *Monitor) SetWorkPoolSummaryStore(s WorkPoolSummaryStore) { a.workPoolSummaries = s }
+
+// SetEventStore sets the store used to query job_created events.
+func (a *Monitor) SetEventStore(s EventStore) { a.events = s }
 
 // SetJobTerminatedPublisher sets the publisher used to emit job_terminated events.
 func (a *Monitor) SetJobTerminatedPublisher(p JobTerminatedPublisher) { a.jobTerminated = p }
@@ -110,28 +109,11 @@ func New(
 	}
 }
 
-// RunJobSubmission updates workpool status when a new job is submitted.
-// Should be called from job submission logic before tasks are enqueued.
-func (a *Monitor) RunJobSubmission(ctx context.Context, workpoolID string) error {
-	ws, err := a.pools.Get(ctx, workpoolID)
-	if err != nil {
-		return fmt.Errorf("get workpool %s: %w", workpoolID, err)
-	}
-
-	if ws.State.State == WorkPoolStatusIdle || ws.State.State == WorkPoolStatusHalted {
-		ws.State.State = WorkPoolStatusOK
-		ws.State.StateMessage = ""
-		ws.State.IncidentCount = 0
-		if err := a.saveState(ctx, ws.State); err != nil {
-			return fmt.Errorf("save workpool %s: %w", workpoolID, err)
-		}
-	}
-	return nil
-}
 
 // RunMonitorLoop runs the monitor until ctx is cancelled.
 // Blocks; run in a dedicated goroutine.
 func (a *Monitor) RunMonitorLoop(ctx context.Context) {
+	var lastActivityPrinted time.Time
 
 	sched := scheduler.New(a.clock)
 
@@ -140,6 +122,10 @@ func (a *Monitor) RunMonitorLoop(ctx context.Context) {
 		ctx, cancel = context.WithCancel(ctx)
 		a.lastActivity = time.Now()
 		sched.Add(defaultMinTimeBetweenPolls, defaultMinTimeBetweenPolls, func() {
+			if lastActivityPrinted != a.lastActivity {
+				a.vlogf("Last activity at %s. Will shut down if no activity before %s", a.lastActivity.Format(time.RFC3339), a.lastActivity.Add(a.lingerDuration).Format(time.RFC3339))
+				lastActivityPrinted = a.lastActivity
+			}
 			now := time.Now()
 			// if it's been too long since the monitor did anything, shutdown
 			if now.Sub(a.lastActivity) > a.lingerDuration {
@@ -152,70 +138,73 @@ func (a *Monitor) RunMonitorLoop(ctx context.Context) {
 	// Tier 2: cluster reconciler. Triggered by PubSub notifications for started batches;
 	// falls back to max_time_between_polls if no notification arrives.
 	notifyTier2 := sched.Add(defaultMinTimeBetweenPolls, defaultMaxTimeBetweenPolls, func() {
-		a.vlogf("poll: starting cluster reconciler")
+		a.vlogf("Started: Reconciling our records against google's")
 		if err := a.runClusterReconciler(ctx); err != nil {
 			log.Printf("tier2: %v", err)
 		}
+		a.vlogf("Completed: Reconciling our records against google's")
 	})
 
 	// Provisioning poll: provisioning. Triggered by job_created events; falls back to 1-minute timer.
 	notifyProvisioning := sched.Add(defaultMinTimeBetweenPolls, defaultMaxTimeBetweenPolls, func() {
-		a.vlogf("Checking for workpools which need new workers")
+		a.vlogf("Started: Checking for workpools which need new workers")
 		if err := a.runProvisioningPoll(ctx); err != nil {
 			log.Printf("provisioning poll: %v", err)
 		}
+		a.vlogf("Completed: Checking for workpools which need new workers")
 	})
 
 	// Tier 1: task recovery. Fixed 30-second interval; no notification trigger.
 	sched.Add(defaultMinTimeBetweenPolls, defaultMaxTimeBetweenPolls, func() {
-		a.vlogf("Checking for ophaned jobs")
+		a.vlogf("Started: Checking for ophaned jobs")
 		if err := a.runRequeueOrphanedTasks(ctx); err != nil {
 			log.Printf("tier1: %v", err)
 		}
+		a.vlogf("Completed: Checking for ophaned jobs")
 	})
 
 	// Tier 3: batch startup monitor. Triggered by PubSub notifications for pending batches;
 	// same fallback timing as tier 2.
 	notifyTier3 := sched.Add(defaultMinTimeBetweenPolls, defaultMaxTimeBetweenPolls, func() {
-		a.vlogf("Checking to see if workers successfully starting")
+		a.vlogf("Started: Checking to see if workers successfully starting")
 		if err := a.runBatchStartupMonitor(ctx); err != nil {
 			log.Printf("tier3: %v", err)
 		}
+		a.vlogf("Completed: Checking to see if workers successfully starting")
 	})
 
 	// Expiry cleaner: deletes documents whose expiry field is in the past. Fixed 30-minute interval.
 	if a.expiry != nil {
 		sched.Add(expiryCleanerInterval, expiryCleanerInterval, func() {
-			a.vlogf("poll: starting expiry cleaner")
+			a.vlogf("Deleting expired objects from firestore...")
 			if err := a.runExpiryCleaner(ctx); err != nil {
 				log.Printf("expiry cleaner: %v", err)
 			}
+			a.vlogf("Deleting expired objects from firestore complete")
 		})
 	}
 
 	// Job summary poll: recomputes JobSummary for every non-terminal job.
 	// Triggered by job_created and task_state_update events; falls back to max interval.
 	var notifyJobSummary func()
-	if a.jobSummaries != nil {
-		notifyJobSummary = sched.Add(jobSummaryMinInterval, jobSummaryMaxInterval, func() {
-			a.vlogf("poll: starting job summary poll")
-			if err := a.runJobSummaryPoll(ctx); err != nil {
-				log.Printf("job summary poll: %v", err)
-			}
-		})
-	}
+	notifyJobSummary = sched.Add(defaultMinTimeBetweenPolls, defaultMaxTimeBetweenPolls, func() {
+		a.vlogf("Starting: Computing job summaries")
+		if err := a.runJobSummaryPoll(ctx); err != nil {
+			log.Printf("job summary poll: %v", err)
+		}
+		a.vlogf("Completed: Computing job summaries")
+	})
 
 	// WorkPool summary poll: recomputes WorkPoolSummary for every workpool.
 	// Triggered by batch notifications and job events; falls back to max interval.
 	var notifyWorkPoolSummary func()
-	if a.workPoolSummaries != nil {
-		notifyWorkPoolSummary = sched.Add(workPoolSummaryMinInterval, workPoolSummaryMaxInterval, func() {
-			a.vlogf("poll: starting workpool summary poll")
-			if err := a.runWorkPoolSummaryPoll(ctx); err != nil {
-				log.Printf("workpool summary poll: %v", err)
-			}
-		})
-	}
+	notifyWorkPoolSummary = sched.Add(defaultMinTimeBetweenPolls, defaultMaxTimeBetweenPolls, func() {
+		a.vlogf("Starting: Compute workpool summaries")
+		if err := a.runWorkPoolSummaryPoll(ctx); err != nil {
+			log.Printf("workpool summary poll: %v", err)
+		}
+		a.vlogf("Completed: Compute workpool summaries")
+	})
 
 	// Route PubSub notifications to the appropriate tier in a background goroutine.
 	// A notification with Err set means the receive loop failed fatally; propagate it.

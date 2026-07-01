@@ -168,6 +168,7 @@ func TestAdapterRoundTrips(t *testing.T) {
 			WorkpoolID:      poolID,
 			BatchID:         batchID,
 			InstanceName:    "vm-expired",
+			Status:          "started",
 			HeartbeatExpiry: now.Add(-5 * time.Minute),
 		}
 		aliveWorker := &fsWorkerDoc{
@@ -363,6 +364,7 @@ func TestOrphanRequeue(t *testing.T) {
 	writeWorker(t, ctx, fs, &fsWorkerDoc{
 		WorkerID:        expiredWorkerID,
 		WorkpoolID:      poolID,
+		Status:          "started",
 		HeartbeatExpiry: now.Add(-10 * time.Minute),
 	})
 	writeWorker(t, ctx, fs, &fsWorkerDoc{

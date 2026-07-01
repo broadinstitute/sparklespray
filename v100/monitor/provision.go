@@ -25,18 +25,22 @@ func CreateBatchID() string {
 // and submits BatchAPIRequests to close the gap, preferring preemptible VMs up to the
 // workpool's budget before falling back to non-preemptible.
 func (a *Monitor) runProvisioningPoll(ctx context.Context) error {
-	// TODO: need some way to determine that we're done worrying about a pool...
 
-	pools, err := a.pools.ListAll(ctx)
+	all, err := a.pools.ListAll(ctx)
 	if err != nil {
 		return fmt.Errorf("list workpools: %w", err)
 	}
 
-	if len(pools) > 0 {
-		// if there's active pools, that counts as activity
-		a.lastActivity = time.Now()
+	var pools []*WorkPoolWithState
+	for _, ws := range all {
+		if ws.State.State != WorkPoolStatusIdle && ws.State.State != WorkPoolStatusHalted {
+			pools = append(pools, ws)
+		}
+	}
 
-		a.vlogf("provisioning poll: Found %d workpools", len(pools))
+	if len(pools) > 0 {
+		a.lastActivity = time.Now()
+		a.vlogf("provisioning poll: Found %d active workpools", len(pools))
 
 		for _, ws := range pools {
 			if err := a.runProvisioningPollForWorkpool(ctx, ws); err != nil {
@@ -94,32 +98,16 @@ func (a *Monitor) runProvisioningPollForWorkpool(ctx context.Context, ws *WorkPo
 	preemptibleCount := min(toRequest, remainingPreemptible)
 	nonPreemptibleCount := toRequest - preemptibleCount
 
-	stateDirty := false
-
 	a.vlogf("monitor: submitting a batch request for %d preemptible VMs and %d nonpreemptible VMs (already requested %d)", preemptibleCount, nonPreemptibleCount, requestedCount)
 	if preemptibleCount > 0 {
 		if err := a.submitBatch(ctx, pool, preemptibleCount, true, now); err != nil {
 			return fmt.Errorf("submit preemptible batch: %w", err)
-		}
-		if ws.State.State == WorkPoolStatusIdle {
-			ws.State.State = WorkPoolStatusOK
-			stateDirty = true
 		}
 	}
 
 	if nonPreemptibleCount > 0 {
 		if err := a.submitBatch(ctx, pool, nonPreemptibleCount, false, now); err != nil {
 			return fmt.Errorf("submit non-preemptible batch: %w", err)
-		}
-		if ws.State.State == WorkPoolStatusIdle {
-			ws.State.State = WorkPoolStatusOK
-			stateDirty = true
-		}
-	}
-
-	if stateDirty {
-		if err := a.saveState(ctx, ws.State); err != nil {
-			return fmt.Errorf("save pool: %w", err)
 		}
 	}
 

@@ -114,7 +114,32 @@ export default function BatchDetail() {
               />
             }
           />
-          <Row label="job_id" value={batch.job_id || dash} />
+          <Row
+            label="job_id"
+            value={
+              batch.job_id
+                ? (() => {
+                    const m = batch.job_id.match(
+                      /^projects\/([^/]+)\/locations\/([^/]+)\/jobs\/([^/]+)$/
+                    );
+                    if (m) {
+                      const url = `https://console.cloud.google.com/batch/jobsDetail/regions/${m[2]}/jobs/${m[3]}/details?project=${m[1]}`;
+                      return (
+                        <a
+                          href={url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{ color: "#1565c0" }}
+                        >
+                          {batch.job_id}
+                        </a>
+                      );
+                    }
+                    return batch.job_id;
+                  })()
+                : dash
+            }
+          />
           <Row label="workpool_id" value={batch.workpool_id || dash} />
           <Row
             label="expected_vm_count"

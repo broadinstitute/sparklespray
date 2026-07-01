@@ -15,6 +15,7 @@ func TestTier1_ExpiredWorkerTasksReset(t *testing.T) {
 	w.Workers.Add(&Worker{
 		WorkerID:        "w1",
 		WorkpoolID:      "pool-1",
+		Status:          "started",
 		HeartbeatExpiry: epoch.Add(-1 * time.Second), // already expired
 	})
 	w.Tasks.Add(&Task{TaskID: "t1", WorkpoolID: "pool-1", Status: TaskStatusClaimed, OwningWorkerID: "w1"})
@@ -36,6 +37,7 @@ func TestTier1_ExpiredWorkerNoTasks_NoChange(t *testing.T) {
 	w.Workers.Add(&Worker{
 		WorkerID:        "w1",
 		WorkpoolID:      "pool-1",
+		Status:          "started",
 		HeartbeatExpiry: epoch.Add(-1 * time.Second),
 	})
 
@@ -66,6 +68,7 @@ func TestTier1_MixedWorkers_OnlyExpiredWorkerAffected(t *testing.T) {
 	w.Workers.Add(&Worker{
 		WorkerID:        "expired",
 		WorkpoolID:      "pool-1",
+		Status:          "started",
 		HeartbeatExpiry: epoch.Add(-1 * time.Second),
 	})
 	w.Tasks.Add(&Task{TaskID: "t-expired", WorkpoolID: "pool-1", Status: TaskStatusRunning, OwningWorkerID: "expired"})
@@ -92,6 +95,7 @@ func TestTier1_PendingTaskNotReset(t *testing.T) {
 	w.Workers.Add(&Worker{
 		WorkerID:        "w1",
 		WorkpoolID:      "pool-1",
+		Status:          "started",
 		HeartbeatExpiry: epoch.Add(-1 * time.Second),
 	})
 	// A pending task not owned by the expired worker.

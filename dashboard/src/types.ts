@@ -90,8 +90,8 @@ export interface WorkPoolDetail {
   labels: { name: string; value: string }[];
   max_worker_count: number;
   max_preemptible_worker_attempts: number;
-  status: string;
-  status_message: string;
+  state: string;
+  state_message: string;
   last_incident_at: string | null;
   incident_count: number;
   expiry: string;

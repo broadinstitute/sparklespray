@@ -148,11 +148,15 @@ func runMonitor(c *cli.Context) error {
 	tasks.SetPublisher(ep)
 
 	jobSummaries := monitor.NewFirestoreJobSummaryStore(fsClient)
+	workPoolSummaries := monitor.NewFirestoreWorkPoolSummaryStore(fsClient)
+	eventStore := monitor.NewFirestoreEventStore(fsClient)
 
 	m := monitor.New(scheduler.RealClock, batchAPI, pools, batches, workers, tasks, pubsubReceiver, db)
 	m.SetVerbose(c.Bool("verbose"))
 	m.SetJobEventReceiver(jobEventReceiver)
 	m.SetJobSummaryStore(jobSummaries)
+	m.SetWorkPoolSummaryStore(workPoolSummaries)
+	m.SetEventStore(eventStore)
 	m.SetJobTerminatedPublisher(ep)
 	m.SetWorkpoolStatePublisher(ep)
 	if linger := c.Int("linger"); linger > 0 {

@@ -172,7 +172,9 @@ The worker updates `heartbeat_expiry` every minute while running. On a clean shu
 
 ### `WorkPoolSummary`
 
-One document per workpool, keyed by `workpool_id`. `WorkPoolSummary` is the mutable counterpart to the immutable `WorkPool` document: a `WorkPool` is written once at creation and never updated; all evolving state lives here. `WorkPoolSummary` is written exclusively by the **monitor** process, which recomputes it on each provisioning poll. No other process should write to this collection.
+One document per workpool, keyed by `workpool_id`. `WorkPoolSummary` is the mutable counterpart to the immutable `WorkPool` document: a `WorkPool` is written once at creation and never updated; all evolving state lives here. `WorkPoolSummary` is written exclusively by the **monitor** process, which recomputes it on each provisioning poll. No other process should write to this collection. Even more strict: the "worker pool summary poll" process is the only one who should insert/update objects in this collection. If another process needs to record information which can not be determined by querying a snapshot of the db, an event should be written which the polling process can use.
+
+(Concrete example: The work pool summary poller skips pools idle pools to reduce work. However, we need a way to transition from idle -> ok, which we want to do when a new job is submitted. Instead of having the job submission directly update the workpool, we insert a new_job event, which the poller sees and uses to determine the pool should be switched to "ok")
 
 Any question about workpool health — "how many VMs are expected?", "are there unhealthy batches?" — should be answered by reading `WorkPoolSummary`, not by scanning `BatchAPIRequests`, `Workers`, or `Tasks` directly.
 

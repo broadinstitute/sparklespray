@@ -390,6 +390,7 @@ func NewFirestoreWorkerStore(fs *firestore.Client) *FirestoreWorkerStore {
 
 func (s *FirestoreWorkerStore) ListExpired(ctx context.Context, now time.Time) ([]*Worker, error) {
 	iter := s.fs.Collection(workerCollection).
+		Where("status", "==", "started").
 		Where("heartbeat_expiry", "<", now).
 		Documents(ctx)
 	return collectWorkers(iter)
@@ -476,6 +477,13 @@ func (s *FirestoreWorkerStore) ListAllForWorkpool(ctx context.Context, workpoolI
 		Where("workpool_id", "==", workpoolID).
 		Documents(ctx)
 	return collectWorkers(iter)
+}
+
+func (s *FirestoreWorkerStore) MarkStopped(ctx context.Context, workerID string) error {
+	_, err := s.fs.Collection(workerCollection).Doc(workerID).Update(ctx, []firestore.Update{
+		{Path: "status", Value: "stopped"},
+	})
+	return err
 }
 
 // ----- FirestoreTaskStore -----
@@ -700,6 +708,51 @@ func (s *FirestoreWorkPoolSummaryStore) Save(ctx context.Context, summary *WorkP
 func (s *FirestoreWorkPoolSummaryStore) SaveHistory(ctx context.Context, history *WorkPoolSummaryHistory) error {
 	_, _, err := s.fs.Collection(workPoolSummaryHistoryCollection).Add(ctx, history)
 	return err
+}
+
+// ----- FirestoreEventStore -----
+
+type FirestoreEventStore struct {
+	fs *firestore.Client
+}
+
+func NewFirestoreEventStore(fs *firestore.Client) *FirestoreEventStore {
+	return &FirestoreEventStore{fs: fs}
+}
+
+type firestoreEventRecord struct {
+	Type       string    `firestore:"type"`
+	Timestamp  time.Time `firestore:"timestamp"`
+	WorkpoolID string    `firestore:"workpool_id"`
+}
+
+func (s *FirestoreEventStore) ListJobCreatedSince(ctx context.Context, since time.Time) ([]JobCreatedRecord, error) {
+	q := s.fs.Collection(eventsCollection).Where("type", "==", "job_created")
+	if !since.IsZero() {
+		q = q.Where("timestamp", ">", since)
+	}
+	iter := q.Documents(ctx)
+	defer iter.Stop()
+
+	var results []JobCreatedRecord
+	for {
+		snap, err := iter.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		var rec firestoreEventRecord
+		if err := snap.DataTo(&rec); err != nil {
+			continue
+		}
+		results = append(results, JobCreatedRecord{
+			WorkpoolID: rec.WorkpoolID,
+			Timestamp:  rec.Timestamp,
+		})
+	}
+	return results, nil
 }
 
 // ----- FirestoreExpiryStore -----

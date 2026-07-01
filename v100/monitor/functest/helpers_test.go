@@ -160,6 +160,7 @@ type fsWorkerDoc struct {
 	WorkpoolID      string    `firestore:"workpool_id"`
 	BatchID         string    `firestore:"batch_id"`
 	InstanceName    string    `firestore:"instance_name"`
+	Status          string    `firestore:"status"`
 	HeartbeatExpiry time.Time `firestore:"heartbeat_expiry"`
 }
 

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -89,7 +90,26 @@ type workpoolSummaryResponse struct {
 
 func (s *dashboardServer) handleListWorkpools(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	// Read v100.WorkPool directly to get the Expiry field not present in monitor.WorkPool.
+
+	// Load all WorkPoolSummary docs (mutable state) keyed by workpool_id.
+	summaries := map[string]monitor.WorkPoolSummary{}
+	summaryIter := s.fs.Collection(monitor.CollectionWorkPoolSummary).Documents(ctx)
+	defer summaryIter.Stop()
+	for {
+		snap, err := summaryIter.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			log.Printf("dashboard: ListWorkpools summary iter: %v", err)
+			break
+		}
+		var ws monitor.WorkPoolSummary
+		if err := snap.DataTo(&ws); err == nil {
+			summaries[ws.WorkpoolID] = ws
+		}
+	}
+
 	iter := s.fs.Collection(v100.WorkpoolCollection).Documents(ctx)
 	defer iter.Stop()
 	result := []workpoolSummaryResponse{}
@@ -112,19 +132,20 @@ func (s *dashboardServer) handleListWorkpools(w http.ResponseWriter, r *http.Req
 		for i, l := range wp.Labels {
 			wpLabels[i] = labelResponse{Name: l.Name, Value: l.Value}
 		}
+		ws := summaries[wp.WorkpoolID]
 		resp := workpoolSummaryResponse{
 			WorkpoolID:    wp.WorkpoolID,
 			MachineType:   wp.MachineType,
 			Region:        wp.Region,
-			State:        wp.State,
-			StateMessage: wp.StateMessage,
-			IncidentCount: wp.IncidentCount,
+			State:         string(ws.State),
+			StateMessage:  ws.StateMessage,
+			IncidentCount: ws.IncidentCount,
 			Labels:        wpLabels,
 			Expiry:        wp.Expiry,
 		}
-		if !wp.LastIncidentAt.IsZero() {
-			s := wp.LastIncidentAt.Format(time.RFC3339)
-			resp.LastIncidentAt = &s
+		if !ws.LastIncidentAt.IsZero() {
+			t := ws.LastIncidentAt.Format(time.RFC3339)
+			resp.LastIncidentAt = &t
 		}
 		result = append(result, resp)
 	}
@@ -171,6 +192,13 @@ func (s *dashboardServer) handleGetWorkpool(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to parse workpool")
 		return
 	}
+
+	// Read mutable state from WorkPoolSummary.
+	var ws monitor.WorkPoolSummary
+	if summarySnap, err := s.fs.Collection(monitor.CollectionWorkPoolSummary).Doc(workpoolID).Get(ctx); err == nil {
+		_ = summarySnap.DataTo(&ws)
+	}
+
 	detailLabels := make([]labelResponse, len(wp.Labels))
 	for i, l := range wp.Labels {
 		detailLabels[i] = labelResponse{Name: l.Name, Value: l.Value}
@@ -187,14 +215,14 @@ func (s *dashboardServer) handleGetWorkpool(w http.ResponseWriter, r *http.Reque
 		Labels:                       detailLabels,
 		MaxWorkerCount:               wp.MaxWorkerCount,
 		MaxPreemptibleWorkerAttempts: wp.MaxPreemptibleWorkerAttempts,
-		State:         wp.State,
-		StateMessage:  wp.StateMessage,
-		IncidentCount:                wp.IncidentCount,
-		Expiry:                       wp.Expiry,
+		State:         string(ws.State),
+		StateMessage:  ws.StateMessage,
+		IncidentCount: ws.IncidentCount,
+		Expiry:        wp.Expiry,
 	}
-	if !wp.LastIncidentAt.IsZero() {
-		s := wp.LastIncidentAt.Format(time.RFC3339)
-		resp.LastIncidentAt = &s
+	if !ws.LastIncidentAt.IsZero() {
+		t := ws.LastIncidentAt.Format(time.RFC3339)
+		resp.LastIncidentAt = &t
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -544,7 +572,13 @@ func (s *dashboardServer) handleListJobs(w http.ResponseWriter, r *http.Request)
 	if !beforeTime.IsZero() {
 		cq = cq.Where("created_at", "<=", beforeTime)
 	}
-	cq = cq.OrderBy("created_at", firestore.Desc)
+	// Only apply server-side ordering when there is no equality filter on workpool_id;
+	// combining an equality filter with an order-by requires a composite index that
+	// may not exist. When filtering by workpool_id the result set is small enough to
+	// sort client-side (see handleListJobs response assembly below).
+	if workpoolID == "" {
+		cq = cq.OrderBy("created_at", firestore.Desc)
+	}
 
 	iter := cq.Documents(ctx)
 	defer iter.Stop()
@@ -566,6 +600,11 @@ func (s *dashboardServer) handleListJobs(w http.ResponseWriter, r *http.Request)
 			continue
 		}
 		result = append(result, jobSummaryToResponse(&js))
+	}
+	if workpoolID != "" {
+		slices.SortFunc(result, func(a, b jobSummaryResponse) int {
+			return b.CreatedAt.Compare(a.CreatedAt)
+		})
 	}
 	writeJSON(w, http.StatusOK, result)
 }

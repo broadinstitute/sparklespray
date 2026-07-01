@@ -48,6 +48,10 @@ function AppRoutes() {
             path="/workpools/:workpoolId/batches/:batchId"
             element={<BatchDetail />}
           />
+          <Route
+            path="/workpools/:workpoolId/jobs"
+            element={<WorkPoolDetail />}
+          />
           <Route path="/clusters/:clusterId" element={<ClusterDetail />} />
           <Route path="/clusters/:clusterId/logs" element={<ClusterLogs />} />
           <Route path="*" element={<NotImplemented />} />

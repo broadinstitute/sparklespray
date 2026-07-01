@@ -145,6 +145,40 @@ function useWorkers(
   return workers;
 }
 
+interface JobRecord {
+  job_id: string;
+  workpool_id: string;
+  created_at: string;
+  state: string;
+  tasks: { state: string; count: number }[];
+  labels: { name: string; value: string }[];
+}
+
+function useJobs(workpoolId: string | undefined, active: boolean): JobRecord[] {
+  const [jobs, setJobs] = useState<JobRecord[]>([]);
+  useEffect(() => {
+    if (!workpoolId || !active) return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const r = await fetch(
+          `/api/v1/jobs?workpool_id=${encodeURIComponent(workpoolId)}`
+        );
+        if (!r.ok || cancelled) return;
+        const data = await r.json();
+        if (!cancelled) setJobs(data);
+      } catch (_) {}
+    };
+    poll();
+    const id = setInterval(poll, 10000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [workpoolId, active]);
+  return jobs;
+}
+
 function useBatches(
   workpoolId: string | undefined,
   active: boolean
@@ -415,14 +449,11 @@ function WorkPoolPropertiesPanel({
       <DetailRow
         label="status"
         value={
-          <StatusBadge
-            status={detail.status || "—"}
-            colorMap={statusColorMap}
-          />
+          <StatusBadge status={detail.state || "—"} colorMap={statusColorMap} />
         }
       />
-      {detail.status_message && (
-        <DetailRow label="message" value={detail.status_message} />
+      {detail.state_message && (
+        <DetailRow label="message" value={detail.state_message} />
       )}
       <DetailRow label="incidents" value={detail.incident_count} />
       {detail.last_incident_at && (
@@ -775,6 +806,154 @@ function BatchesTab({ workpoolId }: { workpoolId: string }) {
   );
 }
 
+// ── Jobs tab ──────────────────────────────────────────────────────────────────
+
+const JOB_STATE_COLORS: Record<string, string> = {
+  pending: "#1565c0",
+  running: "#6a1b9a",
+  success: "#00695c",
+  error: "#bf360c",
+  failed: "#b71c1c",
+  killed: "#555555",
+};
+
+const ACTIVE_TASK_STATES = new Set([
+  "pending",
+  "claimed",
+  "running",
+  "writing",
+]);
+
+function jobTaskSummary(
+  tasks: { state: string; count: number }[]
+): {
+  active: number;
+  ok: number;
+  fail: number;
+} {
+  let active = 0,
+    ok = 0,
+    fail = 0;
+  for (const t of tasks) {
+    if (ACTIVE_TASK_STATES.has(t.state)) active += t.count;
+    else if (t.state === "success") ok += t.count;
+    else if (
+      t.state === "error" ||
+      t.state === "failed" ||
+      t.state === "killed"
+    )
+      fail += t.count;
+  }
+  return { active, ok, fail };
+}
+
+function JobsTab({ workpoolId }: { workpoolId: string }) {
+  const jobs = useJobs(workpoolId, true);
+
+  return (
+    <div
+      style={{
+        border: "1px solid #e0e0e0",
+        borderRadius: 8,
+        overflow: "hidden",
+      }}
+    >
+      <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        <thead>
+          <tr>
+            <th style={TH_STYLE}>Job ID</th>
+            <th style={TH_STYLE}>State</th>
+            <th style={TH_STYLE}>Created</th>
+            <th style={{ ...TH_STYLE, textAlign: "right" }}>
+              active / ok / fail
+            </th>
+            <th style={TH_STYLE}>Labels</th>
+          </tr>
+        </thead>
+        <tbody>
+          {jobs.length === 0 && (
+            <tr>
+              <td
+                colSpan={5}
+                style={{
+                  ...TD_STYLE,
+                  color: "#aaa",
+                  textAlign: "center",
+                  padding: "2rem",
+                }}
+              >
+                No jobs found.
+              </td>
+            </tr>
+          )}
+          {jobs.map((j, i) => {
+            const { active, ok, fail } = jobTaskSummary(j.tasks);
+            const chipColor =
+              fail > 0
+                ? "#b71c1c"
+                : active > 0
+                ? "#6a1b9a"
+                : ok > 0
+                ? "#2e7d32"
+                : "#aaa";
+            return (
+              <tr
+                key={j.job_id}
+                style={{ background: i % 2 === 0 ? "#fff" : "#fafafa" }}
+              >
+                <td style={TD_STYLE}>
+                  <Link
+                    to={`/jobs/${j.job_id}`}
+                    style={{ color: "#1565c0", textDecoration: "none" }}
+                  >
+                    {j.job_id}
+                  </Link>
+                </td>
+                <td style={TD_STYLE}>
+                  <StatusBadge status={j.state} colorMap={JOB_STATE_COLORS} />
+                </td>
+                <td style={{ ...TD_STYLE, color: "#777" }}>
+                  {new Date(j.created_at).toLocaleString()}
+                </td>
+                <td style={{ ...TD_STYLE, textAlign: "right" }}>
+                  <span
+                    style={{
+                      fontFamily: MONO,
+                      fontSize: "0.78rem",
+                      color: chipColor,
+                    }}
+                  >
+                    {active} / {ok} / {fail}
+                  </span>
+                </td>
+                <td style={TD_STYLE}>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                    {j.labels.map((l) => (
+                      <span
+                        key={l.name}
+                        style={{
+                          background: "#f0f0f0",
+                          color: "#555",
+                          borderRadius: 3,
+                          padding: "1px 6px",
+                          fontSize: "0.72rem",
+                          fontFamily: MONO,
+                        }}
+                      >
+                        {l.name}={l.value}
+                      </span>
+                    ))}
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function WorkPoolDetailPage() {
@@ -783,7 +962,8 @@ export default function WorkPoolDetailPage() {
 
   const isWorkers = location.pathname.endsWith("/workers");
   const isBatches = location.pathname.endsWith("/batches");
-  const isOverview = !isWorkers && !isBatches;
+  const isJobs = location.pathname.endsWith("/jobs");
+  const isOverview = !isWorkers && !isBatches && !isJobs;
 
   const detail = useWorkPoolDetail(workpoolId);
   const history = useWorkPoolSummaryHistory(workpoolId);
@@ -808,6 +988,11 @@ export default function WorkPoolDetailPage() {
       href: `/workpools/${workpoolId}/batches`,
       matchExact: true,
     },
+    {
+      label: "Jobs",
+      href: `/workpools/${workpoolId}/jobs`,
+      matchExact: true,
+    },
   ];
 
   return (
@@ -827,6 +1012,7 @@ export default function WorkPoolDetailPage() {
       )}
       {isWorkers && <WorkersTab workpoolId={workpoolId} />}
       {isBatches && <BatchesTab workpoolId={workpoolId} />}
+      {isJobs && <JobsTab workpoolId={workpoolId} />}
     </div>
   );
 }

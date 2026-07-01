@@ -18,6 +18,10 @@ func (a *Monitor) runRequeueOrphanedTasks(ctx context.Context) error {
 	}
 
 	for _, w := range expired {
+		if err := a.workers.MarkStopped(ctx, w.WorkerID); err != nil {
+			log.Printf("tier1: mark worker %s stopped: %v", w.WorkerID, err)
+		}
+
 		tasks, err := a.tasks.ListByWorker(ctx, w.WorkerID, activeTasks)
 		if err != nil {
 			// Log and continue so one bad worker doesn't block the rest.

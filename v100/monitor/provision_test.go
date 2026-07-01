@@ -170,20 +170,6 @@ func TestProvision_HaltedWorkpool_NoProvisioning(t *testing.T) {
 	assert.Empty(t, w.BatchAPI.CreatedJobs)
 }
 
-func TestProvision_IdleToOkTransitionOnFirstBatch(t *testing.T) {
-	w := newWorld()
-	pool := defaultPool("pool-1")
-	pool.MaxPreemptibleWorkerAttempts = 0
-	w.Pools.Add(pool)
-	w.Pools.AddState(&WorkPoolState{WorkpoolID: "pool-1", State: WorkPoolStatusIdle})
-	w.Tasks.Add(&Task{TaskID: "t1", WorkpoolID: "pool-1", Status: TaskStatusPending})
-
-	err := w.A.runProvisioningPoll(context.Background())
-	require.NoError(t, err)
-	assert.Len(t, w.BatchAPI.CreatedJobs, 1)
-	assert.Equal(t, WorkPoolStatusOK, w.Pools.MustGetState("pool-1").State)
-}
-
 // ---- helpers ----
 
 func taskID(n int) string  { return fmt.Sprintf("task-%d", n) }
