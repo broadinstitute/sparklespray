@@ -77,6 +77,17 @@ func formatResources(resources []ResourceEntry) string {
 	return strings.Join(parts, ",")
 }
 
+// formatBindMountArgs derives a --bind-mount flag for each empty volume's mount point,
+// so task containers can see the extra disks that GCP Batch mounts onto the VM host.
+func formatBindMountArgs(rootDir string, volumes []EmptyVolume) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, " --bind-mount '%s:%s'", rootDir, rootDir)
+	for _, v := range volumes {
+		fmt.Fprintf(&b, " --bind-mount '%s:%s'", v.MountPoint, v.MountPoint)
+	}
+	return b.String()
+}
+
 func (c *GCPBatchAPIClient) CreateJob(ctx context.Context, spec *WorkerJobSpec) (string, error) {
 	if len(spec.Resources) == 0 {
 		return "", fmt.Errorf("workpool %s has no resources configured", spec.WorkpoolID)
@@ -116,7 +127,8 @@ func (c *GCPBatchAPIClient) CreateJob(ctx context.Context, spec *WorkerJobSpec) 
 		})
 	}
 
-	workerArgs := fmt.Sprintf("--batch %s --project %s --db %s --workpool %s --work-dir %s --resources %s --linger %d", spec.BatchID, c.project, spec.DBName, spec.WorkpoolID, spec.RootDir, formatResources(spec.Resources), spec.LingerTime/time.Second)
+	workerArgs := fmt.Sprintf("--stream --batch %s --project %s --db %s --workpool %s --work-dir %s --resources %s --linger %d", spec.BatchID, c.project, spec.DBName, spec.WorkpoolID, spec.RootDir, formatResources(spec.Resources), spec.LingerTime/time.Second) +
+		formatBindMountArgs(spec.RootDir, spec.EmptyVolumes)
 	log.Printf("worker args: %s", workerArgs)
 
 	job := &batch.Job{
