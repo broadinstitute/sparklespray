@@ -155,6 +155,8 @@ func executeDockerCommand(ctx context.Context, imageName string, command []strin
 	args = append(args, imageName)
 	args = append(args, command...)
 
+	log.Printf("Executing docker: %s %s", dockerExecutable, strings.Join(args, " "))
+
 	cmd := exec.CommandContext(ctx, dockerExecutable, args...)
 
 	pr, pw := io.Pipe()
@@ -549,6 +551,7 @@ func (ws *workerState) mainLoop(ctx context.Context, resources *Resources) error
 // The image name and extra docker args are ignored.
 // Resource usage is timing-only (no cgroup data available in this mode).
 func executeCommandDirect(ctx context.Context, _ string, command []string, workDir string, _ []string, tel *TaskEventLog) (*ResourceUsage, error) {
+	log.Printf("Executing: %s", strings.Join(command, " "))
 	cmd := exec.CommandContext(ctx, command[0], command[1:]...)
 	cmd.Dir = workDir
 
@@ -744,6 +747,7 @@ func prepareWorkDir(ctx context.Context, tc TransferClient, workDirParent string
 	var localizedFiles []string
 	for _, f := range filesToLocalize {
 		destPath := filepath.Join(taskWorkDir, f.Destination)
+		log.Printf("Localizing %s -> %s", f.Source, destPath)
 		if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
 			os.RemoveAll(workDir)
 			return nil, fmt.Errorf("creating parent dirs for %s: %w", f.Destination, err)
