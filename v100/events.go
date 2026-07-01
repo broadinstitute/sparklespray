@@ -188,17 +188,25 @@ func (ep *EventPublisher) PublishWorkpoolStateChange(ctx context.Context, workpo
 }
 
 // PublishTaskStateUpdate records and publishes a task state transition event.
-func (ep *EventPublisher) PublishTaskStateUpdate(ctx context.Context, update TaskStateUpdate) error {
+// Implements monitor.TaskStatePublisher.
+func (ep *EventPublisher) PublishTaskStateUpdate(ctx context.Context, taskID, jobID, oldState, newState string) error {
+	update := TaskStateUpdate{
+		Type:     "task_state_update",
+		TaskID:   taskID,
+		JobID:    jobID,
+		OldState: oldState,
+		NewState: newState,
+	}
 	now := time.Now()
 	record := EventRecord{
 		EventID:   uuid.New().String(),
-		Type:      update.Type,
+		Type:      "task_state_update",
 		Timestamp: now,
 		Expiry:    now.Add(eventTTL),
-		TaskID:    update.TaskID,
-		JobID:     update.JobID,
-		OldState:  update.OldState,
-		NewState:  update.NewState,
+		TaskID:    taskID,
+		JobID:     jobID,
+		OldState:  oldState,
+		NewState:  newState,
 	}
 	return ep.recordAndPublish(ctx, record, update)
 }

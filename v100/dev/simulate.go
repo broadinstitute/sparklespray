@@ -115,7 +115,7 @@ func runDevSimulate(c *cli.Context) error {
 	log.Printf("simulate: batch %s written", batchID)
 
 	jobSummaries := monitor.NewFirestoreJobSummaryStore(fsClient)
-	taskStore := monitor.NewFirestoreTaskStore(fsClient)
+	taskStore := monitor.NewFirestoreTaskStore(fsClient, nil)
 	workerStore := monitor.NewFirestoreWorkerStore(fsClient)
 	workPoolSummaryStore := monitor.NewFirestoreWorkPoolSummaryStore(fsClient)
 

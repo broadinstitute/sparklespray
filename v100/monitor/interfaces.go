@@ -226,8 +226,10 @@ type TaskStore interface {
 	ListByWorker(ctx context.Context, workerID string, statuses []TaskStatus) ([]*Task, error)
 	// CountPending returns the number of pending tasks for a workpool.
 	CountPending(ctx context.Context, workpoolID string) (int, error)
-	// ResetToPending sets the task to pending and clears OwningWorkerID.
-	ResetToPending(ctx context.Context, taskID string) error
+	// ResetToPending sets the task to pending, clears OwningWorkerID, and
+	// publishes a task_state_update event. jobID and oldStatus must match the
+	// task's current values so the event is accurate.
+	ResetToPending(ctx context.Context, taskID, jobID string, oldStatus TaskStatus) error
 	// CountByJob returns a map from task status string to count for the given job.
 	CountByJob(ctx context.Context, jobID string) (map[string]int, error)
 	// CountByWorkpool returns a map from task status string to count for the given workpool.
@@ -361,6 +363,12 @@ type JobSummaryStore interface {
 	Save(ctx context.Context, summary *JobSummary) error
 	// SaveHistory appends a snapshot to the JobSummaryHistory collection.
 	SaveHistory(ctx context.Context, history *JobSummaryHistory) error
+}
+
+// TaskStatePublisher emits a task_state_update event on every task state
+// transition. Defined here (not in v100) to avoid an import cycle.
+type TaskStatePublisher interface {
+	PublishTaskStateUpdate(ctx context.Context, taskID, jobID, oldState, newState string) error
 }
 
 // JobTerminatedPublisher emits a job_terminated event when a job reaches a

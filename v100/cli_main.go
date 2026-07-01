@@ -107,7 +107,7 @@ func runMonitor(c *cli.Context) error {
 	pools := monitor.NewFirestoreWorkPoolStore(fsClient)
 	batches := monitor.NewFirestoreBatchRequestStore(fsClient)
 	workers := monitor.NewFirestoreWorkerStore(fsClient)
-	tasks := monitor.NewFirestoreTaskStore(fsClient)
+	tasks := monitor.NewFirestoreTaskStore(fsClient, nil)
 
 	var batchAPI monitor.BatchAPIClient
 	if emulatorURL := os.Getenv("SPARKLES_BATCH_API_EMULATOR"); emulatorURL != "" {
@@ -144,6 +144,8 @@ func runMonitor(c *cli.Context) error {
 
 	ep := NewEventPublisher(psClient.Publisher("sparkles-events"), fsClient)
 	defer ep.Stop()
+
+	tasks.SetPublisher(ep)
 
 	jobSummaries := monitor.NewFirestoreJobSummaryStore(fsClient)
 

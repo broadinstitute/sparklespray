@@ -559,7 +559,7 @@ func (s *FakeTaskStore) CountPending(ctx context.Context, workpoolID string) (in
 	return count, nil
 }
 
-func (s *FakeTaskStore) ResetToPending(ctx context.Context, taskID string) error {
+func (s *FakeTaskStore) ResetToPending(ctx context.Context, taskID, jobID string, oldStatus TaskStatus) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

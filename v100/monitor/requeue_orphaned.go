@@ -26,7 +26,7 @@ func (a *Monitor) runRequeueOrphanedTasks(ctx context.Context) error {
 		}
 
 		for _, t := range tasks {
-			if err := a.tasks.ResetToPending(ctx, t.TaskID); err != nil {
+			if err := a.tasks.ResetToPending(ctx, t.TaskID, t.JobID, t.Status); err != nil {
 				log.Printf("tier1: reset task %s to pending: %v", t.TaskID, err)
 			}
 		}

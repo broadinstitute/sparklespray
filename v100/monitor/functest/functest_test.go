@@ -215,7 +215,7 @@ func TestAdapterRoundTrips(t *testing.T) {
 	})
 
 	t.Run("TaskStore", func(t *testing.T) {
-		tasks := monitor.NewFirestoreTaskStore(fs)
+		tasks := monitor.NewFirestoreTaskStore(fs, nil)
 		workerID := "worker-" + randomID()
 		jobID := "job-" + randomID()
 		poolID := "pool-" + randomID()
@@ -261,7 +261,7 @@ func TestAdapterRoundTrips(t *testing.T) {
 			t.Errorf("CountPending: want 1, got %d", count)
 		}
 
-		if err := tasks.ResetToPending(ctx, claimedTask.TaskID); err != nil {
+		if err := tasks.ResetToPending(ctx, claimedTask.TaskID, jobID, monitor.TaskStatusClaimed); err != nil {
 			t.Fatalf("ResetToPending: %v", err)
 		}
 		snap, err := fs.Collection(monitor.CollectionTasks).Doc(claimedTask.TaskID).Get(ctx)
@@ -394,7 +394,7 @@ func TestOrphanRequeue(t *testing.T) {
 	writeTask(t, ctx, fs, aliveTask)
 
 	workers := monitor.NewFirestoreWorkerStore(fs)
-	tasks := monitor.NewFirestoreTaskStore(fs)
+	tasks := monitor.NewFirestoreTaskStore(fs, nil)
 	m, _ := newMonitorWithStores(
 		clock,
 		monitor.NewFirestoreWorkPoolStore(fs),
@@ -462,7 +462,7 @@ func TestJobSummaryPollPublishesTerminationEvent(t *testing.T) {
 		t.Fatalf("Create JobSummary: %v", err)
 	}
 
-	tasks := monitor.NewFirestoreTaskStore(fs)
+	tasks := monitor.NewFirestoreTaskStore(fs, nil)
 	m, pub := newMonitorWithStores(
 		clock,
 		monitor.NewFirestoreWorkPoolStore(fs),

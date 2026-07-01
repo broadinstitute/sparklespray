@@ -2,6 +2,8 @@
 
 This document describes the Firestore collections, Pub/Sub topics, and task lifecycle for the v100 rewrite of Sparklespray.
 
+**Naming convention:** primary collection documents (`Tasks`, `Workers`, `BatchAPIRequests`) use a field named **`status`** for their lifecycle field. Rolled-up views and events (`JobSummary`, `WorkPoolSummary`, `StateCount`, `task_state_update`) use **`state`** / `old_state` / `new_state`. The split is intentional: `status` = raw per-document state; `state` = derived or aggregated state.
+
 ---
 
 ## Firestore Collections
@@ -27,7 +29,7 @@ One document per submitted job. The document ID is the `job_id`.
 | `name`  | string  | Resource name (e.g. `slots`, `mem`) |
 | `value` | float64 | Required quantity of that resource  |
 
-**Label** (embedded object) — user-defined tag; used on `Jobs`, `JobSummary`, `Tasks`, and `WorkPools`:
+**Label** (embedded object) — user-defined tag; used on `Jobs`, `JobSummary`, `JobSummaryHistory`, `Tasks`, and `WorkPools`:
 
 | Field   | Type   | Description |
 | ------- | ------ | ----------- |
@@ -40,23 +42,25 @@ One document per submitted job. The document ID is the `job_id`.
 
 One document per task. The document ID is the `task_id`.
 
-| Field               | Type             | Description                                                                                                                                        |
-| ------------------- | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `task_id`           | string           | Unique identifier for the task                                                                                                                     |
-| `task_index`        | int              | Zero-based index of this task within its job                                                                                                       |
-| `job_id`            | string           | ID of the parent job                                                                                                                               |
-| `workpool_id`       | string           | The workpool this task belongs to (denormalized from the job for efficient querying)                                                               |
-| `status`            | string           | Current status — see table below                                                                                                                   |
-| `command`           | []string         | The command to execute, as an argv array (e.g. `["python", "train.py", "--epochs", "10"]`)                                                         |
-| `docker_image`      | string           | Docker image used to run the command                                                                                                               |
-| `result_path`       | string           | GCS path (e.g. `gs://bucket/path`) where results are uploaded after the command completes                                                          |
-| `log_path`          | string           | GCS path where the command's stdout/stderr is uploaded after the command completes                                                                 |
-| `files_to_localize` | []FileToLocalize | Files to download from GCS into the working directory before the command runs                                                                      |
-| `labels`            | []Label          | User-defined key/value pairs passed to the task at submission time                                                                                 |
-| `owning_worker_id`  | string           | ID of the worker that has claimed this task; empty when not claimed                                                                                |
-| `failure_reason`    | string           | Human-readable reason for failure; populated when `status` is `failed`                                                                             |
-| `exit_code`         | int              | Process exit code; populated when `status` is `error`                                                                                              |
-| `resource_usage`    | ResourceUsage    | Summary of resources consumed by this task's container; written by the worker after the container exits (best-effort; absent if collection failed) |
+| Field                        | Type             | Description                                                                                                                                                 |
+| ---------------------------- | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `task_id`                    | string           | Unique identifier for the task                                                                                                                              |
+| `task_index`                 | int              | Zero-based index of this task within its job                                                                                                                |
+| `job_id`                     | string           | ID of the parent job                                                                                                                                        |
+| `workpool_id`                | string           | The workpool this task belongs to (denormalized from the job for efficient querying)                                                                        |
+| `status`                     | string           | Current status — see table below                                                                                                                            |
+| `command`                    | []string         | The command to execute, as an argv array (e.g. `["python", "train.py", "--epochs", "10"]`)                                                                  |
+| `docker_image`               | string           | Docker image used to run the command                                                                                                                        |
+| `result_path`                | string           | GCS path (e.g. `gs://bucket/path`) where results are uploaded after the command completes                                                                   |
+| `log_path`                   | string           | GCS path where the command's stdout/stderr is uploaded after the command completes                                                                          |
+| `files_to_localize`          | []FileToLocalize | Files to download from GCS into the working directory before the command runs. Mutually exclusive with `files_to_localize_manifest`.                        |
+| `files_to_localize_manifest` | string           | GCS path of a manifest file listing files to localize; used instead of inline `files_to_localize` when the file list is too large to embed in the document. |
+| `labels`                     | []Label          | User-defined key/value pairs passed to the task at submission time                                                                                          |
+| `owning_worker_id`           | string           | ID of the worker that has claimed this task; empty when not claimed                                                                                         |
+| `failure_reason`             | string           | Human-readable reason for failure; populated when `status` is `failed`                                                                                      |
+| `exit_code`                  | int              | Process exit code; populated when `status` is `error`                                                                                                       |
+| `resource_usage`             | ResourceUsage    | Summary of resources consumed by this task's container; written by the worker after the container exits (best-effort; absent if collection failed)          |
+| `last_updated`               | timestamp        | Updated on every status transition; used by tooling to detect stale documents                                                                               |
 
 **FileToLocalize** (embedded object):
 
@@ -99,7 +103,7 @@ Terminal states — no further transitions except an administrative kill:
 | `success` | Task ran to completion and the process exited with code 0                 |
 | `error`   | Task ran to completion but the process returned a non-zero exit code      |
 | `failed`  | Task did not run to completion due to an infrastructure or system failure |
-| `killed`  | Task was administratively terminated _(not yet implemented)_              |
+| `killed`  | Task was administratively terminated                                      |
 
 **Three-way terminal split:** `success`/`error`/`failed` model two distinct failure modes. `error` means the task executed fully and the _program itself_ reported a problem — look at the task's output. `failed` means execution did not complete — look at the worker or infrastructure logs. `success` means exit code 0.
 
@@ -111,26 +115,27 @@ Terminal states — no further transitions except an administrative kill:
 
 One document per workpool. The document ID is the `workpool_id`. `WorkPool` is written once at creation and never updated; all evolving state lives in `WorkPoolSummary`. A workpool defines the VM configuration used to create workers that process tasks associated with that workpool.
 
-| Field                             | Type          | Description                                                                                                    |
-| --------------------------------- | ------------- | -------------------------------------------------------------------------------------------------------------- |
-| `workpool_id`                     | string        | Unique identifier for the workpool                                                                             |
-| `machine_type`                    | string        | GCP machine type for worker VMs (e.g. `n2-standard-4`)                                                         |
-| `region`                          | string        | GCP region for Batch jobs (e.g. `us-central1`)                                                                 |
-| `zones`                           | []string      | GCP zones to query for running VMs (e.g. `["us-central1-a"]`)                                                  |
-| `root_dir`                        | string        | Directory on the VM that the worker uses as its working root; also where the `sparkles` binary is staged       |
-| `sparkles_worker_gcs_path`        | string        | GCS path (e.g. `gs://bucket/sparkles`) of the worker binary; downloaded to `{root_dir}/sparkles` at VM startup |
-| `resources`                       | []Resource    | Resource capacity advertised by workers created from this workpool                                             |
-| `empty_volumes`                   | []EmptyVolume | Ephemeral volumes to attach to each VM                                                                         |
-| `labels`                          | []Label       | User-defined key/value tags attached at creation time (e.g. `team=ml`, `env=prod`)                             |
-| `expiry`                          | timestamp     | When this document may be garbage-collected                                                                    |
-| `max_worker_count`                | int           | Maximum number of VMs the monitor may have running concurrently for this workpool                              |
-| `max_preemptible_worker_attempts` | int           | How many times the monitor may submit a preemptible batch before falling back to on-demand                     |
-| `max_workers_per_request`         | int           | Maximum number of VMs in a single GCP Batch job submission                                                     |
-| `vm_shutdown_grace_period_sec`    | int           | Seconds the monitor waits after asking a VM to shut down before treating it as gone                            |
-| `max_zombies_before_abort`        | int           | Number of zombie VMs tolerated in one batch before the monitor marks the batch failed                          |
-| `max_consecutive_failed_batches`  | int           | Number of consecutive failed batches before the monitor halts the workpool                                     |
+| Field                             | Type            | Description                                                                                                    |
+| --------------------------------- | --------------- | -------------------------------------------------------------------------------------------------------------- |
+| `workpool_id`                     | string          | Unique identifier for the workpool                                                                             |
+| `machine_type`                    | string          | GCP machine type for worker VMs (e.g. `n2-standard-4`)                                                         |
+| `region`                          | string          | GCP region for Batch jobs (e.g. `us-central1`)                                                                 |
+| `zones`                           | []string        | GCP zones to query for running VMs (e.g. `["us-central1-a"]`)                                                  |
+| `root_dir`                        | string          | Directory on the VM that the worker uses as its working root; also where the `sparkles` binary is staged       |
+| `sparkles_worker_gcs_path`        | string          | GCS path (e.g. `gs://bucket/sparkles`) of the worker binary; downloaded to `{root_dir}/sparkles` at VM startup |
+| `service_account`                 | string          | GCP service account email assigned to worker VMs; governs what GCP resources each worker can access            |
+| `resources`                       | []ResourceEntry | Resource capacity advertised by workers created from this workpool                                             |
+| `empty_volumes`                   | []EmptyVolume   | Ephemeral volumes to attach to each VM                                                                         |
+| `labels`                          | []Label         | User-defined key/value tags attached at creation time (e.g. `team=ml`, `env=prod`)                             |
+| `expiry`                          | timestamp       | When this document may be garbage-collected                                                                    |
+| `max_worker_count`                | int             | Maximum number of VMs the monitor may have running concurrently for this workpool                              |
+| `max_preemptible_worker_attempts` | int             | How many times the monitor may submit a preemptible batch before falling back to on-demand                     |
+| `max_workers_per_request`         | int             | Maximum number of VMs in a single GCP Batch job submission                                                     |
+| `vm_shutdown_grace_period_sec`    | int             | Seconds the monitor waits after asking a VM to shut down before treating it as gone                            |
+| `max_zombies_before_abort`        | int             | Number of zombie VMs tolerated in one batch before the monitor marks the batch failed                          |
+| `max_consecutive_failed_batches`  | int             | Number of consecutive failed batches before the monitor halts the workpool                                     |
 
-**Resource** (embedded object) — mirrors the resource entries on `Jobs`; workers created from this workpool will advertise this capacity:
+**ResourceEntry** (embedded object) — same type as `ResourceEntry` on `Jobs`; workers created from this workpool will advertise this capacity:
 
 | Field   | Type    | Description                         |
 | ------- | ------- | ----------------------------------- |
@@ -165,20 +170,19 @@ The worker updates `heartbeat_expiry` every minute while running. On a clean shu
 
 ---
 
-### `WorkPoolSummary` _(not yet implemented)_
+### `WorkPoolSummary`
 
-One document per workpool, keyed by `workpool_id`. `WorkPoolSummary` is the mutable counterpart to the immutable `WorkPool` document: a `WorkPool` is written once at creation and never updated; all evolving state lives here. `WorkPoolSummary` is owned exclusively by the **monitor** process, which recomputes it on each provisioning poll. No other process should write to this collection.
+One document per workpool, keyed by `workpool_id`. `WorkPoolSummary` is the mutable counterpart to the immutable `WorkPool` document: a `WorkPool` is written once at creation and never updated; all evolving state lives here. `WorkPoolSummary` is written exclusively by the **monitor** process, which recomputes it on each provisioning poll. No other process should write to this collection.
 
 Any question about workpool health — "how many VMs are expected?", "are there unhealthy batches?" — should be answered by reading `WorkPoolSummary`, not by scanning `BatchAPIRequests`, `Workers`, or `Tasks` directly.
 
-The following fields are copied from `WorkPool`:
+The following fields are copied from `WorkPool` at first write and not updated thereafter:
 
-| Field                             | Type    | Description                                                                                   |
-| --------------------------------- | ------- | --------------------------------------------------------------------------------------------- |
-| `workpool_id`                     | string  | Workpool this summary describes (copied from `WorkPool`)                                      |
-| `machine_type`                    | string  | GCP machine type for worker VMs (copied from `WorkPool`)                                      |
-| `labels`                          | []Label | User-defined key/value tags (copied from `WorkPool` at creation time; not updated thereafter) |
-| `max_preemptible_worker_attempts` | int     | Max preemptible batch submissions before falling back to on-demand (copied from `WorkPool`)   |
+| Field                             | Type   | Description                                                                                 |
+| --------------------------------- | ------ | ------------------------------------------------------------------------------------------- |
+| `workpool_id`                     | string | Workpool this summary describes (copied from `WorkPool`)                                    |
+| `machine_type`                    | string | GCP machine type for worker VMs (copied from `WorkPool`)                                    |
+| `max_preemptible_worker_attempts` | int    | Max preemptible batch submissions before falling back to on-demand (copied from `WorkPool`) |
 
 The following fields are written exclusively by the monitor process:
 
@@ -190,8 +194,8 @@ The following fields are written exclusively by the monitor process:
 | `state_message`                   | string       | Human-readable description of the current state or last incident                                            |
 | `last_incident_at`                | timestamp    | Time of the most recent watchdog incident                                                                   |
 | `incident_count`                  | int          | Cumulative number of incidents; the monitor halts the workpool if this exceeds a threshold                  |
-| `expected_preemptible_workers`    | int          | Sum of `expected_vm_count` across all `BatchAPIRequests` where `preemptible=true`                           |
-| `expected_nonpreemptible_workers` | int          | Sum of `expected_vm_count` across all `BatchAPIRequests` where `preemptible=false`                          |
+| `expected_preemptible_workers`    | int          | Sum of `expected_vm_count` across active (`pending`/`started`) `BatchAPIRequests` where `preemptible=true`  |
+| `expected_nonpreemptible_workers` | int          | Sum of `expected_vm_count` across active (`pending`/`started`) `BatchAPIRequests` where `preemptible=false` |
 | `unhealthy_batch_count`           | int          | Number of `BatchAPIRequests` documents with `unhealthy=true`                                                |
 | `batch_api_request_counts`        | []StateCount | Per-state counts of `BatchAPIRequests` documents; one entry per non-zero state (`pending`, `started`, etc.) |
 | `preemptible_workers`             | []StateCount | Per-state counts of preemptible `Workers` documents; one entry per non-zero state (`started`, `stopped`)    |
@@ -207,7 +211,7 @@ The following fields are written exclusively by the monitor process:
 
 ---
 
-### `WorkPoolSummaryHistory` _(not yet implemented)_
+### `WorkPoolSummaryHistory`
 
 An append-only log of `WorkPoolSummary` snapshots. Each document is a point-in-time copy written by the monitor process whenever it updates `WorkPoolSummary`. The document ID is a UUID assigned at write time.
 
@@ -333,7 +337,7 @@ All entries share these common fields:
 
 ### `JobSummary`
 
-One document per job, keyed by `job_id`. This is the **mutable** counterpart to the immutable `Jobs` document: a `Job` is written once at submission and never updated; all evolving state lives here. `JobSummary` is owned exclusively by the **monitor** process, which recomputes it whenever task states change. No other process should write to this collection.
+One document per job, keyed by `job_id`. This is the **mutable** counterpart to the immutable `Jobs` document: a `Job` is written once at submission and never updated; all evolving state lives here. The **submit** path creates the initial `JobSummary` (with `state=pending`) at job submission time. After that, the `JobSummary` is maintained exclusively by the **monitor** process, which recomputes it whenever task states change. No process other than submit (at creation) and the monitor (thereafter) should write to this collection.
 
 Any question about job progress — "is this job still running?", "how many tasks failed?" — should be answered by reading `JobSummary`, not by scanning `Tasks` or adding derived fields to `Jobs`.
 
@@ -362,7 +366,7 @@ Any question about job progress — "is this job still running?", "how many task
 | `in_progress`              | At least one task is active (`claimed`/`running`/`writing`); no `failed` or `error` tasks |
 | `in_progress_with_error`   | At least one task is active; at least one task is in `error` state                        |
 | `in_progress_with_failure` | At least one task is active; at least one task is in `failed` state                       |
-| `killed`                   | At least one task was `killed` _(not yet implemented)_                                    |
+| `killed`                   | At least one task was `killed`                                                            |
 | `success`                  | All tasks complete; every terminal task reached `success`                                 |
 | `error`                    | All tasks complete; at least one task is in `error` state, none in `failed`               |
 | `failed`                   | All tasks complete; at least one task is in `failed` state                                |
@@ -392,18 +396,18 @@ An append-only log of `JobSummary` snapshots. Each document is a point-in-time c
 
 One document per GCP Batch job submitted by the monitor. The document ID is the internal `batch_id` (a UUID). This collection is written and read exclusively by the monitor; no other process should modify it.
 
-| Field                     | Type      | Description                                                                              |
-| ------------------------- | --------- | ---------------------------------------------------------------------------------------- |
-| `batch_id`                | string    | Internal UUID for this batch request (document ID)                                       |
-| `job_id`                  | string    | GCP Batch job resource name returned by the Batch API                                    |
-| `workpool_id`             | string    | Workpool this batch request belongs to                                                   |
-| `expected_vm_count`       | int       | Number of VMs requested in this batch job                                                |
-| `preemptible`             | bool      | Whether the batch was submitted as preemptible                                           |
-| `submitted_at`            | timestamp | When the batch job was submitted to GCP                                                  |
-| `running_since`           | timestamp | When the batch job first reached RUNNING state; absent until then                        |
-| `registered_worker_count` | int       | Number of worker processes that have registered for this batch; monotonically increasing |
-| `status`                  | string    | Monitor's classification of this batch — `pending`, `started`, `completed`, or `failed`  |
-| `unhealthy`               | bool      | Sticky flag set when the monitor detects a problem with this batch; never cleared        |
+| Field                     | Type      | Description                                                                                                                                                               |
+| ------------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `batch_id`                | string    | Internal UUID for this batch request (document ID)                                                                                                                        |
+| `job_id`                  | string    | GCP Batch job resource name returned by the Batch API                                                                                                                     |
+| `workpool_id`             | string    | Workpool this batch request belongs to                                                                                                                                    |
+| `expected_vm_count`       | int       | Number of VMs requested in this batch job                                                                                                                                 |
+| `preemptible`             | bool      | Whether the batch was submitted as preemptible                                                                                                                            |
+| `submitted_at`            | timestamp | When the batch job was submitted to GCP                                                                                                                                   |
+| `running_since`           | timestamp | When the batch job first reached RUNNING state; absent until then                                                                                                         |
+| `registered_worker_count` | int       | Number of worker processes that have registered for this batch; monotonically increasing                                                                                  |
+| `status`                  | string    | Monitor's classification of this batch — `pending`, `started`, `completed`, `failed`, or `deleted` (set when the GCP Batch job no longer exists, i.e. a 404 from the API) |
+| `unhealthy`               | bool      | Sticky flag set when the monitor detects a problem with this batch; never cleared                                                                                         |
 
 ---
 
@@ -470,16 +474,16 @@ The monitor subscribes to this topic via the `monitor-events-in` subscription an
 }
 ```
 
-| `new_state` | `old_state`                         | Meaning                                                  |
-| ----------- | ----------------------------------- | -------------------------------------------------------- |
-| `claimed`   | `pending`                           | Worker successfully claimed the task; staging begins     |
-| `running`   | `claimed`                           | Staging complete; task process launched                  |
-| `writing`   | `running`                           | Process exited; uploading results to cloud storage       |
-| `success`   | `writing`                           | Upload complete; process exited with code 0              |
-| `error`     | `writing`                           | Upload complete; process exited with non-zero code       |
-| `failed`    | `claimed` \| `running` \| `writing` | Infrastructure failure; task did not complete            |
-| `pending`   | `claimed` \| `running` \| `writing` | Task orphaned back to pending (worker crash detected)    |
-| `killed`    | _(any)_                             | Task administratively terminated _(not yet implemented)_ |
+| `new_state` | `old_state`                         | Meaning                                               |
+| ----------- | ----------------------------------- | ----------------------------------------------------- |
+| `claimed`   | `pending`                           | Worker successfully claimed the task; staging begins  |
+| `running`   | `claimed`                           | Staging complete; task process launched               |
+| `writing`   | `running`                           | Process exited; uploading results to cloud storage    |
+| `success`   | `writing`                           | Upload complete; process exited with code 0           |
+| `error`     | `writing`                           | Upload complete; process exited with non-zero code    |
+| `failed`    | `claimed` \| `running` \| `writing` | Infrastructure failure; task did not complete         |
+| `pending`   | `claimed` \| `running` \| `writing` | Task orphaned back to pending (worker crash detected) |
+| `killed`    | _(any)_                             | Task administratively terminated                      |
 
 ---
 
@@ -585,7 +589,7 @@ While tasks are running the worker tracks available capacity and waits for a run
       (terminal)  (terminal)  (terminal)
 
      ┌────────┐
-     │ killed │  (administrative kill, from any state) (not yet implemented)
+     │ killed │  (administrative kill, from any state)
      └────────┘
       (terminal)
 ```
@@ -606,7 +610,7 @@ While tasks are running the worker tracks available capacity and waits for a run
 
 **`failed`** — The task did not run to completion due to an infrastructure or system failure (worker crash, resource mismatch, timeout, etc.). Look at the worker or infrastructure logs. Terminal.
 
-**`killed`** — The task was administratively terminated. Terminal. _(not yet implemented)_
+**`killed`** — The task was administratively terminated. Terminal.
 
 **Three-way terminal split:** `success`/`error`/`failed` distinguish two fundamentally different kinds of failure. `error` means _the program_ reported a problem; `failed` means _the infrastructure_ prevented the program from completing.
 
@@ -632,11 +636,11 @@ Every state transition publishes a `task_state_update` event to `sparkles-events
 6. **Any active state → `failed`**  
    The worker calls `RecordFailed` when an infrastructure or system error prevents the task from completing. `failure_reason` is populated and `owning_worker_id` is cleared. Can occur from `claimed`, `running`, or `writing`.
 
-7. **Any active state → `pending`** _(planned)_  
-   A watchdog process periodically scans for worker records whose `heartbeat_expiry` has passed. For each crashed worker, any task in an active state (`claimed`, `running`, or `writing`) is reset to `pending` so it can be retried. Not yet implemented in v100.
+7. **Any active state → `pending`**  
+   The monitor's tier-1 task-recovery loop runs periodically and scans for worker records whose `heartbeat_expiry` has passed. For each crashed or preempted worker, any task in an active state (`claimed`, `running`, or `writing`) is reset to `pending` so it can be picked up by a healthy worker.
 
-8. **Any state → `killed`** _(not yet implemented)_  
-   An external administrative action. `owning_worker_id` is cleared.
+8. **Any state → `killed`**  
+   An external administrative action via the `sparkles kill` command. `owning_worker_id` is cleared. A best-effort `kill_job` control message is sent to all workers via `sparkles-worker-in` so any in-flight task for that job is aborted promptly.
 
 ### Worker perspective
 

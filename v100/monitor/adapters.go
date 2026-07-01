@@ -482,18 +482,25 @@ func (s *FirestoreWorkerStore) ListAllForWorkpool(ctx context.Context, workpoolI
 
 type firestoreTask struct {
 	TaskID         string `firestore:"task_id"`
+	JobID          string `firestore:"job_id"`
 	WorkpoolID     string `firestore:"workpool_id"`
 	Status         string `firestore:"status"`
 	OwningWorkerID string `firestore:"owning_worker_id"`
 }
 
 type FirestoreTaskStore struct {
-	fs *firestore.Client
+	fs        *firestore.Client
+	publisher TaskStatePublisher
 }
 
-func NewFirestoreTaskStore(fs *firestore.Client) *FirestoreTaskStore {
-	return &FirestoreTaskStore{fs: fs}
+func NewFirestoreTaskStore(fs *firestore.Client, publisher TaskStatePublisher) *FirestoreTaskStore {
+	return &FirestoreTaskStore{fs: fs, publisher: publisher}
 }
+
+// SetPublisher wires a TaskStatePublisher after construction. Useful when the
+// publisher is created after the store (e.g. because both depend on the same
+// Firestore client that must be initialised first).
+func (s *FirestoreTaskStore) SetPublisher(p TaskStatePublisher) { s.publisher = p }
 
 func (s *FirestoreTaskStore) ListByWorker(ctx context.Context, workerID string, statuses []TaskStatus) ([]*Task, error) {
 	strStatuses := make([]interface{}, len(statuses))
@@ -520,6 +527,7 @@ func (s *FirestoreTaskStore) ListByWorker(ctx context.Context, workerID string, 
 		}
 		tasks = append(tasks, &Task{
 			TaskID:         f.TaskID,
+			JobID:          f.JobID,
 			WorkpoolID:     f.WorkpoolID,
 			Status:         TaskStatus(f.Status),
 			OwningWorkerID: f.OwningWorkerID,
@@ -548,12 +556,17 @@ func (s *FirestoreTaskStore) CountPending(ctx context.Context, workpoolID string
 	return count, nil
 }
 
-func (s *FirestoreTaskStore) ResetToPending(ctx context.Context, taskID string) error {
-	_, err := s.fs.Collection(taskCollection).Doc(taskID).Update(ctx, []firestore.Update{
+func (s *FirestoreTaskStore) ResetToPending(ctx context.Context, taskID, jobID string, oldStatus TaskStatus) error {
+	if _, err := s.fs.Collection(taskCollection).Doc(taskID).Update(ctx, []firestore.Update{
 		{Path: "status", Value: string(TaskStatusPending)},
 		{Path: "owning_worker_id", Value: ""},
-	})
-	return err
+	}); err != nil {
+		return err
+	}
+	if s.publisher != nil {
+		return s.publisher.PublishTaskStateUpdate(ctx, taskID, jobID, string(oldStatus), string(TaskStatusPending))
+	}
+	return nil
 }
 
 func (s *FirestoreTaskStore) CountByJob(ctx context.Context, jobID string) (map[string]int, error) {

@@ -263,13 +263,7 @@ func (q *FirestoreTaskQueue) ClaimTask(ctx context.Context, jobID string, worker
 				return nil, err
 			}
 			if claimed != nil {
-				if err := q.publisher.PublishTaskStateUpdate(ctx, TaskStateUpdate{
-					Type:     "task_state_update",
-					TaskID:   claimed.TaskID,
-					JobID:    claimed.JobID,
-					OldState: StatusPending,
-					NewState: StatusClaimed,
-				}); err != nil {
+				if err := q.publisher.PublishTaskStateUpdate(ctx, claimed.TaskID, claimed.JobID, StatusPending, StatusClaimed); err != nil {
 					return nil, err
 				}
 				return claimed, nil
@@ -302,13 +296,7 @@ func (q *FirestoreTaskQueue) UpdateState(ctx context.Context, taskID string, old
 	if err != nil {
 		return err
 	}
-	return q.publisher.PublishTaskStateUpdate(ctx, TaskStateUpdate{
-		Type:     "task_state_update",
-		TaskID:   taskID,
-		JobID:    jobID,
-		OldState: oldState,
-		NewState: newState,
-	})
+	return q.publisher.PublishTaskStateUpdate(ctx, taskID, jobID, oldState, newState)
 }
 
 // RecordError marks a task as completed with a non-zero exit code. The process
@@ -335,13 +323,7 @@ func (q *FirestoreTaskQueue) RecordError(ctx context.Context, taskID string, exi
 	if err != nil {
 		return err
 	}
-	return q.publisher.PublishTaskStateUpdate(ctx, TaskStateUpdate{
-		Type:     "task_state_update",
-		TaskID:   taskID,
-		JobID:    jobID,
-		OldState: StatusWriting,
-		NewState: StatusError,
-	})
+	return q.publisher.PublishTaskStateUpdate(ctx, taskID, jobID, StatusWriting, StatusError)
 }
 
 // RecordKilled marks a task as killed. If onlyIfPending is true the update is
@@ -372,13 +354,7 @@ func (q *FirestoreTaskQueue) RecordKilled(ctx context.Context, taskID string, on
 	if err != nil {
 		return err
 	}
-	return q.publisher.PublishTaskStateUpdate(ctx, TaskStateUpdate{
-		Type:     "task_state_update",
-		TaskID:   taskID,
-		JobID:    jobID,
-		OldState: oldState,
-		NewState: StatusKilled,
-	})
+	return q.publisher.PublishTaskStateUpdate(ctx, taskID, jobID, oldState, StatusKilled)
 }
 
 // RecordResourceUsage persists a ResourceUsage summary for the given task.
@@ -415,11 +391,5 @@ func (q *FirestoreTaskQueue) RecordFailed(ctx context.Context, taskID string, fa
 	if err != nil {
 		return err
 	}
-	return q.publisher.PublishTaskStateUpdate(ctx, TaskStateUpdate{
-		Type:     "task_state_update",
-		TaskID:   taskID,
-		JobID:    jobID,
-		OldState: oldState,
-		NewState: StatusFailed,
-	})
+	return q.publisher.PublishTaskStateUpdate(ctx, taskID, jobID, oldState, StatusFailed)
 }
