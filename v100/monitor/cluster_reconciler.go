@@ -47,18 +47,6 @@ func (a *Monitor) reconcileWorkpool(ctx context.Context, ws *WorkPoolWithState) 
 		}
 	}
 
-	// Transition to idle if no VMs remain anywhere in the workpool.
-	workpoolVMs, err := a.batchAPI.ListRunningVMs(ctx, "sparkles-worker-workpool", ws.Pool.WorkpoolID, ws.Pool.Zones)
-	if err != nil {
-		return fmt.Errorf("list workpool VMs: %w", err)
-	}
-	if len(workpoolVMs) == 0 && (ws.State.State == WorkPoolStatusOK || ws.State.State == WorkPoolStatusUnhealthy) {
-		ws.State.State = WorkPoolStatusIdle
-		if err := a.saveState(ctx, ws.State); err != nil {
-			return fmt.Errorf("save pool (idle transition): %w", err)
-		}
-	}
-
 	return nil
 }
 
