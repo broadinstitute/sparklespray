@@ -103,6 +103,7 @@ type Job struct {
 	Name       string          `firestore:"name"`
 	WorkpoolID string          `firestore:"workpool_id"`
 	CreatedAt  time.Time       `firestore:"created_at"`
+	Expiry     time.Time       `firestore:"expiry"`
 	TaskCount  int             `firestore:"task_count"`
 	Resources  []ResourceEntry `firestore:"resources"`
 	Labels     []Label         `firestore:"labels"`
@@ -150,6 +151,7 @@ type Task struct {
 	ExitCode                int              `firestore:"exit_code"`
 	ResourceUsage           *ResourceUsage   `firestore:"resource_usage"`
 	LastUpdated             time.Time        `firestore:"last_updated"`
+	Expiry                  time.Time        `firestore:"expiry"`
 }
 
 type TaskQueue interface {

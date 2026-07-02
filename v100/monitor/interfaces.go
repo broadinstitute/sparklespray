@@ -105,6 +105,7 @@ type BatchAPIRequest struct {
 	ExpectedVMCount       int
 	Preemptible           bool
 	SubmittedAt           time.Time
+	Expiry                time.Time
 	RunningSince          *time.Time // nil until the job first reaches RUNNING
 	RegisteredWorkerCount int        // monotonic; incremented at worker registration, never decremented
 	Status                BatchStatus

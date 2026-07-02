@@ -212,6 +212,7 @@ func devSubmit(jobSpecFile, workpoolSpecFile, project, db, gcsPrefix string) err
 		Name:       jobSpec.Name,
 		WorkpoolID: workpoolID,
 		CreatedAt:  now,
+		Expiry:     now.Add(7 * 24 * time.Hour),
 		TaskCount:  len(jobSpec.Tasks),
 		Resources:  jobSpec.Resources,
 		Labels:     jobSpec.Labels,
@@ -240,6 +241,7 @@ func devSubmit(jobSpecFile, workpoolSpecFile, project, db, gcsPrefix string) err
 				FilesToLocalize: jobSpec.FilesToLocalize,
 				ResultPath:      taskPrefix,
 				LogPath:         taskPrefix + "/stdout.txt",
+				Expiry:          now.Add(7 * 24 * time.Hour),
 			}
 			if err := tx.Set(fsClient.Collection(v100.TaskCollection).Doc(taskIDs[i]), task); err != nil {
 				return err

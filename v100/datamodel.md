@@ -18,6 +18,7 @@ One document per submitted job. The document ID is the `job_id`.
 | `name`        | string          | Human-readable label for the job (set at submission time)                                                              |
 | `workpool_id` | string          | The workpool this job's tasks should be executed in                                                                    |
 | `created_at`  | timestamp       | When the job was submitted                                                                                             |
+| `expiry`      | timestamp       | When this document may be garbage-collected (set 7 days out at submission time)                                        |
 | `task_count`  | int             | Number of tasks in this job (denormalized at submission time)                                                          |
 | `resources`   | []ResourceEntry | Per-task resource requirements (e.g. `slots=1,mem=8`). Workers verify they can satisfy these before claiming any task. |
 | `labels`      | []Label         | User-defined key/value tags attached at submission time (e.g. `experiment=v3`, `owner=alice`)                          |
@@ -61,6 +62,7 @@ One document per task. The document ID is the `task_id`.
 | `exit_code`                  | int              | Process exit code; populated when `status` is `error`                                                                                                       |
 | `resource_usage`             | ResourceUsage    | Summary of resources consumed by this task's container; written by the worker after the container exits (best-effort; absent if collection failed)          |
 | `last_updated`               | timestamp        | Updated on every status transition; used by tooling to detect stale documents                                                                               |
+| `expiry`                     | timestamp        | When this document may be garbage-collected (set 7 days out at submission time)                                                                             |
 
 **FileToLocalize** (embedded object):
 
@@ -406,6 +408,7 @@ One document per GCP Batch job submitted by the monitor. The document ID is the 
 | `expected_vm_count`       | int       | Number of VMs requested in this batch job                                                                                                                                 |
 | `preemptible`             | bool      | Whether the batch was submitted as preemptible                                                                                                                            |
 | `submitted_at`            | timestamp | When the batch job was submitted to GCP                                                                                                                                   |
+| `expiry`                  | timestamp | When this document may be garbage-collected (set 7 days out at submission time)                                                                                           |
 | `running_since`           | timestamp | When the batch job first reached RUNNING state; absent until then                                                                                                         |
 | `registered_worker_count` | int       | Number of worker processes that have registered for this batch; monotonically increasing                                                                                  |
 | `status`                  | string    | Monitor's classification of this batch — `pending`, `started`, `completed`, `failed`, or `deleted` (set when the GCP Batch job no longer exists, i.e. a 404 from the API) |

@@ -67,13 +67,15 @@ func runDevAddWorker(c *cli.Context) error {
 	defer fsClient.Close()
 
 	batchStore := monitor.NewFirestoreBatchRequestStore(fsClient)
+	now := time.Now()
 	if err := batchStore.Create(ctx, &monitor.BatchAPIRequest{
 		BatchID:         batchID,
 		JobID:           jobID,
 		WorkpoolID:      workpoolID,
 		ExpectedVMCount: vmCount,
 		Preemptible:     preemptible,
-		SubmittedAt:     time.Now(),
+		SubmittedAt:     now,
+		Expiry:          now.Add(7 * 24 * time.Hour),
 		Status:          monitor.BatchStatusPending,
 	}); err != nil {
 		return fmt.Errorf("writing BatchAPIRequest to Firestore: %w", err)

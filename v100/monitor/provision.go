@@ -145,6 +145,7 @@ func (a *Monitor) submitBatch(ctx context.Context, pool *WorkPool, vmCount int, 
 		ExpectedVMCount: vmCount,
 		Preemptible:     preemptible,
 		SubmittedAt:     now,
+		Expiry:          now.Add(7 * 24 * time.Hour),
 		Status:          BatchStatusPending,
 	}
 	if err := a.batches.Create(ctx, batch); err != nil {

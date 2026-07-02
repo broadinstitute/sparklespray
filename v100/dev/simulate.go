@@ -101,13 +101,15 @@ func runDevSimulate(c *cli.Context) error {
 
 	batchID := uuid.New().String()
 	batchStore := monitor.NewFirestoreBatchRequestStore(fsClient)
+	batchNow := time.Now()
 	if err := batchStore.Create(ctx, &monitor.BatchAPIRequest{
 		BatchID:         batchID,
 		JobID:           "simulated",
 		WorkpoolID:      cfg.workpoolID,
 		ExpectedVMCount: cfg.workerCount,
 		Preemptible:     true,
-		SubmittedAt:     time.Now(),
+		SubmittedAt:     batchNow,
+		Expiry:          batchNow.Add(7 * 24 * time.Hour),
 		Status:          monitor.BatchStatusStarted,
 	}); err != nil {
 		return fmt.Errorf("writing BatchAPIRequest: %w", err)
@@ -178,6 +180,7 @@ func runSimJobSubmitter(ctx context.Context, cfg simConfig, fsClient *firestore.
 			Name:       fmt.Sprintf("sim-job-%d", jobCounter),
 			WorkpoolID: cfg.workpoolID,
 			CreatedAt:  now,
+			Expiry:     now.Add(7 * 24 * time.Hour),
 			TaskCount:  cfg.tasksPerJob,
 			Resources:  []v100.ResourceEntry{{Name: "slots", Value: 1}},
 		}
@@ -198,6 +201,7 @@ func runSimJobSubmitter(ctx context.Context, cfg simConfig, fsClient *firestore.
 					DockerImage: "simulated",
 					LogPath:     base + "/output.log",
 					ResultPath:  base + "/result",
+					Expiry:      now.Add(7 * 24 * time.Hour),
 				}
 				if err := tx.Set(fsClient.Collection(v100.TaskCollection).Doc(taskID), task); err != nil {
 					return err

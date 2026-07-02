@@ -93,6 +93,16 @@ func Command() cli.Command {
 				Action: runDevCreateTopics,
 			},
 			{
+				Name:  "clean-expired",
+				Usage: "Delete all documents whose expiry timestamp has passed",
+				Flags: []cli.Flag{
+					cli.StringFlag{Name: "project"},
+					cli.StringFlag{Name: "db", Value: defaultDB},
+					cli.BoolFlag{Name: "expire-all", Usage: "treat every document as expired by using (now + 10 years) as the reference time"},
+				},
+				Action: runDevCleanExpired,
+			},
+			{
 				Name:  "batchapi-emulator",
 				Usage: "Run a local batch API emulator for testing",
 				Flags: []cli.Flag{

@@ -12,6 +12,7 @@ import (
 const batchRequestCollection = "BatchAPIRequests"
 const workpoolCollection = "WorkPools"
 const workerCollection = "Workers"
+const jobCollection = "Jobs"
 const taskCollection = "Tasks"
 const eventsCollection = "Events"
 const taskLogCollection = "TaskLog"
@@ -21,6 +22,7 @@ const (
 	CollectionWorkPools              = workpoolCollection
 	CollectionBatches                = batchRequestCollection
 	CollectionWorkers                = workerCollection
+	CollectionJobs                   = jobCollection
 	CollectionTasks                  = taskCollection
 	CollectionJobSummary             = jobSummaryCollection
 	CollectionEvents                 = eventsCollection
@@ -206,6 +208,7 @@ type firestoreBatchRequest struct {
 	ExpectedVMCount       int        `firestore:"expected_vm_count"`
 	Preemptible           bool       `firestore:"preemptible"`
 	SubmittedAt           time.Time  `firestore:"submitted_at"`
+	Expiry                time.Time  `firestore:"expiry"`
 	RunningSince          *time.Time `firestore:"running_since"`
 	RegisteredWorkerCount int        `firestore:"registered_worker_count"`
 	Status                string     `firestore:"status"`
@@ -220,6 +223,7 @@ func toBatchRequest(f *firestoreBatchRequest) *BatchAPIRequest {
 		ExpectedVMCount:       f.ExpectedVMCount,
 		Preemptible:           f.Preemptible,
 		SubmittedAt:           f.SubmittedAt,
+		Expiry:                f.Expiry,
 		RunningSince:          f.RunningSince,
 		RegisteredWorkerCount: f.RegisteredWorkerCount,
 		Status:                BatchStatus(f.Status),
@@ -235,6 +239,7 @@ func fromBatchRequest(b *BatchAPIRequest) *firestoreBatchRequest {
 		ExpectedVMCount:       b.ExpectedVMCount,
 		Preemptible:           b.Preemptible,
 		SubmittedAt:           b.SubmittedAt,
+		Expiry:                b.Expiry,
 		RunningSince:          b.RunningSince,
 		RegisteredWorkerCount: b.RegisteredWorkerCount,
 		Status:                string(b.Status),
