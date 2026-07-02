@@ -112,42 +112,46 @@ func (a *Monitor) updateWorkPoolSummary(ctx context.Context, ws *WorkPoolWithSta
 		return err
 	}
 
-	// Halted → idle when no non-terminal workers remain, so the pool is ready
-	// to accept new work without being stuck in halted forever.
-	if state.State == WorkPoolStatusHalted {
-		nonTerminal := 0
-		for _, w := range workers {
-			if w.Status != "stopped" {
-				nonTerminal++
-			}
+	// idle when no non-terminal workers or tasks remain.
+	nonTerminal := 0
+	for _, w := range workers {
+		if w.Status != "stopped" {
+			nonTerminal++
 		}
-		if nonTerminal == 0 {
-			state.State = WorkPoolStatusIdle
-			state.StateMessage = ""
-			if err := a.saveState(ctx, state); err != nil {
-				return err
-			}
+	}
+	for s, n := range taskCounts {
+		if s != "success" && s != "error" && s != "failed" && s != "killed" {
+			nonTerminal += n
 		}
+	}
+
+	oldState := state.State
+	var newState WorkPoolStatus
+	if nonTerminal == 0 {
+		newState = WorkPoolStatusIdle
 	} else {
-		// status is determined by whether we have any nonterminal tasks associated with it.
-		nonTerminal := 0
-		for s, n := range taskCounts {
-			if s != "success" && s != "error" && s != "failed" && s != "killed" {
-				nonTerminal += n
-			}
-		}
-		oldState := state.State
-		if nonTerminal == 0 {
-			state.State = WorkPoolStatusIdle
+		// so we know the workpool is not idle and it's either
+		// ok or unhealthy. If we've already flagged it as unhealthy,
+		// let it stay that way until it fully drains.
+		if state.State == WorkPoolStatusHalted || state.State == WorkPoolStatusOK {
+			// do nothing, no change
+			newState = oldState
 		} else {
-			state.State = WorkPoolStatusOK
-		}
-		if state.State != oldState {
-			a.vlogfIfChanged("Updating state", string(oldState), string(state.State))
+			// remaining case: state.State must be idle
+			newState = WorkPoolStatusOK
 			state.StateMessage = ""
 			if err := a.saveState(ctx, state); err != nil {
 				return err
 			}
+		}
+	}
+
+	if newState != oldState {
+		a.vlogfIfChanged("Updating state", string(oldState), string(newState))
+		state.State = newState
+		state.StateMessage = ""
+		if err := a.saveState(ctx, state); err != nil {
+			return err
 		}
 	}
 
