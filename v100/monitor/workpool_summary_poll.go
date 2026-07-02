@@ -44,7 +44,7 @@ func (a *Monitor) runWorkPoolSummaryPoll(ctx context.Context) error {
 	}
 
 	for _, ws := range activePools {
-		if err := a.updateWorkPoolSummary(ctx, ws, poolsWithNewJob); err != nil {
+		if err := a.updateWorkPoolSummary(ctx, ws); err != nil {
 			log.Printf("workpool summary poll: pool %s: %v", ws.Pool.WorkpoolID, err)
 		}
 	}
@@ -57,21 +57,13 @@ func (a *Monitor) vlogfIfChanged(msg, oldValue, newValue string) {
 	}
 }
 
-func (a *Monitor) updateWorkPoolSummary(ctx context.Context, ws *WorkPoolWithState, poolsWithNewJob map[string]bool) error {
+func (a *Monitor) updateWorkPoolSummary(ctx context.Context, ws *WorkPoolWithState) error {
 	pool := ws.Pool
 	state := ws.State
 	if state.State == "" {
 		state.State = WorkPoolStatusIdle
 	}
 
-	// Idle → ok when a new job has arrived for this pool.
-	if state.State == WorkPoolStatusIdle && poolsWithNewJob[pool.WorkpoolID] {
-		state.State = WorkPoolStatusOK
-		state.StateMessage = ""
-		if err := a.saveState(ctx, state); err != nil {
-			return err
-		}
-	}
 	now := time.Now()
 
 	// Collect all batches and derive counts.
@@ -120,13 +112,13 @@ func (a *Monitor) updateWorkPoolSummary(ctx context.Context, ws *WorkPoolWithSta
 		return err
 	}
 
-	// Halted → idle when no non-terminal tasks remain, so the pool is ready
+	// Halted → idle when no non-terminal workers remain, so the pool is ready
 	// to accept new work without being stuck in halted forever.
 	if state.State == WorkPoolStatusHalted {
 		nonTerminal := 0
-		for s, n := range taskCounts {
-			if s != "success" && s != "error" && s != "failed" && s != "killed" {
-				nonTerminal += n
+		for _, w := range workers {
+			if w.Status != "stopped" {
+				nonTerminal++
 			}
 		}
 		if nonTerminal == 0 {

@@ -16,6 +16,8 @@ func TestSummaryPoll_JobCreated_IdleToOK(t *testing.T) {
 	pool := defaultPool("pool-1")
 	w.Pools.Add(pool)
 	w.Pools.AddState(&WorkPoolState{WorkpoolID: "pool-1", State: WorkPoolStatusIdle, StateMessage: "no tasks"})
+	// A job_created event is always accompanied by the task(s) it creates.
+	w.Tasks.Add(&Task{TaskID: "t1", WorkpoolID: "pool-1", Status: TaskStatusPending})
 	w.Events.AddEvent("pool-1", epoch.Add(1*time.Minute))
 
 	err := w.A.runWorkPoolSummaryPoll(context.Background())
@@ -31,9 +33,9 @@ func TestSummaryPoll_JobCreated_HaltedUnchanged(t *testing.T) {
 	pool := defaultPool("pool-1")
 	w.Pools.Add(pool)
 	w.Pools.AddState(&WorkPoolState{WorkpoolID: "pool-1", State: WorkPoolStatusHalted, StateMessage: "consecutive failures"})
-	// Pending task prevents the halted→idle transition so we can test that
-	// a job_created event alone doesn't unblock a halted pool.
-	w.Tasks.Add(&Task{TaskID: "t1", WorkpoolID: "pool-1", Status: TaskStatusPending})
+	// Non-terminal (started) worker prevents the halted→idle transition so we can
+	// test that a job_created event alone doesn't unblock a halted pool.
+	w.Workers.Add(&Worker{WorkerID: "w1", WorkpoolID: "pool-1", Status: "started"})
 	w.Events.AddEvent("pool-1", epoch.Add(1*time.Minute))
 
 	err := w.A.runWorkPoolSummaryPoll(context.Background())
@@ -47,6 +49,8 @@ func TestSummaryPoll_JobCreated_OKUnchanged(t *testing.T) {
 	pool := defaultPool("pool-1")
 	w.Pools.Add(pool)
 	w.Pools.AddState(&WorkPoolState{WorkpoolID: "pool-1", State: WorkPoolStatusOK})
+	// A job_created event is always accompanied by the task(s) it creates.
+	w.Tasks.Add(&Task{TaskID: "t1", WorkpoolID: "pool-1", Status: TaskStatusPending})
 	w.Events.AddEvent("pool-1", epoch.Add(1*time.Minute))
 
 	err := w.A.runWorkPoolSummaryPoll(context.Background())
@@ -60,6 +64,8 @@ func TestSummaryPoll_EventCursorAdvances(t *testing.T) {
 	pool := defaultPool("pool-1")
 	w.Pools.Add(pool)
 	w.Pools.AddState(&WorkPoolState{WorkpoolID: "pool-1", State: WorkPoolStatusIdle})
+	// A job_created event is always accompanied by the task(s) it creates.
+	w.Tasks.Add(&Task{TaskID: "t1", WorkpoolID: "pool-1", Status: TaskStatusPending})
 	w.Events.AddEvent("pool-1", epoch.Add(1*time.Minute))
 
 	// First poll: sees the event, transitions idle → ok.

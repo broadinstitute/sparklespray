@@ -15,6 +15,9 @@ func TestTier2_FailedBatch_MarksFailedAndUnhealthy(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
 	w.Pools.Add(pool)
+	// A started worker means the workpool isn't idle — only the summarizer
+	// (not the cluster reconciler) transitions workpool state to idle now.
+	w.Workers.Add(&Worker{WorkerID: "w1", WorkpoolID: "pool-1", Status: "started"})
 
 	w.Batches.Add(&BatchAPIRequest{
 		BatchID:    "b1",
@@ -32,9 +35,8 @@ func TestTier2_FailedBatch_MarksFailedAndUnhealthy(t *testing.T) {
 	assert.True(t, b.Unhealthy)
 	assert.Contains(t, w.BatchAPI.TerminatedJobs, "job-1")
 	ps := w.Pools.MustGetState("pool-1")
-	// After termination VMs are gone → idle transition fires on top of unhealthy.
-	assert.Equal(t, WorkPoolStatusIdle, ps.State)
-	// IncidentCount proves recordIncident was called even though status is now idle.
+	assert.Equal(t, WorkPoolStatusUnhealthy, ps.State)
+	// IncidentCount proves recordIncident was called.
 	assert.Greater(t, ps.IncidentCount, 0)
 }
 
@@ -57,8 +59,9 @@ func TestTier2_SucceededBatch_MarksCompleted(t *testing.T) {
 
 	b := w.Batches.MustGet("b1")
 	assert.Equal(t, BatchStatusCompleted, b.Status)
-	// Succeeded job clears VMs → idle transition fires.
-	assert.Equal(t, WorkPoolStatusIdle, w.Pools.MustGetState("pool-1").State)
+	// The cluster reconciler doesn't transition workpool state on its own —
+	// that's the summarizer's job — so a succeeded batch leaves state as-is.
+	assert.Equal(t, WorkPoolStatusOK, w.Pools.MustGetState("pool-1").State)
 }
 
 func TestTier2_FailedBatchTriggersHaltThreshold(t *testing.T) {
@@ -100,6 +103,9 @@ func TestTier2_Anomaly1_MoreVMsThanExpected_AbortBatch(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
 	w.Pools.Add(pool)
+	// A started worker means the workpool isn't idle — only the summarizer
+	// (not the cluster reconciler) transitions workpool state to idle now.
+	w.Workers.Add(&Worker{WorkerID: "w1", WorkpoolID: "pool-1", Status: "started"})
 
 	runningSince := epoch
 	w.Batches.Add(&BatchAPIRequest{
@@ -121,8 +127,7 @@ func TestTier2_Anomaly1_MoreVMsThanExpected_AbortBatch(t *testing.T) {
 	assert.True(t, b.Unhealthy)
 	assert.Contains(t, w.BatchAPI.TerminatedJobs, "job-1")
 	ps := w.Pools.MustGetState("pool-1")
-	// TerminateJob clears VMs → idle transition follows.
-	assert.Equal(t, WorkPoolStatusIdle, ps.State)
+	assert.Equal(t, WorkPoolStatusUnhealthy, ps.State)
 	assert.Greater(t, ps.IncidentCount, 0)
 }
 
