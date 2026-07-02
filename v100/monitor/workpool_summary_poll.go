@@ -125,6 +125,7 @@ func (a *Monitor) updateWorkPoolSummary(ctx context.Context, ws *WorkPoolWithSta
 		}
 	}
 
+	log.Printf("pool %s has %d nonterminals", state.WorkpoolID, nonTerminal)
 	oldState := state.State
 	var newState WorkPoolStatus
 	if nonTerminal == 0 {

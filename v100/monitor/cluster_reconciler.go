@@ -116,6 +116,9 @@ func (a *Monitor) reconcileVMs(ctx context.Context, ws *WorkPoolWithState, batch
 	for _, w := range workers {
 		registeredInstances[w.InstanceName] = true
 	}
+	// RegisteredWorkerCount is derived from actual Worker records — it's the
+	// monitor's job to compute and persist it, not the worker's.
+	batch.RegisteredWorkerCount = len(workers)
 
 	// Anomaly 1: more VMs than expected — serious bug, abort immediately.
 	if len(gcpVMs) > batch.ExpectedVMCount {
@@ -140,7 +143,7 @@ func (a *Monitor) reconcileVMs(ctx context.Context, ws *WorkPoolWithState, batch
 	// Grace is measured from running_since (not submitted_at) so queued VMs aren't mistaken for failures.
 	// Note: if apiStatus is SUCCEEDED here we already returned above; the check below is belt-and-suspenders.
 	if batch.RunningSince != nil && now.Sub(*batch.RunningSince) > defaultMaxTimeToStartWorker && apiStatus != BatchJobStatusSucceeded {
-		if batch.RegisteredWorkerCount == 0 {
+		if len(workers) == 0 {
 			// No worker ever registered — whole batch is a startup failure.
 			if err := a.batchAPI.TerminateJob(ctx, batch.JobID); err != nil {
 				log.Printf("tier2: terminate job %s (no workers): %v", batch.JobID, err)

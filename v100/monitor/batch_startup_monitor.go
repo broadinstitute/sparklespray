@@ -39,6 +39,14 @@ func (a *Monitor) checkBatchStartup(ctx context.Context, ws *WorkPoolWithState, 
 		return fmt.Errorf("get job status: %w", err)
 	}
 
+	// RegisteredWorkerCount is derived from actual Worker records — it's the
+	// monitor's job to compute and persist it, not the worker's.
+	workers, err := a.workers.ListByBatch(ctx, batch.BatchID)
+	if err != nil {
+		return fmt.Errorf("list workers for batch: %w", err)
+	}
+	batch.RegisteredWorkerCount = len(workers)
+
 	if apiStatus == BatchJobStatusDeleted {
 		log.Printf("tier3: batch %s: GCP job %s no longer exists (404); marking batch as deleted", batch.BatchID, batch.JobID)
 		batch.Status = BatchStatusDeleted
@@ -53,7 +61,7 @@ func (a *Monitor) checkBatchStartup(ctx context.Context, ws *WorkPoolWithState, 
 		}
 	}
 
-	if apiStatus == BatchJobStatusFailed {
+	if apiStatus == BatchJobStatusFailed && batch.RegisteredWorkerCount == 0 {
 		batch.Status = BatchStatusFailed
 		batch.Unhealthy = true
 		recordIncident(ws.State, fmt.Sprintf("Batch job %s failed before any workers started", batch.JobID), now)
@@ -66,7 +74,7 @@ func (a *Monitor) checkBatchStartup(ctx context.Context, ws *WorkPoolWithState, 
 		return a.checkHaltThreshold(ctx, ws.Pool, ws.State)
 	}
 
-	if apiStatus == BatchJobStatusSucceeded {
+	if apiStatus == BatchJobStatusSucceeded && batch.RegisteredWorkerCount == 0 {
 		batch.Status = BatchStatusFailed
 		batch.Unhealthy = true
 		recordIncident(ws.State, fmt.Sprintf("Batch job %s completed with no workers registered", batch.JobID), now)

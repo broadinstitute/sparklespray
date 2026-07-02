@@ -112,14 +112,15 @@ func TestTier3_WorkerRegistered_PromotesToStarted(t *testing.T) {
 
 	runningSince := epoch
 	w.Batches.Add(&BatchAPIRequest{
-		BatchID:               "b1",
-		JobID:                 "job-1",
-		WorkpoolID:            "pool-1",
-		Status:                BatchStatusPending,
-		RegisteredWorkerCount: 1, // at least one worker registered
-		SubmittedAt:           epoch,
-		RunningSince:          &runningSince,
+		BatchID:      "b1",
+		JobID:        "job-1",
+		WorkpoolID:   "pool-1",
+		Status:       BatchStatusPending,
+		SubmittedAt:  epoch,
+		RunningSince: &runningSince,
 	})
+	// At least one worker registered.
+	w.Workers.Add(&Worker{WorkerID: "w1", WorkpoolID: "pool-1", BatchID: "b1", Status: "started"})
 	w.BatchAPI.AddJob("job-1", "b1", "pool-1", 1, BatchJobStatusRunning)
 
 	err := w.A.runBatchStartupMonitor(context.Background())
