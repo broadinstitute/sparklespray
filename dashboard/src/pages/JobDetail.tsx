@@ -1,20 +1,20 @@
-import { useState, useEffect, useMemo } from "react";
-import { useParams, Link, useLocation } from "react-router-dom";
-import { getJobTasks } from "../data/events";
+import { useEffect, useMemo, useState } from "react";
+import { Link, useLocation, useParams } from "react-router-dom";
+import MultiLineChart from "../components/MultiLineChart";
+import TabBar from "../components/TabBar";
+import { mergeEvents, useEvents } from "../data/EventProvider";
 import type { TaskStatus } from "../data/events";
+import { getJobTasks } from "../data/events";
 import { computeTimeSeriesFromHistory } from "../data/jobTimeSeries";
-import { useEvents, mergeEvents } from "../data/EventProvider";
 import type {
   AnyEvent,
   AnyTaskEvent,
   BackendJobSummary,
-  JobSummaryHistoryEntry,
   JobDetail,
+  JobSummaryHistoryEntry,
   TaskStateUpdateEvent,
   TaskSummaryRecord,
 } from "../types";
-import MultiLineChart from "../components/MultiLineChart";
-import TabBar from "../components/TabBar";
 
 const STATUS_COLORS: Record<TaskStatus, { bg: string; text: string }> = {
   pending: { bg: "#e3f2fd", text: "#1565c0" },
