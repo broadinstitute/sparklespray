@@ -109,7 +109,6 @@ func New(
 	}
 }
 
-
 // RunMonitorLoop runs the monitor until ctx is cancelled.
 // Blocks; run in a dedicated goroutine.
 func (a *Monitor) RunMonitorLoop(ctx context.Context) {
@@ -206,7 +205,7 @@ func (a *Monitor) RunMonitorLoop(ctx context.Context) {
 		a.vlogf("Completed: Compute workpool summaries")
 	})
 
-	// Route PubSub notifications to the appropriate tier in a background goroutine.
+	// Route PubSub notifications to the appropriate pollers in a background goroutine.
 	// A notification with Err set means the receive loop failed fatally; propagate it.
 	fatalErrCh := make(chan error, 1)
 
@@ -223,13 +222,16 @@ func (a *Monitor) RunMonitorLoop(ctx context.Context) {
 						return
 					}
 					a.vlogf("job events: received %s event for job %s", n.EventType, n.JobID)
-					if n.EventType == "job_created" {
+					if n.EventType == "job_created" || n.EventType == "workpool_state_change" {
+						log.Printf("Waking up provision check due to %s event", string(n.EventType))
 						notifyProvisioning()
 					}
 					if notifyJobSummary != nil {
+						log.Printf("Waking up job summarizer due to %s event", string(n.EventType))
 						notifyJobSummary()
 					}
 					if notifyWorkPoolSummary != nil {
+						log.Printf("Waking up workpool summarizer due to %s event", string(n.EventType))
 						notifyWorkPoolSummary()
 					}
 				}
