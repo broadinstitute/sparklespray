@@ -15,6 +15,7 @@ cat > /tmp/mprocs-sparkles.yaml <<EOF
 procs:
   monitor:
     cmd: ["${SPARKLES}", "monitor", "--project", "${PROJECT}", "--verbose"]
+    log: "monitor.log"
   frontend:
     cmd: ["bash", "-c", "cd ../dashboard && npm run dev"]
   backend:
