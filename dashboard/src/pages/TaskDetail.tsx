@@ -365,9 +365,7 @@ export default function TaskDetail() {
             fontSize: "0.85rem",
           }}
         >
-          {isActive
-            ? "Waiting for metrics…"
-            : "No metrics available — task is not currently running."}
+          No metrics available for this task.
         </p>
       )}
 
