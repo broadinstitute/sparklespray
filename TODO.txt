@@ -1,0 +1,11 @@
+Move monitor into dashboard-backend
+- Add endpoint for querying monitor status (state, log : list of {timestamp, severity, message})
+
+Add UI pages for:
+- list of all workpools
+- On front page only show "active" workpools
+- list of events (timestamp, type, workpool_id, task_id, job_id) (click to expand and see all fields on event)
+
+On workpool summary tile:
+- Add current workers and expected workers
+- Add timeline (fixed to last 10 minutes. Likely will want to move to configurable window of time)

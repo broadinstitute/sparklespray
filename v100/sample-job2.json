@@ -1,0 +1,25 @@
+{
+  "name": "sample-job",
+  "resources": [{ "name": "slots", "value": 1 }],
+  "filesToLocalize": [
+    {
+      "source": "gs://sparkles-test-0625/temp/simulate_load.py",
+      "destination": "simulate_load.py"
+    }
+  ],
+  "tasks": [
+    {
+      "dockerImage": "python",
+      "command": [
+        "python",
+        "simulate_load.py",
+        "--cpu_fraction=0.5",
+        "--min_mem=20M",
+        "--max_mem=100M",
+        "--run_time=300",
+        "--output_size=1M",
+        "--period=60"
+      ]
+    }
+  ]
+}

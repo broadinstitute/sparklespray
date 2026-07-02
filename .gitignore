@@ -1,3 +1,5 @@
+monitor.log
+mprocs.log
 cli/sparklespray/bin/kubequeconsume
 cli/sparklespray/bin/sparklesworker
 vendor
