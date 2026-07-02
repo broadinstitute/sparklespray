@@ -30,13 +30,15 @@ func (a *Monitor) runProvisioningPoll(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("list workpools: %w", err)
 	}
-
+	a.vlogf("list work pools returned %d", len(all))
 	var pools []*WorkPoolWithState
 	for _, ws := range all {
+		a.vlogf("runProvisioningPoll pool %s status = %s", ws.Pool.WorkpoolID, string(ws.State.State))
 		if ws.State.State != WorkPoolStatusIdle && ws.State.State != WorkPoolStatusHalted {
 			pools = append(pools, ws)
 		}
 	}
+	a.vlogf("After filtering by not idle and not halted: %d", len(pools))
 
 	if len(pools) > 0 {
 		a.lastActivity = time.Now()
