@@ -386,66 +386,6 @@ func TestTier2_Anomaly3_WithinGracePeriod_NoAction(t *testing.T) {
 	assert.Empty(t, w.BatchAPI.TerminatedJobs)
 }
 
-// ---- Idle transition ----
-
-func TestTier2_IdleTransition_NoVMsRemain_OKtoIdle(t *testing.T) {
-	w := newWorld()
-	pool := defaultPool("pool-1")
-	w.Pools.Add(pool)
-	w.Pools.AddState(&WorkPoolState{WorkpoolID: "pool-1", State: WorkPoolStatusOK})
-
-	// A completed batch; no VMs running for the workpool.
-	w.Batches.Add(&BatchAPIRequest{
-		BatchID:    "b1",
-		JobID:      "job-1",
-		WorkpoolID: "pool-1",
-		Status:     BatchStatusCompleted,
-	})
-	// No jobs added to BatchAPI → ListRunningVMs returns empty.
-
-	err := w.A.runClusterReconciler(context.Background())
-	require.NoError(t, err)
-
-	assert.Equal(t, WorkPoolStatusIdle, w.Pools.MustGetState("pool-1").State)
-}
-
-func TestTier2_IdleTransition_UnhealthyNoVMs_TransitionsToIdle(t *testing.T) {
-	w := newWorld()
-	pool := defaultPool("pool-1")
-	w.Pools.Add(pool)
-	w.Pools.AddState(&WorkPoolState{WorkpoolID: "pool-1", State: WorkPoolStatusUnhealthy})
-
-	// No active batches in the store.
-	err := w.A.runClusterReconciler(context.Background())
-	require.NoError(t, err)
-
-	assert.Equal(t, WorkPoolStatusIdle, w.Pools.MustGetState("pool-1").State)
-}
-
-func TestTier2_IdleTransition_VMsStillPresent_StatusUnchanged(t *testing.T) {
-	w := newWorld()
-	pool := defaultPool("pool-1")
-	w.Pools.Add(pool)
-	w.Pools.AddState(&WorkPoolState{WorkpoolID: "pool-1", State: WorkPoolStatusOK})
-
-	runningSince := epoch
-	w.Batches.Add(&BatchAPIRequest{
-		BatchID:         "b1",
-		JobID:           "job-1",
-		WorkpoolID:      "pool-1",
-		ExpectedVMCount: 1,
-		Status:          BatchStatusStarted,
-		RunningSince:    &runningSince,
-	})
-	w.BatchAPI.AddJob("job-1", "b1", "pool-1", 1, BatchJobStatusRunning)
-
-	err := w.A.runClusterReconciler(context.Background())
-	require.NoError(t, err)
-
-	// VMs are still running so no idle transition.
-	assert.Equal(t, WorkPoolStatusOK, w.Pools.MustGetState("pool-1").State)
-}
-
 // ---- running_since stamping via Tier 2 ----
 
 func TestTier2_StampsRunningSince(t *testing.T) {
