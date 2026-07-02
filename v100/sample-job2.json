@@ -13,7 +13,7 @@
       "command": [
         "python",
         "simulate_load.py",
-        "--cpu_fraction=0.5",
+        "--cpu_fraction=50",
         "--min_mem=20M",
         "--max_mem=100M",
         "--run_time=300",

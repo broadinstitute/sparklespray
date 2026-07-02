@@ -107,6 +107,7 @@ type TaskEventLog struct {
 	fsClient       *firestore.Client
 	cancelPoll     context.CancelFunc
 	pollDone       chan struct{}
+	prevCPU        *cpuStats
 }
 
 // OpenTaskEventLog creates a TaskEventLog that writes to filename (raw log)
@@ -136,6 +137,9 @@ func OpenTaskEventLog(ctx context.Context, filename string, taskID string, workD
 		cancelPoll:     cancelPoll,
 		pollDone:       make(chan struct{}),
 	}
+	// Snapshot CPU stats now so the first tick reports usage for the task's
+	// actual first interval rather than being skipped for lack of a baseline.
+	t.prevCPU, _ = getCPUStats()
 
 	go func() {
 		defer close(t.pollDone)
@@ -146,7 +150,8 @@ func OpenTaskEventLog(ctx context.Context, filename string, taskID string, workD
 			case <-pollCtx.Done():
 				return
 			case <-ticker.C:
-				event := collectMetrics(t.taskID, t.workDir)
+				var event *ResourceUsageEvent
+				event, t.prevCPU = collectMetrics(t.taskID, t.workDir, t.prevCPU)
 				if err := t.WriteMetric(event); err != nil {
 					log.Printf("writing metric for task %s: %v", t.taskID, err)
 				}

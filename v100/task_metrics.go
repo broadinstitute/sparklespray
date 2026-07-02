@@ -28,10 +28,10 @@ type ResourceUsageEvent struct {
 	TotalData            int64         `firestore:"total_data" json:"total_data"`
 	TotalShared          int64         `firestore:"total_shared" json:"total_shared"`
 	TotalResident        int64         `firestore:"total_resident" json:"total_resident"`
-	CpuUser              int64         `firestore:"cpu_user" json:"cpu_user"`
-	CpuSystem            int64         `firestore:"cpu_system" json:"cpu_system"`
-	CpuIdle              int64         `firestore:"cpu_idle" json:"cpu_idle"`
-	CpuIowait            int64         `firestore:"cpu_iowait" json:"cpu_iowait"`
+	CpuUser              float64       `firestore:"cpu_user" json:"cpu_user"`
+	CpuSystem            float64       `firestore:"cpu_system" json:"cpu_system"`
+	CpuIdle              float64       `firestore:"cpu_idle" json:"cpu_idle"`
+	CpuIowait            float64       `firestore:"cpu_iowait" json:"cpu_iowait"`
 	MemTotal             int64         `firestore:"mem_total" json:"mem_total"`
 	MemAvailable         int64         `firestore:"mem_available" json:"mem_available"`
 	MemFree              int64         `firestore:"mem_free" json:"mem_free"`
@@ -86,6 +86,26 @@ type cpuStats struct {
 	System int64
 	Idle   int64
 	Iowait int64
+}
+
+// cpuPercentages converts the raw jiffie counters from two /proc/stat
+// snapshots into percentages of total CPU time (summed across all cores)
+// spent in each state between the two samples.
+func cpuPercentages(prev, cur *cpuStats) (user, system, idle, iowait float64) {
+	deltaUser := float64(cur.User - prev.User)
+	deltaSystem := float64(cur.System - prev.System)
+	deltaIdle := float64(cur.Idle - prev.Idle)
+	deltaIowait := float64(cur.Iowait - prev.Iowait)
+
+	total := deltaUser + deltaSystem + deltaIdle + deltaIowait
+	if total <= 0 {
+		return 0, 0, 0, 0
+	}
+
+	return deltaUser / total * 100,
+		deltaSystem / total * 100,
+		deltaIdle / total * 100,
+		deltaIowait / total * 100
 }
 
 func getCPUStats() (*cpuStats, error) {
@@ -199,8 +219,13 @@ func getVolumeUsage(paths ...string) []VolumeUsage {
 	return volumes
 }
 
-// collectMetrics samples current system and process metrics for the given task.
-func collectMetrics(taskID, workDir string) *ResourceUsageEvent {
+// collectMetrics samples current system and process metrics for the given
+// task. prev is the cpuStats snapshot from the previous call (or nil for the
+// first sample of a task) and is used to turn the cumulative /proc/stat
+// counters into a percentage of CPU time spent in each state since that
+// snapshot. It returns the populated event along with the raw cpuStats
+// snapshot the caller should pass as prev on its next call.
+func collectMetrics(taskID, workDir string, prev *cpuStats) (*ResourceUsageEvent, *cpuStats) {
 	now := time.Now()
 	event := &ResourceUsageEvent{
 		TaskID:    taskID,
@@ -216,11 +241,11 @@ func collectMetrics(taskID, workDir string) *ResourceUsageEvent {
 		event.TotalShared = mem.totalShared * pageSize
 		event.TotalResident = mem.totalResident * pageSize
 	}
-	if cpu, err := getCPUStats(); err == nil && cpu != nil {
-		event.CpuUser = cpu.User
-		event.CpuSystem = cpu.System
-		event.CpuIdle = cpu.Idle
-		event.CpuIowait = cpu.Iowait
+	cur, err := getCPUStats()
+	if err != nil || cur == nil {
+		cur = prev
+	} else if prev != nil {
+		event.CpuUser, event.CpuSystem, event.CpuIdle, event.CpuIowait = cpuPercentages(prev, cur)
 	}
 	if sysMem, err := getSystemMemory(); err == nil {
 		event.MemTotal = sysMem.Total
@@ -231,5 +256,5 @@ func collectMetrics(taskID, workDir string) *ResourceUsageEvent {
 		event.MemPressureSomeAvg10 = p.SomeAvg10
 		event.MemPressureFullAvg10 = p.FullAvg10
 	}
-	return event
+	return event, cur
 }

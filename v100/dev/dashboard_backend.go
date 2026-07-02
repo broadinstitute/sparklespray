@@ -962,10 +962,10 @@ type taskLogEntry struct {
 	TotalData            *int64              `json:"total_data,omitempty"`
 	TotalShared          *int64              `json:"total_shared,omitempty"`
 	TotalResident        *int64              `json:"total_resident,omitempty"`
-	CpuUser              *int64              `json:"cpu_user,omitempty"`
-	CpuSystem            *int64              `json:"cpu_system,omitempty"`
-	CpuIdle              *int64              `json:"cpu_idle,omitempty"`
-	CpuIowait            *int64              `json:"cpu_iowait,omitempty"`
+	CpuUser              *float64            `json:"cpu_user,omitempty"`
+	CpuSystem            *float64            `json:"cpu_system,omitempty"`
+	CpuIdle              *float64            `json:"cpu_idle,omitempty"`
+	CpuIowait            *float64            `json:"cpu_iowait,omitempty"`
 	MemTotal             *int64              `json:"mem_total,omitempty"`
 	MemAvailable         *int64              `json:"mem_available,omitempty"`
 	MemFree              *int64              `json:"mem_free,omitempty"`
@@ -1060,16 +1060,16 @@ func (s *dashboardServer) handleGetTaskLog(w http.ResponseWriter, r *http.Reques
 			if v, ok := data["total_resident"].(int64); ok {
 				entry.TotalResident = &v
 			}
-			if v, ok := data["cpu_user"].(int64); ok {
+			if v, ok := data["cpu_user"].(float64); ok {
 				entry.CpuUser = &v
 			}
-			if v, ok := data["cpu_system"].(int64); ok {
+			if v, ok := data["cpu_system"].(float64); ok {
 				entry.CpuSystem = &v
 			}
-			if v, ok := data["cpu_idle"].(int64); ok {
+			if v, ok := data["cpu_idle"].(float64); ok {
 				entry.CpuIdle = &v
 			}
-			if v, ok := data["cpu_iowait"].(int64); ok {
+			if v, ok := data["cpu_iowait"].(float64); ok {
 				entry.CpuIowait = &v
 			}
 			if v, ok := data["mem_total"].(int64); ok {

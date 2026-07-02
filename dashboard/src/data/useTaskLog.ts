@@ -31,33 +31,11 @@ interface LogStreamUpdate {
 
 const GB = 1_073_741_824;
 
-interface RawCpuSnapshot {
-  time: number;
-  cpuUser: number;
-  cpuSystem: number;
-  cpuIdle: number;
-  cpuIowait: number;
-}
-
-function toResourceDataPoint(
-  msg: ResourceUsageUpdate,
-  prev: RawCpuSnapshot | null
-): ResourceDataPoint {
+// The server now reports cpu_user/cpu_system/cpu_idle/cpu_iowait as
+// percentages of total CPU time across all cores (computed server-side from
+// consecutive /proc/stat snapshots), so no client-side delta math is needed.
+function toResourceDataPoint(msg: ResourceUsageUpdate): ResourceDataPoint {
   const t = new Date(msg.timestamp).getTime();
-
-  let cpuUser = 0,
-    cpuSystem = 0,
-    cpuIdle = 0,
-    cpuIowait = 0;
-  if (prev !== null) {
-    const dt = (t - prev.time) / 1000;
-    if (dt > 0) {
-      cpuUser = Math.max(0, ((msg.cpu_user - prev.cpuUser) / dt) * 100);
-      cpuSystem = Math.max(0, ((msg.cpu_system - prev.cpuSystem) / dt) * 100);
-      cpuIdle = Math.max(0, ((msg.cpu_idle - prev.cpuIdle) / dt) * 100);
-      cpuIowait = Math.max(0, ((msg.cpu_iowait - prev.cpuIowait) / dt) * 100);
-    }
-  }
 
   return {
     time: t,
@@ -71,10 +49,10 @@ function toResourceDataPoint(
     totalDataGb: Math.round((msg.total_data / GB) * 100) / 100,
     totalSharedGb: Math.round((msg.total_shared / GB) * 100) / 100,
     totalResidentGb: Math.round((msg.total_resident / GB) * 100) / 100,
-    cpuUser: Math.round(cpuUser * 10) / 10,
-    cpuSystem: Math.round(cpuSystem * 10) / 10,
-    cpuIdle: Math.round(cpuIdle * 10) / 10,
-    cpuIowait: Math.round(cpuIowait * 10) / 10,
+    cpuUser: Math.round(msg.cpu_user * 10) / 10,
+    cpuSystem: Math.round(msg.cpu_system * 10) / 10,
+    cpuIdle: Math.round(msg.cpu_idle * 10) / 10,
+    cpuIowait: Math.round(msg.cpu_iowait * 10) / 10,
     memTotalGb: Math.round((msg.mem_total / GB) * 100) / 100,
     memAvailableGb: Math.round((msg.mem_available / GB) * 100) / 100,
     memFreeGb: Math.round((msg.mem_free / GB) * 100) / 100,
@@ -105,18 +83,17 @@ export function useTaskLog(
   const [error, setError] = useState<string | null>(null);
   const cancelledRef = useRef(false);
   const cursorRef = useRef<string | null>(null);
-  const lastRawCpuRef = useRef<RawCpuSnapshot | null>(null);
   const streamActivatedRef = useRef(false);
 
   useEffect(() => {
-    if (!isActive) return;
-
     cancelledRef.current = false;
     setError(null);
 
     async function start() {
-      // Activate live streaming on the worker (best-effort).
-      if (!streamActivatedRef.current) {
+      // Activate live streaming on the worker (best-effort). Only needed
+      // while the task is still running; finished tasks have no more
+      // metrics to stream, we just need to fetch what's already stored.
+      if (isActive && !streamActivatedRef.current) {
         streamActivatedRef.current = true;
         fetch(`/api/v1/task/${taskId}/stream`, {
           method: "POST",
@@ -146,18 +123,9 @@ export function useTaskLog(
 
           for (const entry of data.entries) {
             if (entry.type === "metric_update") {
-              const raw = entry as ResourceUsageUpdate;
-              const prev = lastRawCpuRef.current;
-              lastRawCpuRef.current = {
-                time: new Date(raw.timestamp).getTime(),
-                cpuUser: raw.cpu_user,
-                cpuSystem: raw.cpu_system,
-                cpuIdle: raw.cpu_idle,
-                cpuIowait: raw.cpu_iowait,
-              };
-              if (prev !== null) {
-                newMetrics.push(toResourceDataPoint(raw, prev));
-              }
+              newMetrics.push(
+                toResourceDataPoint(entry as ResourceUsageUpdate)
+              );
             } else if (entry.type === "log_update") {
               const lu = entry as LogStreamUpdate;
               const ts = new Date(lu.timestamp).toLocaleTimeString("en-US", {
@@ -177,6 +145,9 @@ export function useTaskLog(
           if (newLog) {
             setLogContent((prev) => prev + newLog);
           }
+
+          // Finished tasks won't produce any more entries — fetch once and stop.
+          if (!isActive) break;
         } catch {
           failures++;
           if (failures > MAX_FAILURES) {
@@ -205,7 +176,6 @@ export function useTaskLog(
     setLogContent("");
     setError(null);
     cursorRef.current = null;
-    lastRawCpuRef.current = null;
     streamActivatedRef.current = false;
   }, [taskId]);
 

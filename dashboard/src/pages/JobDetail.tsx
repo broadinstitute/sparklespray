@@ -6,10 +6,12 @@ import { computeTimeSeriesFromHistory } from "../data/jobTimeSeries";
 import { useEvents, mergeEvents } from "../data/EventProvider";
 import type {
   AnyEvent,
+  AnyTaskEvent,
   BackendJobSummary,
   JobSummaryHistoryEntry,
   JobDetail,
   TaskStateUpdateEvent,
+  TaskSummaryRecord,
 } from "../types";
 import MultiLineChart from "../components/MultiLineChart";
 import TabBar from "../components/TabBar";
@@ -254,6 +256,31 @@ function useJobSummary(
   return summary;
 }
 
+// Queries the Task collection directly so tasks that haven't produced any
+// events yet (i.e. still pending) show up in the tasks table.
+function useJobTaskRecords(jobId: string | undefined): TaskSummaryRecord[] {
+  const [records, setRecords] = useState<TaskSummaryRecord[]>([]);
+  useEffect(() => {
+    if (!jobId) return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const r = await fetch(`/api/v1/job/${jobId}/tasks`);
+        if (!r.ok || cancelled) return;
+        const data: TaskSummaryRecord[] = await r.json();
+        if (!cancelled) setRecords(data);
+      } catch (_) {}
+    };
+    poll();
+    const id = setInterval(poll, 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [jobId]);
+  return records;
+}
+
 function useJobSummaryHistory(
   jobId: string | undefined
 ): JobSummaryHistoryEntry[] {
@@ -295,10 +322,29 @@ export default function JobDetail() {
     );
   }, [addJobEventListener, jobId]);
 
-  const tasks = useMemo(() => (jobId ? getJobTasks(localEvents, jobId) : []), [
-    localEvents,
-    jobId,
-  ]);
+  const eventTasks = useMemo(
+    () => (jobId ? getJobTasks(localEvents, jobId) : []),
+    [localEvents, jobId]
+  );
+  const taskRecords = useJobTaskRecords(jobId);
+
+  // The Task collection is the canonical set of tasks (including pending
+  // ones that haven't produced any events yet); the event stream fills in
+  // richer per-task detail (attempts, last event time) once a task starts.
+  const tasks = useMemo(() => {
+    const eventsByTaskId = new Map(eventTasks.map((t) => [t.taskId, t]));
+    return taskRecords
+      .map((rec) => {
+        const fromEvents = eventsByTaskId.get(rec.task_id);
+        return {
+          taskId: rec.task_id,
+          taskIndex: rec.task_index,
+          status: fromEvents?.status ?? (rec.status as TaskStatus),
+          events: fromEvents?.events ?? ([] as AnyTaskEvent[]),
+        };
+      })
+      .sort((a, b) => a.taskIndex - b.taskIndex);
+  }, [taskRecords, eventTasks]);
 
   const jobSummary = useJobSummary(jobId);
   const summaryHistory = useJobSummaryHistory(jobId);
