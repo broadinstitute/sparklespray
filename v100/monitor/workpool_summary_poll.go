@@ -42,6 +42,11 @@ func (a *Monitor) runWorkPoolSummaryPoll(ctx context.Context) error {
 	}
 	return nil
 }
+func (a *Monitor) vlogfIfChanged(msg, oldValue, newValue string) {
+	if oldValue != newValue {
+		a.vlogf("%s: %s -> %s", msg, oldValue, newValue)
+	}
+}
 
 func (a *Monitor) updateWorkPoolSummary(ctx context.Context, ws *WorkPoolWithState, poolsWithNewJob map[string]bool) error {
 	pool := ws.Pool
@@ -117,6 +122,27 @@ func (a *Monitor) updateWorkPoolSummary(ctx context.Context, ws *WorkPoolWithSta
 		}
 		if nonTerminal == 0 {
 			state.State = WorkPoolStatusIdle
+			state.StateMessage = ""
+			if err := a.saveState(ctx, state); err != nil {
+				return err
+			}
+		}
+	} else {
+		// status is determined by whether we have any nonterminal tasks associated with it.
+		nonTerminal := 0
+		for s, n := range taskCounts {
+			if s != "success" && s != "error" && s != "failed" && s != "killed" {
+				nonTerminal += n
+			}
+		}
+		oldState := state.State
+		if nonTerminal == 0 {
+			state.State = WorkPoolStatusIdle
+		} else {
+			state.State = WorkPoolStatusOK
+		}
+		if state.State != oldState {
+			a.vlogfIfChanged("Updating state", string(oldState), string(state.State))
 			state.StateMessage = ""
 			if err := a.saveState(ctx, state); err != nil {
 				return err
