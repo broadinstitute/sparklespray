@@ -35,13 +35,22 @@ func (a *Monitor) runWorkPoolSummaryPoll(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+
+	activePools := make([]*WorkPoolWithState, 0, len(pools))
 	for _, ws := range pools {
+		if ws.State.State != WorkPoolStatusIdle || poolsWithNewJob[ws.Pool.WorkpoolID] {
+			activePools = append(activePools, ws)
+		}
+	}
+
+	for _, ws := range activePools {
 		if err := a.updateWorkPoolSummary(ctx, ws, poolsWithNewJob); err != nil {
 			log.Printf("workpool summary poll: pool %s: %v", ws.Pool.WorkpoolID, err)
 		}
 	}
 	return nil
 }
+
 func (a *Monitor) vlogfIfChanged(msg, oldValue, newValue string) {
 	if oldValue != newValue {
 		a.vlogf("%s: %s -> %s", msg, oldValue, newValue)
