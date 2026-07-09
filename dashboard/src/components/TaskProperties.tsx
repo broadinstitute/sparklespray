@@ -19,13 +19,17 @@ interface Props {
   dockerImage: string;
   logPath: string;
   resultPath: string;
+  vmConsoleUrl: string;
   exitCode: number | null;
   failureReason: string;
   labels: { name: string; value: string }[];
+  workpoolId: string;
   resourceUsage: ResourceUsage | null;
   timings: TimingWindows;
   status: string;
 }
+
+const TERMINAL_STATUSES = new Set(["success", "error", "failed", "killed"]);
 
 // ── colour tokens ──────────────────────────────────────────────────────────
 
@@ -123,7 +127,7 @@ function CopyButton({ text }: { text: string }) {
         setCopied(true);
         setTimeout(() => setCopied(false), 1500);
       }}
-      title="Copy URL"
+      title="Copy path"
       style={{
         display: "inline-flex",
         alignItems: "center",
@@ -143,23 +147,33 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
-function GcsPathRow({ label, path }: { label: string; path: string }) {
-  const href = path.replace(
-    /^gs:\/\/([^/]+)\/(.+)$/,
-    "https://storage.cloud.google.com/$1/$2"
-  );
-  const name = path.split("/").pop() || path;
+function extractInstanceName(vmConsoleUrl: string): string {
+  const m = vmConsoleUrl.match(/\/instances\/([^/?]+)/);
+  return m ? m[1] : vmConsoleUrl;
+}
+
+function LinkRow({
+  label,
+  href,
+  display,
+}: {
+  label: string;
+  href: string;
+  display: string;
+}) {
   return (
     <>
       <span style={{ font: `500 12.5px ${MONO}`, color: "#9aa1ac" }}>
         {label}
       </span>
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      <div
+        style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}
+      >
         <a
           href={href}
           target="_blank"
           rel="noopener noreferrer"
-          title={path}
+          title={display}
           style={{
             display: "inline-flex",
             alignItems: "center",
@@ -167,15 +181,26 @@ function GcsPathRow({ label, path }: { label: string; path: string }) {
             color: "#2f6fdb",
             textDecoration: "none",
             font: `500 13px ${MONO}`,
+            overflowWrap: "anywhere",
+            wordBreak: "break-all",
+            minWidth: 0,
           }}
         >
-          {name}
+          {display}
           <ExternalLinkIcon />
         </a>
-        <CopyButton text={path} />
+        <CopyButton text={href} />
       </div>
     </>
   );
+}
+
+function GcsPathRow({ label, path }: { label: string; path: string }) {
+  const href = path.replace(
+    /^gs:\/\/([^/]+)\/(.+)$/,
+    "https://storage.cloud.google.com/$1/$2"
+  );
+  return <LinkRow label={label} href={href} display={path} />;
 }
 
 const SectionLabel = ({ children }: { children: React.ReactNode }) => (
@@ -368,35 +393,49 @@ function LifecycleStepper({
               position: "relative",
               display: "grid",
               gridTemplateColumns: "18px 1fr auto",
-              gap: 13,
-              alignItems: "start",
+              columnGap: 13,
+              rowGap: 0,
               paddingBottom: i < steps.length - 1 ? 22 : 0,
             }}
           >
-            <LifecycleDot step={step} />
-            <div>
+            {step.time && (
               <div
                 style={{
-                  font: `600 13.5px ${SANS}`,
-                  color: step.time ? "#16191d" : "#9aa1ac",
+                  gridColumn: 2,
+                  gridRow: 1,
+                  font: `400 11.5px ${MONO}`,
+                  color: "#9aa1ac",
                 }}
               >
-                {step.label}
+                {step.subtitle} · {fmtTime(step.time)}
               </div>
-              {step.time && (
-                <div
-                  style={{
-                    font: `400 11.5px ${MONO}`,
-                    color: "#9aa1ac",
-                    marginTop: 3,
-                  }}
-                >
-                  {step.subtitle} · {fmtTime(step.time)}
-                </div>
-              )}
+            )}
+            <div
+              style={{
+                gridColumn: 1,
+                gridRow: step.time ? 2 : 1,
+                alignSelf: "center",
+                justifySelf: "center",
+              }}
+            >
+              <LifecycleDot step={step} />
+            </div>
+            <div
+              style={{
+                gridColumn: 2,
+                gridRow: step.time ? 2 : 1,
+                font: `600 13.5px ${SANS}`,
+                color: step.time ? "#16191d" : "#9aa1ac",
+                marginTop: step.time ? 3 : 0,
+              }}
+            >
+              {step.label}
             </div>
             <span
               style={{
+                gridColumn: 3,
+                gridRow: step.time ? 2 : 1,
+                alignSelf: "center",
                 font: `600 12px ${MONO}`,
                 color: step.terminal
                   ? step.terminalOk
@@ -480,6 +519,7 @@ export default function TaskProperties({
   dockerImage,
   logPath,
   resultPath,
+  vmConsoleUrl,
   exitCode,
   failureReason,
   labels,
@@ -630,8 +670,19 @@ export default function TaskProperties({
                 <div key={String(r.label) + "-val"}>{r.value}</div>
               </>
             ))}
-            {resultPath && <GcsPathRow label="result" path={resultPath} />}
-            {logPath && <GcsPathRow label="log" path={logPath} />}
+            {logPath && TERMINAL_STATUSES.has(status) && (
+              <GcsPathRow label="log" path={logPath} />
+            )}
+            {resultPath && TERMINAL_STATUSES.has(status) && (
+              <GcsPathRow label="output path" path={resultPath} />
+            )}
+            {vmConsoleUrl && (
+              <LinkRow
+                label="vm"
+                href={vmConsoleUrl}
+                display={extractInstanceName(vmConsoleUrl)}
+              />
+            )}
           </div>
         </div>
 

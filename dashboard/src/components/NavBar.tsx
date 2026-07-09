@@ -8,15 +8,19 @@ interface BreadcrumbSegment {
   href?: string;
 }
 
-function parseBreadcrumbs(pathname: string): BreadcrumbSegment[] {
+function parseBreadcrumbs(
+  pathname: string,
+  jobNames: Record<string, string>
+): BreadcrumbSegment[] {
   const segs = pathname.split("/").filter(Boolean);
   const items: BreadcrumbSegment[] = [{ label: "sparkles", href: "/" }];
 
   if (segs[0] === "jobs" && segs[1]) {
     const jobId = segs[1];
+    const jobLabel = jobNames[jobId] || jobId;
     if (segs[2] === "tasks" && segs[3]) {
       const taskId = segs[3];
-      items.push({ label: jobId, href: `/jobs/${jobId}` });
+      items.push({ label: jobLabel, href: `/jobs/${jobId}` });
       items.push({ label: "tasks", href: `/jobs/${jobId}/tasks` });
       if (segs[4] === "metrics") {
         items.push({ label: taskId, href: `/jobs/${jobId}/tasks/${taskId}` });
@@ -28,13 +32,13 @@ function parseBreadcrumbs(pathname: string): BreadcrumbSegment[] {
         items.push({ label: taskId });
       }
     } else if (segs[2] === "tasks") {
-      items.push({ label: jobId, href: `/jobs/${jobId}` });
+      items.push({ label: jobLabel, href: `/jobs/${jobId}` });
       items.push({ label: "tasks" });
     } else if (segs[2] === "summary") {
-      items.push({ label: jobId, href: `/jobs/${jobId}` });
+      items.push({ label: jobLabel, href: `/jobs/${jobId}` });
       items.push({ label: "completed summary" });
     } else {
-      items.push({ label: jobId });
+      items.push({ label: jobLabel });
     }
   } else if (segs[0] === "workpools" && segs[1]) {
     const workpoolId = segs[1];
@@ -130,7 +134,7 @@ function CommandPalette({
           width: 480,
           maxWidth: "90vw",
           overflow: "hidden",
-          fontFamily: "'JetBrains Mono', monospace",
+          fontFamily: "'IBM Plex Mono', monospace",
         }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -223,7 +227,7 @@ function CommandPalette({
 
 export default function NavBar() {
   const location = useLocation();
-  const { jobs } = useEvents();
+  const { jobs, jobCache } = useEvents();
   const [paletteOpen, setPaletteOpen] = useState(false);
 
   const entries = useMemo<PaletteEntry[]>(() => {
@@ -251,7 +255,14 @@ export default function NavBar() {
     return () => document.removeEventListener("keydown", onKey);
   }, []);
 
-  const breadcrumbs = parseBreadcrumbs(location.pathname);
+  const jobNames = useMemo(
+    () =>
+      Object.fromEntries(
+        Object.entries(jobCache).map(([jobId, detail]) => [jobId, detail.name])
+      ),
+    [jobCache]
+  );
+  const breadcrumbs = parseBreadcrumbs(location.pathname, jobNames);
 
   return (
     <>
@@ -269,7 +280,7 @@ export default function NavBar() {
           justifyContent: "space-between",
           padding: "0 1.25rem",
           zIndex: 100,
-          fontFamily: "'JetBrains Mono', monospace",
+          fontFamily: "'IBM Plex Mono', monospace",
           boxSizing: "border-box",
         }}
       >

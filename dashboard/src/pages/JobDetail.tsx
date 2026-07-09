@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
 import MultiLineChart from "../components/MultiLineChart";
 import TabBar from "../components/TabBar";
+import { RangeRefreshBar } from "../components/RefreshControls";
+import type { RangeChange } from "../components/RefreshControls";
 import { mergeEvents, useEvents } from "../data/EventProvider";
 import type { TaskStatus } from "../data/events";
 import { getJobTasks } from "../data/events";
@@ -33,7 +35,7 @@ const HIDDEN_LABEL_KEYS = new Set([
   "job-spec-sha256",
 ]);
 
-const MONO = "'JetBrains Mono', 'Courier New', monospace";
+const MONO = "'IBM Plex Mono', monospace";
 
 function DetailRow({
   label,
@@ -173,7 +175,7 @@ function JobDetailsPanel({
         value={jobDetail ? jobDetail.task_count : dash}
       />
       <DetailRow
-        label="cluster"
+        label="work pool"
         value={
           clusterId ? (
             <Link
@@ -220,11 +222,12 @@ function StatusBadge({ status }: { status: TaskStatus }) {
 }
 
 function useJobSummary(
-  jobId: string | undefined
+  jobId: string | undefined,
+  active: boolean
 ): BackendJobSummary | undefined {
   const [summary, setSummary] = useState<BackendJobSummary | undefined>();
   useEffect(() => {
-    if (!jobId) return;
+    if (!jobId || !active) return;
     let cancelled = false;
     const poll = async () => {
       try {
@@ -252,7 +255,7 @@ function useJobSummary(
       cancelled = true;
       clearInterval(id);
     };
-  }, [jobId]);
+  }, [jobId, active]);
   return summary;
 }
 
@@ -282,18 +285,23 @@ function useJobTaskRecords(jobId: string | undefined): TaskSummaryRecord[] {
 }
 
 function useJobSummaryHistory(
-  jobId: string | undefined
-): JobSummaryHistoryEntry[] {
+  jobId: string | undefined,
+  active: boolean
+): { history: JobSummaryHistoryEntry[]; lastUpdatedAt: number | null } {
   const [history, setHistory] = useState<JobSummaryHistoryEntry[]>([]);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
   useEffect(() => {
-    if (!jobId) return;
+    if (!jobId || !active) return;
     let cancelled = false;
     const poll = async () => {
       try {
         const r = await fetch(`/api/v1/job/${jobId}/summary-history`);
         if (!r.ok || cancelled) return;
         const data = await r.json();
-        if (!cancelled) setHistory(data);
+        if (!cancelled) {
+          setHistory(data);
+          setLastUpdatedAt(Date.now());
+        }
       } catch (_) {}
     };
     poll();
@@ -302,8 +310,8 @@ function useJobSummaryHistory(
       cancelled = true;
       clearInterval(id);
     };
-  }, [jobId]);
-  return history;
+  }, [jobId, active]);
+  return { history, lastUpdatedAt };
 }
 
 export default function JobDetail() {
@@ -313,6 +321,8 @@ export default function JobDetail() {
   const [localEvents, setLocalEvents] = useState<AnyEvent[]>([]);
 
   const isTasksTab = location.pathname.endsWith("/tasks");
+  const [range, setRange] = useState<RangeChange | null>(null);
+  const overviewActive = !isTasksTab && (range?.live ?? true);
 
   // Events are only used for the tasks tab (per-task status + attempt counts).
   useEffect(() => {
@@ -346,13 +356,33 @@ export default function JobDetail() {
       .sort((a, b) => a.taskIndex - b.taskIndex);
   }, [taskRecords, eventTasks]);
 
-  const jobSummary = useJobSummary(jobId);
-  const summaryHistory = useJobSummaryHistory(jobId);
+  const jobSummary = useJobSummary(jobId, overviewActive);
+  const { history: fullSummaryHistory, lastUpdatedAt } = useJobSummaryHistory(
+    jobId,
+    overviewActive
+  );
+
+  const jobCreatedMs =
+    jobId && jobCache[jobId]?.created_at
+      ? new Date(jobCache[jobId].created_at).getTime()
+      : null;
+
+  const summaryHistory = useMemo(() => {
+    if (!range) return fullSummaryHistory;
+    return fullSummaryHistory.filter((h) => {
+      const t = new Date(h.timestamp).getTime();
+      return t >= range.startMs && t <= range.endMs;
+    });
+  }, [fullSummaryHistory, range]);
 
   const { counts, rates } = useMemo(
     () => computeTimeSeriesFromHistory(summaryHistory),
     [summaryHistory]
   );
+
+  const xDomain: [number, number] | undefined = range
+    ? [range.startMs, range.endMs]
+    : undefined;
 
   if (!jobId) {
     return (
@@ -415,72 +445,90 @@ export default function JobDetail() {
       }}
     >
       {/* Header */}
-      <h1 style={{ margin: "0 0 1.5rem", fontSize: "1.3rem", fontWeight: 700 }}>
-        {jobId}
-      </h1>
+      <div style={{ margin: "0 0 1.5rem" }}>
+        <h1 style={{ margin: 0, fontSize: "1.3rem", fontWeight: 700 }}>
+          {jobCache[jobId]?.name || jobId}
+        </h1>
+        <div style={{ marginTop: 4, fontSize: "0.8rem", color: "#999" }}>
+          {jobId}
+        </div>
+      </div>
 
       <TabBar tabs={jobTabs} />
 
       {/* Overview tab */}
       {!isTasksTab && (
         <div
-          style={{ display: "flex", gap: "1.5rem", alignItems: "flex-start" }}
+          style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}
         >
-          {/* Left: job details + status */}
-          <JobDetailsPanel
-            jobDetail={jobId ? jobCache[jobId] : undefined}
-            statusCounts={statusCounts}
-            statusOrder={statusOrder}
-            ratePerMin={ratePerMin}
-            etaDate={etaDate}
-            totalTasks={totalTasks}
-            doneTasks={doneTasks}
+          <RangeRefreshBar
+            anchorLabel="Job start"
+            anchorMs={jobCreatedMs}
+            lastUpdatedAt={lastUpdatedAt}
+            onChange={setRange}
           />
 
-          {/* Right: charts */}
-          <div style={{ flex: 1, minWidth: 0 }}>
-            {/* Time-series charts */}
-            {counts.length > 0 && (
-              <div
-                style={{
-                  background: "#f8f9fa",
-                  border: "1px solid #e0e0e0",
-                  borderRadius: 8,
-                  padding: "1rem 1.5rem",
-                  marginBottom: "1.5rem",
-                }}
-              >
-                <MultiLineChart
-                  data={counts}
-                  title="Tasks in Queue"
-                  yLabel="tasks"
-                  stacked
-                  series={[
-                    { key: "pending", label: "Pending", color: "#1565c0" },
-                    { key: "running", label: "Running", color: "#e65100" },
-                  ]}
-                />
-                <div style={{ height: "1.25rem" }} />
-                <MultiLineChart
-                  data={rates}
-                  title="Completion Rate"
-                  yLabel="tasks/min"
-                  series={[
-                    {
-                      key: "completedSuccess",
-                      label: "Completed (success)",
-                      color: "#2e7d32",
-                    },
-                    {
-                      key: "completedError",
-                      label: "Completed (error)",
-                      color: "#f44336",
-                    },
-                    { key: "failed", label: "Failed", color: "#b71c1c" },
-                  ]}
-                />
-              </div>
-            )}
+          <div
+            style={{ display: "flex", gap: "1.5rem", alignItems: "flex-start" }}
+          >
+            {/* Left: job details + status */}
+            <JobDetailsPanel
+              jobDetail={jobId ? jobCache[jobId] : undefined}
+              statusCounts={statusCounts}
+              statusOrder={statusOrder}
+              ratePerMin={ratePerMin}
+              etaDate={etaDate}
+              totalTasks={totalTasks}
+              doneTasks={doneTasks}
+            />
+
+            {/* Right: charts */}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              {/* Time-series charts */}
+              {counts.length > 0 && (
+                <div
+                  style={{
+                    background: "#f8f9fa",
+                    border: "1px solid #e0e0e0",
+                    borderRadius: 8,
+                    padding: "1rem 1.5rem",
+                    marginBottom: "1.5rem",
+                  }}
+                >
+                  <MultiLineChart
+                    data={counts}
+                    title="Tasks in Queue"
+                    yLabel="tasks"
+                    stacked
+                    xDomain={xDomain}
+                    series={[
+                      { key: "pending", label: "Pending", color: "#1565c0" },
+                      { key: "running", label: "Running", color: "#e65100" },
+                    ]}
+                  />
+                  <div style={{ height: "1.25rem" }} />
+                  <MultiLineChart
+                    data={rates}
+                    title="Completion Rate"
+                    yLabel="tasks/min"
+                    xDomain={xDomain}
+                    series={[
+                      {
+                        key: "completedSuccess",
+                        label: "Completed (success)",
+                        color: "#2e7d32",
+                      },
+                      {
+                        key: "completedError",
+                        label: "Completed (error)",
+                        color: "#f44336",
+                      },
+                      { key: "failed", label: "Failed", color: "#b71c1c" },
+                    ]}
+                  />
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}

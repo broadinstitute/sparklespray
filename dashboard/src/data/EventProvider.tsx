@@ -26,12 +26,18 @@ export interface EventContextValue {
   jobs: BackendJobSummary[];
   addJobEventListener: (jobId: string, cb: EventListener) => () => void;
   jobCache: Record<string, JobDetail>;
+  paused: boolean;
+  setPaused: (paused: boolean) => void;
+  lastUpdatedAt: number | null;
 }
 
 const EventContext = createContext<EventContextValue>({
   jobs: [],
   addJobEventListener: () => () => {},
   jobCache: {},
+  paused: false,
+  setPaused: () => {},
+  lastUpdatedAt: null,
 });
 
 function computeJobSummary(
@@ -56,6 +62,8 @@ function computeJobSummary(
 export function EventProvider({ children }: { children: React.ReactNode }) {
   const [jobs, setJobs] = useState<BackendJobSummary[]>([]);
   const [jobCache, setJobCache] = useState<Record<string, JobDetail>>({});
+  const [paused, setPaused] = useState(false);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
 
   const jobEventCacheRef = useRef<Record<string, AnyEvent[]>>({});
   const jobCursorRef = useRef<Record<string, string | null>>({});
@@ -65,11 +73,18 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
 
   const pendingJobFetchesRef = useRef<Set<string>>(new Set());
 
+  const pausedRef = useRef(paused);
+  pausedRef.current = paused;
+
   useEffect(() => {
     let cancelled = false;
 
     async function pollJobs() {
       while (!cancelled) {
+        if (pausedRef.current) {
+          await new Promise<void>((r) => setTimeout(r, POLL_INTERVAL_MS));
+          continue;
+        }
         try {
           const res = await fetch("/api/v1/jobs");
           if (res.ok) {
@@ -79,6 +94,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
             >[] = await res.json();
             const data = rawData.map(computeJobSummary);
             setJobs(data);
+            setLastUpdatedAt(Date.now());
 
             for (const j of data) {
               if (!pendingJobFetchesRef.current.has(j.job_id)) {
@@ -89,6 +105,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
                     (
                       raw: {
                         job_id: string;
+                        name: string;
                         workpool_id: string;
                         created_at: string;
                         task_count: number;
@@ -217,8 +234,15 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   );
 
   const value = useMemo<EventContextValue>(
-    () => ({ jobs, addJobEventListener, jobCache }),
-    [jobs, addJobEventListener, jobCache]
+    () => ({
+      jobs,
+      addJobEventListener,
+      jobCache,
+      paused,
+      setPaused,
+      lastUpdatedAt,
+    }),
+    [jobs, addJobEventListener, jobCache, paused, lastUpdatedAt]
   );
 
   return (

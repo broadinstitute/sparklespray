@@ -2,9 +2,14 @@ package monitor
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"time"
 )
+
+// idleWorkPoolSummaryMaxAge is how long an idle WorkPoolSummary may go without
+// an update before it is considered stale and deleted.
+const idleWorkPoolSummaryMaxAge = 30 * time.Minute
 
 // collectionsWithExpiry lists every Firestore collection that carries an expiry field.
 var collectionsWithExpiry = []string{
@@ -48,6 +53,35 @@ func (a *Monitor) runExpiryCleaner(ctx context.Context) error {
 		if n > 0 {
 			a.vlogf("expiry cleaner: deleted %d expired documents from %s", n, coll)
 		}
+	}
+
+	if a.workPoolSummaries != nil {
+		if err := a.cleanIdleWorkPoolSummaries(ctx); err != nil {
+			log.Printf("expiry cleaner: %v", err)
+		}
+	}
+
+	return nil
+}
+
+// cleanIdleWorkPoolSummaries deletes WorkPoolSummary documents for idle
+// workpools that haven't been updated in over idleWorkPoolSummaryMaxAge.
+func (a *Monitor) cleanIdleWorkPoolSummaries(ctx context.Context) error {
+	summaries, err := a.workPoolSummaries.ListIdle(ctx)
+	if err != nil {
+		return fmt.Errorf("list idle workpool summaries: %w", err)
+	}
+
+	cutoff := a.clock.Now().Add(-idleWorkPoolSummaryMaxAge)
+	for _, s := range summaries {
+		if s.LastUpdated.After(cutoff) {
+			continue
+		}
+		if err := a.workPoolSummaries.Delete(ctx, s.WorkpoolID); err != nil {
+			log.Printf("expiry cleaner: delete idle workpool summary %s: %v", s.WorkpoolID, err)
+			continue
+		}
+		a.vlogf("expiry cleaner: deleted idle workpool summary %s (last updated %s)", s.WorkpoolID, s.LastUpdated.Format(time.RFC3339))
 	}
 	return nil
 }

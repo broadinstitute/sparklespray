@@ -1,6 +1,11 @@
 import { useState, useMemo, useRef, useCallback, useEffect } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { useEvents } from "../data/EventProvider";
+import { RefreshToggle } from "../components/RefreshControls";
+import JobsTable, {
+  labelColors,
+  workerPoolColor,
+} from "../components/JobsTable";
 import type { BackendJobSummary } from "../types";
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -19,62 +24,10 @@ const SYSTEM_LABEL_KEYS = new Set([
 
 // ── Colors ───────────────────────────────────────────────────────────────────
 
-const LABEL_HUES = [145, 250, 60, 320, 200, 30, 280, 170];
-const labelHueCache = new Map<string, number>();
-let labelHueIndex = 0;
-function getLabelHue(value: string): number {
-  if (!labelHueCache.has(value)) {
-    labelHueCache.set(value, LABEL_HUES[labelHueIndex % LABEL_HUES.length]);
-    labelHueIndex++;
-  }
-  return labelHueCache.get(value)!;
-}
-function labelColors(value: string) {
-  const h = getLabelHue(value);
-  return {
-    bg: `oklch(93% 0.06 ${h})`,
-    border: `oklch(72% 0.10 ${h})`,
-    text: `oklch(35% 0.10 ${h})`,
-  };
-}
-
-const POOL_HUES = [30, 80, 350, 240, 170, 300, 120, 200];
-const poolHueCache = new Map<string, number>();
-let poolHueIndex = 0;
-function workerPoolColor(id: string) {
-  if (!poolHueCache.has(id)) {
-    poolHueCache.set(id, POOL_HUES[poolHueIndex % POOL_HUES.length]);
-    poolHueIndex++;
-  }
-  const h = poolHueCache.get(id)!;
-  return {
-    bg: `oklch(94% 0.05 ${h})`,
-    border: `oklch(72% 0.10 ${h})`,
-    text: `oklch(38% 0.12 ${h})`,
-  };
-}
-
 const C_OK = "oklch(45% 0.14 145)";
 const C_BAD = "oklch(48% 0.20 25)";
 const C_BAD_SOFT = "oklch(72% 0.16 25)";
-const MONO = "'JetBrains Mono', 'Courier New', monospace";
-
-// ── Helpers ──────────────────────────────────────────────────────────────────
-
-const LOCAL_TZ =
-  new Intl.DateTimeFormat("en", { timeZoneName: "short" })
-    .formatToParts(new Date())
-    .find((p) => p.type === "timeZoneName")?.value ?? "";
-
-function formatTimestamp(d: Date): string {
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return (
-    `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` +
-    ` ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(
-      d.getSeconds()
-    )} ${LOCAL_TZ}`
-  );
-}
+const MONO = "'IBM Plex Mono', monospace";
 
 // ── useWorkerPools hook ───────────────────────────────────────────────────────
 
@@ -95,11 +48,15 @@ interface WorkerPool {
   jobs: BackendJobSummary[];
 }
 
-function useWorkerPools(jobs: BackendJobSummary[]): WorkerPool[] {
+function useWorkerPools(
+  jobs: BackendJobSummary[],
+  active: boolean
+): WorkerPool[] {
   const [workpools, setWorkpools] = useState<WorkpoolInfo[]>([]);
   const [workerCounts, setWorkerCounts] = useState<Record<string, number>>({});
 
   useEffect(() => {
+    if (!active) return;
     let cancelled = false;
     async function poll() {
       while (!cancelled) {
@@ -137,7 +94,7 @@ function useWorkerPools(jobs: BackendJobSummary[]): WorkerPool[] {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [active]);
 
   return useMemo(() => {
     return workpools.map((wp) => ({
@@ -172,48 +129,30 @@ function WorkerPoolCard({ pool }: { pool: WorkerPool }) {
         <div
           style={{
             padding: "8px 10px",
-            background: col.bg,
-            borderBottom: `1px solid ${col.border}`,
+            background: "#fafafa",
+            borderBottom: "1px solid #eee",
             display: "flex",
             alignItems: "center",
             gap: 6,
             cursor: "pointer",
           }}
         >
-          {(() => {
-            const st = wp.state || "unknown";
-            const ok = st === "ok" || st === "active";
-            const halted = st === "halted";
-            const color = ok ? C_OK : halted ? C_BAD : C_BAD_SOFT;
-            const bg = ok
-              ? "oklch(92% 0.08 145)"
-              : halted
-              ? "oklch(92% 0.08 25)"
-              : "oklch(92% 0.06 60)";
-            return (
-              <span
-                style={{
-                  fontSize: 10,
-                  fontFamily: MONO,
-                  fontWeight: 700,
-                  color,
-                  background: bg,
-                  borderRadius: 3,
-                  padding: "1px 6px",
-                  flexShrink: 0,
-                  letterSpacing: 0.3,
-                }}
-              >
-                {st}
-              </span>
-            );
-          })()}
+          <span
+            style={{
+              width: 9,
+              height: 9,
+              borderRadius: 2,
+              flexShrink: 0,
+              background: col.bg,
+              border: `1.5px solid ${col.border}`,
+            }}
+          />
           <span
             style={{
               fontSize: 13,
               fontWeight: 700,
               fontFamily: MONO,
-              color: col.text,
+              color: "#222",
               overflow: "hidden",
               textOverflow: "ellipsis",
               whiteSpace: "nowrap",
@@ -227,8 +166,7 @@ function WorkerPoolCard({ pool }: { pool: WorkerPool }) {
               style={{
                 fontSize: 11,
                 fontFamily: MONO,
-                color: col.text,
-                opacity: 0.75,
+                color: "#888",
                 flexShrink: 0,
               }}
             >
@@ -348,17 +286,42 @@ function ColorSwatch({ color }: { color: string }) {
 
 // ── Worker pools sidebar ──────────────────────────────────────────────────────
 
-function WorkerPoolsSidebar({ workerPools }: { workerPools: WorkerPool[] }) {
+function WorkerPoolSection({
+  title,
+  pools,
+}: {
+  title: string;
+  pools: WorkerPool[];
+}) {
+  if (pools.length === 0) return null;
   return (
     <div>
       <div
         style={{
-          display: "flex",
-          alignItems: "baseline",
-          justifyContent: "space-between",
-          marginBottom: 8,
+          fontSize: 10,
+          letterSpacing: 1.5,
+          color: "#aaa",
+          fontFamily: MONO,
+          marginBottom: 6,
         }}
       >
+        {title}
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {pools.map((p) => (
+          <WorkerPoolCard key={p.info.workpool_id} pool={p} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function WorkerPoolsSidebar({ workerPools }: { workerPools: WorkerPool[] }) {
+  const activePools = workerPools.filter((p) => p.info.state !== "idle");
+  const idlePools = workerPools.filter((p) => p.info.state === "idle");
+  return (
+    <div>
+      <div style={{ marginBottom: 8 }}>
         <span
           style={{
             fontSize: 11,
@@ -368,9 +331,6 @@ function WorkerPoolsSidebar({ workerPools }: { workerPools: WorkerPool[] }) {
           }}
         >
           WORKER POOLS
-        </span>
-        <span style={{ fontSize: 11, color: "#bbb", fontFamily: MONO }}>
-          {workerPools.length} active
         </span>
       </div>
       {workerPools.length === 0 ? (
@@ -391,10 +351,9 @@ function WorkerPoolsSidebar({ workerPools }: { workerPools: WorkerPool[] }) {
           run tasks.
         </div>
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {workerPools.map((p) => (
-            <WorkerPoolCard key={p.info.workpool_id} pool={p} />
-          ))}
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <WorkerPoolSection title="ACTIVE" pools={activePools} />
+          <WorkerPoolSection title="IDLE" pools={idlePools} />
         </div>
       )}
     </div>
@@ -695,92 +654,15 @@ function FacetKeyButton({
   );
 }
 
-// ── Label chips (per-row) ─────────────────────────────────────────────────────
-
-function LabelChips({
-  metadata,
-  search,
-  facets,
-  onToggleFacet,
-}: {
-  metadata: Record<string, string> | undefined;
-  search: string;
-  facets: Record<string, Set<string>>;
-  onToggleFacet: (k: string, v: string) => void;
-}) {
-  if (!metadata) return null;
-  const entries = Object.entries(metadata).filter(
-    ([k]) => !SYSTEM_LABEL_KEYS.has(k)
-  );
-  if (entries.length === 0) return null;
-  const q = search.trim().toLowerCase();
-
-  return (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 5 }}>
-      {entries.map(([k, v]) => {
-        const c = labelColors(v);
-        const isMatch =
-          q &&
-          (k.toLowerCase().includes(q) ||
-            v.toLowerCase().includes(q) ||
-            `${k}=${v}`.toLowerCase().includes(q));
-        const active = facets[k]?.has(v);
-        return (
-          <button
-            key={k}
-            onClick={(e) => {
-              e.stopPropagation();
-              onToggleFacet(k, v);
-            }}
-            title={active ? `Remove filter ${k}=${v}` : `Filter by ${k}=${v}`}
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 1,
-              border: `1.5px solid ${
-                active ? c.text : isMatch ? c.text : c.border
-              }`,
-              borderRadius: 3,
-              padding: "1px 7px",
-              fontSize: "0.62rem",
-              fontFamily: MONO,
-              background: active ? c.text : c.bg,
-              color: active ? "white" : c.text,
-              lineHeight: 1.6,
-              boxShadow:
-                isMatch && !active ? `0 0 0 1.5px ${c.border}` : "none",
-              cursor: "pointer",
-              transition: "all 0.1s",
-            }}
-          >
-            <span style={{ opacity: active ? 0.85 : 0.7 }}>{k}</span>
-            <span
-              style={{
-                opacity: active ? 0.6 : 1,
-                color: active ? "white" : c.border,
-                margin: "0 2px",
-              }}
-            >
-              =
-            </span>
-            <span style={{ fontWeight: 700 }}>{v}</span>
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function JobList() {
-  const navigate = useNavigate();
-  const { jobs, jobCache } = useEvents();
+  const { jobs, jobCache, paused, setPaused, lastUpdatedAt } = useEvents();
   const [search, setSearch] = useState("");
   const [timePreset, setTimePreset] = useState(0);
   const [facets, setFacets] = useState<Record<string, Set<string>>>({});
 
-  const workerPools = useWorkerPools(jobs);
+  const workerPools = useWorkerPools(jobs, !paused);
 
   // ── Facet helpers ──────────────────────────────────────────────────────────
 
@@ -819,6 +701,7 @@ export default function JobList() {
         ...j,
         submitDate: new Date(j.created_at),
         metadata: jobCache[j.job_id]?.metadata,
+        name: jobCache[j.job_id]?.name,
       })),
     [jobs, jobCache]
   );
@@ -941,6 +824,14 @@ export default function JobList() {
                   ))}
                 </div>
               </div>
+
+              <div className="jl-filter-divider" />
+
+              <RefreshToggle
+                live={!paused}
+                onToggle={() => setPaused(!paused)}
+                lastUpdatedAt={lastUpdatedAt}
+              />
             </div>
 
             {/* Facet bar */}
@@ -978,89 +869,12 @@ export default function JobList() {
                 found
               </p>
               <div className="jl-divider" />
-              {filteredJobs.length === 0 ? (
-                <div className="jl-empty">no jobs found</div>
-              ) : (
-                <table className="jl-table">
-                  <thead>
-                    <tr>
-                      <th className="jl-th jl-th-index" />
-                      <th className="jl-th">Identifier</th>
-                      <th className="jl-th jl-th-pool">Worker Pool</th>
-                      <th
-                        className="jl-th jl-th-stats"
-                        title="active = pending + claimed + running + writing&#10;ok = success&#10;fail = error + failed + killed"
-                      >
-                        active / ok / fail
-                      </th>
-                      <th className="jl-th jl-th-time">Start Time (local)</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredJobs.map(
-                      ({ job_id, workpool_id, metadata, created_at }, i) => {
-                        const submitDate = new Date(created_at);
-                        const cc = workpool_id
-                          ? workerPoolColor(workpool_id)
-                          : null;
-                        return (
-                          <tr
-                            key={job_id}
-                            className="jl-tr"
-                            onClick={() => navigate(`/jobs/${job_id}`)}
-                          >
-                            <td className="jl-td jl-td-index">
-                              {String(i + 1).padStart(2, "0")}
-                            </td>
-                            <td className="jl-td">
-                              <div className="jl-id">{job_id}</div>
-                              <LabelChips
-                                metadata={metadata}
-                                search={search}
-                                facets={facets}
-                                onToggleFacet={toggleFacet}
-                              />
-                            </td>
-                            <td className="jl-td jl-td-pool">
-                              {workpool_id && cc ? (
-                                <span className="jl-pool-cell">
-                                  <span
-                                    className="jl-pool-swatch"
-                                    style={{
-                                      background: cc.bg,
-                                      border: `1.5px solid ${cc.border}`,
-                                    }}
-                                  />
-                                  <span
-                                    style={{
-                                      color: cc.text,
-                                      overflow: "hidden",
-                                      textOverflow: "ellipsis",
-                                      whiteSpace: "nowrap",
-                                    }}
-                                  >
-                                    {workpool_id}
-                                  </span>
-                                </span>
-                              ) : (
-                                <span className="jl-pool-empty">—</span>
-                              )}
-                            </td>
-                            <td className="jl-td jl-td-stats">
-                              <JobStatsChip
-                                job={jobs.find((j) => j.job_id === job_id)!}
-                              />
-                            </td>
-                            <td className="jl-td jl-td-time">
-                              {formatTimestamp(submitDate)}
-                            </td>
-                          </tr>
-                        );
-                      }
-                    )}
-                  </tbody>
-                </table>
-              )}
+              <JobsTable
+                jobs={filteredJobs}
+                search={search}
+                facets={facets}
+                onToggleFacet={toggleFacet}
+              />
             </section>
 
             <div className="jl-footer">◆ sparkles dashboard</div>
@@ -1076,40 +890,17 @@ export default function JobList() {
   );
 }
 
-const ACTIVE_STATES = new Set(["pending", "claimed", "running", "writing"]);
-
-function JobStatsChip({ job }: { job: BackendJobSummary }) {
-  const { taskCount: total, successCount: ok, failureCount: fail } = job;
-  const active = job.tasks
-    .filter((t) => ACTIVE_STATES.has(t.state))
-    .reduce((sum, t) => sum + t.count, 0);
-  let cls = "jl-chip";
-  if (fail > 0) cls += " jl-chip-red";
-  else if (total > 0 && total === ok) cls += " jl-chip-green";
-  const tip =
-    "active = pending + claimed + running + writing\n" +
-    "ok = success\n" +
-    "fail = error + failed + killed";
-  return (
-    <span className={cls} title={tip}>
-      {`${active} / ${ok} / ${fail}`}
-    </span>
-  );
-}
-
 // ColorSwatch used in sidebar (kept for completeness)
 void ColorSwatch;
 
 // ── Styles ────────────────────────────────────────────────────────────────────
 
 const styles = `
-  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&display=swap');
-
   .jl-root {
     min-height: 100vh;
     background: #fff;
     color: #333;
-    font-family: 'JetBrains Mono', 'Courier New', monospace;
+    font-family: 'IBM Plex Mono', monospace;
     padding: 2rem;
     box-sizing: border-box;
   }
@@ -1167,11 +958,11 @@ const styles = `
     text-transform: uppercase;
     color: #aaa;
     flex-shrink: 0;
-    font-family: 'JetBrains Mono', 'Courier New', monospace;
+    font-family: 'IBM Plex Mono', monospace;
   }
 
   .jl-search-input {
-    font-family: 'JetBrains Mono', 'Courier New', monospace;
+    font-family: 'IBM Plex Mono', monospace;
     font-size: 0.75rem;
     border: 1.5px solid #ccc;
     border-radius: 3px;
@@ -1187,7 +978,7 @@ const styles = `
   .jl-search-input:focus { border-color: #333; }
 
   .jl-search-clear {
-    font-family: 'JetBrains Mono', 'Courier New', monospace;
+    font-family: 'IBM Plex Mono', monospace;
     font-size: 0.7rem;
     color: #aaa;
     background: none;
@@ -1220,7 +1011,7 @@ const styles = `
   }
 
   .jl-time-preset {
-    font-family: 'JetBrains Mono', 'Courier New', monospace;
+    font-family: 'IBM Plex Mono', monospace;
     font-size: 0.68rem;
     padding: 3px 9px;
     border: none;
@@ -1252,7 +1043,7 @@ const styles = `
 
   .jl-facet-clear {
     margin-left: auto;
-    font-family: 'JetBrains Mono', 'Courier New', monospace;
+    font-family: 'IBM Plex Mono', monospace;
     font-size: 0.68rem;
     color: #888;
     background: none;
@@ -1285,130 +1076,6 @@ const styles = `
     height: 1px;
     background: linear-gradient(90deg, #1565c044, #1565c011 60%, transparent);
     margin-bottom: 0;
-  }
-
-  /* ── Table ───────────────────────────────────────── */
-
-  .jl-table {
-    width: 100%;
-    border-collapse: collapse;
-    table-layout: fixed;
-  }
-
-  .jl-th {
-    font-size: 0.6rem;
-    letter-spacing: 0.18em;
-    text-transform: uppercase;
-    color: #aaa;
-    font-weight: 400;
-    padding: 0.45rem 0.5rem;
-    text-align: left;
-    border-bottom: 1px solid #f0f0f0;
-  }
-
-  .jl-th-stats { text-align: right; width: 8rem; }
-  .jl-th-time  { text-align: right; width: 14rem; }
-  .jl-th-index { width: 2.2rem; }
-  .jl-th-pool  { width: 9rem; }
-
-  .jl-tr { cursor: pointer; }
-
-  .jl-td {
-    padding: 0.65rem 0.5rem;
-    vertical-align: top;
-    border-bottom: 1px solid #f0f0f0;
-    transition: background 0.12s;
-  }
-
-  .jl-tr:hover .jl-td { background: #f0f5ff; }
-  .jl-tr:hover .jl-id  { color: #1565c0; }
-
-  .jl-td-index {
-    font-size: 0.65rem;
-    color: #ccc;
-    font-weight: 400;
-    padding-top: 0.68rem;
-    border-left: 2px solid transparent;
-    transition: background 0.12s, border-color 0.15s;
-  }
-
-  .jl-tr:hover .jl-td-index { border-left-color: #1565c0; }
-
-  .jl-id {
-    font-size: 0.82rem;
-    font-weight: 500;
-    color: #222;
-    transition: color 0.12s;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .jl-td-stats {
-    text-align: right;
-    white-space: nowrap;
-    padding-top: 0.68rem;
-  }
-
-  .jl-td-time {
-    text-align: right;
-    font-size: 0.72rem;
-    color: #999;
-    white-space: nowrap;
-    padding-top: 0.68rem;
-  }
-
-  .jl-td-pool {
-    padding-top: 0.68rem;
-    overflow: hidden;
-  }
-
-  .jl-pool-cell {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    font-size: 0.68rem;
-    font-family: 'JetBrains Mono', 'Courier New', monospace;
-    font-weight: 600;
-    max-width: 100%;
-    overflow: hidden;
-  }
-
-  .jl-pool-swatch {
-    width: 9px;
-    height: 9px;
-    border-radius: 2px;
-    flex-shrink: 0;
-  }
-
-  .jl-pool-empty {
-    font-size: 0.72rem;
-    color: #ccc;
-  }
-
-  /* ── Label chips ─────────────────────────────────── */
-
-  .jl-chip {
-    font-size: 0.68rem;
-    font-weight: 600;
-    border-radius: 4px;
-    padding: 1px 8px;
-    white-space: nowrap;
-    flex-shrink: 0;
-    background: #f0f0f0;
-    color: #777;
-    margin: 0 0.5rem;
-  }
-
-  .jl-chip-green { background: #e8f5e9; color: #2e7d32; }
-  .jl-chip-red   { background: #ffebee; color: #b71c1c; }
-
-  .jl-empty {
-    font-size: 0.75rem;
-    color: #ccc;
-    padding: 1rem 0.5rem;
-    border-top: 1px solid #f0f0f0;
-    border-bottom: 1px solid #f0f0f0;
   }
 
   .jl-footer {

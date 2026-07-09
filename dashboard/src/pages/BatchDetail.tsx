@@ -2,8 +2,9 @@ import { useState, useEffect } from "react";
 import { useParams, Link } from "react-router-dom";
 import type { BatchRecord } from "./WorkPoolDetail";
 import { StatusBadge } from "./WorkPoolDetail";
+import { RefreshToggle } from "../components/RefreshControls";
 
-const MONO = "'JetBrains Mono', 'Courier New', monospace";
+const MONO = "'IBM Plex Mono', monospace";
 
 const BATCH_STATUS_COLORS: Record<string, string> = {
   pending: "#1565c0",
@@ -37,17 +38,24 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
-function useBatch(batchId: string | undefined): BatchRecord | undefined {
+function useBatch(
+  batchId: string | undefined,
+  active: boolean
+): { batch: BatchRecord | undefined; lastUpdatedAt: number | null } {
   const [batch, setBatch] = useState<BatchRecord | undefined>();
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
   useEffect(() => {
-    if (!batchId) return;
+    if (!batchId || !active) return;
     let cancelled = false;
     const poll = async () => {
       try {
         const r = await fetch(`/api/v1/batch/${batchId}`);
         if (!r.ok || cancelled) return;
         const data = await r.json();
-        if (!cancelled) setBatch(data);
+        if (!cancelled) {
+          setBatch(data);
+          setLastUpdatedAt(Date.now());
+        }
       } catch (_) {}
     };
     poll();
@@ -56,8 +64,8 @@ function useBatch(batchId: string | undefined): BatchRecord | undefined {
       cancelled = true;
       clearInterval(id);
     };
-  }, [batchId]);
-  return batch;
+  }, [batchId, active]);
+  return { batch, lastUpdatedAt };
 }
 
 export default function BatchDetail() {
@@ -65,7 +73,8 @@ export default function BatchDetail() {
     workpoolId: string;
     batchId: string;
   }>();
-  const batch = useBatch(batchId);
+  const [live, setLive] = useState(true);
+  const { batch, lastUpdatedAt } = useBatch(batchId, live);
   const dash = <span style={{ color: "#ccc" }}>—</span>;
 
   return (
@@ -88,9 +97,23 @@ export default function BatchDetail() {
         <span style={{ color: "#555" }}>{batchId}</span>
       </div>
 
-      <h1 style={{ margin: "0 0 1.5rem", fontSize: "1.1rem", fontWeight: 700 }}>
-        Batch API Request
-      </h1>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          marginBottom: "1.5rem",
+        }}
+      >
+        <h1 style={{ margin: 0, fontSize: "1.1rem", fontWeight: 700 }}>
+          Batch API Request
+        </h1>
+        <RefreshToggle
+          live={live}
+          onToggle={() => setLive(!live)}
+          lastUpdatedAt={lastUpdatedAt}
+        />
+      </div>
 
       {!batch ? (
         <div style={{ color: "#aaa" }}>Loading…</div>

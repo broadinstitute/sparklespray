@@ -298,6 +298,10 @@ type WorkPoolSummaryHistory struct {
 type WorkPoolSummaryStore interface {
 	Save(ctx context.Context, summary *WorkPoolSummary) error
 	SaveHistory(ctx context.Context, history *WorkPoolSummaryHistory) error
+	// ListIdle returns all WorkPoolSummary documents whose state is idle.
+	ListIdle(ctx context.Context) ([]*WorkPoolSummary, error)
+	// Delete removes the WorkPoolSummary document for the given workpool.
+	Delete(ctx context.Context, workpoolID string) error
 }
 
 // ----- Job summary types -----
@@ -334,13 +338,14 @@ type Label struct {
 // JobSummary is created at job submission (state=pending) and updated by the
 // monitor's job-summary poll as task states change.
 type JobSummary struct {
-	JobID      string       `firestore:"job_id"`
-	WorkpoolID string       `firestore:"workpool_id"`
-	CreatedAt  time.Time    `firestore:"created_at"`
-	Expiry     time.Time    `firestore:"expiry"`
-	State      JobStatus    `firestore:"state"`
-	Tasks      []StateCount `firestore:"tasks"`
-	Labels     []Label      `firestore:"labels"`
+	JobID       string       `firestore:"job_id"`
+	WorkpoolID  string       `firestore:"workpool_id"`
+	CreatedAt   time.Time    `firestore:"created_at"`
+	Expiry      time.Time    `firestore:"expiry"`
+	LastUpdated time.Time    `firestore:"last_updated"`
+	State       JobStatus    `firestore:"state"`
+	Tasks       []StateCount `firestore:"tasks"`
+	Labels      []Label      `firestore:"labels"`
 }
 
 // JobSummaryHistory is an append-only snapshot written each time the monitor

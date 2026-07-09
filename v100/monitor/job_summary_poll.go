@@ -32,9 +32,11 @@ func (a *Monitor) updateJobSummary(ctx context.Context, summary *JobSummary) err
 
 	newState := computeJobStatus(counts)
 	newTasks := taskCountsFromMap(counts)
+	now := time.Now()
 
 	summary.State = newState
 	summary.Tasks = newTasks
+	summary.LastUpdated = now
 
 	if err := a.jobSummaries.Save(ctx, summary); err != nil {
 		return err
@@ -44,7 +46,7 @@ func (a *Monitor) updateJobSummary(ctx context.Context, summary *JobSummary) err
 		JobID:      summary.JobID,
 		WorkpoolID: summary.WorkpoolID,
 		CreatedAt:  summary.CreatedAt,
-		Timestamp:  time.Now(),
+		Timestamp:  now,
 		Expiry:     summary.Expiry,
 		State:      newState,
 		Tasks:      newTasks,

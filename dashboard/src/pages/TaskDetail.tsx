@@ -8,6 +8,8 @@ import TaskProperties from "../components/TaskProperties";
 import MultiLineChart from "../components/MultiLineChart";
 import EventLog from "../components/EventLog";
 import TabBar from "../components/TabBar";
+import { RangeRefreshBar, RefreshToggle } from "../components/RefreshControls";
+import type { RangeChange } from "../components/RefreshControls";
 
 const MONO = "'IBM Plex Mono', monospace";
 const SANS = "'IBM Plex Sans', sans-serif";
@@ -33,9 +35,11 @@ export default function TaskDetail() {
     dockerImage: string;
     logPath: string;
     resultPath: string;
+    vmConsoleUrl: string;
     exitCode: number | null;
     failureReason: string;
     labels: { name: string; value: string }[];
+    workpoolId: string;
     resourceUsage: {
       elapsed_seconds: number;
       max_memory_bytes: number;
@@ -47,6 +51,7 @@ export default function TaskDetail() {
     } | null;
   } | null>(null);
   const logBottomRef = useRef<HTMLDivElement>(null);
+  const isNearBottomRef = useRef(true);
 
   const taskBase = `/jobs/${jobId}/tasks/${taskId}`;
   const activeTab = location.pathname.endsWith("/metrics")
@@ -78,9 +83,11 @@ export default function TaskDetail() {
           dockerImage: d.docker_image ?? "",
           logPath: d.log_path ?? "",
           resultPath: d.result_path ?? "",
+          vmConsoleUrl: d.vm_console_url ?? "",
           exitCode: d.exit_code != null ? d.exit_code : null,
           failureReason: d.failure_reason ?? "",
           labels: Array.isArray(d.labels) ? d.labels : [],
+          workpoolId: d.workpool_id ?? "",
           resourceUsage: d.resource_usage ?? null,
         })
       )
@@ -90,9 +97,11 @@ export default function TaskDetail() {
           dockerImage: "",
           logPath: "",
           resultPath: "",
+          vmConsoleUrl: "",
           exitCode: null,
           failureReason: "",
           labels: [],
+          workpoolId: "",
           resourceUsage: null,
         })
       );
@@ -107,10 +116,29 @@ export default function TaskDetail() {
   const timings = useMemo(() => extractTimings(taskEvents), [taskEvents]);
 
   const isActive = ["claimed", "running", "writing"].includes(status);
-  const { resourceData, logContent, error: pubsubError } = useTaskLog(
-    taskId ?? "",
-    isActive
-  );
+  const [range, setRange] = useState<RangeChange | null>(null);
+  const [live, setLive] = useState(true);
+  const paused = !live;
+  const {
+    resourceData: fullResourceData,
+    logContent,
+    error: pubsubError,
+    lastUpdatedAt,
+  } = useTaskLog(taskId ?? "", isActive, paused);
+
+  const taskStartMs =
+    timings.running?.getTime() ?? timings.claimed?.getTime() ?? null;
+
+  const resourceData = useMemo(() => {
+    if (!range) return fullResourceData;
+    return fullResourceData.filter(
+      (p) => p.time >= range.startMs && p.time <= range.endMs
+    );
+  }, [fullResourceData, range]);
+
+  const xDomain: [number, number] | undefined = range
+    ? [range.startMs, range.endMs]
+    : undefined;
 
   const volumeSeries = useMemo(() => {
     const locations = Array.from(
@@ -131,7 +159,7 @@ export default function TaskDetail() {
   }, [resourceData]);
 
   useEffect(() => {
-    if (activeTab === "log")
+    if (activeTab === "log" && isNearBottomRef.current)
       logBottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [logContent, activeTab]);
 
@@ -261,9 +289,11 @@ export default function TaskDetail() {
             dockerImage={taskInfo?.dockerImage ?? ""}
             logPath={taskInfo?.logPath ?? ""}
             resultPath={taskInfo?.resultPath ?? ""}
+            vmConsoleUrl={taskInfo?.vmConsoleUrl ?? ""}
             exitCode={taskInfo?.exitCode ?? null}
             failureReason={taskInfo?.failureReason ?? ""}
             labels={taskInfo?.labels ?? []}
+            workpoolId={taskInfo?.workpoolId ?? ""}
             resourceUsage={taskInfo?.resourceUsage ?? null}
             timings={timings}
             status={status}
@@ -275,6 +305,18 @@ export default function TaskDetail() {
       )}
 
       {/* Metrics tab */}
+      {activeTab === "metrics" && (
+        <div style={{ marginBottom: "1.25rem" }}>
+          <RangeRefreshBar
+            anchorLabel="Task start"
+            anchorMs={taskStartMs}
+            lastUpdatedAt={lastUpdatedAt}
+            onChange={setRange}
+            live={live}
+            onLiveChange={setLive}
+          />
+        </div>
+      )}
       {activeTab === "metrics" && resourceData.length > 0 && (
         <div
           style={{
@@ -289,6 +331,7 @@ export default function TaskDetail() {
             title="CPU Breakdown (% of one core)"
             yLabel="%/core"
             stacked
+            xDomain={xDomain}
             series={[
               { key: "cpuUser", label: "user", color: "#1976d2" },
               { key: "cpuSystem", label: "system", color: "#e53935" },
@@ -300,8 +343,8 @@ export default function TaskDetail() {
             data={resourceData}
             title="Process Memory"
             yLabel="GB"
+            xDomain={xDomain}
             series={[
-              { key: "totalMemoryGb", label: "virtual", color: "#7c4dff" },
               { key: "totalResidentGb", label: "resident", color: "#ab47bc" },
               { key: "totalDataGb", label: "data", color: "#42a5f5" },
               { key: "totalSharedGb", label: "shared", color: "#80cbc4" },
@@ -311,6 +354,7 @@ export default function TaskDetail() {
             data={resourceData}
             title="System Memory"
             yLabel="GB"
+            xDomain={xDomain}
             series={[
               { key: "memTotalGb", label: "total", color: "#bdbdbd" },
               { key: "memAvailableGb", label: "available", color: "#43a047" },
@@ -321,6 +365,7 @@ export default function TaskDetail() {
             data={resourceData}
             title="Memory Pressure"
             yLabel="%"
+            xDomain={xDomain}
             series={[
               {
                 key: "memPressureSomeAvg10",
@@ -338,6 +383,7 @@ export default function TaskDetail() {
             data={resourceData}
             title="Process Count"
             yLabel="procs"
+            xDomain={xDomain}
             series={[
               { key: "processCount", label: "processes", color: "#5c6bc0" },
             ]}
@@ -348,6 +394,7 @@ export default function TaskDetail() {
                 data={vs.data}
                 title={`Disk: ${vs.location}`}
                 yLabel="GB"
+                xDomain={xDomain}
                 series={[
                   { key: "totalGb", label: "total", color: "#bdbdbd" },
                   { key: "usedGb", label: "used", color: "#f4511e" },
@@ -372,12 +419,24 @@ export default function TaskDetail() {
       {/* Log tab */}
       {activeTab === "log" && (
         <div style={{ marginBottom: "2rem" }}>
+          <div style={{ marginBottom: "0.75rem" }}>
+            <RefreshToggle
+              live={live}
+              onToggle={() => setLive(!live)}
+              lastUpdatedAt={lastUpdatedAt}
+            />
+          </div>
           <div
+            onScroll={(e) => {
+              const el = e.currentTarget;
+              isNearBottomRef.current =
+                el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+            }}
             style={{
               background: "#282c34",
               borderRadius: 8,
               padding: "1rem",
-              fontFamily: '"JetBrains Mono", "Fira Mono", monospace',
+              fontFamily: MONO,
               fontSize: "0.8rem",
               lineHeight: 1.6,
               height: 420,

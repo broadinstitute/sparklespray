@@ -9,3 +9,44 @@ Add UI pages for:
 On workpool summary tile:
 - Add current workers and expected workers
 - Add timeline (fixed to last 10 minutes. Likely will want to move to configurable window of time)
+
+Make long log output gracefully handled. (Maybe make a common timeline control for what region of time we're viewing)
+Various reported metrics all look wrong. specifically: CPU and memory. (Maybe drop proccess count)
+
+Worker and batchapirequest status seem like they might be acting funny.
+
+I think I saw us request 2 workers when we only needed one.
+
+Keep an eye on latency between job submission and start
+
+The link to the task output shouldn't be visible until after task completion
+
+Add a link on task page to worker which owns the task. Add a link on worker to vm instance on compute page.
+
+Various tables (workers, batchapirequests) should sort by create date
+
+
+On the task details page make the following changes:
+1. only show the link to the log if the task is in a terminal state
+2. Add a link to the workpool page for the workpool associated with this task]
+
+
+Define job submission file format
+
+Fix metrics (test on hermit machine)
+- CPU (Currently % of capacity, but would like % of 1 core)
+- Memory (Verify this is working)
+- Verify disk usage computed right?
+- Maybe just make a plot of resident memory usage?
+- Replace completed metrics with those computed from sampling
+   - mean CPU time
+   - mean resident size
+   - max RSS
+   - max disk usage?
+
+lingering worker not working
+
+Add output location to tasks
+
+define job spec
+

@@ -845,13 +845,31 @@ func startWorker(ctx context.Context, project, db, workerID, workpoolID, batchID
 
 	var instanceName string
 	if !noGCP {
-		instanceName, err = metadata.InstanceNameWithContext(ctx)
+		instanceProject, err := metadata.ProjectIDWithContext(ctx)
+		if err != nil {
+			psClient.Close()
+			fsClient.Close()
+			gcsClient.Close()
+			return nil, fmt.Errorf("reading project ID from metadata server: %w", err)
+		}
+
+		zone, err := metadata.ZoneWithContext(ctx)
+		if err != nil {
+			psClient.Close()
+			fsClient.Close()
+			gcsClient.Close()
+			return nil, fmt.Errorf("reading zone from metadata server: %w", err)
+		}
+
+		instance, err := metadata.InstanceNameWithContext(ctx)
 		if err != nil {
 			psClient.Close()
 			fsClient.Close()
 			gcsClient.Close()
 			return nil, fmt.Errorf("reading instance name from metadata server: %w", err)
 		}
+
+		instanceName = fmt.Sprintf("project/%s/zone/%s/instance/%s", instanceProject, zone, instance)
 	}
 
 	now := time.Now()

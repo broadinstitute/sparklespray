@@ -653,6 +653,26 @@ func (f *FakeWorkPoolSummaryStore) SaveHistory(_ context.Context, h *WorkPoolSum
 	return nil
 }
 
+func (f *FakeWorkPoolSummaryStore) ListIdle(_ context.Context) ([]*WorkPoolSummary, error) {
+	var idle []*WorkPoolSummary
+	for _, s := range f.Summaries {
+		if s.State == WorkPoolStatusIdle {
+			idle = append(idle, s)
+		}
+	}
+	return idle, nil
+}
+
+func (f *FakeWorkPoolSummaryStore) Delete(_ context.Context, workpoolID string) error {
+	for i, s := range f.Summaries {
+		if s.WorkpoolID == workpoolID {
+			f.Summaries = append(f.Summaries[:i], f.Summaries[i+1:]...)
+			return nil
+		}
+	}
+	return nil
+}
+
 // ---- FakeEventStore ----
 
 type FakeEventStore struct {

@@ -2,8 +2,9 @@ import { useState, useEffect } from "react";
 import { useParams, Link } from "react-router-dom";
 import type { WorkerRecord } from "./WorkPoolDetail";
 import { StatusBadge } from "./WorkPoolDetail";
+import { RefreshToggle } from "../components/RefreshControls";
 
-const MONO = "'JetBrains Mono', 'Courier New', monospace";
+const MONO = "'IBM Plex Mono', monospace";
 
 const WORKER_COLORS: Record<string, string> = {
   started: "#2e7d32",
@@ -35,17 +36,24 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
-function useWorker(workerId: string | undefined): WorkerRecord | undefined {
+function useWorker(
+  workerId: string | undefined,
+  active: boolean
+): { worker: WorkerRecord | undefined; lastUpdatedAt: number | null } {
   const [worker, setWorker] = useState<WorkerRecord | undefined>();
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
   useEffect(() => {
-    if (!workerId) return;
+    if (!workerId || !active) return;
     let cancelled = false;
     const poll = async () => {
       try {
         const r = await fetch(`/api/v1/worker/${workerId}`);
         if (!r.ok || cancelled) return;
         const data = await r.json();
-        if (!cancelled) setWorker(data);
+        if (!cancelled) {
+          setWorker(data);
+          setLastUpdatedAt(Date.now());
+        }
       } catch (_) {}
     };
     poll();
@@ -54,8 +62,8 @@ function useWorker(workerId: string | undefined): WorkerRecord | undefined {
       cancelled = true;
       clearInterval(id);
     };
-  }, [workerId]);
-  return worker;
+  }, [workerId, active]);
+  return { worker, lastUpdatedAt };
 }
 
 export default function WorkerDetail() {
@@ -63,7 +71,8 @@ export default function WorkerDetail() {
     workpoolId: string;
     workerId: string;
   }>();
-  const worker = useWorker(workerId);
+  const [live, setLive] = useState(true);
+  const { worker, lastUpdatedAt } = useWorker(workerId, live);
   const dash = <span style={{ color: "#ccc" }}>—</span>;
 
   return (
@@ -86,9 +95,23 @@ export default function WorkerDetail() {
         <span style={{ color: "#555" }}>{workerId}</span>
       </div>
 
-      <h1 style={{ margin: "0 0 1.5rem", fontSize: "1.1rem", fontWeight: 700 }}>
-        Worker
-      </h1>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          marginBottom: "1.5rem",
+        }}
+      >
+        <h1 style={{ margin: 0, fontSize: "1.1rem", fontWeight: 700 }}>
+          Worker
+        </h1>
+        <RefreshToggle
+          live={live}
+          onToggle={() => setLive(!live)}
+          lastUpdatedAt={lastUpdatedAt}
+        />
+      </div>
 
       {!worker ? (
         <div style={{ color: "#aaa" }}>Loading…</div>

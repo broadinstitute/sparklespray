@@ -715,6 +715,35 @@ func (s *FirestoreWorkPoolSummaryStore) SaveHistory(ctx context.Context, history
 	return err
 }
 
+func (s *FirestoreWorkPoolSummaryStore) ListIdle(ctx context.Context) ([]*WorkPoolSummary, error) {
+	iter := s.fs.Collection(workPoolSummaryCollection).
+		Where("state", "==", string(WorkPoolStatusIdle)).
+		Documents(ctx)
+
+	var summaries []*WorkPoolSummary
+	for {
+		snap, err := iter.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		var doc WorkPoolSummary
+		if err := snap.DataTo(&doc); err != nil {
+			return nil, err
+		}
+		cp := doc
+		summaries = append(summaries, &cp)
+	}
+	return summaries, nil
+}
+
+func (s *FirestoreWorkPoolSummaryStore) Delete(ctx context.Context, workpoolID string) error {
+	_, err := s.fs.Collection(workPoolSummaryCollection).Doc(workpoolID).Delete(ctx)
+	return err
+}
+
 // ----- FirestoreEventStore -----
 
 type FirestoreEventStore struct {

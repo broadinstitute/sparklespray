@@ -3,8 +3,12 @@ import { useParams, useLocation, Link } from "react-router-dom";
 import type { WorkPoolDetail, WorkPoolSummaryHistoryEntry } from "../types";
 import MultiLineChart from "../components/MultiLineChart";
 import TabBar from "../components/TabBar";
+import { RangeRefreshBar } from "../components/RefreshControls";
+import type { RangeChange } from "../components/RefreshControls";
+import JobsTable from "../components/JobsTable";
+import type { JobsTableRow } from "../components/JobsTable";
 
-const MONO = "'JetBrains Mono', 'Courier New', monospace";
+const MONO = "'IBM Plex Mono', monospace";
 
 // ── Status colours ────────────────────────────────────────────────────────────
 
@@ -68,11 +72,12 @@ function formatTime(ms: number): string {
 // ── Data hooks ────────────────────────────────────────────────────────────────
 
 function useWorkPoolDetail(
-  workpoolId: string | undefined
+  workpoolId: string | undefined,
+  active: boolean
 ): WorkPoolDetail | undefined {
   const [detail, setDetail] = useState<WorkPoolDetail | undefined>();
   useEffect(() => {
-    if (!workpoolId) return;
+    if (!workpoolId || !active) return;
     let cancelled = false;
     const poll = async () => {
       try {
@@ -88,23 +93,28 @@ function useWorkPoolDetail(
       cancelled = true;
       clearInterval(id);
     };
-  }, [workpoolId]);
+  }, [workpoolId, active]);
   return detail;
 }
 
 function useWorkPoolSummaryHistory(
-  workpoolId: string | undefined
-): WorkPoolSummaryHistoryEntry[] {
+  workpoolId: string | undefined,
+  active: boolean
+): { history: WorkPoolSummaryHistoryEntry[]; lastUpdatedAt: number | null } {
   const [history, setHistory] = useState<WorkPoolSummaryHistoryEntry[]>([]);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
   useEffect(() => {
-    if (!workpoolId) return;
+    if (!workpoolId || !active) return;
     let cancelled = false;
     const poll = async () => {
       try {
         const r = await fetch(`/api/v1/workpool/${workpoolId}/summary-history`);
         if (!r.ok || cancelled) return;
         const data = await r.json();
-        if (!cancelled) setHistory(data);
+        if (!cancelled) {
+          setHistory(data);
+          setLastUpdatedAt(Date.now());
+        }
       } catch (_) {}
     };
     poll();
@@ -113,8 +123,8 @@ function useWorkPoolSummaryHistory(
       cancelled = true;
       clearInterval(id);
     };
-  }, [workpoolId]);
-  return history;
+  }, [workpoolId, active]);
+  return { history, lastUpdatedAt };
 }
 
 function useWorkers(
@@ -511,15 +521,41 @@ function WorkPoolPropertiesPanel({
   );
 }
 
-function OverviewTab({
-  workpoolId,
-  detail,
-  history,
-}: {
-  workpoolId: string;
-  detail: WorkPoolDetail | undefined;
-  history: WorkPoolSummaryHistoryEntry[];
-}) {
+function OverviewTab({ workpoolId }: { workpoolId: string }) {
+  const [range, setRange] = useState<RangeChange | null>(null);
+
+  const detail = useWorkPoolDetail(workpoolId, range?.live ?? true);
+  const { history: fullHistory, lastUpdatedAt } = useWorkPoolSummaryHistory(
+    workpoolId,
+    range?.live ?? true
+  );
+
+  const earliestMs = useMemo(
+    () =>
+      fullHistory.length > 0
+        ? new Date(fullHistory[0].timestamp).getTime()
+        : null,
+    [fullHistory]
+  );
+
+  // The most recent history entry's timestamp mirrors WorkPoolSummary.last_updated
+  // (the monitor writes both from the same value whenever it recomputes the summary).
+  const poolLastUpdatedMs = useMemo(
+    () =>
+      fullHistory.length > 0
+        ? new Date(fullHistory[fullHistory.length - 1].timestamp).getTime()
+        : null,
+    [fullHistory]
+  );
+
+  const history = useMemo(() => {
+    if (!range) return fullHistory;
+    return fullHistory.filter((h) => {
+      const t = new Date(h.timestamp).getTime();
+      return t >= range.startMs && t <= range.endMs;
+    });
+  }, [fullHistory, range]);
+
   const {
     workerCounts,
     taskCounts,
@@ -540,97 +576,111 @@ function OverviewTab({
     color: TASK_COLORS[s] ?? "#888",
   }));
 
-  const hasCharts = workerCounts.length > 0;
-
-  // suppress unused warning
-  void workpoolId;
+  const hasCharts = fullHistory.length > 0;
+  const xDomain: [number, number] | undefined = range
+    ? [range.startMs, range.endMs]
+    : undefined;
 
   return (
-    <div style={{ display: "flex", gap: "1.5rem", alignItems: "flex-start" }}>
-      <WorkPoolPropertiesPanel detail={detail} />
+    <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
+      <RangeRefreshBar
+        anchorLabel="Pool start"
+        anchorMs={earliestMs}
+        endAnchorLabel="Pool end"
+        endAnchorMs={poolLastUpdatedMs}
+        lastUpdatedAt={lastUpdatedAt}
+        onChange={setRange}
+      />
 
-      <div style={{ flex: 1, minWidth: 0 }}>
-        {hasCharts ? (
-          <div
-            style={{
-              background: "#f8f9fa",
-              border: "1px solid #e0e0e0",
-              borderRadius: 8,
-              padding: "1rem 1.5rem",
-            }}
-          >
-            <MultiLineChart
-              data={workerCounts}
-              title="Workers"
-              yLabel="workers"
-              stacked
-              series={[
-                {
-                  key: "started_preemptible",
-                  label: "Started (preemptible)",
-                  color: "#6a1b9a",
-                },
-                {
-                  key: "started_nonpreemptible",
-                  label: "Started (non-preemptible)",
-                  color: "#1565c0",
-                },
-                {
-                  key: "pending_preemptible",
-                  label: "Pending (preemptible)",
-                  color: "#ce93d8",
-                },
-                {
-                  key: "pending_nonpreemptible",
-                  label: "Pending (non-preemptible)",
-                  color: "#90caf9",
-                },
-              ]}
-            />
-            <div style={{ height: "1.25rem" }} />
-            {taskSeriesConfig.length > 0 && (
-              <>
-                <MultiLineChart
-                  data={taskCounts}
-                  title="Tasks by Status"
-                  yLabel="tasks"
-                  stacked
-                  series={taskSeriesConfig}
-                />
-                <div style={{ height: "1.25rem" }} />
-              </>
-            )}
-            {terminalDeltaSeriesConfig.length > 0 &&
-              taskTerminalDeltas.length > 0 && (
+      <div style={{ display: "flex", gap: "1.5rem", alignItems: "flex-start" }}>
+        <WorkPoolPropertiesPanel detail={detail} />
+
+        <div style={{ flex: 1, minWidth: 0 }}>
+          {hasCharts ? (
+            <div
+              style={{
+                background: "#f8f9fa",
+                border: "1px solid #e0e0e0",
+                borderRadius: 8,
+                padding: "1rem 1.5rem",
+              }}
+            >
+              <MultiLineChart
+                data={workerCounts}
+                title="Workers"
+                yLabel="workers"
+                stacked
+                xDomain={xDomain}
+                series={[
+                  {
+                    key: "started_preemptible",
+                    label: "Started (preemptible)",
+                    color: "#6a1b9a",
+                  },
+                  {
+                    key: "started_nonpreemptible",
+                    label: "Started (non-preemptible)",
+                    color: "#1565c0",
+                  },
+                  {
+                    key: "pending_preemptible",
+                    label: "Pending (preemptible)",
+                    color: "#ce93d8",
+                  },
+                  {
+                    key: "pending_nonpreemptible",
+                    label: "Pending (non-preemptible)",
+                    color: "#90caf9",
+                  },
+                ]}
+              />
+              <div style={{ height: "1.25rem" }} />
+              {taskSeriesConfig.length > 0 && (
                 <>
                   <MultiLineChart
-                    data={taskTerminalDeltas}
-                    title="Task Completions per Interval"
+                    data={taskCounts}
+                    title="Tasks by Status"
                     yLabel="tasks"
                     stacked
-                    series={terminalDeltaSeriesConfig}
+                    xDomain={xDomain}
+                    series={taskSeriesConfig}
                   />
                   <div style={{ height: "1.25rem" }} />
                 </>
               )}
-          </div>
-        ) : (
-          <div
-            style={{
-              background: "#f8f9fa",
-              border: "1px solid #e0e0e0",
-              borderRadius: 8,
-              padding: "2rem",
-              color: "#aaa",
-              fontFamily: MONO,
-              fontSize: "0.85rem",
-              textAlign: "center",
-            }}
-          >
-            No history data yet. Charts will appear once the workpool summary
-            history is populated.
-          </div>
-        )}
+              {terminalDeltaSeriesConfig.length > 0 &&
+                taskTerminalDeltas.length > 0 && (
+                  <>
+                    <MultiLineChart
+                      data={taskTerminalDeltas}
+                      title="Task Completions per Interval"
+                      yLabel="tasks"
+                      stacked
+                      xDomain={xDomain}
+                      series={terminalDeltaSeriesConfig}
+                    />
+                    <div style={{ height: "1.25rem" }} />
+                  </>
+                )}
+            </div>
+          ) : (
+            <div
+              style={{
+                background: "#f8f9fa",
+                border: "1px solid #e0e0e0",
+                borderRadius: 8,
+                padding: "2rem",
+                color: "#aaa",
+                fontFamily: MONO,
+                fontSize: "0.85rem",
+                textAlign: "center",
+              }}
+            >
+              No history data yet. Charts will appear once the workpool summary
+              history is populated.
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -808,150 +858,18 @@ function BatchesTab({ workpoolId }: { workpoolId: string }) {
 
 // ── Jobs tab ──────────────────────────────────────────────────────────────────
 
-const JOB_STATE_COLORS: Record<string, string> = {
-  pending: "#1565c0",
-  running: "#6a1b9a",
-  success: "#00695c",
-  error: "#bf360c",
-  failed: "#b71c1c",
-  killed: "#555555",
-};
-
-const ACTIVE_TASK_STATES = new Set([
-  "pending",
-  "claimed",
-  "running",
-  "writing",
-]);
-
-function jobTaskSummary(
-  tasks: { state: string; count: number }[]
-): {
-  active: number;
-  ok: number;
-  fail: number;
-} {
-  let active = 0,
-    ok = 0,
-    fail = 0;
-  for (const t of tasks) {
-    if (ACTIVE_TASK_STATES.has(t.state)) active += t.count;
-    else if (t.state === "success") ok += t.count;
-    else if (
-      t.state === "error" ||
-      t.state === "failed" ||
-      t.state === "killed"
-    )
-      fail += t.count;
-  }
-  return { active, ok, fail };
-}
-
 function JobsTab({ workpoolId }: { workpoolId: string }) {
   const jobs = useJobs(workpoolId, true);
 
-  return (
-    <div
-      style={{
-        border: "1px solid #e0e0e0",
-        borderRadius: 8,
-        overflow: "hidden",
-      }}
-    >
-      <table style={{ width: "100%", borderCollapse: "collapse" }}>
-        <thead>
-          <tr>
-            <th style={TH_STYLE}>Job ID</th>
-            <th style={TH_STYLE}>State</th>
-            <th style={TH_STYLE}>Created</th>
-            <th style={{ ...TH_STYLE, textAlign: "right" }}>
-              active / ok / fail
-            </th>
-            <th style={TH_STYLE}>Labels</th>
-          </tr>
-        </thead>
-        <tbody>
-          {jobs.length === 0 && (
-            <tr>
-              <td
-                colSpan={5}
-                style={{
-                  ...TD_STYLE,
-                  color: "#aaa",
-                  textAlign: "center",
-                  padding: "2rem",
-                }}
-              >
-                No jobs found.
-              </td>
-            </tr>
-          )}
-          {jobs.map((j, i) => {
-            const { active, ok, fail } = jobTaskSummary(j.tasks);
-            const chipColor =
-              fail > 0
-                ? "#b71c1c"
-                : active > 0
-                ? "#6a1b9a"
-                : ok > 0
-                ? "#2e7d32"
-                : "#aaa";
-            return (
-              <tr
-                key={j.job_id}
-                style={{ background: i % 2 === 0 ? "#fff" : "#fafafa" }}
-              >
-                <td style={TD_STYLE}>
-                  <Link
-                    to={`/jobs/${j.job_id}`}
-                    style={{ color: "#1565c0", textDecoration: "none" }}
-                  >
-                    {j.job_id}
-                  </Link>
-                </td>
-                <td style={TD_STYLE}>
-                  <StatusBadge status={j.state} colorMap={JOB_STATE_COLORS} />
-                </td>
-                <td style={{ ...TD_STYLE, color: "#777" }}>
-                  {new Date(j.created_at).toLocaleString()}
-                </td>
-                <td style={{ ...TD_STYLE, textAlign: "right" }}>
-                  <span
-                    style={{
-                      fontFamily: MONO,
-                      fontSize: "0.78rem",
-                      color: chipColor,
-                    }}
-                  >
-                    {active} / {ok} / {fail}
-                  </span>
-                </td>
-                <td style={TD_STYLE}>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-                    {j.labels.map((l) => (
-                      <span
-                        key={l.name}
-                        style={{
-                          background: "#f0f0f0",
-                          color: "#555",
-                          borderRadius: 3,
-                          padding: "1px 6px",
-                          fontSize: "0.72rem",
-                          fontFamily: MONO,
-                        }}
-                      >
-                        {l.name}={l.value}
-                      </span>
-                    ))}
-                  </div>
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
-  );
+  const rows: JobsTableRow[] = jobs.map((j) => ({
+    job_id: j.job_id,
+    workpool_id: j.workpool_id,
+    created_at: j.created_at,
+    tasks: j.tasks,
+    metadata: Object.fromEntries(j.labels.map((l) => [l.name, l.value])),
+  }));
+
+  return <JobsTable jobs={rows} emptyMessage="No jobs found." />;
 }
 
 // ── Main page ─────────────────────────────────────────────────────────────────
@@ -964,9 +882,6 @@ export default function WorkPoolDetailPage() {
   const isBatches = location.pathname.endsWith("/batches");
   const isJobs = location.pathname.endsWith("/jobs");
   const isOverview = !isWorkers && !isBatches && !isJobs;
-
-  const detail = useWorkPoolDetail(workpoolId);
-  const history = useWorkPoolSummaryHistory(workpoolId);
 
   if (!workpoolId) {
     return (
@@ -1003,13 +918,7 @@ export default function WorkPoolDetailPage() {
 
       <TabBar tabs={tabs} />
 
-      {isOverview && (
-        <OverviewTab
-          workpoolId={workpoolId}
-          detail={detail}
-          history={history}
-        />
-      )}
+      {isOverview && <OverviewTab workpoolId={workpoolId} />}
       {isWorkers && <WorkersTab workpoolId={workpoolId} />}
       {isBatches && <BatchesTab workpoolId={workpoolId} />}
       {isJobs && <JobsTab workpoolId={workpoolId} />}

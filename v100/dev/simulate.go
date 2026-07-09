@@ -215,12 +215,13 @@ func runSimJobSubmitter(ctx context.Context, cfg simConfig, fsClient *firestore.
 		}
 
 		summary := &monitor.JobSummary{
-			JobID:      jobID,
-			WorkpoolID: cfg.workpoolID,
-			CreatedAt:  now,
-			Expiry:     now.Add(7 * 24 * time.Hour),
-			State:      monitor.JobStatusPending,
-			Tasks:      []monitor.StateCount{{State: "pending", Count: cfg.tasksPerJob}},
+			JobID:       jobID,
+			WorkpoolID:  cfg.workpoolID,
+			CreatedAt:   now,
+			Expiry:      now.Add(7 * 24 * time.Hour),
+			LastUpdated: now,
+			State:       monitor.JobStatusPending,
+			Tasks:       []monitor.StateCount{{State: "pending", Count: cfg.tasksPerJob}},
 		}
 		if err := jobSummaries.Create(ctx, summary); err != nil {
 			log.Printf("simulate: creating job summary for %s: %v", jobID, err)

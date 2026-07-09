@@ -68,22 +68,37 @@ function toResourceDataPoint(msg: ResourceUsageUpdate): ResourceDataPoint {
   };
 }
 
+function mergeResourceData(
+  prev: ResourceDataPoint[],
+  incoming: ResourceDataPoint[]
+): ResourceDataPoint[] {
+  const byTime = new Map<number, ResourceDataPoint>();
+  for (const p of prev) byTime.set(p.time, p);
+  for (const p of incoming) byTime.set(p.time, p);
+  return Array.from(byTime.values()).sort((a, b) => a.time - b.time);
+}
+
 const MAX_FAILURES = 10;
 
 export function useTaskLog(
   taskId: string,
-  isActive: boolean
+  isActive: boolean,
+  paused = false
 ): {
   resourceData: ResourceDataPoint[];
   logContent: string;
   error: string | null;
+  lastUpdatedAt: number | null;
 } {
   const [resourceData, setResourceData] = useState<ResourceDataPoint[]>([]);
   const [logContent, setLogContent] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
   const cancelledRef = useRef(false);
   const cursorRef = useRef<string | null>(null);
   const streamActivatedRef = useRef(false);
+  const pausedRef = useRef(paused);
+  pausedRef.current = paused;
 
   useEffect(() => {
     cancelledRef.current = false;
@@ -103,6 +118,10 @@ export function useTaskLog(
       let failures = 0;
 
       while (!cancelledRef.current) {
+        if (pausedRef.current) {
+          await new Promise<void>((r) => setTimeout(r, 5_000));
+          continue;
+        }
         try {
           const params = new URLSearchParams({
             types: "log_update,metric_update",
@@ -128,6 +147,7 @@ export function useTaskLog(
               );
             } else if (entry.type === "log_update") {
               const lu = entry as LogStreamUpdate;
+              if (!lu.content) continue;
               const ts = new Date(lu.timestamp).toLocaleTimeString("en-US", {
                 hour: "2-digit",
                 minute: "2-digit",
@@ -140,11 +160,12 @@ export function useTaskLog(
           if (data.next_after) cursorRef.current = data.next_after;
 
           if (newMetrics.length > 0) {
-            setResourceData((prev) => [...prev, ...newMetrics]);
+            setResourceData((prev) => mergeResourceData(prev, newMetrics));
           }
           if (newLog) {
             setLogContent((prev) => prev + newLog);
           }
+          setLastUpdatedAt(Date.now());
 
           // Finished tasks won't produce any more entries — fetch once and stop.
           if (!isActive) break;
@@ -159,7 +180,7 @@ export function useTaskLog(
         }
 
         if (!cancelledRef.current) {
-          await new Promise<void>((r) => setTimeout(r, 2_000));
+          await new Promise<void>((r) => setTimeout(r, 5_000));
         }
       }
     }
@@ -179,5 +200,5 @@ export function useTaskLog(
     streamActivatedRef.current = false;
   }, [taskId]);
 
-  return { resourceData, logContent, error };
+  return { resourceData, logContent, error, lastUpdatedAt };
 }

@@ -16,7 +16,7 @@ export default function TabBar({ tabs }: { tabs: TabItem[] }) {
         gap: 0,
         borderBottom: "2px solid #e0e0e0",
         marginBottom: "1.5rem",
-        fontFamily: "'JetBrains Mono', monospace",
+        fontFamily: "'IBM Plex Mono', monospace",
       }}
     >
       {tabs.map((tab) => {

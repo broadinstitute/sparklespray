@@ -257,13 +257,14 @@ func devSubmit(jobSpecFile, workpoolSpecFile, project, db, gcsPrefix string) err
 	// Create the initial JobSummary so the monitor's job-summary poll can track it.
 	summaryStore := monitor.NewFirestoreJobSummaryStore(fsClient)
 	if err := summaryStore.Create(ctx, &monitor.JobSummary{
-		JobID:      jobID,
-		WorkpoolID: workpoolID,
-		CreatedAt:  now,
-		Expiry:     now.Add(7 * 24 * time.Hour),
-		State:      monitor.JobStatusPending,
-		Tasks:      []monitor.StateCount{{State: "pending", Count: len(jobSpec.Tasks)}},
-		Labels:     toMonitorLabels(jobSpec.Labels),
+		JobID:       jobID,
+		WorkpoolID:  workpoolID,
+		CreatedAt:   now,
+		Expiry:      now.Add(7 * 24 * time.Hour),
+		LastUpdated: now,
+		State:       monitor.JobStatusPending,
+		Tasks:       []monitor.StateCount{{State: "pending", Count: len(jobSpec.Tasks)}},
+		Labels:      toMonitorLabels(jobSpec.Labels),
 	}); err != nil {
 		return fmt.Errorf("creating job summary: %w", err)
 	}

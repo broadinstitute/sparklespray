@@ -63,6 +63,7 @@ export interface BackendJobSummary {
 
 export interface JobDetail {
   job_id: string;
+  name: string;
   workpool_id: string;
   created_at: string;
   task_count: number;

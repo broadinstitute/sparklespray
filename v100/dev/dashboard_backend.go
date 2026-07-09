@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -779,7 +780,12 @@ type taskResponse struct {
 	Labels         []labelResponse        `json:"labels"`
 	ExitCode       *int                   `json:"exit_code,omitempty"`
 	ResourceUsage  *resourceUsageResponse `json:"resource_usage,omitempty"`
+	VMConsoleURL   string                 `json:"vm_console_url,omitempty"`
 }
+
+// instanceNameRe parses the custom "project/<project>/zone/<zone>/instance/<instance>"
+// format written into WorkerRecord.InstanceName (see worker.go).
+var instanceNameRe = regexp.MustCompile(`^project/([^/]+)/zone/([^/]+)/instance/([^/]+)$`)
 
 type taskSummaryResponse struct {
 	TaskID        string                 `json:"task_id"`
@@ -844,6 +850,21 @@ func (s *dashboardServer) handleGetTask(w http.ResponseWriter, r *http.Request) 
 			BlockWriteBytes: ru.BlockWriteBytes,
 			ExitCode:        ru.ExitCode,
 			OOMKilled:       ru.OOMKilled,
+		}
+	}
+	if task.OwningWorkerID != "" {
+		if wsnap, werr := s.fs.Collection("Workers").Doc(task.OwningWorkerID).Get(ctx); werr == nil {
+			var wr v100.WorkerRecord
+			if derr := wsnap.DataTo(&wr); derr == nil {
+				if m := instanceNameRe.FindStringSubmatch(wr.InstanceName); m != nil {
+					resp.VMConsoleURL = fmt.Sprintf(
+						"https://console.cloud.google.com/compute/instancesDetail/zones/%s/instances/%s?project=%s",
+						m[2], m[3], m[1],
+					)
+				}
+			}
+		} else if grpcstatus.Code(werr) != codes.NotFound {
+			log.Printf("dashboard: GetTask %s: lookup worker %s: %v", taskID, task.OwningWorkerID, werr)
 		}
 	}
 	writeJSON(w, http.StatusOK, resp)

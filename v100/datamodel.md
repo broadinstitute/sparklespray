@@ -345,15 +345,16 @@ One document per job, keyed by `job_id`. This is the **mutable** counterpart to 
 
 Any question about job progress — "is this job still running?", "how many tasks failed?" — should be answered by reading `JobSummary`, not by scanning `Tasks` or adding derived fields to `Jobs`.
 
-| Field         | Type         | Description                                                                              |
-| ------------- | ------------ | ---------------------------------------------------------------------------------------- |
-| `job_id`      | string       | ID of the job this summary describes                                                     |
-| `workpool_id` | string       | Workpool the job is running in                                                           |
-| `created_at`  | timestamp    | When the job was submitted (copied from `Jobs.created_at` at submission time)            |
-| `expiry`      | timestamp    | When this document may be garbage-collected                                              |
-| `state`       | string       | Rolled-up job state — see table below                                                    |
-| `tasks`       | []StateCount | Task counts grouped by state; one entry per non-zero state                               |
-| `labels`      | []Label      | User-defined tags (copied from `Jobs.labels` at submission time; not updated thereafter) |
+| Field          | Type         | Description                                                                              |
+| -------------- | ------------ | ---------------------------------------------------------------------------------------- |
+| `job_id`       | string       | ID of the job this summary describes                                                     |
+| `workpool_id`  | string       | Workpool the job is running in                                                           |
+| `created_at`   | timestamp    | When the job was submitted (copied from `Jobs.created_at` at submission time)            |
+| `expiry`       | timestamp    | When this document may be garbage-collected                                              |
+| `last_updated` | timestamp    | When these fields were last recomputed by the monitor                                    |
+| `state`        | string       | Rolled-up job state — see table below                                                    |
+| `tasks`        | []StateCount | Task counts grouped by state; one entry per non-zero state                               |
+| `labels`       | []Label      | User-defined tags (copied from `Jobs.labels` at submission time; not updated thereafter) |
 
 **StateCount** (embedded object):
 
