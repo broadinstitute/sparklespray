@@ -1286,12 +1286,13 @@ sparkles sub -u train_mlp_sm.py -u data -u benchmark_train_mlp.py --gpu n --gpu_
 
 ## Running Workflows
 
-Sparkles now supports running multi-step workflows defined in JSON files. The workflow feature allows you to:
+Sparkles supports running multi-step workflows defined in JSON files. The workflow feature allows you to:
 
 - Define a sequence of steps to be executed in order
-- Specify different Docker images for each step
-- Pass parameters between steps
+- Specify different Docker images and machine types for each step
+- Pass parameters and files between steps
 - Fan out execution using CSV parameter files
+- Write a summary file once all steps complete
 
 ### Usage
 
@@ -1301,21 +1302,45 @@ sparkles workflow run JOB_NAME WORKFLOW_DEFINITION_FILE [options]
 
 #### Arguments:
 
-- `JOB_NAME`: A name for your workflow job
+- `JOB_NAME`: A name for your workflow job. Each step becomes its own sparkles job named `JOB_NAME-N` (`N` is the 1-based step number).
 - `WORKFLOW_DEFINITION_FILE`: Path to a JSON file containing the workflow definition
 
 #### Options:
 
-- `--retry`: Retry any failed tasks
-- `--nodes N`: Maximum number of nodes to power on at one time
-- `--parameter VAR=VALUE` or `-p VAR=VALUE`: Define variables to be used in the workflow
+- `--retry`: If a step's job already exists and has failed tasks, reset those failed tasks to pending and re-run them instead of starting fresh.
+- `--nodes N`: Maximum number of worker nodes to power on at one time (passed straight through to each step's job).
+- `--parameter VAR=VALUE` or `-p VAR=VALUE`: Define a custom variable to use in variable expansion (see below). Can be repeated.
+- `--upload SRC` or `--upload SRC:DST` (`-u`): Upload a local file to make it available for a step's `files_to_localize` list. `SRC` is the local path; `DST` is the name it's referenced by in `files_to_localize` and stored as on the remote machine (defaults to `basename(SRC)` if omitted). Can be repeated.
+- `--image NAME` or `-i NAME`: Default Docker image for any step that doesn't set its own `image`.
+- `--machine-type TYPE` or `-m TYPE`: Default machine type for any step that doesn't set its own `machine_type`.
+- `--add-hash-to-job-id`: Append a hash of the uploaded files, `paths_to_localize` sources, parameters, image, and machine type onto `JOB_NAME`. This gives identical workflow invocations (same inputs) the same job id, so re-running with unchanged inputs resumes/reuses the existing jobs instead of starting new ones.
 
 ### Workflow Definition Format
 
-Workflows are defined in JSON files with the following structure:
+Workflows are defined in JSON files with the following top-level fields:
+
+| Field                | Type                            | Required | Description                                                                                                     |
+| --------------------- | -------------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------- |
+| `steps`              | list of step objects (below)     | yes      | The steps to run, in order.                                                                                     |
+| `files_to_localize`  | list of strings                  | no       | Destination filenames (matching `DST` names passed via `--upload`) to localize onto every step's worker. Merged with each step's own `files_to_localize`. |
+| `paths_to_localize`  | list of `{src, dst}` objects      | no       | Files to localize onto every step's worker, specified by source path directly in the JSON (no `--upload` needed). `src` supports variable expansion (e.g. to reference an earlier step's output path). Merged with each step's own `paths_to_localize`. |
+| `write_on_completion`| list of `{filename, expression}` | no       | Files to write once every step has finished successfully. See "Writing output on completion" below.            |
+
+Each entry in `steps` supports:
+
+| Field               | Type              | Required | Description                                                                                                  |
+| -------------------- | ------------------ | -------- | ---------------------------------------------------------------------------------------------------------- |
+| `command`           | list of strings    | yes      | The command to run (supports variable expansion in each element).                                          |
+| `image`             | string             | no       | Docker image for this step. Falls back to `--image`/`-i` if omitted.                                        |
+| `machine_type`      | string             | no       | Machine type for this step. Falls back to `--machine-type`/`-m` if omitted.                                 |
+| `parameters_csv`    | string             | no       | Path to a CSV file to fan out this step's execution (one task per row). Supports variable expansion.        |
+| `files_to_localize` | list of strings    | no       | Same as the top-level field, but only for this step; merged with the top-level list.                        |
+| `paths_to_localize` | list of `{src, dst}` objects | no | Same as the top-level field, but only for this step; merged with the top-level list.                        |
+| `run_local`         | boolean            | no       | Reserved for future use. **Do not set this to `true`** — running a step's command locally isn't implemented yet, and doing so currently aborts the whole workflow run with an error rather than being ignored. Defaults to `false`. |
 
 ```json
 {
+  "files_to_localize": ["shared_config.json"],
   "steps": [
     {
       "command": ["echo", "Hello {job_name}"],
@@ -1324,28 +1349,41 @@ Workflows are defined in JSON files with the following structure:
     },
     {
       "command": ["python", "process.py", "--input={prev_job_path}/output.txt"],
-      "image": "python:3.9"
+      "image": "python:3.9",
+      "machine_type": "n1-standard-4",
+      "paths_to_localize": [
+        {"src": "{step.1.job_path}/1/output.txt", "dst": "input.txt"}
+      ]
     }
+  ],
+  "write_on_completion": [
+    {"filename": "last_job.txt", "expression": "{prev_job_name}"}
   ]
 }
 ```
 
-Each step can include:
-
-- `command`: List of command arguments (supports variable expansion)
-- `image`: Docker image to use (optional)
-- `parameters_csv`: Path to a CSV file for fan-out execution (optional)
-- `run_local`: Boolean flag to run the command locally (currently not supported)
+Running this workflow with `sparkles workflow run my-job workflow.json -u shared_config.json` would upload `shared_config.json` locally so it can be localized onto every step's worker (since it's listed in the top-level `files_to_localize`).
 
 ### Variable Expansion
 
-The workflow system supports variable expansion in commands and parameter CSV paths:
+The workflow system expands `{variable}` references in a step's `command`, `parameters_csv`, and `paths_to_localize[].src`, as well as in `write_on_completion[].expression`:
 
-- `{job_name}`: Current job name
-- `{job_path}`: Path to the current job
-- `{prev_job_name}`: Previous step's job name
-- `{prev_job_path}`: Path to the previous step's job
-- Custom variables defined with `--parameter`
+- `{job_name}`: Current step's sub-job name (`JOB_NAME-N`)
+- `{job_path}`: Path to the current step's job output
+- `{prev_job_name}`: Previous step's sub-job name — undefined during the first step (referencing it there raises an error)
+- `{prev_job_path}`: Path to the previous step's job output — undefined during the first step
+- `{step.N.job_name}` / `{step.N.job_path}`: The sub-job name/path for step `N` specifically (1-based), letting a step reference *any* earlier (or later) step by number, not just the immediately preceding one
+- Any custom variable defined with `--parameter VAR=VALUE`
+- `{parameter.NAME}`: A special passthrough — inside a step's `command` (only), this is left as the literal text `{NAME}` instead of being expanded by the workflow engine. This lets you reference a column named `NAME` from that step's `parameters_csv`, which gets substituted per-task later when each CSV row's task actually runs, rather than once at workflow-expansion time. Note this passthrough does *not* apply inside `parameters_csv` or `write_on_completion[].expression` — referencing `{parameter.NAME}` there will raise an error since `parameter.NAME` isn't itself a variable.
+
+If a `{variable}` used in `command` or `parameters_csv` isn't defined, sparkles raises an error naming the offending step number.
+
+### Writing output on completion
+
+Once every step in the workflow finishes successfully, sparkles processes `write_on_completion` (if present) and writes one file per entry, using the final set of variables (including `prev_job_name`/`prev_job_path` from the last step and all `step.N.*` variables):
+
+- If `expression` is a string, it's variable-expanded (the same `{variable}` syntax as above) and written to `filename` verbatim.
+- If `expression` is a JSON object or array, every string value inside it is variable-expanded recursively, and the result is written to `filename` as JSON.
 
 ### Example
 
