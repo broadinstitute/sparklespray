@@ -8,10 +8,14 @@ def delete(
     cluster: Cluster,
     jq: JobQueue,
     job_id: str,
+    stop_cluster: bool = True,
 ):
-    cluster.stop_cluster()
-    jq.delete_job(job_id)
+    if stop_cluster:
+        cluster.stop_cluster()
+    # reap terminal Batch jobs before deleting the job record, since resolving the
+    # cluster id requires the job to still exist in the datastore
     cluster.delete_complete_requests()
+    jq.delete_job(job_id)
 
     return True
 

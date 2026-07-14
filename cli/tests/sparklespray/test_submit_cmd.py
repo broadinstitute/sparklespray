@@ -198,6 +198,71 @@ def test_submit_cmd_when_sub_job_exists_ignored_for_new_job(mock_watch, job_queu
 
 
 @patch("sparklespray.commands.submit.watch")
+def test_submit_cmd_reuses_cluster_when_env_unchanged(mock_watch, job_queue, mock_io, datastore_client, cluster_api, config, task_storage):
+    mock_watch.return_value = True
+
+    args = parse_args_for_test(["sub", "--name", "reuse-job", "--no-wait", "echo", "hi"])
+    assert submit_cmd(job_queue, mock_io, datastore_client, cluster_api, args, config) == 0
+
+    # resubmit with identical runtime config: the lingering cluster must be kept
+    with patch("sparklespray.commands.submit.delete") as mock_delete, patch(
+        "sparklespray.commands.submit.kill"
+    ) as mock_kill, patch("sparklespray.commands.submit.submit") as mock_submit:
+        args = parse_args_for_test(["sub", "--name", "reuse-job", "--no-wait", "echo", "hi"])
+        assert submit_cmd(job_queue, mock_io, datastore_client, cluster_api, args, config) == 0
+
+    mock_kill.assert_not_called()
+    mock_delete.assert_called_once()
+    assert mock_delete.call_args.kwargs.get("stop_cluster") is False
+    mock_submit.assert_called_once()
+
+
+@patch("sparklespray.commands.submit.watch")
+def test_submit_cmd_rebuilds_cluster_when_env_changes(mock_watch, job_queue, mock_io, datastore_client, cluster_api, config, task_storage):
+    mock_watch.return_value = True
+
+    args = parse_args_for_test(["sub", "--name", "rebuild-job", "--machine-type", "n1-standard-1", "--no-wait", "echo", "hi"])
+    assert submit_cmd(job_queue, mock_io, datastore_client, cluster_api, args, config) == 0
+
+    # resubmit with a different machine type (changes the cluster name): the old
+    # cluster must be torn down and rebuilt
+    with patch("sparklespray.commands.submit.delete") as mock_delete, patch(
+        "sparklespray.commands.submit.kill"
+    ) as mock_kill, patch("sparklespray.commands.submit.submit") as mock_submit:
+        args = parse_args_for_test(["sub", "--name", "rebuild-job", "--machine-type", "n1-standard-2", "--no-wait", "echo", "hi"])
+        assert submit_cmd(job_queue, mock_io, datastore_client, cluster_api, args, config) == 0
+
+    mock_kill.assert_called_once()
+    mock_delete.assert_called_once()
+    assert mock_delete.call_args.kwargs.get("stop_cluster") is True
+    mock_submit.assert_called_once()
+
+
+@patch("sparklespray.commands.submit.watch")
+def test_submit_cmd_rebuilds_cluster_when_non_env_cluster_input_changes(mock_watch, job_queue, mock_io, datastore_client, cluster_api, config, task_storage):
+    # work_root_dir feeds into the cluster name but was NOT part of the old
+    # image+machine_type env-hash, so this case only triggers a rebuild once the
+    # decision is based on the full cluster identity.
+    mock_watch.return_value = True
+
+    args = parse_args_for_test(["sub", "--name", "workdir-job", "--no-wait", "echo", "hi"])
+    assert submit_cmd(job_queue, mock_io, datastore_client, cluster_api, args, config) == 0
+
+    config.work_root_dir = "/mnt/disks/somewhere_else"
+
+    with patch("sparklespray.commands.submit.delete") as mock_delete, patch(
+        "sparklespray.commands.submit.kill"
+    ) as mock_kill, patch("sparklespray.commands.submit.submit") as mock_submit:
+        args = parse_args_for_test(["sub", "--name", "workdir-job", "--no-wait", "echo", "hi"])
+        assert submit_cmd(job_queue, mock_io, datastore_client, cluster_api, args, config) == 0
+
+    mock_kill.assert_called_once()
+    mock_delete.assert_called_once()
+    assert mock_delete.call_args.kwargs.get("stop_cluster") is True
+    mock_submit.assert_called_once()
+
+
+@patch("sparklespray.commands.submit.watch")
 def test_submit_cmd_with_seq_parameter(mock_watch, job_queue, mock_io, datastore_client, cluster_api, config, task_storage):
     # Setup mocks
     mock_watch.return_value = True

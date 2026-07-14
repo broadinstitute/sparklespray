@@ -177,6 +177,7 @@ def submit(
     config: SubmitConfig,
     datastore_client,
     cluster: Cluster,
+    cluster_name: str,
     metadata: Dict[str, str] = {},
     clean_if_exists: bool = False,
 ):
@@ -214,7 +215,6 @@ def submit(
 
     log.info("Submitting job with id: %s", job_id)
 
-    boot_volume = config.boot_volume
     default_url_prefix = config.default_url_prefix
 
     default_job_url_prefix = url_join(default_url_prefix, job_id)
@@ -230,17 +230,6 @@ def submit(
         task_spec_urls.append(url)
         command_result_urls.append(task["command_result_url"])
         log_urls.append(task["stdout_url"])
-
-    machine_specs = MachineSpec(
-        service_account_email=config.service_account_email,
-        boot_volume=boot_volume,
-        mounts=config.mounts,
-        work_root_dir=config.work_root_dir,
-        machine_type=config.machine_type,
-    )
-
-    image = config.image
-    cluster_name = _make_cluster_name(job_id, image, machine_specs, False)
 
     existing_job = jq.get_job_optional(job_id)
     if existing_job is not None:
@@ -701,26 +690,31 @@ def submit_cmd(
         config.debug_log_prefix,
     )
 
+    # the cluster name is a hash of everything that determines which VMs can run
+    # this job (image, machine type, mounts, boot volume, service account, sparkles
+    # version, ...). Two jobs with the same cluster name can share worker VMs.
+    machine_specs = MachineSpec(
+        service_account_email=config.service_account_email,
+        boot_volume=boot_volume,
+        mounts=config.mounts,
+        work_root_dir=config.work_root_dir,
+        machine_type=machine_type,
+    )
+    cluster_name = _make_cluster_name(job_id, image, machine_specs, False)
+
     # test to see if we already have such a job submitted, in which case, we don't want to do anything
     already_submitted = False
     needs_kill_before_submit = False
     spec_hash = compute_dict_hash(spec)
-    job_env_hash = compute_dict_hash(
-        dict(
-            # boot_volume_in_gb=boot_volume_in_gb,
-            image=spec["image"],
-            # kubequeconsume_exe_md5=kubequeconsume_exe_md5,
-            machine_type=machine_type,
-        )
-    )
-    metadata["job-env-sha256"] = job_env_hash
     metadata["job-spec-sha256"] = spec_hash
     existing_job = jq.get_job_optional(job_id=job_id)
     if existing_job:
         previous_spec_hash = existing_job.metadata.get("job-spec-sha256")
         if previous_spec_hash == spec_hash:
             already_submitted = True
-        if existing_job.metadata.get("job-env-sha256") != job_env_hash:
+        # if the resubmitted job would land on a different cluster than the existing
+        # one, its lingering workers can't be reused -- tear the old cluster down.
+        if existing_job.cluster != cluster_name:
             needs_kill_before_submit = True
 
     if args.skipifexists and already_submitted and (not needs_kill_before_submit):
@@ -751,17 +745,29 @@ def submit_cmd(
         needs_submit = True
 
     if needs_submit:
-        if needs_kill_before_submit:
-            txtui.user_print(
-                f"Found existing job {job_id} with different runtime environment. Stopping any running instances before proceeding"
-            )
-
-            kill(jq, cluster, datastore_client, cluster_api, job_id, keepcluster=False)
         if existing_job:
-            txtui.user_print(
-                f"Found existing job named {job_id}. Removing before submitting new job."
-            )
-            delete(cluster, jq, job_id)
+            if needs_kill_before_submit:
+                # runtime environment (image/machine type) changed: the existing
+                # cluster can't service the new tasks, so stop it and rebuild.
+                txtui.user_print(
+                    f"Found existing job {job_id} with a different runtime "
+                    f"environment. Stopping its cluster before resubmitting."
+                )
+                kill(
+                    jq, cluster, datastore_client, cluster_api, job_id, keepcluster=False
+                )
+                delete(cluster, jq, job_id, stop_cluster=True)
+            else:
+                # same runtime environment: leave any lingering worker running so
+                # it can immediately pick up the resubmitted tasks instead of
+                # waiting for a new VM to provision. Only clear the old job's
+                # bookkeeping (delete_complete_requests only reaps terminal Batch
+                # jobs, so the still-running lingering worker is preserved).
+                txtui.user_print(
+                    f"Found existing job {job_id} with the same runtime "
+                    f"environment. Reusing its cluster and replacing the job."
+                )
+                delete(cluster, jq, job_id, stop_cluster=False)
         txtui.user_print(f"Submitting job: {job_id}")
 
         submit(
@@ -772,6 +778,7 @@ def submit_cmd(
             submit_config,
             datastore_client,
             cluster,
+            cluster_name,
             metadata=metadata,
             clean_if_exists=True,
         )
