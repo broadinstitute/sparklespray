@@ -73,6 +73,7 @@ class PrepConfig:
     work_root_dir: Optional[str] = None
     cache_db_path: Optional[str] = None
     provision_mode: Optional[str] = None
+    when_sub_job_exists: Optional[str] = None
 
 
 @dataclass
@@ -96,6 +97,7 @@ class Config:
     monitor_port: int
     cache_db_path: str
     provision_mode: str
+    when_sub_job_exists: str
     credentials: Credentials = dataclasses.field(repr=False)
 
     @property
@@ -281,6 +283,14 @@ def load_config(
         "preemptible",
     ), f"provision_mode must be one of 'normal', 'flex', 'preemptible' but was: {provision_mode}"
     config.provision_mode = provision_mode
+
+    when_sub_job_exists = consume("when_sub_job_exists", "overwrite")
+    assert when_sub_job_exists in (
+        "abort",
+        "confirm",
+        "overwrite",
+    ), f"when_sub_job_exists must be one of 'abort', 'confirm', 'overwrite' but was: {when_sub_job_exists}"
+    config.when_sub_job_exists = when_sub_job_exists
 
     machine_type = config.machine_type
     assert machine_type is not None

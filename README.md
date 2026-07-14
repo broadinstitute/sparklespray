@@ -669,6 +669,19 @@ Sparklespray supports several types of disk mounts:
 
 `provision_mode=flex` only works for jobs that request GPUs (via `--add-gpu` or a GPU-attached machine type, see [Using GPUs](#using-gpus)) — `sparkles sub` will abort with an error if `provision_mode=flex` is set but no GPU is being requested.
 
+### Job Resubmission Settings
+
+| Parameter              | Default     | Description                                                                 |
+| ----------------------- | ----------- | ---------------------------------------------------------------------------- |
+| `when_sub_job_exists`  | "overwrite" | What to do when `sparkles sub` (or a `sparkles workflow run` step) would resubmit a job whose name already exists: "overwrite" (today's default — stop any running instances and replace it), "abort" (raise an error instead of replacing it), or "confirm" (prompt interactively before replacing it). |
+
+`when_sub_job_exists` only applies when sparkles is about to delete and
+replace an existing job. It has no effect on `--skipifexists` (skip
+resubmission entirely) or `--retry` (just retry failed tasks) — those flags
+still take priority and behave exactly as before whenever their conditions
+are met. This setting also governs the same decision for jobs submitted
+internally by each step of `sparkles workflow run`.
+
 ### Authentication Settings
 
 | Parameter             | Default                                         | Description                      |

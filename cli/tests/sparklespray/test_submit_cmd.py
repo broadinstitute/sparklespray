@@ -145,6 +145,59 @@ def test_submit_cmd_basic(mock_watch, job_queue, mock_io, datastore_client, clus
 
 
 @patch("sparklespray.commands.submit.watch")
+def test_submit_cmd_when_sub_job_exists_abort(mock_watch, job_queue, mock_io, datastore_client, cluster_api, config, task_storage):
+    mock_watch.return_value = True
+
+    args = parse_args_for_test(["sub", "--name", "test-job", "echo", "hello", "world"])
+    result = submit_cmd(job_queue, mock_io, datastore_client, cluster_api, args, config)
+    assert result == 0
+    original_job_uuid = job_queue.get_job_must("test-job").metadata["UUID"]
+
+    config.when_sub_job_exists = "abort"
+    args = parse_args_for_test(["sub", "--name", "test-job", "echo", "hello", "world"])
+    with pytest.raises(UserError):
+        submit_cmd(job_queue, mock_io, datastore_client, cluster_api, args, config)
+
+    # the existing job must be untouched
+    assert job_queue.get_job_must("test-job").metadata["UUID"] == original_job_uuid
+
+
+@patch("sparklespray.commands.submit.watch")
+def test_submit_cmd_when_sub_job_exists_confirm(mock_watch, job_queue, mock_io, datastore_client, cluster_api, config, task_storage):
+    mock_watch.return_value = True
+
+    args = parse_args_for_test(["sub", "--name", "test-job", "echo", "hello", "world"])
+    result = submit_cmd(job_queue, mock_io, datastore_client, cluster_api, args, config)
+    assert result == 0
+    original_job_uuid = job_queue.get_job_must("test-job").metadata["UUID"]
+
+    config.when_sub_job_exists = "confirm"
+
+    with patch("sparklespray.commands.submit._confirm_overwrite", return_value=False):
+        args = parse_args_for_test(["sub", "--name", "test-job", "echo", "hello", "world"])
+        with pytest.raises(UserError):
+            submit_cmd(job_queue, mock_io, datastore_client, cluster_api, args, config)
+    assert job_queue.get_job_must("test-job").metadata["UUID"] == original_job_uuid
+
+    with patch("sparklespray.commands.submit._confirm_overwrite", return_value=True):
+        args = parse_args_for_test(["sub", "--name", "test-job", "echo", "hello", "world"])
+        result = submit_cmd(job_queue, mock_io, datastore_client, cluster_api, args, config)
+    assert result == 0
+    assert job_queue.get_job_must("test-job").metadata["UUID"] != original_job_uuid
+
+
+@patch("sparklespray.commands.submit.watch")
+def test_submit_cmd_when_sub_job_exists_ignored_for_new_job(mock_watch, job_queue, mock_io, datastore_client, cluster_api, config, task_storage):
+    mock_watch.return_value = True
+
+    config.when_sub_job_exists = "abort"
+
+    args = parse_args_for_test(["sub", "--name", "brand-new-job", "echo", "hello", "world"])
+    result = submit_cmd(job_queue, mock_io, datastore_client, cluster_api, args, config)
+    assert result == 0
+
+
+@patch("sparklespray.commands.submit.watch")
 def test_submit_cmd_with_seq_parameter(mock_watch, job_queue, mock_io, datastore_client, cluster_api, config, task_storage):
     # Setup mocks
     mock_watch.return_value = True

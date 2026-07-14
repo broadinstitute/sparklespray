@@ -127,6 +127,44 @@ def test_provision_mode_invalid_value_rejected(tmpdir):
         )
 
 
+def test_when_sub_job_exists_defaults_to_overwrite(tmpdir):
+    config_file = tmpdir.join("config")
+    config_file.write(_base_config_text())
+
+    config = load_config(
+        config_file=str(config_file),
+        overrides={},
+        gcloud_config_file=str(tmpdir.join("invalid")),
+    )
+
+    assert config.when_sub_job_exists == "overwrite"
+
+
+def test_when_sub_job_exists_explicit_value(tmpdir):
+    config_file = tmpdir.join("config")
+    config_file.write(_base_config_text("when_sub_job_exists=abort"))
+
+    config = load_config(
+        config_file=str(config_file),
+        overrides={},
+        gcloud_config_file=str(tmpdir.join("invalid")),
+    )
+
+    assert config.when_sub_job_exists == "abort"
+
+
+def test_when_sub_job_exists_invalid_value_rejected(tmpdir):
+    config_file = tmpdir.join("config")
+    config_file.write(_base_config_text("when_sub_job_exists=bogus"))
+
+    with pytest.raises(AssertionError):
+        load_config(
+            config_file=str(config_file),
+            overrides={},
+            gcloud_config_file=str(tmpdir.join("invalid")),
+        )
+
+
 def test_missing_args(tmpdir):
     config_file = tmpdir.join("config")
     config_file.write(

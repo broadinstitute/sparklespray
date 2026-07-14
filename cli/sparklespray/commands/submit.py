@@ -544,6 +544,11 @@ def construct_submit_cmd_args(unparsed_args: List[str]):
     return args
 
 
+def _confirm_overwrite(job_id: str) -> bool:
+    response = input(f'A job named "{job_id}" already exists. Overwrite it? [y/N] ')
+    return response.strip().lower() in ("y", "yes")
+
+
 def submit_cmd(
     jq: JobQueue,
     io: IO,
@@ -728,6 +733,19 @@ def submit_cmd(
         jq.reset(job_id, None, statuses_to_clear=[STATUS_FAILED])
         needs_submit = False
     else:
+        if existing_job:
+            if config.when_sub_job_exists == "abort":
+                raise UserError(
+                    f'A job named "{job_id}" already exists. Aborting because '
+                    f"when_sub_job_exists=abort. Use --retry, --skipifexists, a "
+                    f"different --name, or set when_sub_job_exists=overwrite/confirm "
+                    f"to proceed."
+                )
+            elif config.when_sub_job_exists == "confirm":
+                if not _confirm_overwrite(job_id):
+                    raise UserError(
+                        f'Aborting: declined to overwrite existing job "{job_id}".'
+                    )
         needs_submit = True
 
     if needs_submit:
