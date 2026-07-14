@@ -14,34 +14,6 @@ env:
   POETRY_VERSION: "1.4.2"
 
 jobs:
-  build-go:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-
-      - name: Set up Go
-        uses: actions/setup-go@v3
-        with:
-          go-version: 1.19
-
-      - name: Build everything
-        run: cd go/src/github.com/broadinstitute/sparklesworker && go build -v ./...
-
-      - name: build executable
-        run: bash scripts/build-static-exe.sh
-
-      - name: print md5sum
-        run: md5sum cli/sparklespray/bin/sparklesworker && ls -s cli/sparklespray/bin/sparklesworker
-
-      - name: Upload executable
-        uses: actions/upload-artifact@v4
-        with:
-          name: sparklesworker-exe-${{ github.run_number }}
-          path: cli/sparklespray/bin/sparklesworker
-          retention-days: 5
-  #    - name: Test
-  #      run: cd go/src/github.com/broadinstitute/sparklesworker && go test -v ./...
-
   test-python:
     runs-on: ubuntu-latest
     steps:
@@ -78,7 +50,7 @@ jobs:
         working-directory: cli
 
   build-package:
-    needs: [test-python, build-go]
+    needs: [test-python]
     runs-on: ubuntu-latest
 
     steps:
@@ -104,13 +76,6 @@ jobs:
         uses: abatilo/actions-poetry@v2
         with:
           poetry-version: ${{ env.POETRY_VERSION }}
-      - name: Download executable
-        uses: actions/download-artifact@v4
-        with:
-          name: sparklesworker-exe-${{ github.run_number }}
-          path: cli/sparklespray/bin
-      - name: print md5sum
-        run: md5sum cli/sparklespray/bin/sparklesworker && ls -s cli/sparklespray/bin/sparklesworker
       - name: get package version
         run: (echo -n 'package_version=' && poetry version -s) >> "$GITHUB_ENV"
         working-directory: cli

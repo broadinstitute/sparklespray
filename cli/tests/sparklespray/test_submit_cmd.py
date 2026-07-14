@@ -50,8 +50,6 @@ def config(tmpdir):
     
     # Create a temporary config file
     config_file = tmpdir.join( ".sparkles")
-    exe_path = tmpdir.join("sparklesworker")
-    exe_path.write_binary(b"")
 
     config_content = f"""
 [config]
@@ -65,7 +63,6 @@ default_url_prefix = gs://mock-results
 debug_log_prefix = gs://mock-logs
 monitor_port = 8080
 sparklesworker_image = sparklesworker:latest
-sparklesworker_exe_path = { exe_path }
 """
     config_file.write_text(config_content, "utf8")
     

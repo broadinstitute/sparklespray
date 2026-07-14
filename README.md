@@ -605,7 +605,6 @@ Some configuration values can be inherited from your gcloud configuration (`~/.c
 | `monitor_port`            | 6032                             | Port for job monitoring interface                |
 | `work_root_dir`           | "/mnt/"                          | Base directory for job execution                 |
 | `cas_url_prefix`          | `{default_url_prefix}/CAS/`      | Storage location for CAS files (temporary files) |
-| `sparklesworker_exe_path` | Auto-detected                    | Path to sparklesworker executable                |
 | `cache_db_path`           | ".kubeque-cached-file-hashes"    | Path to file hash cache                          |
 | `debug_log_prefix`        | `{default_url_prefix}/node-logs` | Location for debug logs                          |
 

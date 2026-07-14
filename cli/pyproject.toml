@@ -4,7 +4,6 @@ version = "5.11.0"
 description = "CLI for submitting batch jobs to GCP for execution"
 authors = ["Philip Montgomery <pmontgom@broadinstitute.org>"]
 include = [
-    "sparklespray/bin/sparklesworker",
     "sparklespray/sparklesworker/go/src/**/*",
 ]
 
