@@ -287,6 +287,7 @@ def submit(
         config.boot_volume,
         config.mounts,
         accelerators=config.accelerators,
+        provision_mode=config.provision_mode,
     )
 
     pipeline_spec = job.model_dump_json()
@@ -676,6 +677,7 @@ def submit_cmd(
         target_node_count=target_node_count,
         max_preemptable_attempts_scale=max_preemptable_attempts_scale,
         accelerators=args.accelerators,
+        provision_mode=config.provision_mode,
     )
     assert mount_ == submit_config.mounts
 

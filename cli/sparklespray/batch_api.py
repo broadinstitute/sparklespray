@@ -70,6 +70,9 @@ class JobSpec(BaseModel):
     gcs_bucket_mounts: List[GCSBucketMount] = dataclasses.field(default_factory=list)
     # GPU accelerator types to attach (e.g. ["nvidia-tesla-t4", "nvidia-tesla-t4"] for two T4s)
     accelerators: List[str] = dataclasses.field(default_factory=list)
+    # VM provisioning strategy: "normal" (always standard), "preemptible" (spot/standard
+    # mixing driven by the `preemptible` field below), or "flex" (DWS Flex Start)
+    provision_mode: str = "preemptible"
 
 
 def _create_volumes(disks: List[Disk], gcs_bucket_mounts: List[GCSBucketMount]):
@@ -167,13 +170,24 @@ def create_batch_job_from_job_spec(
     # GPU driver installation requires the batch-debian image; non-GPU jobs use batch-cos
     boot_disk_image = "batch-debian" if use_gpu else "batch-cos"
 
-    instance_policy = batch.AllocationPolicy.InstancePolicy(
-        machine_type=job_spec.machine_type,
-        provisioning_model=(
+    if job_spec.provision_mode == "flex":
+        provisioning_model = batch.AllocationPolicy.ProvisioningModel.FLEX_START
+        reservation = "NO_RESERVATION"
+    elif job_spec.provision_mode == "normal":
+        provisioning_model = batch.AllocationPolicy.ProvisioningModel.STANDARD
+        reservation = ""
+    else:  # "preemptible" -- preserve the existing dynamic spot/standard mixing
+        provisioning_model = (
             batch.AllocationPolicy.ProvisioningModel.SPOT
             if job_spec.preemptible
             else batch.AllocationPolicy.ProvisioningModel.STANDARD
-        ),
+        )
+        reservation = ""
+
+    instance_policy = batch.AllocationPolicy.InstancePolicy(
+        machine_type=job_spec.machine_type,
+        provisioning_model=provisioning_model,
+        reservation=reservation,
         boot_disk=batch.AllocationPolicy.Disk(
             type=job_spec.boot_disk.type,
             size_gb=job_spec.boot_disk.size_gb,
@@ -251,7 +265,10 @@ def to_node_reqs(job: batch.Job):
     if pm == batch.AllocationPolicy.ProvisioningModel.SPOT:
         node_class = NODE_REQ_CLASS_PREEMPTIVE
     else:
-        assert pm == batch.AllocationPolicy.ProvisioningModel.STANDARD
+        assert pm in (
+            batch.AllocationPolicy.ProvisioningModel.STANDARD,
+            batch.AllocationPolicy.ProvisioningModel.FLEX_START,
+        )
         node_class = NODE_REQ_CLASS_NORMAL
 
     node_reqs = []

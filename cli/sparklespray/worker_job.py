@@ -32,6 +32,7 @@ def create_job_spec(
     boot_volume: PersistentDiskMount,
     mounts: List[DiskMountT],
     accelerators: List[str] = [],
+    provision_mode: str = "preemptible",
 ):
     consume_exe_path = os.path.join(work_root_dir, "consume")
     consume_data = os.path.join(work_root_dir, "data")
@@ -118,6 +119,7 @@ def create_job_spec(
         service_account_email=service_account_email,
         scopes=["https://www.googleapis.com/auth/cloud-platform"],
         accelerators=accelerators,
+        provision_mode=provision_mode,
     )
 
     return job

@@ -655,6 +655,15 @@ Sparklespray supports several types of disk mounts:
 | `preemptible`                    | "y"     | Use preemptible instances ("y" or "n") |
 | `max_preemptable_attempts_scale` | 2       | Max retry attempts for preempted jobs  |
 
+`preemptible` still works exactly as before, but is superseded by
+`provision_mode` (below) when the latter is set explicitly.
+
+### Provisioning Settings
+
+| Parameter        | Default                                          | Description                                                                                                                                                                                                       |
+| ----------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `provision_mode` | "preemptible" if `preemptible=y`, else "normal"  | VM provisioning strategy: "normal" (always standard VMs), "preemptible" (today's default spot/standard mixing driven by `preemptible`/`max_preemptable_attempts_scale`), or "flex" (Dynamic Workload Scheduler Flex Start -- `provisioningModel=FLEX_START`; may queue up to 7 days for capacity in exchange for a discount, and is mutually exclusive with preemptible/spot). |
+
 ### Authentication Settings
 
 | Parameter             | Default                                         | Description                      |
@@ -674,6 +683,20 @@ machine_type=n1-standard-2
 zones=us-east1-b
 region=us-east1
 account=my-service-account@project.iam.gserviceaccount.com
+```
+
+Configuration using Dynamic Workload Scheduler Flex Start (queued, discounted capacity):
+
+```ini
+[config]
+default_url_prefix=gs://my-bucket/sparkles
+project=my-project-id
+default_image=ubuntu:20.04
+machine_type=n1-standard-2
+zones=us-east1-b
+region=us-east1
+account=my-service-account@project.iam.gserviceaccount.com
+provision_mode=flex
 ```
 
 Configuration with multiple disk types:

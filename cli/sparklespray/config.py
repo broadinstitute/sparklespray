@@ -73,6 +73,7 @@ class PrepConfig:
     monitor_port: Optional[int] = None
     work_root_dir: Optional[str] = None
     cache_db_path: Optional[str] = None
+    provision_mode: Optional[str] = None
 
 
 @dataclass
@@ -96,6 +97,7 @@ class Config:
     work_root_dir: str
     monitor_port: int
     cache_db_path: str
+    provision_mode: str
     credentials: Credentials = dataclasses.field(repr=False)
 
     @property
@@ -276,6 +278,15 @@ def load_config(
         config.max_preemptable_attempts_scale = consume(
             "max_preemptable_attempts_scale", 2, int
         )
+
+    default_provision_mode = "preemptible" if preemptible_yn.lower() == "y" else "normal"
+    provision_mode = consume("provision_mode", default_provision_mode)
+    assert provision_mode in (
+        "normal",
+        "flex",
+        "preemptible",
+    ), f"provision_mode must be one of 'normal', 'flex', 'preemptible' but was: {provision_mode}"
+    config.provision_mode = provision_mode
 
     machine_type = config.machine_type
     assert machine_type is not None

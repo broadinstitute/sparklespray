@@ -58,6 +58,7 @@ class SubmitConfig(BaseModel):
     target_node_count: int
     max_preemptable_attempts_scale: int
     accelerators: List[str] = []
+    provision_mode: str = "preemptible"
 
 
 class MachineSpec(BaseModel):
