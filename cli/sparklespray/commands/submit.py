@@ -8,7 +8,7 @@ from ..errors import UserError
 from google.cloud import datastore
 
 from pydantic import BaseModel
-from ..batch_api import ClusterAPI
+from ..batch_api import ClusterAPI, _machine_type_has_gpu
 
 import sparklespray
 from ..cluster_service import MinConfig, Cluster, create_cluster
@@ -574,6 +574,13 @@ def submit_cmd(
         machine_type = args.machine_type
 
     _validate_gpu_machine_type(machine_type, args.accelerators)
+
+    use_gpu = len(args.accelerators) > 0 or _machine_type_has_gpu(machine_type)
+    if config.provision_mode == "flex" and not use_gpu:
+        raise UserError(
+            "provision_mode=flex only works when requesting GPUs, but we are not "
+            "provisioning a machine with GPUs. Aborting."
+        )
 
     cas_url_prefix = config.cas_url_prefix
     default_url_prefix = config.default_url_prefix

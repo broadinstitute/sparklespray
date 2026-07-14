@@ -556,6 +556,10 @@ sparkles sub -n train-job --machine-type g2-standard-4 \
     -i pytorch/pytorch:2.2.0-cuda12.1-cudnn8-runtime python train.py
 ```
 
+### Getting GPU capacity with Dynamic Workload Scheduler Flex Start
+
+GPU-attached machine types are frequently capacity-constrained. If you're having trouble getting a GPU job scheduled, set `provision_mode=flex` in your `.sparkles` config (see [Provisioning Settings](#provisioning-settings)) to request Dynamic Workload Scheduler Flex Start capacity instead of on-demand capacity. This queues the job for up to 7 days until GPU capacity is available, at a discount over on-demand pricing. `provision_mode=flex` only works for jobs that request GPUs (via `--add-gpu` or a GPU-attached machine type) — it will be rejected for CPU-only jobs.
+
 # Configuration reference
 
 Sparklespray uses a configuration file (`.sparkles`) to define how jobs are executed and managed. The file can be placed in your home directory or any parent directory of where you run the `sparkles` command.
@@ -663,6 +667,8 @@ Sparklespray supports several types of disk mounts:
 | Parameter        | Default                                          | Description                                                                                                                                                                                                       |
 | ----------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `provision_mode` | "preemptible" if `preemptible=y`, else "normal"  | VM provisioning strategy: "normal" (always standard VMs), "preemptible" (today's default spot/standard mixing driven by `preemptible`/`max_preemptable_attempts_scale`), or "flex" (Dynamic Workload Scheduler Flex Start -- `provisioningModel=FLEX_START`; may queue up to 7 days for capacity in exchange for a discount, and is mutually exclusive with preemptible/spot). |
+
+`provision_mode=flex` only works for jobs that request GPUs (via `--add-gpu` or a GPU-attached machine type, see [Using GPUs](#using-gpus)) — `sparkles sub` will abort with an error if `provision_mode=flex` is set but no GPU is being requested.
 
 ### Authentication Settings
 

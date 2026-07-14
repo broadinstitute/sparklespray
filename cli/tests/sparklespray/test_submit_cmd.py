@@ -5,6 +5,7 @@ from sparklespray.commands.submit import submit_cmd
 from sparklespray.job_queue import JobQueue
 from sparklespray.batch_api import ClusterAPI
 from sparklespray.config import Config
+from sparklespray.errors import UserError
 
 from .factories import DatastoreClientSimulator, MockIO
 
@@ -164,6 +165,36 @@ def test_submit_cmd_with_seq_parameter(mock_watch, job_queue, mock_io, datastore
     job = job_queue.get_job_must("test-job")
     tasks = task_storage.get_tasks(job.job_id)
     assert len(tasks) == 3
+
+@patch("sparklespray.commands.submit.watch")
+def test_submit_cmd_flex_without_gpu_rejected(mock_watch, job_queue, mock_io, datastore_client, cluster_api, config, task_storage):
+    mock_watch.return_value = True
+
+    config.provision_mode = "flex"
+
+    args = parse_args_for_test(["sub", "--name", "flex-job", "echo", "hello", "world"])
+
+    with pytest.raises(UserError):
+        submit_cmd(job_queue, mock_io, datastore_client, cluster_api, args, config)
+
+
+@patch("sparklespray.commands.submit.watch")
+def test_submit_cmd_flex_with_gpu_allowed(mock_watch, job_queue, mock_io, datastore_client, cluster_api, config, task_storage):
+    mock_watch.return_value = True
+
+    config.provision_mode = "flex"
+
+    args = parse_args_for_test([
+        "sub", "--name", "flex-gpu-job",
+        "--machine-type", "n1-standard-4",
+        "--add-gpu", "nvidia-tesla-t4",
+        "echo", "hello", "world",
+    ])
+
+    result = submit_cmd(job_queue, mock_io, datastore_client, cluster_api, args, config)
+
+    assert result == 0
+
 
 @patch("sparklespray.commands.submit.watch")
 def test_submit_cmd_complex_args(mock_watch, job_queue, mock_io, datastore_client, cluster_api, config, temp_file, task_storage):
