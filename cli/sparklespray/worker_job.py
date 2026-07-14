@@ -33,6 +33,7 @@ def create_job_spec(
     mounts: List[DiskMountT],
     accelerators: List[str] = [],
     provision_mode: str = "preemptible",
+    worker_linger: int = 600,
 ):
     consume_exe_path = os.path.join(work_root_dir, "consume")
     consume_data = os.path.join(work_root_dir, "data")
@@ -99,7 +100,7 @@ def create_job_spec(
 
     job = JobSpec(
         task_count="1",
-        runnables=create_runnables(60 * 10),  # keep a worker around for 10 minutes
+        runnables=create_runnables(worker_linger),
         machine_type=machine_type,
         preemptible=True,
         locations=[f"regions/{location}"],

@@ -74,6 +74,7 @@ class PrepConfig:
     cache_db_path: Optional[str] = None
     provision_mode: Optional[str] = None
     when_sub_job_exists: Optional[str] = None
+    worker_linger: Optional[int] = None
 
 
 @dataclass
@@ -98,6 +99,7 @@ class Config:
     cache_db_path: str
     provision_mode: str
     when_sub_job_exists: str
+    worker_linger: int
     credentials: Credentials = dataclasses.field(repr=False)
 
     @property
@@ -291,6 +293,8 @@ def load_config(
         "overwrite",
     ), f"when_sub_job_exists must be one of 'abort', 'confirm', 'overwrite' but was: {when_sub_job_exists}"
     config.when_sub_job_exists = when_sub_job_exists
+
+    config.worker_linger = consume("worker_linger", 600, int)
 
     machine_type = config.machine_type
     assert machine_type is not None

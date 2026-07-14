@@ -127,6 +127,32 @@ def test_provision_mode_invalid_value_rejected(tmpdir):
         )
 
 
+def test_worker_linger_defaults_to_600(tmpdir):
+    config_file = tmpdir.join("config")
+    config_file.write(_base_config_text())
+
+    config = load_config(
+        config_file=str(config_file),
+        overrides={},
+        gcloud_config_file=str(tmpdir.join("invalid")),
+    )
+
+    assert config.worker_linger == 600
+
+
+def test_worker_linger_explicit_value(tmpdir):
+    config_file = tmpdir.join("config")
+    config_file.write(_base_config_text("worker_linger=120"))
+
+    config = load_config(
+        config_file=str(config_file),
+        overrides={},
+        gcloud_config_file=str(tmpdir.join("invalid")),
+    )
+
+    assert config.worker_linger == 120
+
+
 def test_when_sub_job_exists_defaults_to_overwrite(tmpdir):
     config_file = tmpdir.join("config")
     config_file.write(_base_config_text())

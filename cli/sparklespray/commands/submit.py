@@ -288,6 +288,7 @@ def submit(
         config.mounts,
         accelerators=config.accelerators,
         provision_mode=config.provision_mode,
+        worker_linger=config.worker_linger,
     )
 
     pipeline_spec = job.model_dump_json()
@@ -684,6 +685,7 @@ def submit_cmd(
         max_preemptable_attempts_scale=max_preemptable_attempts_scale,
         accelerators=args.accelerators,
         provision_mode=config.provision_mode,
+        worker_linger=config.worker_linger,
     )
     assert mount_ == submit_config.mounts
 

@@ -669,6 +669,20 @@ Sparklespray supports several types of disk mounts:
 
 `provision_mode=flex` only works for jobs that request GPUs (via `--add-gpu` or a GPU-attached machine type, see [Using GPUs](#using-gpus)) — `sparkles sub` will abort with an error if `provision_mode=flex` is set but no GPU is being requested.
 
+### Worker Node Settings
+
+| Parameter       | Default | Description                                                                     |
+| ---------------- | ------- | -------------------------------------------------------------------------------- |
+| `worker_linger` | 600     | Seconds a worker will keep running after its task queue is empty, in case a new job is submitted while it's still around. |
+
+After a worker drains its queue of work, it doesn't shut down immediately —
+it stays running for `worker_linger` seconds in case a new job is submitted
+in the meantime, so that job can be picked up right away by the still-running
+worker instead of waiting for a brand new VM to boot up. Lower this if you'd
+rather workers shut down (and stop being billed for) idle time sooner;
+raise it if you're submitting a series of related jobs and want to maximize
+the chance of reusing an already-running worker between them.
+
 ### Job Resubmission Settings
 
 | Parameter              | Default     | Description                                                                 |
