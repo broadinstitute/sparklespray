@@ -33,8 +33,13 @@ class MockSparkles(SparklesInterface):
     def wait_for_completion(self, name: str):
         self.wait_for_completion_calls.append(name)
 
-    def start(self, name: str, command, params, image, uploads, machine_type):
-        self.start_calls.append((name, command, params, image, uploads, machine_type))
+    def start(
+        self, name: str, command, params, image, uploads, machine_type,
+        skip_if_complete: bool = False,
+    ):
+        self.start_calls.append(
+            (name, command, params, image, uploads, machine_type, skip_if_complete)
+        )
         self.jobs[name] = True
 
     def get_job_path_prefix(self) -> str:
@@ -77,7 +82,7 @@ def test_run_workflow_basic(tmpdir):
     # Verify the expected calls were made
     assert sparkles.job_exists_calls == ["test-job-1"]
     assert sparkles.start_calls == [
-        ("test-job-1", ["echo", "Hello World"], [{}], None, [], None),
+        ("test-job-1", ["echo", "Hello World"], [{}], None, [], None, False),
     ]
     assert sparkles.wait_for_completion_calls == ["test-job-1"]
     assert len(sparkles.clear_failed_calls) == 0
@@ -108,8 +113,8 @@ def test_run_workflow_with_retry(tmpdir):
     assert sparkles.job_exists_calls == ["test-job-1", "test-job-2"]
     assert sparkles.clear_failed_calls == ["test-job-1"]
     assert sparkles.start_calls == [
-        ("test-job-1", ["echo", "Step 1"], [{}], None, [], None),
-        ("test-job-2", ["echo", "Step 2"], [{}], "python:3.9", [], None),
+        ("test-job-1", ["echo", "Step 1"], [{}], None, [], None, False),
+        ("test-job-2", ["echo", "Step 2"], [{}], "python:3.9", [], None, False),
     ]
     assert sparkles.wait_for_completion_calls == ["test-job-1", "test-job-2"]
 
@@ -145,7 +150,7 @@ def test_run_workflow_with_parameters(tmpdir):
     # Verify the expected calls were made
     assert sparkles.job_exists_calls == ["test-job-1"]
     assert len(sparkles.start_calls) == 1
-    name, command, params, image, uploads, machine_type = sparkles.start_calls[0]
+    name, command, params, image, uploads, machine_type, skip_if_complete = sparkles.start_calls[0]
     assert name == "test-job-1"
     assert command == ["process", "test-job-1", "gs://path/to/jobs/test-job-1"]
     assert len(params) == 2
@@ -197,7 +202,7 @@ def test_run_workflow_with_file_localization(tmpdir):
     # Verify the expected calls were made
     assert sparkles.job_exists_calls == ["test-job-1"]
     assert len(sparkles.start_calls) == 1
-    name, command, params, image, uploads, machine_type = sparkles.start_calls[0]
+    name, command, params, image, uploads, machine_type, skip_if_complete = sparkles.start_calls[0]
     assert name == "test-job-1"
     assert command == ["process", "data"]
     
