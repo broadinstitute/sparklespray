@@ -31,6 +31,7 @@ from ..job_queue import JobQueue
 from ..log import log
 from ..model import LOCAL_SSD, MachineSpec, PersistentDiskMount, SubmitConfig
 from ..spec import SrcDstPair, make_spec_from_command
+from ..task_store import STATUS_COMPLETE
 from ..util import get_timestamp, random_string, url_join
 from datetime import datetime
 from ..certgen import create_self_signed_cert
@@ -482,6 +483,12 @@ def _setup_parser_for_sub_command(parser):
         action="store_true",
     )
     parser.add_argument(
+        "--skip-if-complete",
+        help="If set, will do nothing if a job with the same name is found and was successfully executed",
+        action="store_true",
+        dest="skip_if_complete",
+    )
+    parser.add_argument(
         "--symlinks",
         help="When localizing files, use symlinks instead of copying files into location. This should only be used when the uploaded files will not be modified by the job.",
         action="store_true",
@@ -704,19 +711,38 @@ def submit_cmd(
 
     # test to see if we already have such a job submitted, in which case, we don't want to do anything
     already_submitted = False
+    already_completed = False
     needs_kill_before_submit = False
     spec_hash = compute_dict_hash(spec)
     metadata["job-spec-sha256"] = spec_hash
     existing_job = jq.get_job_optional(job_id=job_id)
     if existing_job:
+        # check to see if we have already fully executed all tasks
+        existing_tasks = jq.task_storage.get_tasks(job_id=job_id)
+        if existing_tasks and all(
+            task.status == STATUS_COMPLETE and str(task.exit_code) == "0"
+            for task in existing_tasks
+        ):
+            already_completed = True
+
         previous_spec_hash = existing_job.metadata.get("job-spec-sha256")
         if previous_spec_hash == spec_hash:
             already_submitted = True
+            txtui.user_print("Found existing job with identical 'job-spec-sha256'")
+        else:
+            txtui.user_print("Found existing job with different 'job-spec-sha256'")
         # if the resubmitted job would land on a different cluster than the existing
         # one, its lingering workers can't be reused -- tear the old cluster down.
         if existing_job.cluster != cluster_name:
             needs_kill_before_submit = True
 
+    if args.skip_if_complete and already_completed:
+        # if the user requested that we skip if it's complete (ignoring whether the job changed at all. This is largely to allow workflows to re-run with changes)
+        txtui.user_print(
+            f"Found existing job {job_id} which already completed successfully and --skip-if-complete was specified. Skipping submission."
+        )
+        return 0
+    
     if args.skipifexists and already_submitted and (not needs_kill_before_submit):
         txtui.user_print(
             f"Found existing job {job_id} and --skipifexists was specified. Skipping submission."

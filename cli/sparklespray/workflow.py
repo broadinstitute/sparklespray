@@ -25,6 +25,7 @@ import sys
 @dataclass
 class WorkflowRunArgs:
     retry: bool = False
+    skip_completed_steps: bool = False
     parameters: Dict[str, str] = field(default_factory=dict)
     uploads: List[Tuple[str, str]] = field(default_factory=list)
     machine_type: Optional[str] = None
@@ -52,6 +53,7 @@ class SparklesInterface:
         image: Optional[str],
         uploads: List[Tuple[str, str]],
         machine_type: Optional[str],
+        skip_if_complete: bool = False,
     ):
         raise NotImplementedError()
 
@@ -197,6 +199,7 @@ def run_workflow(
         retry: Whether to retry failed tasks
     """
     retry = workflow_args.retry
+    skip_completed_steps = workflow_args.skip_completed_steps
     command_line_parameters = workflow_args.parameters
     uploads = workflow_args.uploads
     default_image = workflow_args.image
@@ -325,6 +328,7 @@ def run_workflow(
             image,
             list(uploads_for_step),
             machine_type,
+            skip_completed_steps,
         )
 
         try:
@@ -390,6 +394,12 @@ def add_workflow_cmd(subparser):
         "--retry",
         help="if set, will retry running any failed tasks",
         action="store_true",
+    )
+    run_parser.add_argument(
+        "--skip-completed-steps",
+        help="if set, steps whose job already completed successfully will not be rerun, regardless of whether the code or workflow changed",
+        action="store_true",
+        dest="skip_completed_steps",
     )
 
     def key_value_pair(value: str):
@@ -490,9 +500,13 @@ def workflow_run_cmd(
             image: Optional[str],
             uploads: List[Tuple[str, str]],
             machine_type: Optional[str],
+            skip_if_complete: bool = False,
         ):
             # Submit a new job with the given parameters
             submit_cmd_args = ["-n", name, "--no-wait", "--retry"]
+
+            if skip_if_complete:
+                submit_cmd_args.append("--skip-if-complete")
 
             if machine_type:
                 submit_cmd_args.extend(["-m", machine_type])
@@ -541,6 +555,7 @@ def workflow_run_cmd(
 
     workflow_args = WorkflowRunArgs(
         retry=args.retry,
+        skip_completed_steps=args.skip_completed_steps,
         parameters=parameters,
         uploads=uploads,
         machine_type=args.machine_type,
