@@ -442,7 +442,9 @@ def create_services_from_config(config: Config, requested: List[str]):
         ),
         compute_engine_client=lambda services: InstancesClient(credentials=credentials),
         cluster_api=lambda services: ClusterAPI(
-            services.get("batch_service_client"), services.get("compute_engine_client")
+            services.get("batch_service_client"),
+            services.get("compute_engine_client"),
+            services.get("datastore_client"),
         ),
     )
 

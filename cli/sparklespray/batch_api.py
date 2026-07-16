@@ -5,6 +5,7 @@ import time
 from google.cloud.batch_v1alpha.services.batch_service import BatchServiceClient
 from google.cloud.compute_v1.services.instances import InstancesClient
 import google.cloud.compute_v1.types as compute
+from google.cloud import datastore
 
 from google.api_core.exceptions import NotFound
 
@@ -383,10 +384,29 @@ class ClusterAPI:
         self,
         batch_service_client: BatchServiceClient,
         compute_engine_client: InstancesClient,
+        datastore_client: datastore.Client,
     ):
         self.batch_service = batch_service_client
         self.compute_engine_client = compute_engine_client
+        self.datastore_client = datastore_client
         self._reported_failed_jobs: set = set()
+
+    def _archive_job(self, name):
+        # preserve a copy of the batch API job before we delete it so that
+        # we can still debug past failures after the job has been cleaned up
+        try:
+            job = self.batch_service.get_job(batch.GetJobRequest(name=name))
+        except NotFound:
+            return
+
+        entity_key = self.datastore_client.key("ArchivedBatchAPIJob")
+        entity = datastore.Entity(
+            key=entity_key, exclude_from_indexes=("job_json",)
+        )
+        entity["batch_job_name"] = name
+        entity["job_json"] = type(job).to_json(job)
+        entity["timestamp"] = time.time()
+        self.datastore_client.put(entity)
 
     def create_job(
         self,
@@ -405,6 +425,7 @@ class ClusterAPI:
         return job_result.name
 
     def delete(self, name):
+        self._archive_job(name)
         self.batch_service.delete_job(batch.DeleteJobRequest(name=name))
 
     def cancel(self, name):
