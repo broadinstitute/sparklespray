@@ -1,13 +1,7 @@
-from ..task_store import (
-    STATUS_FAILED,
-    STATUS_CLAIMED,
-    STATUS_PENDING,
-    STATUS_KILLED,
-)
 from ..job_queue import JobQueue
 from ..io_helper import IO
 from ..log import log
-from .shared import _resolve_jobid
+from .shared import _resolve_jobid, _get_filtered_tasks
 import json
 import sys
 from ..task_store import Task
@@ -17,27 +11,8 @@ import csv
 
 def show_cmd(jq: JobQueue, io: IO, args):
     jobid = _resolve_jobid(jq, args.jobid)
-    retcode = args.exitcode
 
-    if args.incomplete:
-        tasks = []
-        for status in [STATUS_FAILED, STATUS_CLAIMED, STATUS_PENDING, STATUS_KILLED]:
-            tasks.extend(jq.task_storage.get_tasks(jobid, status=status))
-    else:
-        tasks = jq.task_storage.get_tasks(jobid)
-
-    if retcode is not None:
-
-        def retcode_matches(exit_code):
-            return exit_code is not None and int(exit_code) == retcode
-
-        before_count = len(tasks)
-        tasks = [task for task in tasks if retcode_matches(task.exit_code)]
-        log.info(
-            "Filtered {} tasks to {} tasks with exit code {}".format(
-                before_count, len(tasks), retcode
-            )
-        )
+    tasks = _get_filtered_tasks(jq, jobid, args.incomplete, args.exitcode)
 
     if len(tasks) == 0:
         log.error("No tasks found")

@@ -99,6 +99,7 @@ def main(argv=None):
     from .commands.reset import add_reset_cmd
     from .commands.logs import add_logs_cmd
     from .commands.show import add_show_cmd
+    from .commands.summarize_job_metrics import add_summarize_job_metrics_cmd
     from .commands.status import add_status_cmd
     from .commands.delete import add_delete_cmd
     from .commands.kill import add_kill_cmd
@@ -132,6 +133,7 @@ def main(argv=None):
     add_setup_cmd(subparser)
     add_logs_cmd(subparser)
     add_show_cmd(subparser)
+    add_summarize_job_metrics_cmd(subparser)
     add_status_cmd(subparser)
     add_workflow_cmd(subparser)
     add_watch_cmd(subparser)
