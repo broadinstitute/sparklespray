@@ -1,15 +1,20 @@
 package sparklesworker
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"log"
+	"math"
 	"os"
 	"os/exec"
 	"path"
 	"path/filepath"
+	"runtime"
+	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -61,12 +66,27 @@ type ResourceUsage struct {
 	BlockOutputOps     int64           `json:"block_output_ops"`
 }
 
+// PerfStats holds whole-machine memory/CPU usage sampled periodically while a task's
+// command runs, to capture resource usage that a single process's rusage misses
+// (e.g. when the command spawns additional child processes).
+type PerfStats struct {
+	MemoryAvailable           int64   `json:"memory_available"`
+	NumberOfCPUs              int     `json:"number_of_cpus"`
+	MaxMemoryInUse            int64   `json:"max_memory_in_use"`
+	P95MemoryInUse            int64   `json:"p95_memory_in_use"`
+	MedianMemoryInUse         int64   `json:"median_memory_in_use"`
+	MaxUserCPUPercentUsage    float64 `json:"max_user_cpu_percent_usage"`
+	P95UserCPUPercentUsage    float64 `json:"p95_user_cpu_percent_usage"`
+	MedianUserCPUPercentUsage float64 `json:"median_user_cpu_percent_usage"`
+}
+
 type ResultStruct struct {
-	Command    string            `json:"command"`
-	Parameters map[string]string `json:"parameters,omitempty"`
-	ReturnCode string            `json:"return_code"`
-	Files      []*ResultFile     `json:"files"`
-	Usage      *ResourceUsage    `json:"resource_usage"`
+	Command      string            `json:"command"`
+	Parameters   map[string]string `json:"parameters,omitempty"`
+	ReturnCode   string            `json:"return_code"`
+	Files        []*ResultFile     `json:"files"`
+	Usage        *ResourceUsage    `json:"resource_usage"`
+	MachineStats *PerfStats        `json:"machine_stats"`
 }
 
 // The amount of time we're willing to wait for a file we uploaded to appear in cloud storage
@@ -184,12 +204,257 @@ func downloadAll(ioc IOClient, workdir string, downloads []*TaskDownload, cacheD
 	return nil, downloaded
 }
 
-func execCommand(command string, workdir string, stdout *os.File) (*syscall.Rusage, string, error) {
+// How often the perfMonitor samples whole-machine memory/CPU usage while a task's command runs.
+const perfMetricPollPeriod = 1 * time.Minute
+
+// cpuStat holds the numeric fields of the aggregate "cpu" line in /proc/stat, in jiffies.
+type cpuStat struct {
+	user, nice, system, idle, iowait, irq, softirq, steal, guest, guestNice int64
+}
+
+func (s cpuStat) total() int64 {
+	return s.user + s.nice + s.system + s.idle + s.iowait + s.irq + s.softirq + s.steal + s.guest + s.guestNice
+}
+
+// readMemInfo parses /proc/meminfo and returns the MemTotal and MemAvailable values, in bytes.
+func readMemInfo() (memTotal int64, memAvailable int64, err error) {
+	f, err := os.Open("/proc/meminfo")
+	if err != nil {
+		return 0, 0, err
+	}
+	defer f.Close()
+
+	found := 0
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() && found < 2 {
+		fields := strings.Fields(scanner.Text())
+		if len(fields) < 2 {
+			continue
+		}
+		var target *int64
+		switch fields[0] {
+		case "MemTotal:":
+			target = &memTotal
+		case "MemAvailable:":
+			target = &memAvailable
+		default:
+			continue
+		}
+		kb, err := strconv.ParseInt(fields[1], 10, 64)
+		if err != nil {
+			return 0, 0, err
+		}
+		*target = kb * 1024
+		found++
+	}
+	if err := scanner.Err(); err != nil {
+		return 0, 0, err
+	}
+	if found < 2 {
+		return 0, 0, fmt.Errorf("did not find both MemTotal and MemAvailable in /proc/meminfo")
+	}
+
+	return memTotal, memAvailable, nil
+}
+
+// readMemInUse returns how much memory is in use (MemTotal - MemAvailable, in bytes), given a
+// previously-read memAvailable (bytes) as the baseline for total available memory.
+func readMemInUse(memAvailable int64) (int64, error) {
+	_, memAvail, err := readMemInfo()
+	if err != nil {
+		return 0, err
+	}
+	memInUse := memAvailable - memAvail
+	if memInUse < 0 {
+		memInUse = 0
+	}
+	return memInUse, nil
+}
+
+// readCPUStat parses the aggregate "cpu" line (not the per-core "cpu0", "cpu1", ... lines) from /proc/stat.
+func readCPUStat() (cpuStat, error) {
+	f, err := os.Open("/proc/stat")
+	if err != nil {
+		return cpuStat{}, err
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		fields := strings.Fields(scanner.Text())
+		if len(fields) == 0 || fields[0] != "cpu" {
+			continue
+		}
+
+		values := make([]int64, 10)
+		for i := 1; i < len(fields) && i-1 < len(values); i++ {
+			v, err := strconv.ParseInt(fields[i], 10, 64)
+			if err != nil {
+				return cpuStat{}, err
+			}
+			values[i-1] = v
+		}
+
+		return cpuStat{
+			user: values[0], nice: values[1], system: values[2], idle: values[3], iowait: values[4],
+			irq: values[5], softirq: values[6], steal: values[7], guest: values[8], guestNice: values[9],
+		}, nil
+	}
+	if err := scanner.Err(); err != nil {
+		return cpuStat{}, err
+	}
+
+	return cpuStat{}, fmt.Errorf("did not find aggregate cpu line in /proc/stat")
+}
+
+// cpuUserPercent returns the percentage of aggregate machine CPU capacity spent in user mode
+// between two samples. Because the aggregate "cpu" line in /proc/stat already sums ticks across
+// every core, a fully-busy multi-core machine yields ~100%, not (numCPUs * 100)%.
+func cpuUserPercent(prev, cur cpuStat) float64 {
+	deltaTotal := cur.total() - prev.total()
+	if deltaTotal <= 0 {
+		return 0
+	}
+	deltaUser := (cur.user + cur.nice) - (prev.user + prev.nice)
+	return float64(deltaUser) / float64(deltaTotal) * 100
+}
+
+// percentileFloat64 returns the pct-th percentile (0-100) of sortedAscending using linear
+// interpolation between ranks. sortedAscending must be sorted ascending and non-empty.
+func percentileFloat64(sortedAscending []float64, pct float64) float64 {
+	if len(sortedAscending) == 1 {
+		return sortedAscending[0]
+	}
+	rank := pct / 100 * float64(len(sortedAscending)-1)
+	lower := int(math.Floor(rank))
+	upper := int(math.Ceil(rank))
+	if lower == upper {
+		return sortedAscending[lower]
+	}
+	frac := rank - float64(lower)
+	return sortedAscending[lower]*(1-frac) + sortedAscending[upper]*frac
+}
+
+// perfMonitor periodically samples whole-machine memory/CPU usage in a background goroutine
+// for the duration of a running task's command.
+type perfMonitor struct {
+	shutdownChan chan bool
+	resultChan   chan *PerfStats
+}
+
+func startPerfMonitor() *perfMonitor {
+	numCPUs := runtime.NumCPU()
+
+	_, memAvailable, err := readMemInfo()
+	if err != nil {
+		log.Printf("perfMonitor: could not read available memory, will report 0: %v", err)
+	}
+
+	pm := &perfMonitor{shutdownChan: make(chan bool), resultChan: make(chan *PerfStats, 1)}
+	go pm.run(memAvailable, numCPUs)
+	return pm
+}
+
+// Stop signals the monitor's goroutine to stop sampling and returns the computed stats.
+func (pm *perfMonitor) Stop() *PerfStats {
+	pm.shutdownChan <- true
+	return <-pm.resultChan
+}
+
+func (pm *perfMonitor) run(memAvailable int64, numCPUs int) {
+	var memSamples []int64
+	var cpuPercentSamples []float64
+	loggedError := false
+	stopSampling := false
+
+	// Take an immediate memory reading so that even a task shorter than perfMetricPollPeriod
+	// still gets at least one sample, rather than waiting for the first tick.
+	if memInUse, err := readMemInUse(memAvailable); err == nil {
+		memSamples = append(memSamples, memInUse)
+	} else {
+		log.Printf("perfMonitor: could not take initial memory reading, will stop sampling: %v", err)
+		loggedError = true
+		stopSampling = true
+	}
+
+	ticker := time.NewTicker(perfMetricPollPeriod)
+	defer ticker.Stop()
+
+	prevCPUStat, err := readCPUStat()
+	if err != nil {
+		if !loggedError {
+			log.Printf("perfMonitor: could not read initial cpu stats, will stop sampling: %v", err)
+			loggedError = true
+		}
+		stopSampling = true
+	}
+
+	for {
+		select {
+		case <-pm.shutdownChan:
+			pm.resultChan <- computePerfStats(memAvailable, numCPUs, memSamples, cpuPercentSamples)
+			return
+		case <-ticker.C:
+			if stopSampling {
+				continue
+			}
+
+			memInUse, memErr := readMemInUse(memAvailable)
+			curCPUStat, cpuErr := readCPUStat()
+			if memErr != nil || cpuErr != nil {
+				if !loggedError {
+					log.Printf("perfMonitor: error sampling machine stats, will stop sampling: mem=%v cpu=%v", memErr, cpuErr)
+					loggedError = true
+				}
+				stopSampling = true
+				continue
+			}
+
+			memSamples = append(memSamples, memInUse)
+			cpuPercentSamples = append(cpuPercentSamples, cpuUserPercent(prevCPUStat, curCPUStat))
+			prevCPUStat = curCPUStat
+		}
+	}
+}
+
+func computePerfStats(memAvailable int64, numCPUs int, memSamples []int64, cpuPercentSamples []float64) *PerfStats {
+	stats := &PerfStats{
+		MemoryAvailable: memAvailable,
+		NumberOfCPUs:    numCPUs,
+	}
+
+	if len(memSamples) > 0 {
+		memAsFloat := make([]float64, len(memSamples))
+		for i, v := range memSamples {
+			memAsFloat[i] = float64(v)
+		}
+		sort.Float64s(memAsFloat)
+		stats.MaxMemoryInUse = int64(memAsFloat[len(memAsFloat)-1])
+		stats.P95MemoryInUse = int64(percentileFloat64(memAsFloat, 95))
+		stats.MedianMemoryInUse = int64(percentileFloat64(memAsFloat, 50))
+	}
+
+	if len(cpuPercentSamples) > 0 {
+		sorted := append([]float64(nil), cpuPercentSamples...)
+		sort.Float64s(sorted)
+		stats.MaxUserCPUPercentUsage = sorted[len(sorted)-1]
+		stats.P95UserCPUPercentUsage = percentileFloat64(sorted, 95)
+		stats.MedianUserCPUPercentUsage = percentileFloat64(sorted, 50)
+	}
+
+	return stats
+}
+
+func execCommand(command string, workdir string, stdout *os.File) (*syscall.Rusage, *PerfStats, string, error) {
 	attr := &os.ProcAttr{Dir: workdir, Env: nil, Files: []*os.File{nil, stdout, stdout}}
 	exePath := "/bin/sh"
+
+	perfMon := startPerfMonitor()
+
 	proc, err := os.StartProcess(exePath, []string{exePath, "-c", command}, attr)
 	if err != nil {
-		return nil, "", err
+		perfMon.Stop()
+		return nil, nil, "", err
 	}
 
 	var procState *os.ProcessState
@@ -203,6 +468,8 @@ func execCommand(command string, workdir string, stdout *os.File) (*syscall.Rusa
 		panic(fmt.Sprintf("Error calling proc.Wait(): %s", err))
 	}
 
+	perfStats := perfMon.Stop()
+
 	rusage := procState.SysUsage().(*syscall.Rusage)
 	status := procState.Sys().(syscall.WaitStatus)
 	var statusStr string
@@ -212,7 +479,7 @@ func execCommand(command string, workdir string, stdout *os.File) (*syscall.Rusa
 		statusStr = fmt.Sprintf("%d", status.ExitStatus())
 	}
 
-	return rusage, statusStr, nil
+	return rusage, perfStats, statusStr, nil
 }
 
 type UploadMapping map[string]string
@@ -413,7 +680,7 @@ func executeTaskInDir(ioc IOClient, workdir string, taskId string, spec *TaskSpe
 
 	cwdDir := path.Join(workdir, commandWorkingDir)
 	log.Printf("Executing (working dir: %s, output written to: %s): %s", cwdDir, stdoutPath, spec.Command)
-	resourceUsage, retcode, err := execCommand(spec.Command, cwdDir, stdout)
+	resourceUsage, perfStats, retcode, err := execCommand(spec.Command, cwdDir, stdout)
 	if err != nil {
 		return retcode, err
 	}
@@ -431,7 +698,7 @@ func executeTaskInDir(ioc IOClient, workdir string, taskId string, spec *TaskSpe
 
 	addUpload(filesToUpload, stdoutPath, spec.StdoutURL)
 
-	err = writeResultFile(ioc, spec.CommandResultURL, retcode, resourceUsage, workdir, filesToUpload, spec.Command, spec.Parameters)
+	err = writeResultFile(ioc, spec.CommandResultURL, retcode, resourceUsage, perfStats, workdir, filesToUpload, spec.Command, spec.Parameters)
 	if err != nil {
 		return retcode, err
 	}
@@ -528,6 +795,7 @@ func writeResultFile(ioc IOClient,
 	CommandResultURL string,
 	retcode string,
 	resourceUsage *syscall.Rusage,
+	perfStats *PerfStats,
 	workdir string,
 	filesToUpload map[string]string,
 	command string,
@@ -555,7 +823,8 @@ func writeResultFile(ioc IOClient,
 			SharedMemorySize:   resourceUsage.Isrss,
 			UnsharedMemorySize: resourceUsage.Ixrss,
 			BlockInputOps:      resourceUsage.Inblock,
-			BlockOutputOps:     resourceUsage.Oublock}}
+			BlockOutputOps:     resourceUsage.Oublock},
+		MachineStats: perfStats}
 
 	resultJson, err := json.Marshal(result)
 	if err != nil {
