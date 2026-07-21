@@ -1,3 +1,4 @@
+import collections
 import json
 import statistics
 
@@ -44,6 +45,15 @@ def _pick_time_unit(values_sec):
     if statistics.median(values_sec) < 0.1 * 60:
         return 1, " sec"
     return 60, " min"
+
+
+def _format_duration(seconds):
+    if seconds < 60:
+        return f"{seconds:.1f} sec"
+    elif seconds < 3600:
+        return f"{seconds / 60:.1f} min"
+    else:
+        return f"{seconds / 3600:.1f} hours"
 
 
 def _pick_memory_unit(values_bytes):
@@ -114,6 +124,7 @@ def summarize_job_metrics_cmd(jq: JobQueue, io: IO, args):
     user_cpu_percents = []
     total_memory_values = []
     number_of_cpus_values = []
+    machine_types = []
     commands_by_task_id = {}
     if completed_tasks:
         txtui.user_print(
@@ -139,11 +150,29 @@ def summarize_job_metrics_cmd(jq: JobQueue, io: IO, args):
                 }
             )
             user_cpu_percents.append(machine_stats["max_user_cpu_percent_usage"])
-            total_memory_values.append(machine_stats["memory_available"])
+            total_memory_values.append(machine_stats["memory_total"])
             number_of_cpus_values.append(machine_stats["number_of_cpus"])
+            if machine_stats["machine_type"]:
+                machine_types.append(machine_stats["machine_type"])
 
     for r in runtime_records + max_memory_records:
         r["command"] = commands_by_task_id.get(r["task_id"], "")
+
+    if machine_types:
+        machine_type_counts = collections.Counter(machine_types)
+        if len(machine_type_counts) == 1:
+            machine_type_str = next(iter(machine_type_counts))
+        else:
+            machine_type_str = ", ".join(
+                f"{mt} ({n})" for mt, n in machine_type_counts.most_common()
+            )
+    else:
+        machine_type_str = "unknown"
+    txtui.user_print(f"machine type: {machine_type_str}")
+
+    runtimes = [r["value"] for r in runtime_records]
+    total_runtime_str = _format_duration(sum(runtimes)) if runtimes else "no data available"
+    txtui.user_print(f"total runtime: {total_runtime_str}")
 
     txtui.user_print(f"Task summary for job {jobid} ({len(tasks)} tasks)")
     if total_memory_values:
@@ -179,7 +208,6 @@ def summarize_job_metrics_cmd(jq: JobQueue, io: IO, args):
         _print_metric_stats("User CPU usage", user_cpu_percents)
     txtui.user_print("")
 
-    runtimes = [r["value"] for r in runtime_records]
     if runtimes:
         divisor, unit = _pick_time_unit(runtimes)
         _print_metric_stats("Runtime", [v / divisor for v in runtimes], unit=unit)

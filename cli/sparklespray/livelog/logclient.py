@@ -136,8 +136,6 @@ class LogMonitor:
         self.task_id = task_id
         self.offset = 0
 
-        self.prev_mem_total = 0
-
     def close(self):
         self.stub.dispose()
 
@@ -155,28 +153,3 @@ class LogMonitor:
 
             if response["end_of_file"]:
                 break
-
-        response = self.stub.get_process_status()
-
-        mem_total = (
-            response["total_memory"]
-            + response["total_data"]
-            + response["total_shared"]
-            + response["total_resident"]
-        )
-        per_gb = 1024 * 1024 * 1024.0
-        if abs(self.prev_mem_total - mem_total) > 0.01 * per_gb:
-            self.prev_mem_total = mem_total
-
-            print_log_content(
-                datetime.datetime.now(),
-                "Processes running in container: %s, total memory used: %.3f GB, data memory used: %.3f GB, shared used %.3f GB, resident %.3f GB"
-                % (
-                    response["process_count"],
-                    response["total_data"] / per_gb,
-                    response["total_data"] / per_gb,
-                    response["total_shared"] / per_gb,
-                    response["total_resident"] / per_gb,
-                ),
-                from_sparkles=True,
-            )

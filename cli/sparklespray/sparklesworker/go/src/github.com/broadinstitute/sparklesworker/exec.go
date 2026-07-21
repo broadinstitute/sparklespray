@@ -68,9 +68,13 @@ type ResourceUsage struct {
 
 // PerfStats holds whole-machine memory/CPU usage sampled periodically while a task's
 // command runs, to capture resource usage that a single process's rusage misses
-// (e.g. when the command spawns additional child processes).
+// (e.g. when the command spawns additional child processes). Memory figures are
+// absolute (total machine memory in use at the moment of the sample), not relative to
+// whatever else was running when the task started, so MaxMemoryInUse can be compared
+// directly against MemoryTotal to see how close the machine came to running out.
 type PerfStats struct {
-	MemoryAvailable           int64   `json:"memory_available"`
+	MachineType               string  `json:"machine_type"`
+	MemoryTotal               int64   `json:"memory_total"`
 	NumberOfCPUs              int     `json:"number_of_cpus"`
 	MaxMemoryInUse            int64   `json:"max_memory_in_use"`
 	P95MemoryInUse            int64   `json:"p95_memory_in_use"`
@@ -257,14 +261,15 @@ func readMemInfo() (memTotal int64, memAvailable int64, err error) {
 	return memTotal, memAvailable, nil
 }
 
-// readMemInUse returns how much memory is in use (MemTotal - MemAvailable, in bytes), given a
-// previously-read memAvailable (bytes) as the baseline for total available memory.
-func readMemInUse(memAvailable int64) (int64, error) {
-	_, memAvail, err := readMemInfo()
+// readMemInUse returns how much memory is currently in use, machine-wide, in bytes
+// (MemTotal - MemAvailable, both read fresh). This is an absolute figure comparable
+// directly against MemTotal, not a delta relative to some earlier baseline.
+func readMemInUse() (int64, error) {
+	memTotal, memAvail, err := readMemInfo()
 	if err != nil {
 		return 0, err
 	}
-	memInUse := memAvailable - memAvail
+	memInUse := memTotal - memAvail
 	if memInUse < 0 {
 		memInUse = 0
 	}
@@ -342,16 +347,21 @@ type perfMonitor struct {
 	resultChan   chan *PerfStats
 }
 
-func startPerfMonitor() *perfMonitor {
+func startPerfMonitor(stdout *os.File) *perfMonitor {
 	numCPUs := runtime.NumCPU()
 
-	_, memAvailable, err := readMemInfo()
+	memTotal, _, err := readMemInfo()
 	if err != nil {
-		log.Printf("perfMonitor: could not read available memory, will report 0: %v", err)
+		log.Printf("perfMonitor: could not read total memory, will report 0: %v", err)
+	}
+
+	machineType, err := GetMachineType()
+	if err != nil {
+		log.Printf("perfMonitor: could not read machine type, will report empty: %v", err)
 	}
 
 	pm := &perfMonitor{shutdownChan: make(chan bool), resultChan: make(chan *PerfStats, 1)}
-	go pm.run(memAvailable, numCPUs)
+	go pm.run(stdout, memTotal, numCPUs, machineType)
 	return pm
 }
 
@@ -361,15 +371,47 @@ func (pm *perfMonitor) Stop() *PerfStats {
 	return <-pm.resultChan
 }
 
-func (pm *perfMonitor) run(memAvailable int64, numCPUs int) {
+// Only write another line to stdout.txt once a sample differs from the last-written one by at
+// least this much, so a long-running, steady-state task doesn't flood its log with near-duplicates.
+const perfLogMemThresholdGB = 0.1
+const perfLogCPUPercentThreshold = 5.0
+
+func shouldLogPerfSample(hasLogged bool, lastMemInUse int64, lastCPUPercent float64, memInUse int64, cpuPercent float64) bool {
+	if !hasLogged {
+		return true
+	}
+	memDeltaGB := math.Abs(float64(memInUse-lastMemInUse)) / (1024 * 1024 * 1024)
+	cpuDelta := math.Abs(cpuPercent - lastCPUPercent)
+	return memDeltaGB > perfLogMemThresholdGB || cpuDelta > perfLogCPUPercentThreshold
+}
+
+func formatPerfLogLine(memInUse, memTotal int64, cpuPercent float64, numCPUs int) string {
+	const bytesPerGB = 1024 * 1024 * 1024
+	return fmt.Sprintf(
+		"[%s sparkles metrics] Mem in use: %.1f/%.1f GB, User CPU: %.1f%% (%d CPUs)\n",
+		time.Now().Format(time.RFC3339),
+		float64(memInUse)/bytesPerGB,
+		float64(memTotal)/bytesPerGB,
+		cpuPercent,
+		numCPUs,
+	)
+}
+
+func (pm *perfMonitor) run(stdout *os.File, memTotal int64, numCPUs int, machineType string) {
 	var memSamples []int64
 	var cpuPercentSamples []float64
 	loggedError := false
 	stopSampling := false
 
+	hasLoggedLine := false
+	var lastLoggedMemInUse int64
+	var lastLoggedCPUPercent float64
+
 	// Take an immediate memory reading so that even a task shorter than perfMetricPollPeriod
-	// still gets at least one sample, rather than waiting for the first tick.
-	if memInUse, err := readMemInUse(memAvailable); err == nil {
+	// still gets at least one sample, rather than waiting for the first tick. There's no cpu
+	// percentage to pair it with yet (that needs a delta between two readings), so this sample
+	// feeds the final result.json stats but doesn't produce a stdout.txt line on its own.
+	if memInUse, err := readMemInUse(); err == nil {
 		memSamples = append(memSamples, memInUse)
 	} else {
 		log.Printf("perfMonitor: could not take initial memory reading, will stop sampling: %v", err)
@@ -392,14 +434,14 @@ func (pm *perfMonitor) run(memAvailable int64, numCPUs int) {
 	for {
 		select {
 		case <-pm.shutdownChan:
-			pm.resultChan <- computePerfStats(memAvailable, numCPUs, memSamples, cpuPercentSamples)
+			pm.resultChan <- computePerfStats(memTotal, numCPUs, machineType, memSamples, cpuPercentSamples)
 			return
 		case <-ticker.C:
 			if stopSampling {
 				continue
 			}
 
-			memInUse, memErr := readMemInUse(memAvailable)
+			memInUse, memErr := readMemInUse()
 			curCPUStat, cpuErr := readCPUStat()
 			if memErr != nil || cpuErr != nil {
 				if !loggedError {
@@ -410,17 +452,28 @@ func (pm *perfMonitor) run(memAvailable int64, numCPUs int) {
 				continue
 			}
 
+			cpuPercent := cpuUserPercent(prevCPUStat, curCPUStat)
 			memSamples = append(memSamples, memInUse)
-			cpuPercentSamples = append(cpuPercentSamples, cpuUserPercent(prevCPUStat, curCPUStat))
+			cpuPercentSamples = append(cpuPercentSamples, cpuPercent)
 			prevCPUStat = curCPUStat
+
+			if shouldLogPerfSample(hasLoggedLine, lastLoggedMemInUse, lastLoggedCPUPercent, memInUse, cpuPercent) {
+				if _, err := stdout.WriteString(formatPerfLogLine(memInUse, memTotal, cpuPercent, numCPUs)); err != nil {
+					log.Printf("perfMonitor: could not write metrics line to stdout: %v", err)
+				}
+				hasLoggedLine = true
+				lastLoggedMemInUse = memInUse
+				lastLoggedCPUPercent = cpuPercent
+			}
 		}
 	}
 }
 
-func computePerfStats(memAvailable int64, numCPUs int, memSamples []int64, cpuPercentSamples []float64) *PerfStats {
+func computePerfStats(memTotal int64, numCPUs int, machineType string, memSamples []int64, cpuPercentSamples []float64) *PerfStats {
 	stats := &PerfStats{
-		MemoryAvailable: memAvailable,
-		NumberOfCPUs:    numCPUs,
+		MachineType:  machineType,
+		MemoryTotal:  memTotal,
+		NumberOfCPUs: numCPUs,
 	}
 
 	if len(memSamples) > 0 {
@@ -449,7 +502,7 @@ func execCommand(command string, workdir string, stdout *os.File) (*syscall.Rusa
 	attr := &os.ProcAttr{Dir: workdir, Env: nil, Files: []*os.File{nil, stdout, stdout}}
 	exePath := "/bin/sh"
 
-	perfMon := startPerfMonitor()
+	perfMon := startPerfMonitor(stdout)
 
 	proc, err := os.StartProcess(exePath, []string{exePath, "-c", command}, attr)
 	if err != nil {

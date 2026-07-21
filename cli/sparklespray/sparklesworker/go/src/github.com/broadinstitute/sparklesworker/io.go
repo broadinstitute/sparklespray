@@ -9,6 +9,7 @@ import (
 	"os"
 	"path"
 	"regexp"
+	"strings"
 
 	"google.golang.org/api/option"
 
@@ -192,4 +193,15 @@ func GetInstanceName() (string, error) {
 
 func GetInstanceZone() (string, error) {
 	return getMetadata("http://metadata.google.internal/computeMetadata/v1/instance/zone")
+}
+
+// GetMachineType returns the short machine type name (e.g. "n4-standard-2"), trimming the
+// "projects/<num>/machineTypes/" prefix the metadata server includes in its response.
+func GetMachineType() (string, error) {
+	raw, err := getMetadata("http://metadata.google.internal/computeMetadata/v1/instance/machine-type")
+	if err != nil {
+		return "", err
+	}
+	parts := strings.Split(raw, "/")
+	return parts[len(parts)-1], nil
 }
