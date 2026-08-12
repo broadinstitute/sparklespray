@@ -31,7 +31,7 @@ sparklesworker_image=invalid-sparklesworker-name
         PersistentDiskMount(
             path="/mnt/disks/mount_1",
             size_in_gb=100,
-            type="local-ssd",
+            type="pd-balanced",
             mount_options=[],
         )
     ]
