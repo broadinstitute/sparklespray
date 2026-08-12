@@ -2,7 +2,6 @@ import os
 
 from .model import (
     PersistentDiskMount,
-    LOCAL_SSD,
     ExistingDiskMount,
     DiskMountT,
     MachineSpec,
@@ -23,6 +22,7 @@ import dataclasses
 from google.auth.credentials import Credentials
 from typing import Callable
 from .errors import UserError
+from .gcp_utils import supports_hyperdisk_balanced, UnknownMachineType
 from .batch_api import ClusterAPI
 from google.cloud.batch_v1alpha.services.batch_service import BatchServiceClient
 from typing import TypeVar, Union
@@ -298,17 +298,16 @@ def load_config(
 
     machine_type = config.machine_type
     assert machine_type is not None
-    if machine_type.startswith("n4-"):
-        # N4 instances only work with "hyperdrive" so use that as the default
-        default_boot_drive_type = default_drive_type = "hyperdisk-balanced"
-    elif machine_type.startswith("n1-") or machine_type.startswith("n2-"):
-        # the original sparkles behavior was always use local-ssd
-        default_drive_type = LOCAL_SSD
-        default_boot_drive_type = "pd-balanced"
-    else:
-        # not all machine types have local ssd, so default everything else to the standard pd-balanced
-        default_drive_type = "pd-balanced"
-        default_boot_drive_type = "pd-balanced"
+    try:
+        if supports_hyperdisk_balanced(machine_type):
+            default_boot_drive_type = default_drive_type = "hyperdisk-balanced"
+        else:
+            default_boot_drive_type = default_drive_type = "pd-balanced"
+    except UnknownMachineType:
+        raise BadConfig(
+            f"Cannot guess a sensible default disk type for unknown machine type '{machine_type}'. "
+            "Please set boot_volume_type and mount_N_type explicitly in your config."
+        )
 
     # assuming 40 GB is enough. A better default would be based on the docker image size
     config.boot_volume = PersistentDiskMount(
