@@ -21,6 +21,7 @@ import (
 
 	"cloud.google.com/go/logging"
 	"github.com/bmatcuk/doublestar"
+	"golang.org/x/net/context"
 )
 
 type TaskDownload struct {
@@ -498,8 +499,13 @@ func computePerfStats(memTotal int64, numCPUs int, machineType string, memSample
 	return stats
 }
 
-func execCommand(command string, workdir string, stdout *os.File) (*syscall.Rusage, *PerfStats, string, error) {
-	attr := &os.ProcAttr{Dir: workdir, Env: nil, Files: []*os.File{nil, stdout, stdout}}
+func execCommand(ctx context.Context, command string, workdir string, stdout *os.File) (*syscall.Rusage, *PerfStats, string, error) {
+	attr := &os.ProcAttr{
+		Dir:   workdir,
+		Env:   nil,
+		Files: []*os.File{nil, stdout, stdout},
+		Sys:   &syscall.SysProcAttr{Setpgid: true}, // own process group, so we can kill any children the shell spawns too
+	}
 	exePath := "/bin/sh"
 
 	perfMon := startPerfMonitor(stdout)
@@ -510,15 +516,37 @@ func execCommand(command string, workdir string, stdout *os.File) (*syscall.Rusa
 		return nil, nil, "", err
 	}
 
+	type waitResult struct {
+		state *os.ProcessState
+		err   error
+	}
+	waitCh := make(chan waitResult, 1)
+	go func() {
+		state, err := proc.Wait()
+		waitCh <- waitResult{state, err}
+	}()
+
 	var procState *os.ProcessState
-	err = NotifyUntilComplete(func() error {
-		var err2 error
-		procState, err2 = proc.Wait()
-		return err2
-	})
-	if err != nil {
-		// this should not be possible
-		panic(fmt.Sprintf("Error calling proc.Wait(): %s", err))
+	doneCh := ctx.Done()
+waitLoop:
+	for {
+		select {
+		case <-doneCh:
+			log.Printf("Task cancelled (job killed/replaced/deleted); killing process group %d: %s", proc.Pid, command)
+			if killErr := syscall.Kill(-proc.Pid, syscall.SIGKILL); killErr != nil {
+				log.Printf("Failed to kill process group %d: %v", proc.Pid, killErr)
+			}
+			doneCh = nil // already handled; avoid re-selecting this case, just wait for the exit below
+		case res := <-waitCh:
+			if res.err != nil {
+				// this should not be possible
+				panic(fmt.Sprintf("Error calling proc.Wait(): %s", res.err))
+			}
+			procState = res.state
+			break waitLoop
+		case <-time.After(time.Second):
+			NotifyWatchdog()
+		}
 	}
 
 	perfStats := perfMon.Stop()
@@ -530,6 +558,10 @@ func execCommand(command string, workdir string, stdout *os.File) (*syscall.Rusa
 		statusStr = fmt.Sprintf("signaled(%s)", status.Signal())
 	} else {
 		statusStr = fmt.Sprintf("%d", status.ExitStatus())
+	}
+
+	if ctx.Err() != nil {
+		return rusage, perfStats, statusStr, ctx.Err()
 	}
 
 	return rusage, perfStats, statusStr, nil
@@ -693,7 +725,7 @@ func getFilesWithMatchingMTimes(a map[string]time.Time, b map[string]time.Time) 
 	return matching
 }
 
-func executeTaskInDir(ioc IOClient, workdir string, taskId string, spec *TaskSpec, cachedir string, monitor *Monitor) (string, error) {
+func executeTaskInDir(ctx context.Context, ioc IOClient, workdir string, taskId string, spec *TaskSpec, cachedir string, monitor *Monitor) (string, error) {
 	stdoutPath := path.Join(workdir, "stdout.txt")
 	execLifecycleScript("PreDownloadScript", workdir, spec.PreDownloadScript)
 
@@ -733,7 +765,7 @@ func executeTaskInDir(ioc IOClient, workdir string, taskId string, spec *TaskSpe
 
 	cwdDir := path.Join(workdir, commandWorkingDir)
 	log.Printf("Executing (working dir: %s, output written to: %s): %s", cwdDir, stdoutPath, spec.Command)
-	resourceUsage, perfStats, retcode, err := execCommand(spec.Command, cwdDir, stdout)
+	resourceUsage, perfStats, retcode, err := execCommand(ctx, spec.Command, cwdDir, stdout)
 	if err != nil {
 		return retcode, err
 	}
@@ -761,7 +793,7 @@ func executeTaskInDir(ioc IOClient, workdir string, taskId string, spec *TaskSpe
 	return retcode, err
 }
 
-func executeTask(ioc IOClient, taskId string, taskSpec *TaskSpec, cacheDir string, tasksDir string, monitor *Monitor) (string, error) {
+func executeTask(ctx context.Context, ioc IOClient, taskId string, taskSpec *TaskSpec, cacheDir string, tasksDir string, monitor *Monitor) (string, error) {
 	//	log.Printf("Job spec (%s) of claimed task: %s", json_url, json.dumps(spec, indent=2))
 
 	mode := os.FileMode(0700)
@@ -797,7 +829,7 @@ func executeTask(ioc IOClient, taskId string, taskSpec *TaskSpec, cacheDir strin
 		return "", err
 	}
 
-	retcode, err := executeTaskInDir(ioc, workDir, taskId, taskSpec, cacheDir, monitor)
+	retcode, err := executeTaskInDir(ctx, ioc, workDir, taskId, taskSpec, cacheDir, monitor)
 	if err != nil {
 		return retcode, err
 	}
@@ -909,11 +941,11 @@ func loadTaskSpec(ioc IOClient, taskURL string) (*TaskSpec, error) {
 	return &taskSpec, nil
 }
 
-func ExecuteTaskFromUrl(ioc IOClient, taskId string, taskURL string, cacheDir string, tasksDir string, monitor *Monitor) (string, error) {
+func ExecuteTaskFromUrl(ctx context.Context, ioc IOClient, taskId string, taskURL string, cacheDir string, tasksDir string, monitor *Monitor) (string, error) {
 	taskSpec, err := loadTaskSpec(ioc, taskURL)
 	if err != nil {
 		return "", err
 	}
 
-	return executeTask(ioc, taskId, taskSpec, cacheDir, tasksDir, monitor)
+	return executeTask(ctx, ioc, taskId, taskSpec, cacheDir, tasksDir, monitor)
 }

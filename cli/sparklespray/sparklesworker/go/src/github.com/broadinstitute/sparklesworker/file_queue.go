@@ -2,8 +2,8 @@ package sparklesworker
 
 import (
 	"encoding/json"
+	"errors"
 	"io/ioutil"
-	"log"
 
 	"golang.org/x/net/context"
 )
@@ -27,15 +27,15 @@ func (q *memQueue) claimTask(ctx context.Context) (*Task, error) {
 	return t, nil
 }
 
-func (q *memQueue) isJobKilled(ctx context.Context, JobID string) (bool, error) {
-	return false, nil
+func (q *memQueue) getJobState(ctx context.Context, JobID string) (*JobState, error) {
+	return &JobState{Exists: true, Status: "", UUID: ""}, nil
 }
 
 func (q *memQueue) atomicUpdateTask(ctx context.Context, task_id string, mutateTaskCallback func(task *Task) bool) (*Task, error) {
 	t := q.retrievedTasks[task_id]
 	ok := mutateTaskCallback(t)
 	if !ok {
-		log.Fatalf("mutation failed")
+		return nil, errors.New("Update failed")
 	}
 	return t, nil
 }

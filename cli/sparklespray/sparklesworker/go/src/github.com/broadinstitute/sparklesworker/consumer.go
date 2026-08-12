@@ -2,6 +2,7 @@ package sparklesworker
 
 import (
 	"log"
+	"sync/atomic"
 	"time"
 
 	"cloud.google.com/go/logging"
@@ -77,16 +78,76 @@ type Options struct {
 	LoggingClient      *logging.Client
 }
 
+// JobState is a snapshot of a Job entity's existence/status/generation, used
+// by the worker to decide whether a task it's running should be aborted.
+type JobState struct {
+	Exists bool
+	Status string
+	UUID   string
+}
+
 type Queue interface {
 	claimTask(ctx context.Context) (*Task, error)
-	isJobKilled(ctx context.Context, JobID string) (bool, error)
+	getJobState(ctx context.Context, JobID string) (*JobState, error)
 	atomicUpdateTask(ctx context.Context, task_id string, mutateTaskCallback func(task *Task) bool) (*Task, error)
 }
 
-type Executor func(taskId string, taskParam string) (string, error)
+type Executor func(ctx context.Context, taskId string, taskParam string) (string, error)
 
 func getTimestampMillis() int64 {
 	return int64(time.Now().UnixNano()) / int64(time.Millisecond)
+}
+
+// JobStatePollInterval controls how often, while a task is executing, the
+// worker re-checks whether the job backing that task has been killed,
+// deleted, or replaced (resubmitted under the same name, which changes its
+// metadata UUID).
+const JobStatePollInterval = 1 * time.Minute
+
+// jobAbortMonitor polls a job's state on a ticker while a task runs, and
+// cancels the task's context the moment it sees the job killed, deleted, or
+// replaced by a resubmission (its UUID no longer matches what we captured
+// at claim time).
+type jobAbortMonitor struct {
+	stopCh    chan struct{}
+	triggered int32 // atomic bool
+}
+
+func startJobAbortMonitor(ctx context.Context, queue Queue, jobID string, expectedUUID string, cancel context.CancelFunc) *jobAbortMonitor {
+	m := &jobAbortMonitor{stopCh: make(chan struct{})}
+	go func() {
+		ticker := time.NewTicker(JobStatePollInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-m.stopCh:
+				return
+			case <-ticker.C:
+				state, err := queue.getJobState(ctx, jobID)
+				if err != nil {
+					// transient poll error - don't abort a running task over it, just retry next tick
+					log.Printf("jobAbortMonitor: error polling job %s: %v", jobID, err)
+					continue
+				}
+				if !state.Exists || state.Status == JOB_STATUS_KILLED || state.UUID != expectedUUID {
+					log.Printf("jobAbortMonitor: aborting task for job %s (exists=%v status=%s uuid=%s expectedUUID=%s)",
+						jobID, state.Exists, state.Status, state.UUID, expectedUUID)
+					atomic.StoreInt32(&m.triggered, 1)
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+	return m
+}
+
+func (m *jobAbortMonitor) Stop() {
+	close(m.stopCh)
+}
+
+func (m *jobAbortMonitor) Triggered() bool {
+	return atomic.LoadInt32(&m.triggered) == 1
 }
 
 func ConsumerRunLoop(ctx context.Context, queue Queue, sleepUntilNotify func(sleepTime time.Duration), executor Executor, SleepOnEmpty time.Duration, MaxWaitForNewTasks time.Duration) error {
@@ -123,15 +184,34 @@ func ConsumerRunLoop(ctx context.Context, queue Queue, sleepUntilNotify func(sle
 		log.Printf("Claimed task %s", claimed.TaskID)
 		firstClaim = false
 
-		jobKilled, err := queue.isJobKilled(ctx, claimed.JobID)
+		jobState, err := queue.getJobState(ctx, claimed.JobID)
 		if err != nil {
-			log.Printf("Got error in isJobKilled for %s: %v", claimed.JobID, err)
+			log.Printf("Got error in getJobState for %s: %v", claimed.JobID, err)
 			return err
 		}
 
-		if !jobKilled {
-			retcode, err := executor(claimed.TaskID, claimed.Args)
-			if err != nil {
+		if jobState.Exists && jobState.Status != JOB_STATUS_KILLED {
+			execCtx, cancel := context.WithCancel(ctx)
+			monitor := startJobAbortMonitor(ctx, queue, claimed.JobID, jobState.UUID, cancel)
+
+			retcode, err := executor(execCtx, claimed.TaskID, claimed.Args)
+			monitor.Stop()
+			cancel() // no-op if already cancelled; releases resources either way
+
+			if monitor.Triggered() {
+				log.Printf("Task %s aborted mid-execution (job killed/replaced/deleted)", claimed.TaskID)
+				// IMPORTANT: by the time we get here, the task_id we claimed could
+				// already belong to a *different* generation of the job (same
+				// job_id, resubmitted, deterministic task_id, re-claimed by another
+				// worker). Only mark it killed if we're still the owner of record -
+				// otherwise we'd stomp on a legitimately in-progress task that just
+				// happens to share our old task_id.
+				_, err = updateTaskKilled(ctx, queue, claimed.TaskID, claimed.Owner)
+				if err != nil {
+					log.Printf("Got error updating task %s was killed: %v", claimed.TaskID, err)
+					return err
+				}
+			} else if err != nil {
 				log.Printf("Got error executing task %s: %v, marking task as failed", claimed.TaskID, err)
 
 				_, err = updateTaskFailed(ctx, queue, claimed.TaskID, err.Error())
@@ -147,7 +227,7 @@ func ConsumerRunLoop(ctx context.Context, queue Queue, sleepUntilNotify func(sle
 				}
 			}
 		} else {
-			_, err = updateTaskKilled(ctx, queue, claimed.TaskID)
+			_, err = updateTaskKilled(ctx, queue, claimed.TaskID, claimed.Owner)
 			if err != nil {
 				log.Printf("Got error updating task %s was killed: %v", claimed.TaskID, err)
 				return err
@@ -252,16 +332,35 @@ func updateTaskFailed(ctx context.Context, q Queue, task_id string, failure stri
 	return updatedTask, nil
 }
 
-func updateTaskKilled(ctx context.Context, q Queue, task_id string) (*Task, error) {
-	log.Printf("updateTaskKilled of task %v", task_id)
+func updateTaskKilled(ctx context.Context, q Queue, task_id string, expectedOwner string) (*Task, error) {
+	log.Printf("updateTaskKilled of task %v (owner=%s)", task_id, expectedOwner)
 
 	now := getTimestampMillis()
 	taskHistory := &TaskHistory{Timestamp: float64(now) / 1000.0,
 		Status: STATUS_KILLED}
 
+	// notOurTaskAnymore covers any reason the mutate below rejects the write
+	// because something else already changed this task's state out from
+	// under us: kill()'s own reset-claimed-to-pending step, a resubmission
+	// that created a fresh pending row under the same task_id, or a
+	// different owner having since claimed it. None of those are worker-fatal
+	// - they just mean there's nothing for us to update, so don't propagate
+	// an error for them.
+	notOurTaskAnymore := false
 	mutate := func(task *Task) bool {
+		if task.Owner != expectedOwner {
+			// task_id was reclaimed by a different generation/owner (job was
+			// resubmitted under the same name) since we originally claimed it.
+			// Leave the new owner's claim alone - don't write, don't error out,
+			// just let the caller move on to the next task.
+			log.Printf("Task %v is now owned by %q (we were %q) - job was resubmitted/reclaimed since we claimed it. Leaving it alone.", task.TaskID, task.Owner, expectedOwner)
+			notOurTaskAnymore = true
+			return false
+		}
+
+		// if we got here, then we are the owner of this task
 		if task.Status != STATUS_CLAIMED {
-			log.Printf("While attempting to mark task %v as killed, found task had status %v. Aborting", task.Status)
+			log.Printf("While attempting to mark task %v as killed, found task had status %v (expected claimed). Nothing to do - leaving it alone.", task.TaskID, task.Status)
 			return false
 		}
 
@@ -273,6 +372,14 @@ func updateTaskKilled(ctx context.Context, q Queue, task_id string) (*Task, erro
 
 	updatedTask, err := q.atomicUpdateTask(ctx, task_id, mutate)
 	if err != nil {
+		if notOurTaskAnymore {
+			// Not a real error - the task just isn't ours to update anymore.
+			// No write happened, and no result was uploaded either (the
+			// executor's context was already cancelled before any upload
+			// step could run). Report success-with-no-task so the caller
+			// just proceeds to its next poll.
+			return nil, nil
+		}
 		// I suppose this is not technically correct. Could be a simultaneous update of "success" or "failed" and "lost"
 		return nil, err
 	}

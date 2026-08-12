@@ -1,6 +1,7 @@
 package sparklesworker
 
 import (
+	"encoding/json"
 	"errors"
 	"log"
 	"math/rand"
@@ -82,15 +83,28 @@ func (q *DataStoreQueue) claimTask(ctx context.Context) (*Task, error) {
 	}
 }
 
-func (q *DataStoreQueue) isJobKilled(ctx context.Context, jobID string) (bool, error) {
+func (q *DataStoreQueue) getJobState(ctx context.Context, jobID string) (*JobState, error) {
 	jobKey := datastore.NameKey("Job", jobID, nil)
 	var job Job
 	err := q.client.Get(ctx, jobKey, &job)
+	if err == datastore.ErrNoSuchEntity {
+		return &JobState{Exists: false}, nil
+	}
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 
-	return job.Status == JOB_STATUS_KILLED, nil
+	uuid := ""
+	if job.Metadata != "" {
+		var metadata map[string]string
+		if jsonErr := json.Unmarshal([]byte(job.Metadata), &metadata); jsonErr != nil {
+			log.Printf("Warning: could not parse metadata for job %s: %v", jobID, jsonErr)
+		} else {
+			uuid = metadata["UUID"]
+		}
+	}
+
+	return &JobState{Exists: true, Status: job.Status, UUID: uuid}, nil
 }
 
 func (q *DataStoreQueue) atomicUpdateTask(ctx context.Context, task_id string, mutateTaskCallback func(task *Task) bool) (*Task, error) {

@@ -296,8 +296,8 @@ func consume(c *cli.Context) error {
 		MaxWaitForNewTasks: time.Duration(shutdownAfter) * time.Second, // how long to wait for a new task to arrive if the queue is empty
 		Owner:              owner}
 
-	executor := func(taskId string, taskParam string) (string, error) {
-		return ExecuteTaskFromUrl(ioc, taskId, taskParam, cacheDir, tasksDir, monitor)
+	executor := func(ctx context.Context, taskId string, taskParam string) (string, error) {
+		return ExecuteTaskFromUrl(ctx, ioc, taskId, taskParam, cacheDir, tasksDir, monitor)
 	}
 
 	sleepUntilNotify := func(sleepTime time.Duration) {
