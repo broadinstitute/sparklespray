@@ -620,11 +620,16 @@ Some configuration values can be inherited from your gcloud configuration (`~/.c
 | `mount_N_size_in_gb` | 100                  | Size in GB for mount N                        |
 | `mount_N_name`       | None                 | Name of existing disk or bucket path to mount |
 
-\*Default disk type depends on machine type:
+\*Default disk type depends on machine type: both the boot disk and the
+first data disk (`mount_1`) default to "hyperdisk-balanced" if the machine
+type's series supports Hyperdisk Balanced, otherwise "pd-balanced".
 
-- n4-\*: "hyperdisk-balanced" for both boot and data disks
-- n1-\* or n2-\*: "pd-balanced" for boot, "local-ssd" for data disks
-- Others: "pd-balanced" for both boot and data disks
+As of this writing, Hyperdisk Balanced is supported for: A3, A4, A4X, C3,
+C3D, C4, C4A, C4D, C4N, G4, H3, H4D, M1, M2, M3, M4, M4N, N4, N4A, N4D, X4,
+and Z3 machine series. Other series (including N1, N2, N2D, G2, E2, C2, C2D,
+A2, T2A, and T2D) default to "pd-balanced". Sparkles will raise an error if
+the machine type's series is unrecognized, asking you to set
+`boot_volume_type`/`mount_N_type` explicitly.
 
 #### Disk Mount Types
 
