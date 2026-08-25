@@ -50,3 +50,95 @@ Add output location to tasks
 
 define job spec
 
+workpool
+  "machineType": "n2-standard-2",
+  "rootDir": "/mnt/sparkles",
+  (store in project)"region": "us-central1",
+  "zones": compute
+  "maxWorkerCount": 2,
+  "maxPreemptibleWorkerAttempts": 0,
+  "maxWorkersPerRequest": 2,
+  "resources": [{ "name": "slots", "value": 1 }],
+  "emptyVolumes": [],
+  (store in project)"sparklesWorkerGCSPath": "gs://sparkles-test-0625/bin/sparkles-linux-amd64-dev",
+  (store in project)"serviceAccount": "sparkles-lnibyae4xk@sparkles-test-0625.iam.gserviceaccount.com",
+  "dbName": "sparkles",
+  "lingerTimeSec": 600
+
+
+------- 
+Next steps:
+1. Define submit command documentation. 
+2. Define backend submission API
+3. Implement submission API and submit command
+
+Things that are missing: API key support. 
+
+new sparkles config=
+{"url": "...", "api_key": "..."}
+
+sparkles sub job.json [--config path.json] [--name name (default to the filename)]
+
+format of job.json:
+
+{
+  (default) "resources": [{ "name": "slots", "value": 1 }],
+  (default) "filesToLocalize": [], 
+  "tasks": [
+    {
+      (default to job+index) "name": ...
+      "dockerImage": "alpine:3.19",
+      "command": ["sh", "-c", "echo task 1 && sleep 5"],
+      "filesToLocalize": ... 
+    },
+    ...
+  ]
+  or "task_template": {"dockerImage": ..., "command": ...} if --params filename.csv is specified
+   "workpool": {
+      "machineType": "n2-standard-2",
+      (default) "rootDir": "/mnt/sparkles",
+      (default from project) "region": "us-central1",
+      (default by querying for region) "zones": ["us-central1-a", "us-central1-b", "us-central1-c", "us-central1-f"],
+      (default) "resources": [{ "name": "slots", "value": 1 }],
+      (default) "emptyVolumes": [], 
+      (default from project) "sparklesWorkerGCSPath": "gs://sparkles-test-0625/bin/sparkles-linux-amd64-dev",
+      (set by backend) "serviceAccount": "sparkles-lnibyae4xk@sparkles-test-0625.iam.gserviceaccount.com",
+      (set by backend) "dbName": "sparkles",
+      (default) "lingerTimeSec": 600
+
+      // mutable fields
+      (default) "maxWorkerCount": 1,
+      (default) "maxPreemptibleWorkerAttempts": 0,
+      (default) "maxWorkersPerRequest": 50,
+   }
+},
+
+
+Minimal API submission:
+{
+  "tasks": [
+    {
+       "image": "alpine:3.19",
+       "command": ["sh", "-c", "echo task 1 && sleep 5"],
+   }
+  ],
+   "workpool": {
+      "machineType": "n2-standard-2",
+   }
+}
+
+Full reference
+
+JobSubmission Fields 
+name: tasks
+type: list of TaskSpec
+description:
+default value:
+
+TaskSpec Fields 
+name: image
+type: string
+description: The docker image to use for executing the command
+default value: None -- field is required
+
+name: command: 

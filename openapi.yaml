@@ -1,0 +1,157 @@
+openapi: 3.0.4
+info:
+  title: Sparkles
+  description: |-
+    Sparkles
+  version: 1.0.12
+paths:
+  /job/submit:
+    post:
+      summary: Submit a job
+      operationId: subJob
+      requestBody:
+        description: Create a new job submission
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SubmitJobBody"
+        required: true
+      responses:
+        "200":
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SubmitJobResponse"
+        "400":
+          description: Invalid input
+        "422":
+          description: Validation exception
+        default:
+          description: Unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+components:
+  schemas:
+    SubmitJobBody:
+      type: object
+      required:
+        - tasks
+        - workpool
+        - name
+      properties:
+        name:
+          type: string
+
+        resources:
+          type: array
+          items:
+            $ref: "#/components/schemas/Resource"
+
+        tasks:
+          type: array
+          items:
+            $ref: "#/components/schemas/Task"
+
+        workpool:
+          type: object
+          properties:
+            machineType:
+              type: string
+              example: n2-standard-2
+            rootDir:
+              type: string
+            region:
+              type: string
+              example: us-central1
+            zones:
+              type: array
+              items:
+                type: string
+            resources:
+              type: array
+              items:
+                $ref: "#/components/schemas/Resource"
+            emptyVolumes:
+              type: array
+              items:
+                type: object
+                # todo: look up fields
+            sparklesWorkerGCSPath:
+              type: string
+            lingerTimeSec:
+              type: number
+
+            # mutable fields
+            maxWorkerCount:
+              type: number
+            maxPreemptibleWorkerAttempts:
+              type: number
+            maxWorkersPerRequest:
+              type: number
+
+    FileToLocalize:
+      type: object
+      # todo: Are these names right?
+      required:
+        - source
+        - destination
+      properties:
+        source:
+          type: string
+        destination:
+          type: string
+
+    Task:
+      type: object
+      required:
+        - image
+        - command
+      properties:
+        filesToLocalize:
+          type: array
+          items:
+            $ref: "#/components/schemas/FileToLocalize"
+        image:
+          type: string
+        command:
+          type: array
+          items:
+            type: string
+
+    Resource:
+      type: object
+      required:
+        - name
+        - type
+      properties:
+        name:
+          type: string
+        value:
+          type: number
+
+    SubmitJobResponse:
+      type: object
+      properties:
+        id:
+          type: string
+
+    Error:
+      type: object
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+      required:
+        - code
+        - message
+
+  securitySchemes:
+    api_key:
+      type: apiKey
+      name: api_key
+      in: header
