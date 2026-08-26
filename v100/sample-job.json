@@ -1,19 +1,19 @@
 {
-  "name": "sample-job",
-  "resources": [{ "name": "slots", "value": 1 }],
-  "filesToLocalize": [],
   "tasks": [
     {
-      "dockerImage": "alpine:3.19",
+      "image": "alpine:3.19",
       "command": ["sh", "-c", "echo task 1 && sleep 5"]
     },
     {
-      "dockerImage": "alpine:3.19",
+      "image": "alpine:3.19",
       "command": ["sh", "-c", "echo task 2 && sleep 5"]
     },
     {
-      "dockerImage": "alpine:3.19",
+      "image": "alpine:3.19",
       "command": ["sh", "-c", "echo task 3 && sleep 5"]
     }
-  ]
+  ],
+  "workpool": {
+    "machineType": "n2-standard-2"
+  }
 }

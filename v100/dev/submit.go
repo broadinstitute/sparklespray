@@ -101,7 +101,7 @@ func resolveWorkpoolID(workpoolSpec *WorkpoolSpec) (string, error) {
 		return "", fmt.Errorf("canonicalizing workpool spec: %w", err)
 	}
 	sum := sha256.Sum256(canonical)
-	return hex.EncodeToString(sum[:]), nil
+	return "wp-" + hex.EncodeToString(sum[:])[:20], nil
 }
 
 func devSubmit(jobSpecFile, workpoolSpecFile, project, db, gcsPrefix string) error {

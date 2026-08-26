@@ -19,6 +19,7 @@ import (
 	pubsubpb "cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
 	v100 "github.com/broadinstitute/sparklespray/v100"
 	"github.com/broadinstitute/sparklespray/v100/monitor"
+	"github.com/google/uuid"
 	iamcredentials "google.golang.org/api/iamcredentials/v1"
 	"google.golang.org/api/iterator"
 	"google.golang.org/grpc/codes"
@@ -33,9 +34,60 @@ type dashboardServer struct {
 	project string
 	fs      *firestore.Client
 	ps      *pubsub.Client
-	// subscriberSA is the service account email used to generate short-lived
-	// Pub/Sub tokens. If empty the subscription endpoint returns an error.
-	subscriberSA string
+	config  *SparklesConfig
+}
+
+// sparklesConfigCollection is the Firestore collection holding SparklesConfig
+// documents, and sparklesConfigDocID is the ID of the single doc read at
+// dashboard-backend startup.
+const (
+	sparklesConfigCollection = "SparklesConfig"
+	sparklesConfigDocID      = "default"
+)
+
+// SparklesConfig holds settings needed to service requests that aren't yet
+// part of the public API surface (openapi.yaml) and so can't be supplied by a
+// caller. It is read from the Firestore doc
+// SparklesConfig/default at dashboard-backend startup.
+type SparklesConfig struct {
+	// GCSPrefix is the GCS prefix under which task result and log paths are
+	// written, e.g. "gs://my-bucket/results". Mirrors the --gcs-prefix flag
+	// accepted by "dev submit" (see v100/dev/submit.go).
+	GCSPrefix string `firestore:"gcs_prefix" json:"gcsPrefix"`
+	// SubscriberSA is the service account email used to generate short-lived
+	// Pub/Sub tokens for the subscription endpoint. If empty, that endpoint
+	// returns an error.
+	SubscriberSA string `firestore:"subscriber_sa" json:"subscriberSA"`
+	// SparklesWorkerGCSPath is the default GCS path to the sparkles-worker
+	// binary/image, used when a submitted workpool omits sparklesWorkerGCSPath.
+	SparklesWorkerGCSPath string `firestore:"sparkles_worker_gcs_path" json:"sparklesWorkerGCSPath"`
+	// ServiceAccount is the default GCP service account email worker VMs run
+	// as, used when a submitted workpool omits serviceAccount.
+	ServiceAccount string `firestore:"service_account" json:"serviceAccount"`
+	// Region is the default GCP region worker VMs are provisioned in, used
+	// when a submitted workpool omits region.
+	Region string `firestore:"region" json:"region"`
+	// Zones is the default set of GCP zones eligible for worker VM placement,
+	// used when a submitted workpool omits zones.
+	Zones []string `firestore:"zones" json:"zones"`
+}
+
+// loadSparklesConfig reads the SparklesConfig/default doc from Firestore. It
+// returns an error (wrapping codes.NotFound semantics) if the doc doesn't exist,
+// since dashboard-backend has no built-in defaults to fall back to.
+func loadSparklesConfig(ctx context.Context, fs *firestore.Client) (*SparklesConfig, error) {
+	snap, err := fs.Collection(sparklesConfigCollection).Doc(sparklesConfigDocID).Get(ctx)
+	if err != nil {
+		if grpcstatus.Code(err) == codes.NotFound {
+			return nil, fmt.Errorf("%s/%s not found in Firestore; it must be created before starting dashboard-backend", sparklesConfigCollection, sparklesConfigDocID)
+		}
+		return nil, fmt.Errorf("reading %s/%s: %w", sparklesConfigCollection, sparklesConfigDocID, err)
+	}
+	var config SparklesConfig
+	if err := snap.DataTo(&config); err != nil {
+		return nil, fmt.Errorf("parsing %s/%s: %w", sparklesConfigCollection, sparklesConfigDocID, err)
+	}
+	return &config, nil
 }
 
 // ----- helpers -----
@@ -48,6 +100,7 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	}
 }
 
+// writeError writes a body matching openapi.yaml's Error schema: {"code": ..., "error": ...}.
 func writeError(w http.ResponseWriter, httpStatus int, code, msg string) {
 	writeJSON(w, httpStatus, map[string]string{"error": msg, "code": code})
 }
@@ -516,6 +569,242 @@ func (s *dashboardServer) handleGetBatch(w http.ResponseWriter, r *http.Request)
 		Status:                string(batch.Status),
 		Unhealthy:             batch.Unhealthy,
 	})
+}
+
+// ----- POST /api/v1/job -----
+//
+// Request/response shapes mirror components/schemas/SubmitJobBody and
+// SubmitJobResponse in openapi.yaml. The write path (workpool upsert, job +
+// task creation, job summary, job_created event) mirrors devSubmit in
+// v100/dev/submit.go, minus the CLI-only polling/printing loop.
+
+// submitFileToLocalizeRequest mirrors openapi's FileToLocalize schema, which
+// already matches v100.FileToLocalize's json tags.
+type submitFileToLocalizeRequest = v100.FileToLocalize
+
+// submitTaskRequest mirrors openapi's Task schema.
+type submitTaskRequest struct {
+	FilesToLocalize []submitFileToLocalizeRequest `json:"filesToLocalize"`
+	Image           string                        `json:"image"`
+	Command         []string                      `json:"command"`
+}
+
+// submitJobRequest mirrors openapi's SubmitJobBody schema.
+type submitJobRequest struct {
+	Name            string                        `json:"name"`
+	Resources       []v100.ResourceEntry          `json:"resources"`
+	FilesToLocalize []submitFileToLocalizeRequest `json:"filesToLocalize"`
+	Labels          []v100.Label                  `json:"labels"`
+	Tasks           []submitTaskRequest           `json:"tasks"`
+	Workpool        WorkpoolSpec                  `json:"workpool"`
+}
+
+// submitJobResponse mirrors openapi's SubmitJobResponse schema.
+type submitJobResponse struct {
+	ID string `json:"id"`
+}
+
+// applyWorkpoolDefaults fills in fields of spec that were omitted from the
+// submission with defaults, either fixed values or ones supplied by config
+// (for settings not yet exposed by the openapi.yaml request schema).
+func applyWorkpoolDefaults(spec *WorkpoolSpec, config *SparklesConfig) {
+	if spec.RootDir == "" {
+		spec.RootDir = "/mnt/sparkles"
+	}
+	if spec.SparklesWorkerGCSPath == "" {
+		spec.SparklesWorkerGCSPath = config.SparklesWorkerGCSPath
+	}
+	if spec.ServiceAccount == "" {
+		spec.ServiceAccount = config.ServiceAccount
+	}
+	if len(spec.Resources) == 0 {
+		spec.Resources = []v100.ResourceEntry{{Name: "slots", Value: 1}}
+	}
+	if spec.EmptyVolumes == nil {
+		spec.EmptyVolumes = []v100.EmptyVolume{}
+	}
+	if spec.Region == "" {
+		spec.Region = config.Region
+	}
+	if len(spec.Zones) == 0 {
+		spec.Zones = config.Zones
+	}
+	if spec.MaxWorkerCount == 0 {
+		spec.MaxWorkerCount = 1
+	}
+	if spec.MaxPreemptibleWorkerAttempts == 0 {
+		spec.MaxPreemptibleWorkerAttempts = 1
+	}
+	if spec.MaxWorkersPerRequest == 0 {
+		spec.MaxWorkersPerRequest = 25
+	}
+	if spec.VMShutdownGracePeriodSec == 0 {
+		spec.VMShutdownGracePeriodSec = 600
+	}
+	if spec.MaxZombiesBeforeAbort == 0 {
+		spec.MaxZombiesBeforeAbort = 5
+	}
+	if spec.MaxConsecutiveFailedBatches == 0 {
+		spec.MaxConsecutiveFailedBatches = 5
+	}
+}
+
+// workpoolIDRe matches valid workpool IDs: at most 35 characters, starting
+// with a lowercase letter, followed by lowercase letters, numbers, or '-'.
+var workpoolIDRe = regexp.MustCompile(`^[a-z][a-z0-9-]{0,34}$`)
+
+func (s *dashboardServer) handleSubmitJob(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	var req submitJobRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "invalid JSON body")
+		return
+	}
+	if req.Name == "" {
+		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "'name' is required")
+		return
+	}
+	if req.Workpool.MachineType == "" {
+		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "'workpool.machineType' is required")
+		return
+	}
+	if len(req.Tasks) == 0 {
+		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "'tasks' must contain at least one task")
+		return
+	}
+	for _, t := range req.Tasks {
+		if t.Image == "" {
+			writeError(w, http.StatusBadRequest, "BAD_REQUEST", "each task requires 'image'")
+			return
+		}
+		if len(t.Command) == 0 {
+			writeError(w, http.StatusBadRequest, "BAD_REQUEST", "each task requires 'command'")
+			return
+		}
+	}
+
+	applyWorkpoolDefaults(&req.Workpool, s.config)
+
+	workpoolID, err := resolveWorkpoolID(&req.Workpool)
+	if err != nil {
+		log.Printf("dashboard: SubmitJob resolveWorkpoolID: %v", err)
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to resolve workpool id")
+		return
+	}
+
+	if !workpoolIDRe.MatchString(workpoolID) {
+		log.Printf("dashboard: SubmitJob: workpool.id %q is invalid", workpoolID)
+		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "'workpool.id' must be at most 35 characters, start with a lowercase letter, and contain only lowercase letters, numbers, and '-'")
+		return
+	}
+
+	now := time.Now()
+	workpool := v100.WorkPool{
+		WorkpoolID:            workpoolID,
+		MachineType:           req.Workpool.MachineType,
+		RootDir:               req.Workpool.RootDir,
+		SparklesWorkerGCSPath: req.Workpool.SparklesWorkerGCSPath,
+		ServiceAccount:        req.Workpool.ServiceAccount,
+		Resources:             req.Workpool.Resources,
+		EmptyVolumes:          req.Workpool.EmptyVolumes,
+		Expiry:                now.Add(7 * 24 * time.Hour),
+		Region:                req.Workpool.Region,
+		Zones:                 req.Workpool.Zones,
+
+		MaxWorkerCount:               req.Workpool.MaxWorkerCount,
+		MaxPreemptibleWorkerAttempts: req.Workpool.MaxPreemptibleWorkerAttempts,
+		MaxWorkersPerRequest:         req.Workpool.MaxWorkersPerRequest,
+
+		VMShutdownGracePeriodSec:    req.Workpool.VMShutdownGracePeriodSec,
+		MaxZombiesBeforeAbort:       req.Workpool.MaxZombiesBeforeAbort,
+		MaxConsecutiveFailedBatches: req.Workpool.MaxConsecutiveFailedBatches,
+	}
+	if _, err := s.fs.Collection(v100.WorkpoolCollection).Doc(workpoolID).Set(ctx, workpool); err != nil {
+		log.Printf("dashboard: SubmitJob writing workpool %s: %v", workpoolID, err)
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to write workpool")
+		return
+	}
+
+	jobID := uuid.New().String()
+	job := v100.Job{
+		JobID:      jobID,
+		Name:       req.Name,
+		WorkpoolID: workpoolID,
+		CreatedAt:  now,
+		Expiry:     now.Add(7 * 24 * time.Hour),
+		TaskCount:  len(req.Tasks),
+		Resources:  req.Resources,
+		Labels:     req.Labels,
+	}
+
+	// Pre-generate task IDs outside the transaction so retries are idempotent.
+	taskIDs := make([]string, len(req.Tasks))
+	for i := range taskIDs {
+		taskIDs[i] = uuid.New().String()
+	}
+
+	err = s.fs.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
+		if err := tx.Set(s.fs.Collection(v100.JobCollection).Doc(jobID), job); err != nil {
+			return err
+		}
+		for i, t := range req.Tasks {
+			taskPrefix := fmt.Sprintf("%s/%s/%d", s.config.GCSPrefix, req.Name, i)
+			// Per-task files are localized in addition to job-level files.
+			filesToLocalize := append([]v100.FileToLocalize{}, req.FilesToLocalize...)
+			filesToLocalize = append(filesToLocalize, t.FilesToLocalize...)
+			task := v100.Task{
+				JobID:           jobID,
+				TaskID:          taskIDs[i],
+				TaskIndex:       i,
+				WorkpoolID:      workpoolID,
+				Status:          v100.StatusPending,
+				Command:         t.Command,
+				DockerImage:     t.Image,
+				FilesToLocalize: filesToLocalize,
+				Labels:          req.Labels,
+				ResultPath:      taskPrefix,
+				LogPath:         taskPrefix + "/stdout.txt",
+				Expiry:          now.Add(7 * 24 * time.Hour),
+			}
+			if err := tx.Set(s.fs.Collection(v100.TaskCollection).Doc(taskIDs[i]), task); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		log.Printf("dashboard: SubmitJob writing job %s: %v", jobID, err)
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to write job and tasks")
+		return
+	}
+
+	// Create the initial JobSummary so the monitor's job-summary poll can track it.
+	summaryStore := monitor.NewFirestoreJobSummaryStore(s.fs)
+	if err := summaryStore.Create(ctx, &monitor.JobSummary{
+		JobID:       jobID,
+		WorkpoolID:  workpoolID,
+		CreatedAt:   now,
+		Expiry:      now.Add(7 * 24 * time.Hour),
+		LastUpdated: now,
+		State:       monitor.JobStatusPending,
+		Tasks:       []monitor.StateCount{{State: "pending", Count: len(req.Tasks)}},
+		Labels:      toMonitorLabels(req.Labels),
+	}); err != nil {
+		log.Printf("dashboard: SubmitJob creating job summary %s: %v", jobID, err)
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to create job summary")
+		return
+	}
+
+	// Publish job_created event so the monitor can react immediately.
+	// Non-fatal: the monitor's periodic poll will pick up the job if this fails.
+	ep := v100.NewEventPublisher(s.ps.Publisher("sparkles-events"), s.fs)
+	defer ep.Stop()
+	if err := ep.PublishJobCreated(ctx, v100.JobCreatedEvent{JobID: jobID, WorkpoolID: workpoolID}); err != nil {
+		log.Printf("dashboard: SubmitJob publishing job_created event %s: %v", jobID, err)
+	}
+
+	writeJSON(w, http.StatusOK, submitJobResponse{ID: jobID})
 }
 
 // ----- GET /api/v1/jobs -----
@@ -1384,14 +1673,14 @@ func (s *dashboardServer) handleCreateSubscription(w http.ResponseWriter, r *htt
 }
 
 func (s *dashboardServer) generateSubscriberToken(ctx context.Context) (string, error) {
-	if s.subscriberSA == "" {
-		return "", fmt.Errorf("subscriber service account not configured; set --subscriber-sa")
+	if s.config.SubscriberSA == "" {
+		return "", fmt.Errorf("subscriber service account not configured; set SparklesConfig.SubscriberSA")
 	}
 	svc, err := iamcredentials.NewService(ctx)
 	if err != nil {
 		return "", fmt.Errorf("creating IAM credentials service: %w", err)
 	}
-	name := "projects/-/serviceAccounts/" + s.subscriberSA
+	name := "projects/-/serviceAccounts/" + s.config.SubscriberSA
 	resp, err := svc.Projects.ServiceAccounts.GenerateAccessToken(name,
 		&iamcredentials.GenerateAccessTokenRequest{
 			Scope: []string{"https://www.googleapis.com/auth/pubsub"},
@@ -1430,7 +1719,6 @@ func runDevDashboardBackend(c *cli.Context) error {
 	}
 	db := c.String("db")
 	addr := c.String("addr")
-	subscriberSA := c.String("subscriber-sa")
 
 	ctx := context.Background()
 
@@ -1446,11 +1734,16 @@ func runDevDashboardBackend(c *cli.Context) error {
 	}
 	defer psClient.Close()
 
+	config, err := loadSparklesConfig(ctx, fsClient)
+	if err != nil {
+		return fmt.Errorf("loading sparkles config: %w", err)
+	}
+
 	srv := &dashboardServer{
-		project:      project,
-		fs:           fsClient,
-		ps:           psClient,
-		subscriberSA: subscriberSA,
+		project: project,
+		fs:      fsClient,
+		ps:      psClient,
+		config:  config,
 	}
 
 	mux := http.NewServeMux()
@@ -1462,6 +1755,7 @@ func runDevDashboardBackend(c *cli.Context) error {
 	mux.HandleFunc("GET /api/v1/batch/{batch_id}", srv.handleGetBatch)
 	mux.HandleFunc("GET /api/v1/workpool/{workpool_id}/summary", srv.handleGetWorkpoolSummary)
 	mux.HandleFunc("GET /api/v1/workpool/{workpool_id}/summary-history", srv.handleGetWorkpoolSummaryHistory)
+	mux.HandleFunc("POST /api/v1/job", srv.handleSubmitJob)
 	mux.HandleFunc("GET /api/v1/jobs", srv.handleListJobs)
 	mux.HandleFunc("GET /api/v1/job/{job_id}", srv.handleGetJob)
 	mux.HandleFunc("GET /api/v1/job/{job_id}/summary", srv.handleGetJobSummary)

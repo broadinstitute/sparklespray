@@ -55,6 +55,15 @@ func NewApp() *cli.App {
 			Action: runWorker,
 		},
 		{
+			Name:      "submit",
+			ArgsUsage: "<job-json>",
+			Usage:     "Submit a job to a running dashboard-backend (POST /api/v1/job)",
+			Flags: []cli.Flag{
+				cli.StringFlag{Name: "url", Usage: "base URL of the dashboard-backend (required)"},
+			},
+			Action: runSubmit,
+		},
+		{
 			Name:      "kill",
 			ArgsUsage: "<job-id>",
 			Usage:     "Kill all pending and running tasks for a job",

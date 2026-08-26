@@ -24,6 +24,16 @@ func Command() cli.Command {
 				Action: runDevSubmit,
 			},
 			{
+				Name:      "set-config",
+				ArgsUsage: "<config-json>",
+				Usage:     "Load a SparklesConfig JSON file into Firestore (SparklesConfig/default), used by dashboard-backend",
+				Flags: []cli.Flag{
+					cli.StringFlag{Name: "project"},
+					cli.StringFlag{Name: "db", Value: defaultDB},
+				},
+				Action: runSetConfig,
+			},
+			{
 				Name:      "export",
 				ArgsUsage: "<collection>",
 				Usage:     "Dump Firestore collection contents as JSON (one doc per line)",
@@ -80,7 +90,6 @@ func Command() cli.Command {
 					cli.StringFlag{Name: "project"},
 					cli.StringFlag{Name: "db", Value: defaultDB},
 					cli.StringFlag{Name: "addr", Value: ":8080", Usage: "address to listen on"},
-					cli.StringFlag{Name: "subscriber-sa", Value: "", Usage: "service account email used to generate Pub/Sub tokens for subscription endpoint"},
 				},
 				Action: runDevDashboardBackend,
 			},

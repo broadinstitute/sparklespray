@@ -5,7 +5,7 @@ info:
     Sparkles
   version: 1.0.12
 paths:
-  /job/submit:
+  /api/v1/job:
     post:
       summary: Submit a job
       operationId: subJob
@@ -38,6 +38,10 @@ components:
   schemas:
     SubmitJobBody:
       type: object
+      description: |-
+        A job submission. Corresponds to the `JobSpec` struct used by the
+        `sparkles dev submit` CLI command (v100/dev/submit.go), combined with
+        the `WorkpoolSpec` it currently reads from a separate file.
       required:
         - tasks
         - workpool
@@ -45,11 +49,35 @@ components:
       properties:
         name:
           type: string
+          description: Human readable name for the job. Stored as `Job.Name` (firestore field `name`).
 
         resources:
           type: array
+          description: |-
+            Job-level resource requirements (e.g. slots, memory) applied to the job as a
+            whole. Stored as `Job.Resources` (firestore field `resources`), a list of
+            `ResourceEntry`.
           items:
-            $ref: "#/components/schemas/Resource"
+            $ref: "#/components/schemas/ResourceEntry"
+
+        filesToLocalize:
+          type: array
+          description: |-
+            Files to localize onto every task in this job, in addition to any files listed
+            on the individual task. Corresponds to `JobSpec.FilesToLocalize` in
+            v100/dev/submit.go, which today is copied onto every generated `Task` -
+            there is currently no way to give a subset of tasks different job-level files.
+          items:
+            $ref: "#/components/schemas/FileToLocalize"
+
+        labels:
+          type: array
+          description: |-
+            Key/value labels attached to the job and copied onto every task, e.g. for
+            filtering or billing attribution. Stored as `Job.Labels` / `Task.Labels`
+            (firestore field `labels`), a list of `Label`.
+          items:
+            $ref: "#/components/schemas/Label"
 
         tasks:
           type: array
@@ -57,98 +85,237 @@ components:
             $ref: "#/components/schemas/Task"
 
         workpool:
-          type: object
-          properties:
-            machineType:
-              type: string
-              example: n2-standard-2
-            rootDir:
-              type: string
-            region:
-              type: string
-              example: us-central1
-            zones:
-              type: array
-              items:
-                type: string
-            resources:
-              type: array
-              items:
-                $ref: "#/components/schemas/Resource"
-            emptyVolumes:
-              type: array
-              items:
-                type: object
-                # todo: look up fields
-            sparklesWorkerGCSPath:
-              type: string
-            lingerTimeSec:
-              type: number
+          $ref: "#/components/schemas/WorkpoolSpec"
 
-            # mutable fields
-            maxWorkerCount:
-              type: number
-            maxPreemptibleWorkerAttempts:
-              type: number
-            maxWorkersPerRequest:
-              type: number
+    Label:
+      type: object
+      description: A single key/value label. Corresponds to Go's `Label` struct (v100/task_queue.go).
+      required:
+        - name
+        - value
+      properties:
+        name:
+          type: string
+        value:
+          type: string
+
+    WorkpoolSpec:
+      type: object
+      description: |-
+        Describes the pool of worker VMs that will execute this job's tasks.
+        Corresponds to Go's `WorkpoolSpec` (v100/dev/submit.go), which is persisted
+        as a `WorkPool` record (v100/task_queue.go).
+      required:
+        - machineType
+      properties:
+        id:
+          type: string
+          pattern: "^[a-z][a-z0-9-]{0,34}$"
+          description: |-
+            Optional identifier for the workpool. Must be at most 35 characters, start
+            with a lowercase letter, and contain only lowercase letters, numbers, and
+            '-' (enforced server-side by `workpoolIDRe` in v100/dev/dashboard_backend.go).
+            If omitted, the server derives one deterministically by hashing the
+            canonical JSON of this spec (`resolveWorkpoolID` in v100/dev/submit.go), so
+            identical workpool specs resolve to the same, reusable workpool.
+        machineType:
+          type: string
+          description: GCE machine type to use for worker VMs.
+          example: n2-standard-2
+        rootDir:
+          type: string
+          description: Root directory on the worker VM under which tasks execute and files are localized.
+        serviceAccount:
+          type: string
+          description: |-
+            GCP service account email that worker VMs run as. Not currently exposed by
+            openapi.yaml prior to this revision; corresponds to `WorkpoolSpec.ServiceAccount`
+            / `WorkPool.ServiceAccount` (firestore field `service_account`).
+        region:
+          type: string
+          description: GCP region to provision worker VMs in.
+          example: us-central1
+        zones:
+          type: array
+          description: Specific GCP zones (within `region`) eligible for worker VM placement.
+          items:
+            type: string
+        resources:
+          type: array
+          description: |-
+            Resources available on each worker VM (e.g. slots, memory), matched against
+            task-level `resources` requirements when scheduling. Stored as
+            `WorkPool.Resources` (firestore field `resources`), a list of `ResourceEntry`.
+          items:
+            $ref: "#/components/schemas/ResourceEntry"
+        emptyVolumes:
+          type: array
+          description: |-
+            Empty (scratch) disks to attach to each worker VM. Corresponds to Go's
+            `EmptyVolume` struct (v100/task_queue.go).
+          items:
+            $ref: "#/components/schemas/EmptyVolume"
+        sparklesWorkerGCSPath:
+          type: string
+          description: GCS path to the sparkles-worker binary/image that worker VMs bootstrap from.
+        lingerTimeSec:
+          type: number
+          description: |-
+            Seconds an idle worker VM should linger before shutting down, so it can pick
+            up more work without a fresh VM boot. NOTE: as of this writing this field is
+            read from the CLI's workpool spec file but is not wired through to the
+            persisted `WorkPool` record (v100.WorkPool has no corresponding field) -
+            it is currently a no-op server-side.
+
+        # mutable fields - can be adjusted on an existing, already-running workpool
+        maxWorkerCount:
+          type: number
+          description: |-
+            Provisioning parameter. Upper bound on the number of worker VMs the pool will
+            scale up to. Stored as `WorkPool.MaxWorkerCount` (firestore field `max_worker_count`).
+        maxPreemptibleWorkerAttempts:
+          type: number
+          description: |-
+            Provisioning parameter. Maximum number of times to re-attempt provisioning a
+            preemptible (spot) worker VM after it is preempted before falling back or
+            giving up. Stored as `WorkPool.MaxPreemptibleWorkerAttempts`
+            (firestore field `max_preemptible_worker_attempts`).
+        maxWorkersPerRequest:
+          type: number
+          description: |-
+            Provisioning parameter. Maximum number of worker VM creations to batch into a
+            single provisioning API request. Stored as `WorkPool.MaxWorkersPerRequest`
+            (firestore field `max_workers_per_request`).
+        vmShutdownGracePeriodSec:
+          type: number
+          description: |-
+            Watchdog parameter. Seconds to wait for a worker VM to shut down cleanly
+            before the monitor considers it stuck. A value of 0 tells the monitor to use
+            its own built-in default. Stored as `WorkPool.VMShutdownGracePeriodSec`
+            (firestore field `vm_shutdown_grace_period_sec`).
+        maxZombiesBeforeAbort:
+          type: number
+          description: |-
+            Watchdog parameter. Number of "zombie" workers (VMs that stopped
+            heartbeating but haven't been cleaned up) the monitor will tolerate before
+            aborting the workpool. A value of 0 tells the monitor to use its own
+            built-in default. Stored as `WorkPool.MaxZombiesBeforeAbort`
+            (firestore field `max_zombies_before_abort`).
+        maxConsecutiveFailedBatches:
+          type: number
+          description: |-
+            Watchdog parameter. Number of consecutive failed worker-provisioning batches
+            the monitor will tolerate before aborting the workpool. A value of 0 tells the
+            monitor to use its own built-in default. Stored as
+            `WorkPool.MaxConsecutiveFailedBatches` (firestore field `max_consecutive_failed_batches`).
+
+    EmptyVolume:
+      type: object
+      description: |-
+        An empty (scratch) disk attached to a worker VM. Corresponds to Go's
+        `EmptyVolume` struct (v100/task_queue.go).
+      required:
+        - mountPoint
+        - type
+        - sizeInGB
+      properties:
+        mountPoint:
+          type: string
+          description: Path inside the worker VM where the volume is mounted.
+        type:
+          type: string
+          description: GCE disk type (e.g. pd-standard, pd-ssd).
+        sizeInGB:
+          type: integer
+          description: Size of the disk, in gigabytes.
 
     FileToLocalize:
       type: object
-      # todo: Are these names right?
+      description: |-
+        A file to copy onto a worker before a task runs. Corresponds to Go's
+        `FileToLocalize` struct (v100/task_queue.go). Field names already match
+        the Go json tags.
       required:
         - source
         - destination
       properties:
         source:
           type: string
+          description: Location the file is copied from (e.g. a gs:// URL).
         destination:
           type: string
+          description: Path on the worker VM the file is copied to.
+        isExecutable:
+          type: boolean
+          description: |-
+            Whether the executable bit should be set on the localized file. Corresponds
+            to `FileToLocalize.IsExecutable` (json/firestore tag `is_executable`).
 
     Task:
       type: object
+      description: |-
+        A single unit of work within a job. Corresponds to Go's `JobSpecTask`
+        (v100/dev/submit.go) on submission, persisted as `Task` (v100/task_queue.go).
       required:
         - image
         - command
       properties:
         filesToLocalize:
           type: array
+          description: |-
+            Files to localize onto the worker before this task runs, in addition to any
+            job-level `filesToLocalize`. Persisted as `Task.FilesToLocalize`
+            (firestore field `files_to_localize`) - see also
+            `Task.FilesToLocalizeManifest`, which the server uses instead when the file
+            list is too large to store inline.
           items:
             $ref: "#/components/schemas/FileToLocalize"
         image:
           type: string
+          description: |-
+            Docker image to run the task in. Named `image` here for brevity, but
+            corresponds to `DockerImage` in Go (`JobSpecTask.DockerImage` /
+            `Task.DockerImage`, firestore field `docker_image`).
         command:
           type: array
+          description: Command and arguments to run inside the container.
           items:
             type: string
 
-    Resource:
+    ResourceEntry:
       type: object
+      description: |-
+        A named resource quantity, e.g. `{"name": "slots", "value": 1}`. Renamed from
+        `Resource` to match Go's `ResourceEntry` struct (v100/task_queue.go).
       required:
         - name
-        - type
+        - value
       properties:
         name:
           type: string
+          description: Resource name, e.g. "slots" or "memory". There is no fixed enum in the Go model - any name is a valid key as long as job and workpool entries agree.
         value:
           type: number
+          description: Quantity of the resource.
 
     SubmitJobResponse:
       type: object
       properties:
         id:
           type: string
+          description: The generated job ID. Corresponds to `Job.JobID` (firestore field `job_id`), a UUID assigned at submission time.
 
     Error:
       type: object
       properties:
         code:
           type: string
-        message:
+        error:
           type: string
+          description: Human readable error message. Corresponds to the `error` field written by `writeError` (v100/dev/dashboard_backend.go).
       required:
         - code
-        - message
+        - error
 
   securitySchemes:
     api_key:
