@@ -108,8 +108,8 @@ if batch.RegisteredWorkerCount >= 1 {
 }
 ```
 
-This only runs for batches still in `BatchStatusPending` (tier 3 only
-processes pending batches, `batch_startup_monitor.go:20`), so it fires
+This only runs for batches still in `BatchStatusPending` (the batch startup
+monitor only processes pending batches, `batch_startup_monitor.go:20`), so it fires
 exactly once per batch — the first poll where a worker has registered. This
 is the natural, single point to publish `batch_succeeded`:
 

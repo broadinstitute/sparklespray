@@ -187,7 +187,7 @@ func TestRecordIncident_PublishesIncident(t *testing.T) {
 }
 
 // TestIncident_FlowsThroughToWorkPoolSummary is an end-to-end trace: an
-// incident recorded by the cluster reconciler (tier 2) is published as a
+// incident recorded by the cluster reconciler is published as a
 // workpool_incident event, and the next WorkPool summary poll derives
 // StateMessage/LastIncidentAt/IncidentCount from that event rather than from
 // any field persisted on WorkPoolState.

@@ -323,7 +323,7 @@ Additional fields present on **workpool incident events** (`workpool_incident`):
 | `state_message` | string | Human-readable description of the anomaly      |
 
 `workpool_incident` is published by `recordIncident` (`v100/monitor/monitor.go`)
-every time the watchdog (tier 2/tier 3) detects a batch/worker anomaly — a
+every time the watchdog (cluster reconciler/batch startup monitor) detects a batch/worker anomaly — a
 batch failing outright, a subset of VMs failing to register within the grace
 period, or a zombie worker being terminated. `recordIncident` is purely a
 log-to-Events operation; it does not mutate `WorkPoolState` itself. Unlike
@@ -587,7 +587,7 @@ Both are consumed by `checkHaltThreshold` (see the `Events` collection section a
 
 ### `batch-api-notifications` _(GCP Batch API → Monitor)_
 
-Published by GCP Batch API (or the batch API emulator) to notify the monitor when a batch job changes state. The monitor subscribes to this topic under the `batch-api-notifications` subscription. When a notification arrives the monitor immediately runs its tier-2 reconciliation loop (checking job status, reconciling VMs) for the affected batch rather than waiting for the next periodic tick.
+Published by GCP Batch API (or the batch API emulator) to notify the monitor when a batch job changes state. The monitor subscribes to this topic under the `batch-api-notifications` subscription. When a notification arrives the monitor immediately runs its cluster reconciler loop (checking job status, reconciling VMs) for the affected batch rather than waiting for the next periodic tick.
 
 Messages are JSON-encoded GCP Batch API state-change notifications:
 
@@ -735,7 +735,7 @@ Every state transition publishes a `task_state_update` event to `sparkles-events
    The worker calls `RecordFailed` when an infrastructure or system error prevents the task from completing. `failure_reason` is populated and `owning_worker_id` is cleared. Can occur from `claimed`, `running`, or `writing`.
 
 7. **Any active state → `pending`**  
-   The monitor's tier-1 task-recovery loop runs periodically and scans for worker records whose `heartbeat_expiry` has passed. For each crashed or preempted worker, any task in an active state (`claimed`, `running`, or `writing`) is reset to `pending` so it can be picked up by a healthy worker.
+   The monitor's task recovery loop runs periodically and scans for worker records whose `heartbeat_expiry` has passed. For each crashed or preempted worker, any task in an active state (`claimed`, `running`, or `writing`) is reset to `pending` so it can be picked up by a healthy worker.
 
 8. **Any state → `killed`**  
    An external administrative action via the `sparkles kill` command. `owning_worker_id` is cleared. A best-effort `kill_job` control message is sent to all workers via `sparkles-worker-in` so any in-flight task for that job is aborted promptly.

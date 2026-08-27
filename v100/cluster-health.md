@@ -19,6 +19,78 @@ and interacts with — the others.
 
 `WorkPoolStatus` is the one surfaced most prominently (dashboard, `sparkles dev submit`'s polling loop) and the one this document focuses on.
 
+### `WorkPoolStatus`
+
+Decided entirely by the WorkPool summary poll, except for `→ halted` (see
+"`unhealthy` → `halted`: the halt threshold" below):
+
+```mermaid
+stateDiagram-v2
+    [*] --> idle
+    idle --> ok: nonTerminal > 0
+    ok --> unhealthy: incident in last hour
+    unhealthy --> ok: no incidents in last hour
+    unhealthy --> halted: last N batch outcomes all failed (checkHaltThreshold)
+    ok --> idle: nonTerminal == 0
+    unhealthy --> idle: nonTerminal == 0
+    halted --> idle: nonTerminal == 0
+```
+
+`nonTerminal == 0` (no non-`stopped` workers, no non-terminal tasks) always
+wins and sends any state to `idle` — including `halted`, which is otherwise
+sticky. `halted` has no other way out.
+
+### `BatchStatus`
+
+```mermaid
+stateDiagram-v2
+    [*] --> pending: submitBatch (CreateJob succeeds)
+    pending --> started: batch startup monitor — first worker registers
+    pending --> failed: batch startup monitor — no workers before GCP failure/success, or queue timeout
+    pending --> deleted: batch startup monitor — GCP job reports 404
+    started --> completed: cluster reconciler — GCP job SUCCEEDED
+    started --> failed: cluster reconciler — GCP failure, over-provisioning, startup grace period exceeded, or too many zombies
+    started --> deleted: cluster reconciler — GCP job reports 404
+```
+
+The batch startup monitor owns `pending`; the cluster reconciler owns `started`. A synchronous `CreateJob`
+failure in `submitBatch` never reaches `pending` at all — no `BatchAPIRequest`
+document is created for it (see "Batch outcome events" below).
+
+### Worker status
+
+```mermaid
+stateDiagram-v2
+    [*] --> started: worker registers (worker_started event)
+    started --> stopped: clean shutdown (worker_stopped event)
+    started --> stopped: heartbeat expires — task recovery calls MarkStopped
+```
+
+### Task status
+
+```mermaid
+stateDiagram-v2
+    [*] --> pending
+    pending --> claimed: a worker claims the task
+    claimed --> running: worker starts the container
+    running --> writing: container exits; uploading results/logs
+    writing --> success: upload complete, exit code 0
+    writing --> error: upload complete, non-zero exit code
+    claimed --> failed: infrastructure failure
+    running --> failed: infrastructure failure
+    writing --> failed: infrastructure failure
+    claimed --> killed: administrative kill
+    running --> killed: administrative kill
+    writing --> killed: administrative kill
+    claimed --> pending: owning worker's heartbeat expires (task recovery orphan recovery)
+    running --> pending: owning worker's heartbeat expires (task recovery orphan recovery)
+    writing --> pending: owning worker's heartbeat expires (task recovery orphan recovery)
+```
+
+`claimed`/`running`/`writing` are the "active" statuses (`activeStatuses` in
+`task_queue.go`) that task recovery resets back to `pending` when their owning
+worker's heartbeat expires, so another worker can pick the task back up.
+
 ## The pollers that drive all of this
 
 The monitor runs several independent, debounced pollers
@@ -26,17 +98,17 @@ The monitor runs several independent, debounced pollers
 notification-or-timer schedule (2s minimum, 30s fallback, except where
 noted):
 
-| Poller                        | File                                     | Scope                                                       | Wakes on                                                     |
-| ----------------------------- | ---------------------------------------- | ----------------------------------------------------------- | ------------------------------------------------------------ |
-| Tier 1: task recovery         | `monitor.go` (`runRequeueOrphanedTasks`) | all workpools                                               | fixed timer only                                             |
-| Tier 2: cluster reconciler    | `cluster_reconciler.go`                  | batches in `pending`/`started`                              | PubSub notification for a started batch; timer fallback      |
-| Tier 3: batch startup monitor | `batch_startup_monitor.go`               | batches in `pending`                                        | PubSub notification for a pending batch; timer fallback      |
-| Provisioning poll             | `provision.go`                           | workpools not `idle`/`halted`                               | `job_created`/`workpool_state_change` events; timer fallback |
-| Job summary poll              | (job summary machinery)                  | non-terminal jobs                                           | `job_created`/`task_state_update` events; timer fallback     |
-| WorkPool summary poll         | `workpool_summary_poll.go`               | non-idle workpools, or idle ones with a fresh `job_created` | batch/job events; timer fallback                             |
-| Expiry cleaner                | `monitor.go`                             | all expired documents                                       | fixed 30-minute timer                                        |
+| Poller                | File                                     | Scope                                                       | Wakes on                                                     |
+| --------------------- | ---------------------------------------- | ----------------------------------------------------------- | ------------------------------------------------------------ |
+| Task recovery         | `monitor.go` (`runRequeueOrphanedTasks`) | all workpools                                               | fixed timer only                                             |
+| Cluster reconciler    | `cluster_reconciler.go`                  | batches in `pending`/`started`                              | PubSub notification for a started batch; timer fallback      |
+| Batch startup monitor | `batch_startup_monitor.go`               | batches in `pending`                                        | PubSub notification for a pending batch; timer fallback      |
+| Provisioning poll     | `provision.go`                           | workpools not `idle`/`halted`                               | `job_created`/`workpool_state_change` events; timer fallback |
+| Job summary poll      | (job summary machinery)                  | non-terminal jobs                                           | `job_created`/`task_state_update` events; timer fallback     |
+| WorkPool summary poll | `workpool_summary_poll.go`               | non-idle workpools, or idle ones with a fresh `job_created` | batch/job events; timer fallback                             |
+| Expiry cleaner        | `monitor.go`                             | all expired documents                                       | fixed 30-minute timer                                        |
 
-Tiers 2 and 3 do **not** filter by `WorkPoolStatus` — they keep reconciling
+The cluster reconciler and batch startup monitor do **not** filter by `WorkPoolStatus` — they keep reconciling
 batches (terminating zombie VMs, detecting GCP-reported failures, etc.) for
 a workpool regardless of whether it's `ok`, `unhealthy`, or `halted`, as long
 as it still has batches in `pending`/`started`. Only the **provisioning
@@ -70,8 +142,8 @@ tasks (status not in `success`/`error`/`failed`/`killed`):
 
 ### `ok`/`idle` → `unhealthy`
 
-`recordIncident` (`monitor.go:343`) is called from tier 2
-(`cluster_reconciler.go`) and tier 3 (`batch_startup_monitor.go`) whenever
+`recordIncident` (`monitor.go:343`) is called from the cluster reconciler
+(`cluster_reconciler.go`) and the batch startup monitor (`batch_startup_monitor.go`) whenever
 they detect an anomaly:
 
 - A batch fails outright (see `markBatchFailed` below).
@@ -86,7 +158,7 @@ they detect an anomaly:
 touch `WorkPoolState` at all. The `→ unhealthy` transition itself is decided
 by the WorkPool summary poll instead, alongside the `idle ↔ ok` logic above
 (see the next section) — deliberately centralizing all of the "what's our
-current banner state" logic in one poller rather than having tier 2/3 mutate
+current banner state" logic in one poller rather than having the watchdog pollers mutate
 state directly at incident time.
 
 This is safe to defer to the next poll tick because `unhealthy` doesn't gate
@@ -186,15 +258,15 @@ A `BatchAPIRequest` document is created in `submitBatch` (`provision.go:120`)
 after a successful call to the GCP Batch API's `CreateJob`, starting in
 `pending`. From there:
 
-- **Tier 3** owns `pending` batches. It promotes a batch to `started` the
+- The **batch startup monitor** owns `pending` batches. It promotes a batch to `started` the
   first time a worker registers (`RegisteredWorkerCount >= 1`), or to
   `failed` if it fails/completes with zero workers registered, or if it
   never leaves the queue within `max_time_in_queue`.
-- **Tier 2** owns `started` batches. It promotes to `completed` on GCP-reported
+- The **cluster reconciler** owns `started` batches. It promotes to `completed` on GCP-reported
   success, or to `failed` on GCP-reported failure, over-provisioning, no
   worker registering within the startup grace period, or too many zombie
   workers.
-- Either tier can mark a batch `deleted` if the GCP Batch API reports 404 for
+- Either poller can mark a batch `deleted` if the GCP Batch API reports 404 for
   its job (manually deleted or expired).
 
 Whenever a batch is marked `failed` in full (as opposed to a partial,
@@ -215,7 +287,7 @@ still published as a `batch_failed` event directly (with the API's error as
 the reason), so it's counted toward the halt threshold even though no batch
 document ever existed for it. `batch_succeeded` is published once per batch,
 the first time it's confirmed to have a registered worker (the same
-`pending → started` transition tier 3 uses).
+`pending → started` transition the batch startup monitor uses).
 
 See `datamodel.md`'s `Events` section and `batch-success-failure-events.md`
 for the full design rationale.

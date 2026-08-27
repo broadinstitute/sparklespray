@@ -1,6 +1,6 @@
 # Autoscaler Testing Strategy
 
-The autoscaler is complex enough — multiple tiers, time-dependent logic, two external services, a
+The autoscaler is complex enough — multiple pollers, time-dependent logic, two external services, a
 PubSub throttle, and a state machine — that correctness cannot be verified by inspection alone. This
 document describes the interfaces to mock, the unit tests to write per component, and the end-to-end
 scenarios that verify the system as a whole.
@@ -105,7 +105,7 @@ interface PubSubReceiver:
 ### `scheduler.Scheduler`
 
 The leading-edge throttle with trailing coalescing is implemented in the `scheduler` package
-(`v100/scheduler/`). Each tier registers with `scheduler.Add(minDelay, maxDelay, callback)` and
+(`v100/scheduler/`). Each poller registers with `scheduler.Add(minDelay, maxDelay, callback)` and
 receives a `notify` func to call on incoming PubSub notifications.
 
 In tests, construct the scheduler with `scheduler.New(fakeClock)` where `fakeClock` is a
@@ -124,7 +124,7 @@ case <-timerCh:
 
 The `scheduler` package itself is already tested in `scheduler/scheduler_test.go`. Autoscaler tests
 only need to verify that the correct `notify` func is called when a PubSub notification arrives for
-a given batch, and that the right tier callback fires as a result.
+a given batch, and that the right poller callback fires as a result.
 
 ---
 
@@ -162,7 +162,7 @@ throttle/coalescing contract so autoscaler-level tests don't need to re-verify i
 | Halted workpool → no provisioning                   | status=halted                                                                   | no BatchAPIRequest created                                 |
 | Workpool transitions idle→ok on first batch         | status=idle, 5 pending tasks                                                    | workpool.status==ok after poll                             |
 
-### Tier 1 — Task Recovery
+### Task Recovery
 
 | Test                             | Setup                                                                      | Assert                                                 |
 | -------------------------------- | -------------------------------------------------------------------------- | ------------------------------------------------------ |
@@ -173,7 +173,7 @@ throttle/coalescing contract so autoscaler-level tests don't need to re-verify i
 | Task in writing state            | worker expired, task.status=writing                                        | task reset to pending                                  |
 | Task in pending state            | worker expired, task.status=pending                                        | task unchanged (already pending)                       |
 
-### Tier 2 — Cluster Reconciler
+### Cluster Reconciler
 
 **Batch API lifecycle:**
 
@@ -218,7 +218,7 @@ throttle/coalescing contract so autoscaler-level tests don't need to re-verify i
 | No VMs remain, status=unhealthy | all batches done after incident | workpool.status=idle      |
 | VMs still present               | one batch still running         | workpool.status unchanged |
 
-### Tier 3 — Batch Startup Monitor
+### Batch Startup Monitor
 
 | Test                                      | Setup                                                                | Assert                                         |
 | ----------------------------------------- | -------------------------------------------------------------------- | ---------------------------------------------- |
@@ -262,18 +262,18 @@ that the components interact correctly.
 1. Submit a job: 20 pending tasks, workpool `idle`
 2. Autoscaler poll: expect 1 preemptible BatchAPIRequest (vm_count=20), workpool→`ok`
 3. Fake Batch API: transition job to RUNNING
-4. Tier 3 poll: expect `running_since` stamped, batch stays `pending`
-5. Simulate 20 workers registering (increment `registered_worker_count`); Tier 3 poll: expect batch→`started`
+4. Batch startup monitor poll: expect `running_since` stamped, batch stays `pending`
+5. Simulate 20 workers registering (increment `registered_worker_count`); batch startup monitor poll: expect batch→`started`
 6. Workers complete tasks; all heartbeats expire cleanly (heartbeat_expiry set to now on shutdown)
 7. Fake Batch API: transition job to SUCCEEDED
-8. Tier 2 poll: expect batch→`completed`, workpool→`idle`
+8. Cluster reconciler poll: expect batch→`completed`, workpool→`idle`
 
 ### S2: Preemption recovery
 
 1. 10 tasks pending; autoscaler creates a 10-VM preemptible batch; 10 workers register
 2. Workers each claim a task
 3. Advance time: 3 workers have heartbeat_expiry in the past (preempted); 7 are live
-4. Tier 1 runs: expect 3 tasks reset to `pending`, owning_worker_id cleared
+4. Task recovery runs: expect 3 tasks reset to `pending`, owning_worker_id cleared
 5. Autoscaler poll: 3 pending tasks, 7 live workers → creates a new batch for 3 VMs
 6. New workers register, tasks complete
 
@@ -282,7 +282,7 @@ that the components interact correctly.
 1. 5 tasks pending; autoscaler creates a 5-VM preemptible batch (Batch 1)
 2. Fake Batch API: Batch 1 transitions to RUNNING; `running_since` stamped
 3. Advance time past `max_time_to_start_worker`; `registered_worker_count` stays 0
-4. Tier 2 Anomaly 2: whole batch terminated, Batch 1 → `failed`, workpool → `unhealthy`
+4. Cluster reconciler Anomaly 2: whole batch terminated, Batch 1 → `failed`, workpool → `unhealthy`
 5. Halt check: only 1 failed batch; `max_consecutive_failed_batches=2` → not halted
 6. Autoscaler poll: 5 tasks still pending; creates Batch 2
 7. Same sequence: Batch 2 → `failed`
@@ -290,36 +290,36 @@ that the components interact correctly.
 9. Autoscaler poll: `status=halted` → no new batch created
 10. Assert tasks remain pending and no further VMs are requested
 
-### S4: Fast-failing batch — caught by Tier 3
+### S4: Fast-failing batch — caught by the batch startup monitor
 
 1. 5 tasks pending; autoscaler creates Batch 1; job reaches RUNNING, `running_since` stamped
 2. VMs fail immediately and disappear; Batch API transitions to FAILED
-3. PubSub notification arrives; Tier 3 runs immediately (leading edge)
-4. Tier 3: batch_api_status=FAILED → Batch 1 marked `failed`, workpool → `unhealthy`
+3. PubSub notification arrives; batch startup monitor runs immediately (leading edge)
+4. Batch startup monitor: batch_api_status=FAILED → Batch 1 marked `failed`, workpool → `unhealthy`
 5. Autoscaler poll: creates Batch 2; same failure occurs → workpool → `halted`
 
 ### S5: Zombie detection — surgical then abort
 
 1. 5-VM batch; all workers register; advance time so 2 workers have heartbeat expired + VMs still running
-2. Tier 2 Anomaly 3: 2 zombies below `max_zombies_before_abort=3` → 2 VMs terminated surgically
+2. Cluster reconciler Anomaly 3: 2 zombies below `max_zombies_before_abort=3` → 2 VMs terminated surgically
 3. Batch stays `started` (not failed); workpool → `unhealthy`; `incident_count=2`
 4. Advance time; 3 more workers become zombies
-5. Tier 2: 3 zombies > threshold → entire batch terminated, batch → `failed`, halt check runs
+5. Cluster reconciler: 3 zombies > threshold → entire batch terminated, batch → `failed`, halt check runs
 
 ### S6: Stuck-in-queue batch
 
 1. Autoscaler creates a batch; Batch API stays in `QUEUED` (no capacity)
-2. Tier 3 polls every 30s; `running_since` never set
+2. Batch startup monitor polls every 30s; `running_since` never set
 3. Advance time past `max_time_in_queue`
-4. Tier 3: batch → `failed`, workpool → `unhealthy`, halt check runs
+4. Batch startup monitor: batch → `failed`, workpool → `unhealthy`, halt check runs
 
 ### S7: Notification burst — coalescing
 
 Uses `scheduler.New(fakeClock)` so time is fully controlled.
 
-1. Register Tier 2 callback with `sched.Add(min_time_between_polls, max_time_between_polls, tier2)`; capture `notify`
+1. Register cluster reconciler callback with `sched.Add(min_time_between_polls, max_time_between_polls, clusterReconciler)`; capture `notify`
 2. Deliver 10 PubSub notifications in a loop, calling `notify()` each time (t=0s..4s via `fakeClock.Advance`)
-3. Step the loop once (no clock advance): assert notify channel fires, Tier 2 poll runs — poll count = 1
+3. Step the loop once (no clock advance): assert notify channel fires, cluster reconciler poll runs — poll count = 1
 4. `fakeClock.Advance(min_time_between_polls)`: step the loop — scheduled timer fires trailing call, poll count = 2
 5. No more items in notify channel
 6. `fakeClock.Advance(max_time_between_polls)`: step the loop — fallback timer fires, poll count = 3

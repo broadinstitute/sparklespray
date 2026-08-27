@@ -9,7 +9,7 @@ import (
 
 // Runs on PubSub notifications for pending batches
 // or after max_time_between_polls. Only processes pending batches; once promoted to started,
-// failed, or completed, Tier 2 owns the batch.
+// failed, or completed, the cluster reconciler owns the batch.
 func (a *Monitor) runBatchStartupMonitor(ctx context.Context) error {
 	pools, err := a.pools.ListAll(ctx)
 	if err != nil {
@@ -19,14 +19,14 @@ func (a *Monitor) runBatchStartupMonitor(ctx context.Context) error {
 	for _, ws := range pools {
 		pendingBatches, err := a.batches.ListByWorkpool(ctx, ws.Pool.WorkpoolID, []BatchStatus{BatchStatusPending})
 		if err != nil {
-			log.Printf("tier3: list pending batches for workpool %s: %v", ws.Pool.WorkpoolID, err)
+			log.Printf("batch startup monitor: list pending batches for workpool %s: %v", ws.Pool.WorkpoolID, err)
 			continue
 		}
 
 		now := a.clock.Now()
 		for _, batch := range pendingBatches {
 			if err := a.checkBatchStartup(ctx, ws, batch, now); err != nil {
-				log.Printf("tier3: batch %s: %v", batch.BatchID, err)
+				log.Printf("batch startup monitor: batch %s: %v", batch.BatchID, err)
 			}
 		}
 	}
@@ -48,7 +48,7 @@ func (a *Monitor) checkBatchStartup(ctx context.Context, ws *WorkPoolWithState, 
 	batch.RegisteredWorkerCount = len(workers)
 
 	if apiStatus == BatchJobStatusDeleted {
-		log.Printf("tier3: batch %s: GCP job %s no longer exists (404); marking batch as deleted", batch.BatchID, batch.JobID)
+		log.Printf("batch startup monitor: batch %s: GCP job %s no longer exists (404); marking batch as deleted", batch.BatchID, batch.JobID)
 		batch.Status = BatchStatusDeleted
 		return a.batches.Save(ctx, batch)
 	}
@@ -74,9 +74,9 @@ func (a *Monitor) checkBatchStartup(ctx context.Context, ws *WorkPoolWithState, 
 		if err := a.batches.Save(ctx, batch); err != nil {
 			return err
 		}
-		// This branch only runs for batches still in BatchStatusPending (tier 3
-		// only processes pending batches), so it fires exactly once per batch —
-		// the first poll where a worker has registered.
+		// This branch only runs for batches still in BatchStatusPending (the
+		// batch startup monitor only processes pending batches), so it fires
+		// exactly once per batch — the first poll where a worker has registered.
 		if a.batchOutcomes != nil {
 			if err := a.batchOutcomes.PublishBatchSucceeded(ctx, ws.Pool.WorkpoolID); err != nil {
 				log.Printf("checkBatchStartup: publish batch_succeeded for workpool %s: %v", ws.Pool.WorkpoolID, err)

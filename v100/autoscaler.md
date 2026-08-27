@@ -155,12 +155,12 @@ batch (zombie/startup checks) or to the whole workpool (the idle transition).
 ## Detection Approach
 
 Since some unhealthy failure modes (e.g. a non-responsive worker) are indistinguishable from normal failures
-using only Firestore data, Tier 2 periodically cross-references GCP's live VM list against Firestore state.
+using only Firestore data, the cluster reconciler periodically cross-references GCP's live VM list against Firestore state.
 
 Workers record their GCP instance name at startup. This enables exact matching between running VMs and
 Firestore Worker records, allowing surgical termination of specific problem VMs.
 
-The watchdog is assumed to run as a **single instance**. All tiers do read-modify-write on `WorkPool.status`
+The watchdog is assumed to run as a **single instance**. All pollers do read-modify-write on `WorkPool.status`
 and `BatchAPIRequest.status`; if the watchdog is ever run redundantly, these updates must be wrapped in
 Firestore transactions to avoid races.
 
@@ -231,7 +231,7 @@ inside a separate function, since the autoscaler poll is the only call site for 
 
 ---
 
-## Tier 1 — Task Recovery (runs every 30s)
+## Task Recovery (runs every 30s)
 
 Handles the common preemption/crash case quickly with no GCP API calls.
 
@@ -245,7 +245,7 @@ for each Worker where heartbeat_expiry < now:
 
 ---
 
-## Tier 2 — Cluster Reconciler (runs on Batch API notification, or after max_time_between_polls)
+## Cluster Reconciler (runs on Batch API notification, or after max_time_between_polls)
 
 Reconciles Firestore state against live GCP state: VM list for zombie detection, Batch API status
 for job-level lifecycle. Triggered immediately by a PubSub notification from the Batch API; falls
@@ -340,11 +340,11 @@ for each WorkPool that has batches with status in ("pending", "started"):
 
 ---
 
-## Tier 3 — Batch Startup Monitor (runs on Batch API notification, or after max_time_between_polls)
+## Batch Startup Monitor (runs on Batch API notification, or after max_time_between_polls)
 
 Watches newly submitted batch jobs until they are confirmed running or failed. Restricted to
-`pending` batches only; once a batch transitions to `started`, `failed`, or `completed`, Tier 3
-stops watching it and Tier 2 owns steady-state health. Triggered immediately by PubSub
+`pending` batches only; once a batch transitions to `started`, `failed`, or `completed`, the batch startup monitor
+stops watching it and the cluster reconciler owns steady-state health. Triggered immediately by PubSub
 notifications; falls back to 30-second polling if no notification arrives.
 
 ```
@@ -371,7 +371,7 @@ for each BatchAPIRequest where status == "pending":
     # Promote to "started" as soon as any worker has registered.
     if batch.registered_worker_count >= 1:
         set batch.status = "started"
-        continue  # Tier 3 will no longer poll this batch; Tier 2 takes over
+        continue  # the batch startup monitor will no longer poll this batch; the cluster reconciler takes over
 
     # Guard against a batch that never leaves the queue (e.g. quota/capacity exhaustion):
     # if it has never reached RUNNING within max_time_in_queue, give up on it.
@@ -385,7 +385,7 @@ for each BatchAPIRequest where status == "pending":
 Note the division of labor for an un-started batch: a job that **never reaches `RUNNING`** is caught here by
 the `max_time_in_queue` guard, while a job that **reaches `RUNNING` but whose VMs never register a worker**
 stays `pending` here (`running_since` is set, so neither this guard nor the `started` promotion fires) and is
-caught by Tier 2's Anomaly 2 after `max_time_to_start_worker`.
+caught by the cluster reconciler's Anomaly 2 after `max_time_to_start_worker`.
 
 ---
 
@@ -394,13 +394,13 @@ caught by Tier 2's Anomaly 2 after `max_time_to_start_worker`.
 The GCP Batch API can publish PubSub notifications when a job or task changes state. The watchdog
 subscribes to this topic. On receipt of a notification:
 
-- If the notification is for a `pending` batch → trigger a Tier 3 check for that batch
-- If the notification is for a `started` batch → trigger a Tier 2 check for that batch
+- If the notification is for a `pending` batch → trigger a batch startup monitor check for that batch
+- If the notification is for a `started` batch → trigger a cluster reconciler check for that batch
 
 ### Notification scheduling — leading-edge throttle with trailing coalescing
 
 Notifications can arrive in rapid bursts (e.g. many tasks completing at once). To avoid redundant
-back-to-back polls while still reacting quickly, each tier uses a **leading-edge throttle with
+back-to-back polls while still reacting quickly, each poller uses a **leading-edge throttle with
 trailing coalescing** per batch:
 
 - The **first** notification triggers a poll immediately (leading edge).
@@ -424,9 +424,9 @@ regardless of notification activity.
 
 ---
 
-## Halt threshold check (called by watchdog tiers whenever a batch is marked `failed`)
+## Halt threshold check (called by watchdog pollers whenever a batch is marked `failed`)
 
-When Tier 2 or Tier 3 sets `batch.status = "failed"`, they immediately call this check.
+When the cluster reconciler or batch startup monitor sets `batch.status = "failed"`, they immediately call this check.
 The `halted` transition lives here rather than in the Provisioning Guard so that `workpool.status`
 is always the authoritative signal — the guard only needs to read it.
 
@@ -472,9 +472,9 @@ problem is resolved. The watchdog will halt provisioning again if failures conti
 
 ## Notes
 
-- Tier 1 orphans tasks as soon as `heartbeat_expiry < now`. Tier 2 waits an additional
+- Task recovery orphans tasks as soon as `heartbeat_expiry < now`. The cluster reconciler waits an additional
   `vm_shutdown_grace_period` before acting on the VM. Tasks are already being retried elsewhere
-  by the time Tier 2 terminates the stale VM.
+  by the time the cluster reconciler terminates the stale VM.
 
 - For Anomaly 2, there are no tasks to orphan (the VM never claimed any). Pending tasks
   remain available for healthy workers in this batch or a future batch.
@@ -499,9 +499,9 @@ problem is resolved. The watchdog will halt provisioning again if failures conti
 
 Most failure modes are now caught quickly:
 
-- Batch-API-level failures (`FAILED`, zero-worker `SUCCEEDED`, stuck-in-queue) are caught by Tier 3 within
+- Batch-API-level failures (`FAILED`, zero-worker `SUCCEEDED`, stuck-in-queue) are caught by the batch startup monitor within
   ~30s, or near-instantly via a PubSub notification.
-- Fast-failing VMs that disappear before Tier 2 runs are caught by the `registered_worker_count == 0`
+- Fast-failing VMs that disappear before the cluster reconciler runs are caught by the `registered_worker_count == 0`
   whole-batch check in Anomaly 2.
 
 The remaining slow mode is when VMs **do** reach `RUNNING` but their worker binary never registers. Anomaly 2

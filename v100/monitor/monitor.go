@@ -155,10 +155,10 @@ func (a *Monitor) RunMonitorLoop(ctx context.Context) {
 
 	// Cluster reconciler: Triggered by PubSub notifications for started batches;
 	// falls back to max_time_between_polls if no notification arrives.
-	notifyTier2 := sched.Add(defaultMinTimeBetweenPolls, defaultMaxTimeBetweenPolls, func() {
+	notifyClusterReconciler := sched.Add(defaultMinTimeBetweenPolls, defaultMaxTimeBetweenPolls, func() {
 		a.vlogf("Started: Reconciling our records against google's")
 		if err := a.runClusterReconciler(ctx); err != nil {
-			log.Printf("tier2: %v", err)
+			log.Printf("cluster reconciler: %v", err)
 		}
 		a.vlogf("Completed: Reconciling our records against google's")
 	})
@@ -176,16 +176,16 @@ func (a *Monitor) RunMonitorLoop(ctx context.Context) {
 	sched.Add(defaultMinTimeBetweenPolls, defaultMaxTimeBetweenPolls, func() {
 		a.vlogf("Started: Checking for ophaned jobs")
 		if err := a.runRequeueOrphanedTasks(ctx); err != nil {
-			log.Printf("tier1: %v", err)
+			log.Printf("task recovery: %v", err)
 		}
 		a.vlogf("Completed: Checking for ophaned jobs")
 	})
 
-	// Startup monitor: Triggered by PubSub notifications for pending batches; and fallback timer
-	notifyTier3 := sched.Add(defaultMinTimeBetweenPolls, defaultMaxTimeBetweenPolls, func() {
+	// Batch startup monitor: Triggered by PubSub notifications for pending batches; and fallback timer
+	notifyBatchStartupMonitor := sched.Add(defaultMinTimeBetweenPolls, defaultMaxTimeBetweenPolls, func() {
 		a.vlogf("Started: Checking to see if workers successfully starting")
 		if err := a.runBatchStartupMonitor(ctx); err != nil {
-			log.Printf("tier3: %v", err)
+			log.Printf("batch startup monitor: %v", err)
 		}
 		a.vlogf("Completed: Checking to see if workers successfully starting")
 	})
@@ -268,7 +268,7 @@ func (a *Monitor) RunMonitorLoop(ctx context.Context) {
 					return
 				}
 				a.vlogf("pubsub: received notification for batch %s", n.BatchID)
-				a.routeNotification(ctx, n.BatchID, notifyTier2, notifyTier3)
+				a.routeNotification(ctx, n.BatchID, notifyClusterReconciler, notifyBatchStartupMonitor)
 				if notifyWorkPoolSummary != nil {
 					notifyWorkPoolSummary()
 				}
@@ -300,21 +300,21 @@ func (a *Monitor) RunMonitorLoop(ctx context.Context) {
 	}
 }
 
-// routeNotification looks up a batch and notifies the appropriate tier.
-func (a *Monitor) routeNotification(ctx context.Context, batchID string, notifyTier2, notifyTier3 func()) {
+// routeNotification looks up a batch and notifies the appropriate poller.
+func (a *Monitor) routeNotification(ctx context.Context, batchID string, notifyClusterReconciler, notifyBatchStartupMonitor func()) {
 	batch, err := a.batches.Get(ctx, batchID)
 	if err != nil {
-		log.Printf("notification: failed to look up batch %s: %v — notifying both tiers", batchID, err)
-		notifyTier2()
-		notifyTier3()
+		log.Printf("notification: failed to look up batch %s: %v — notifying both the cluster reconciler and the batch startup monitor", batchID, err)
+		notifyClusterReconciler()
+		notifyBatchStartupMonitor()
 		return
 	}
 
 	switch batch.Status {
 	case BatchStatusPending:
-		notifyTier3()
+		notifyBatchStartupMonitor()
 	case BatchStatusStarted:
-		notifyTier2()
+		notifyClusterReconciler()
 		// Completed/failed batches need no notification-driven check.
 	}
 }
@@ -410,7 +410,7 @@ func (a *Monitor) checkHaltThreshold(ctx context.Context, pool *WorkPool, state 
 	return nil
 }
 
-// RunRequeueOrphanedTasks runs one tier-1 pass: any tasks owned by workers
+// RunRequeueOrphanedTasks runs one task-recovery pass: any tasks owned by workers
 // whose heartbeats have expired are reset to pending. Exported for functional tests.
 func (a *Monitor) RunRequeueOrphanedTasks(ctx context.Context) error {
 	return a.runRequeueOrphanedTasks(ctx)

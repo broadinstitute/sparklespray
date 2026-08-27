@@ -17,7 +17,7 @@ func (a *Monitor) runClusterReconciler(ctx context.Context) error {
 
 	for _, ws := range pools {
 		if err := a.reconcileWorkpool(ctx, ws); err != nil {
-			log.Printf("tier2: workpool %s: %v", ws.Pool.WorkpoolID, err)
+			log.Printf("cluster reconciler: workpool %s: %v", ws.Pool.WorkpoolID, err)
 		}
 	}
 	return nil
@@ -34,9 +34,9 @@ func (a *Monitor) reconcileWorkpool(ctx context.Context, ws *WorkPoolWithState) 
 	}
 
 	for _, batch := range activeBatches {
-		done, err := a.runTier2ForBatch(ctx, ws, batch, now)
+		done, err := a.reconcileBatch(ctx, ws, batch, now)
 		if err != nil {
-			log.Printf("tier2: batch %s: %v", batch.BatchID, err)
+			log.Printf("cluster reconciler: batch %s: %v", batch.BatchID, err)
 		}
 		if done {
 			// batch was failed/completed; reload pool state so we don't overwrite a halted status.
@@ -50,16 +50,16 @@ func (a *Monitor) reconcileWorkpool(ctx context.Context, ws *WorkPoolWithState) 
 	return nil
 }
 
-// runTier2ForBatch processes one batch. Returns (done=true) if the batch was terminated
+// reconcileBatch processes one batch. Returns (done=true) if the batch was terminated
 // and the caller should reload the workpool before continuing.
-func (a *Monitor) runTier2ForBatch(ctx context.Context, ws *WorkPoolWithState, batch *BatchAPIRequest, now time.Time) (done bool, err error) {
+func (a *Monitor) reconcileBatch(ctx context.Context, ws *WorkPoolWithState, batch *BatchAPIRequest, now time.Time) (done bool, err error) {
 	apiStatus, err := a.batchAPI.GetJobStatus(ctx, batch.JobID)
 	if err != nil {
 		return false, fmt.Errorf("get job status: %w", err)
 	}
 
 	if apiStatus == BatchJobStatusDeleted {
-		log.Printf("tier2: batch %s: GCP job %s no longer exists (404); marking batch as deleted", batch.BatchID, batch.JobID)
+		log.Printf("cluster reconciler: batch %s: GCP job %s no longer exists (404); marking batch as deleted", batch.BatchID, batch.JobID)
 		batch.Status = BatchStatusDeleted
 		return true, a.batches.Save(ctx, batch)
 	}
@@ -75,10 +75,10 @@ func (a *Monitor) runTier2ForBatch(ctx context.Context, ws *WorkPoolWithState, b
 
 	if apiStatus == BatchJobStatusFailed {
 		if err := a.batchAPI.PrintBatchDebuggingInfo(ctx, batch.JobID); err != nil {
-			log.Printf("tier2: print batch debugging info for %s: %v", batch.JobID, err)
+			log.Printf("cluster reconciler: print batch debugging info for %s: %v", batch.JobID, err)
 		}
 		if err := a.batchAPI.TerminateJob(ctx, batch.JobID); err != nil {
-			log.Printf("tier2: terminate job %s: %v", batch.JobID, err)
+			log.Printf("cluster reconciler: terminate job %s: %v", batch.JobID, err)
 		}
 		return true, a.markBatchFailed(ctx, ws, batch, fmt.Sprintf("Batch job %s reported failure by Batch API", batch.JobID), now)
 	}
@@ -114,7 +114,7 @@ func (a *Monitor) reconcileVMs(ctx context.Context, ws *WorkPoolWithState, batch
 	// Anomaly 1: more VMs than expected — serious bug, abort immediately.
 	if len(gcpVMs) > batch.ExpectedVMCount {
 		if err := a.batchAPI.TerminateJob(ctx, batch.JobID); err != nil {
-			log.Printf("tier2: terminate job %s (over-provisioning): %v", batch.JobID, err)
+			log.Printf("cluster reconciler: terminate job %s (over-provisioning): %v", batch.JobID, err)
 		}
 		return a.markBatchFailed(ctx, ws, batch,
 			fmt.Sprintf("Over-provisioning: %d VMs running, expected %d", len(gcpVMs), batch.ExpectedVMCount),
@@ -128,7 +128,7 @@ func (a *Monitor) reconcileVMs(ctx context.Context, ws *WorkPoolWithState, batch
 		if len(workers) == 0 {
 			// No worker ever registered — whole batch is a startup failure.
 			if err := a.batchAPI.TerminateJob(ctx, batch.JobID); err != nil {
-				log.Printf("tier2: terminate job %s (no workers): %v", batch.JobID, err)
+				log.Printf("cluster reconciler: terminate job %s (no workers): %v", batch.JobID, err)
 			}
 			return a.markBatchFailed(ctx, ws, batch,
 				fmt.Sprintf("Batch %s: no worker registered within grace period", batch.BatchID),
@@ -140,7 +140,7 @@ func (a *Monitor) reconcileVMs(ctx context.Context, ws *WorkPoolWithState, batch
 		for instanceName, vmInfo := range gcpVMs {
 			if !registeredInstances[instanceName] {
 				if err := a.batchAPI.TerminateVM(ctx, vmInfo.Zone, instanceName); err != nil {
-					log.Printf("tier2: terminate VM %s: %v", instanceName, err)
+					log.Printf("cluster reconciler: terminate VM %s: %v", instanceName, err)
 				}
 				batch.Unhealthy = true
 				batchDirty = true
@@ -173,7 +173,7 @@ func (a *Monitor) reconcileVMs(ctx context.Context, ws *WorkPoolWithState, batch
 
 	if len(zombies) > maxZombies {
 		if err := a.batchAPI.TerminateJob(ctx, batch.JobID); err != nil {
-			log.Printf("tier2: terminate job %s (too many zombies): %v", batch.JobID, err)
+			log.Printf("cluster reconciler: terminate job %s (too many zombies): %v", batch.JobID, err)
 		}
 		return a.markBatchFailed(ctx, ws, batch,
 			fmt.Sprintf("Too many zombie workers (%d), aborting batch", len(zombies)),
@@ -183,7 +183,7 @@ func (a *Monitor) reconcileVMs(ctx context.Context, ws *WorkPoolWithState, batch
 	batchDirty := false
 	for _, z := range zombies {
 		if err := a.batchAPI.TerminateVM(ctx, gcpVMs[z.InstanceName].Zone, z.InstanceName); err != nil {
-			log.Printf("tier2: terminate zombie VM %s: %v", z.InstanceName, err)
+			log.Printf("cluster reconciler: terminate zombie VM %s: %v", z.InstanceName, err)
 		}
 		batch.Unhealthy = true
 		batchDirty = true

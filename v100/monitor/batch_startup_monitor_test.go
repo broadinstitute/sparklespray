@@ -9,9 +9,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// ---- Tier 3: Batch Startup Monitor ----
+// ---- Batch Startup Monitor ----
 
-func TestTier3_RunningJob_StampsRunningSince(t *testing.T) {
+func TestBatchStartupMonitor_RunningJob_StampsRunningSince(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
 	w.Pools.Add(pool)
@@ -34,7 +34,7 @@ func TestTier3_RunningJob_StampsRunningSince(t *testing.T) {
 	assert.Equal(t, epoch, *b.RunningSince)
 }
 
-func TestTier3_RunningSinceNotOverwritten(t *testing.T) {
+func TestBatchStartupMonitor_RunningSinceNotOverwritten(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
 	w.Pools.Add(pool)
@@ -58,7 +58,7 @@ func TestTier3_RunningSinceNotOverwritten(t *testing.T) {
 	assert.Equal(t, original, *b.RunningSince)
 }
 
-func TestTier3_FailedJob_MarksFailedAndUnhealthy(t *testing.T) {
+func TestBatchStartupMonitor_FailedJob_MarksFailedAndUnhealthy(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
 	w.Pools.Add(pool)
@@ -90,7 +90,7 @@ func TestTier3_FailedJob_MarksFailedAndUnhealthy(t *testing.T) {
 	assert.Equal(t, WorkPoolStatusUnhealthy, w.Pools.MustGetState("pool-1").State)
 }
 
-func TestTier3_SucceededWithNoWorkers_MarksFailedAndUnhealthy(t *testing.T) {
+func TestBatchStartupMonitor_SucceededWithNoWorkers_MarksFailedAndUnhealthy(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
 	w.Pools.Add(pool)
@@ -119,7 +119,7 @@ func TestTier3_SucceededWithNoWorkers_MarksFailedAndUnhealthy(t *testing.T) {
 	assert.Equal(t, WorkPoolStatusUnhealthy, w.Pools.MustGetState("pool-1").State)
 }
 
-func TestTier3_WorkerRegistered_PromotesToStarted(t *testing.T) {
+func TestBatchStartupMonitor_WorkerRegistered_PromotesToStarted(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
 	w.Pools.Add(pool)
@@ -144,7 +144,7 @@ func TestTier3_WorkerRegistered_PromotesToStarted(t *testing.T) {
 	assert.Equal(t, BatchStatusStarted, b.Status)
 }
 
-func TestTier3_StuckInQueue_MarksFailedAfterMaxTimeInQueue(t *testing.T) {
+func TestBatchStartupMonitor_StuckInQueue_MarksFailedAfterMaxTimeInQueue(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
 	w.Pools.Add(pool)
@@ -168,7 +168,7 @@ func TestTier3_StuckInQueue_MarksFailedAfterMaxTimeInQueue(t *testing.T) {
 	assert.True(t, b.Unhealthy)
 }
 
-func TestTier3_NotYetPastMaxTimeInQueue_NoAction(t *testing.T) {
+func TestBatchStartupMonitor_NotYetPastMaxTimeInQueue_NoAction(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
 	w.Pools.Add(pool)

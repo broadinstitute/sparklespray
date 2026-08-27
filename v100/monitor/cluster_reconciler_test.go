@@ -11,7 +11,7 @@ import (
 
 // ---- Batch API lifecycle ----
 
-func TestTier2_FailedBatch_MarksFailedAndUnhealthy(t *testing.T) {
+func TestClusterReconciler_FailedBatch_MarksFailedAndUnhealthy(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
 	w.Pools.Add(pool)
@@ -43,7 +43,7 @@ func TestTier2_FailedBatch_MarksFailedAndUnhealthy(t *testing.T) {
 	assert.Equal(t, WorkPoolStatusUnhealthy, w.Pools.MustGetState("pool-1").State)
 }
 
-func TestTier2_SucceededBatch_MarksCompleted(t *testing.T) {
+func TestClusterReconciler_SucceededBatch_MarksCompleted(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
 	w.Pools.Add(pool)
@@ -67,7 +67,7 @@ func TestTier2_SucceededBatch_MarksCompleted(t *testing.T) {
 	assert.Equal(t, WorkPoolStatusOK, w.Pools.MustGetState("pool-1").State)
 }
 
-func TestTier2_FailedBatchTriggersHaltThreshold(t *testing.T) {
+func TestClusterReconciler_FailedBatchTriggersHaltThreshold(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
 	pool.MaxConsecutiveFailedBatches = 2
@@ -96,7 +96,7 @@ func TestTier2_FailedBatchTriggersHaltThreshold(t *testing.T) {
 
 // ---- Anomaly 1: over-provisioning ----
 
-func TestTier2_Anomaly1_MoreVMsThanExpected_AbortBatch(t *testing.T) {
+func TestClusterReconciler_Anomaly1_MoreVMsThanExpected_AbortBatch(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
 	w.Pools.Add(pool)
@@ -130,7 +130,7 @@ func TestTier2_Anomaly1_MoreVMsThanExpected_AbortBatch(t *testing.T) {
 	assert.Equal(t, WorkPoolStatusUnhealthy, w.Pools.MustGetState("pool-1").State)
 }
 
-func TestTier2_Anomaly1_ExactVMCount_NoTermination(t *testing.T) {
+func TestClusterReconciler_Anomaly1_ExactVMCount_NoTermination(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
 	w.Pools.Add(pool)
@@ -159,7 +159,7 @@ func TestTier2_Anomaly1_ExactVMCount_NoTermination(t *testing.T) {
 
 // ---- Anomaly 2: startup failure ----
 
-func TestTier2_Anomaly2_BeforeGracePeriod_NoAction(t *testing.T) {
+func TestClusterReconciler_Anomaly2_BeforeGracePeriod_NoAction(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
 	w.Pools.Add(pool)
@@ -183,7 +183,7 @@ func TestTier2_Anomaly2_BeforeGracePeriod_NoAction(t *testing.T) {
 	assert.Empty(t, w.BatchAPI.TerminatedVMs)
 }
 
-func TestTier2_Anomaly2_NoWorkersAfterGrace_WholeBatchTerminated(t *testing.T) {
+func TestClusterReconciler_Anomaly2_NoWorkersAfterGrace_WholeBatchTerminated(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
 	w.Pools.Add(pool)
@@ -209,7 +209,7 @@ func TestTier2_Anomaly2_NoWorkersAfterGrace_WholeBatchTerminated(t *testing.T) {
 	assert.Contains(t, w.BatchAPI.TerminatedJobs, "job-1")
 }
 
-func TestTier2_Anomaly2_SomeWorkersRegistered_SurgicalTermination(t *testing.T) {
+func TestClusterReconciler_Anomaly2_SomeWorkersRegistered_SurgicalTermination(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
 	w.Pools.Add(pool)
@@ -238,7 +238,7 @@ func TestTier2_Anomaly2_SomeWorkersRegistered_SurgicalTermination(t *testing.T) 
 	assert.True(t, b.Unhealthy)
 }
 
-func TestTier2_Anomaly2_RunningSinceNil_Skipped(t *testing.T) {
+func TestClusterReconciler_Anomaly2_RunningSinceNil_Skipped(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
 	w.Pools.Add(pool)
@@ -266,7 +266,7 @@ func TestTier2_Anomaly2_RunningSinceNil_Skipped(t *testing.T) {
 
 // ---- Anomaly 3: zombie workers ----
 
-func TestTier2_Anomaly3_ZombieBelowThreshold_SurgicalTermination(t *testing.T) {
+func TestClusterReconciler_Anomaly3_ZombieBelowThreshold_SurgicalTermination(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
 	pool.VMShutdownGracePeriod = 1 * time.Minute
@@ -301,7 +301,7 @@ func TestTier2_Anomaly3_ZombieBelowThreshold_SurgicalTermination(t *testing.T) {
 	assert.True(t, b.Unhealthy)
 }
 
-func TestTier2_Anomaly3_ZombieAboveThreshold_WholeBatchAborted(t *testing.T) {
+func TestClusterReconciler_Anomaly3_ZombieAboveThreshold_WholeBatchAborted(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
 	pool.VMShutdownGracePeriod = 1 * time.Minute
@@ -332,7 +332,7 @@ func TestTier2_Anomaly3_ZombieAboveThreshold_WholeBatchAborted(t *testing.T) {
 	assert.Equal(t, BatchStatusFailed, b.Status)
 }
 
-func TestTier2_Anomaly3_ZombieVMGone_NoTermination(t *testing.T) {
+func TestClusterReconciler_Anomaly3_ZombieVMGone_NoTermination(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
 	pool.VMShutdownGracePeriod = 1 * time.Minute
@@ -361,7 +361,7 @@ func TestTier2_Anomaly3_ZombieVMGone_NoTermination(t *testing.T) {
 	assert.Empty(t, w.BatchAPI.TerminatedJobs)
 }
 
-func TestTier2_Anomaly3_WithinGracePeriod_NoAction(t *testing.T) {
+func TestClusterReconciler_Anomaly3_WithinGracePeriod_NoAction(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
 	pool.VMShutdownGracePeriod = 5 * time.Minute
@@ -390,9 +390,9 @@ func TestTier2_Anomaly3_WithinGracePeriod_NoAction(t *testing.T) {
 	assert.Empty(t, w.BatchAPI.TerminatedJobs)
 }
 
-// ---- running_since stamping via Tier 2 ----
+// ---- running_since stamping via cluster reconciler ----
 
-func TestTier2_StampsRunningSince(t *testing.T) {
+func TestClusterReconciler_StampsRunningSince(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
 	w.Pools.Add(pool)
@@ -415,7 +415,7 @@ func TestTier2_StampsRunningSince(t *testing.T) {
 	assert.Equal(t, epoch, *b.RunningSince)
 }
 
-func TestTier2_RunningSinceNotOverwritten(t *testing.T) {
+func TestClusterReconciler_RunningSinceNotOverwritten(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
 	w.Pools.Add(pool)

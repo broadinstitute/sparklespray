@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestTier1_ExpiredWorkerTasksReset(t *testing.T) {
+func TestTaskRecovery_ExpiredWorkerTasksReset(t *testing.T) {
 	w := newWorld()
 
 	w.Workers.Add(&Worker{
@@ -31,7 +31,7 @@ func TestTier1_ExpiredWorkerTasksReset(t *testing.T) {
 	}
 }
 
-func TestTier1_ExpiredWorkerNoTasks_NoChange(t *testing.T) {
+func TestTaskRecovery_ExpiredWorkerNoTasks_NoChange(t *testing.T) {
 	w := newWorld()
 
 	w.Workers.Add(&Worker{
@@ -46,7 +46,7 @@ func TestTier1_ExpiredWorkerNoTasks_NoChange(t *testing.T) {
 	// Nothing to assert — just no crash.
 }
 
-func TestTier1_UnexpiredWorker_NoChange(t *testing.T) {
+func TestTaskRecovery_UnexpiredWorker_NoChange(t *testing.T) {
 	w := newWorld()
 
 	w.Workers.Add(&Worker{
@@ -61,7 +61,7 @@ func TestTier1_UnexpiredWorker_NoChange(t *testing.T) {
 	assert.Equal(t, TaskStatusRunning, w.Tasks.MustGet("t1").Status)
 }
 
-func TestTier1_MixedWorkers_OnlyExpiredWorkerAffected(t *testing.T) {
+func TestTaskRecovery_MixedWorkers_OnlyExpiredWorkerAffected(t *testing.T) {
 	w := newWorld()
 
 	// Expired worker with a task.
@@ -88,7 +88,7 @@ func TestTier1_MixedWorkers_OnlyExpiredWorkerAffected(t *testing.T) {
 	assert.Equal(t, TaskStatusRunning, w.Tasks.MustGet("t-healthy").Status)
 }
 
-func TestTier1_PendingTaskNotReset(t *testing.T) {
+func TestTaskRecovery_PendingTaskNotReset(t *testing.T) {
 	w := newWorld()
 
 	// Expired worker, but its task is already pending (no owning worker).
