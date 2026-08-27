@@ -82,12 +82,16 @@ type WorkPool struct {
 
 // WorkPoolState holds the mutable runtime state for a workpool. It is stored in
 // WorkPoolSummary and never written to the immutable WorkPools collection.
+//
+// StateMessage/LastIncidentAt/IncidentCount are NOT part of this struct —
+// unlike State, they aren't persisted mutable state. WorkPoolSummary's
+// equivalent fields are derived by querying recent workpool_incident events
+// (see EventStore.ListRecentWorkpoolIncidents) each time the WorkPool
+// summary poll runs, so they self-heal as old incidents age out of the
+// window instead of accumulating forever.
 type WorkPoolState struct {
-	WorkpoolID     string
-	State          WorkPoolStatus
-	StateMessage   string
-	LastIncidentAt time.Time
-	IncidentCount  int
+	WorkpoolID string
+	State      WorkPoolStatus
 }
 
 // WorkPoolWithState pairs an immutable WorkPool config with its current mutable state.
@@ -391,6 +395,26 @@ type WorkpoolStatePublisher interface {
 	PublishWorkpoolStateChange(ctx context.Context, workpoolID, state, stateMessage string) error
 }
 
+// BatchOutcomePublisher emits one event per batch attempt outcome — success
+// or failure — used to feed checkHaltThreshold's event-log query. Defined
+// here (not in v100) to avoid an import cycle.
+type BatchOutcomePublisher interface {
+	// PublishBatchFailed records that a batch (or a CreateJob call that never
+	// became a batch) failed. reason is a human-readable explanation.
+	PublishBatchFailed(ctx context.Context, workpoolID, reason string) error
+	// PublishBatchSucceeded records that a batch was confirmed healthy (its
+	// first worker registered). Published once per batch.
+	PublishBatchSucceeded(ctx context.Context, workpoolID string) error
+}
+
+// WorkpoolIncidentPublisher emits a workpool_incident event whenever the
+// watchdog detects a batch/worker anomaly for a workpool. Used to feed
+// updateWorkPoolSummary's event-log query for StateMessage/LastIncidentAt/
+// IncidentCount. Defined here (not in v100) to avoid an import cycle.
+type WorkpoolIncidentPublisher interface {
+	PublishWorkpoolIncident(ctx context.Context, workpoolID, reason string) error
+}
+
 // Notification is delivered on the channel returned by PubSubReceiver.Notifications.
 // Exactly one of BatchID or Err is set: Err is non-nil when the receive loop fails fatally.
 type Notification struct {
@@ -418,11 +442,30 @@ type JobCreatedRecord struct {
 	Timestamp  time.Time
 }
 
-// EventStore queries the Events collection for job_created events.
+// BatchOutcome is a minimal view of an Events document for batch_failed/batch_succeeded events.
+type BatchOutcome struct {
+	Failed    bool // true for batch_failed, false for batch_succeeded
+	Timestamp time.Time
+}
+
+// WorkpoolIncident is a minimal view of an Events document for workpool_incident events.
+type WorkpoolIncident struct {
+	Message   string
+	Timestamp time.Time
+}
+
+// EventStore queries the Events collection for job_created, batch outcome,
+// and workpool incident events.
 type EventStore interface {
 	// ListJobCreatedSince returns all job_created events with timestamp > since.
 	// If since is zero, all job_created events are returned.
 	ListJobCreatedSince(ctx context.Context, since time.Time) ([]JobCreatedRecord, error)
+	// ListRecentBatchOutcomes returns batch_failed/batch_succeeded events for
+	// workpoolID with timestamp > since, ordered most-recent-first.
+	ListRecentBatchOutcomes(ctx context.Context, workpoolID string, since time.Time) ([]BatchOutcome, error)
+	// ListRecentWorkpoolIncidents returns workpool_incident events for
+	// workpoolID with timestamp > since, ordered most-recent-first.
+	ListRecentWorkpoolIncidents(ctx context.Context, workpoolID string, since time.Time) ([]WorkpoolIncident, error)
 }
 
 // PubSubReceiver delivers Batch API status-change notifications.

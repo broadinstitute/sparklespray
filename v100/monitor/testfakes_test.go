@@ -675,12 +675,53 @@ func (f *FakeWorkPoolSummaryStore) Delete(_ context.Context, workpoolID string) 
 
 // ---- FakeEventStore ----
 
+// FakeEventStore doubles as both EventStore (read side) and
+// BatchOutcomePublisher/WorkpoolIncidentPublisher (write side), backed by
+// the same in-memory slices — mirroring how the real Events Firestore
+// collection is written by EventPublisher and read by FirestoreEventStore.
 type FakeEventStore struct {
-	Events []JobCreatedRecord
+	Events            []JobCreatedRecord
+	BatchOutcomes     []fakeBatchOutcome
+	WorkpoolIncidents []fakeWorkpoolIncident
+	Clock             scheduler.Clock
+}
+
+// fakeWorkpoolIncident pairs a WorkpoolIncident with the workpool it belongs
+// to, so ListRecentWorkpoolIncidents can filter by workpoolID like the
+// Firestore query does.
+type fakeWorkpoolIncident struct {
+	WorkpoolID string
+	WorkpoolIncident
+}
+
+// fakeBatchOutcome pairs a BatchOutcome with the workpool it belongs to, so
+// ListRecentBatchOutcomes can filter by workpoolID like the Firestore query does.
+type fakeBatchOutcome struct {
+	WorkpoolID string
+	BatchOutcome
 }
 
 func newFakeEventStore() *FakeEventStore {
 	return &FakeEventStore{}
+}
+
+// PublishBatchFailed implements BatchOutcomePublisher.
+func (f *FakeEventStore) PublishBatchFailed(_ context.Context, workpoolID, _ string) error {
+	f.AddBatchOutcome(workpoolID, true, f.now())
+	return nil
+}
+
+// PublishBatchSucceeded implements BatchOutcomePublisher.
+func (f *FakeEventStore) PublishBatchSucceeded(_ context.Context, workpoolID string) error {
+	f.AddBatchOutcome(workpoolID, false, f.now())
+	return nil
+}
+
+func (f *FakeEventStore) now() time.Time {
+	if f.Clock != nil {
+		return f.Clock.Now()
+	}
+	return time.Now()
 }
 
 func (f *FakeEventStore) ListJobCreatedSince(_ context.Context, since time.Time) ([]JobCreatedRecord, error) {
@@ -698,6 +739,56 @@ func (f *FakeEventStore) ListJobCreatedSince(_ context.Context, since time.Time)
 
 func (f *FakeEventStore) AddEvent(workpoolID string, ts time.Time) {
 	f.Events = append(f.Events, JobCreatedRecord{WorkpoolID: workpoolID, Timestamp: ts})
+}
+
+// ListRecentBatchOutcomes returns outcomes for workpoolID with timestamp >
+// since, ordered most-recent-first, matching FirestoreEventStore's contract.
+func (f *FakeEventStore) ListRecentBatchOutcomes(_ context.Context, workpoolID string, since time.Time) ([]BatchOutcome, error) {
+	var out []BatchOutcome
+	for _, o := range f.BatchOutcomes {
+		if o.WorkpoolID == workpoolID && o.Timestamp.After(since) {
+			out = append(out, o.BatchOutcome)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Timestamp.After(out[j].Timestamp) })
+	return out, nil
+}
+
+// AddBatchOutcome records a batch_failed (failed=true) or batch_succeeded
+// (failed=false) outcome for workpoolID at ts.
+func (f *FakeEventStore) AddBatchOutcome(workpoolID string, failed bool, ts time.Time) {
+	f.BatchOutcomes = append(f.BatchOutcomes, fakeBatchOutcome{
+		WorkpoolID:   workpoolID,
+		BatchOutcome: BatchOutcome{Failed: failed, Timestamp: ts},
+	})
+}
+
+// PublishWorkpoolIncident implements WorkpoolIncidentPublisher.
+func (f *FakeEventStore) PublishWorkpoolIncident(_ context.Context, workpoolID, reason string) error {
+	f.AddWorkpoolIncident(workpoolID, reason, f.now())
+	return nil
+}
+
+// ListRecentWorkpoolIncidents returns incidents for workpoolID with
+// timestamp > since, ordered most-recent-first, matching
+// FirestoreEventStore's contract.
+func (f *FakeEventStore) ListRecentWorkpoolIncidents(_ context.Context, workpoolID string, since time.Time) ([]WorkpoolIncident, error) {
+	var out []WorkpoolIncident
+	for _, i := range f.WorkpoolIncidents {
+		if i.WorkpoolID == workpoolID && i.Timestamp.After(since) {
+			out = append(out, i.WorkpoolIncident)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Timestamp.After(out[j].Timestamp) })
+	return out, nil
+}
+
+// AddWorkpoolIncident records a workpool_incident event for workpoolID at ts.
+func (f *FakeEventStore) AddWorkpoolIncident(workpoolID, message string, ts time.Time) {
+	f.WorkpoolIncidents = append(f.WorkpoolIncidents, fakeWorkpoolIncident{
+		WorkpoolID:       workpoolID,
+		WorkpoolIncident: WorkpoolIncident{Message: message, Timestamp: ts},
+	})
 }
 
 // ---- World: test fixture builder ----
@@ -725,10 +816,13 @@ func newWorld() *World {
 	pubsub := newFakePubSubReceiver()
 	summaries := newFakeWorkPoolSummaryStore()
 	events := newFakeEventStore()
+	events.Clock = clock
 
 	a := New(clock, batchAPI, pools, batches, workers, tasks, pubsub, "test-db")
 	a.SetWorkPoolSummaryStore(summaries)
 	a.SetEventStore(events)
+	a.SetBatchOutcomePublisher(events)
+	a.SetWorkpoolIncidentPublisher(events)
 
 	return &World{
 		Clock:             clock,

@@ -21,6 +21,13 @@ const (
 	defaultMaxConsecutiveFailedBatches = 2
 
 	expiryCleanerInterval = 30 * time.Minute
+
+	// defaultHaltCheckWindow bounds how far back checkHaltThreshold looks in
+	// the Events log. Kept short (not an all-time window) both to keep the
+	// Firestore query cheap and because the failure mode we care about most
+	// is "things never start" — a burst of failures right now — not a slow
+	// drift over hours.
+	defaultHaltCheckWindow = 1 * time.Hour
 )
 
 // activeTasks is the set of task statuses that are orphaned back to pending when a worker dies.
@@ -39,6 +46,8 @@ type Monitor struct {
 	jobSummaries           JobSummaryStore
 	jobTerminated          JobTerminatedPublisher
 	workpoolStatePublisher WorkpoolStatePublisher
+	batchOutcomes          BatchOutcomePublisher
+	workpoolIncidents      WorkpoolIncidentPublisher
 	workPoolSummaries      WorkPoolSummaryStore
 	events                 EventStore
 	lastEventTime          time.Time
@@ -71,6 +80,16 @@ func (a *Monitor) SetJobTerminatedPublisher(p JobTerminatedPublisher) { a.jobTer
 // SetWorkpoolStatePublisher sets the publisher used to emit workpool_state_change events.
 func (a *Monitor) SetWorkpoolStatePublisher(p WorkpoolStatePublisher) {
 	a.workpoolStatePublisher = p
+}
+
+// SetBatchOutcomePublisher sets the publisher used to emit batch_failed/batch_succeeded events.
+func (a *Monitor) SetBatchOutcomePublisher(p BatchOutcomePublisher) {
+	a.batchOutcomes = p
+}
+
+// SetWorkpoolIncidentPublisher sets the publisher used to emit workpool_incident events.
+func (a *Monitor) SetWorkpoolIncidentPublisher(p WorkpoolIncidentPublisher) {
+	a.workpoolIncidents = p
 }
 
 // SetExpiryStore sets the store used to garbage-collect expired documents.
@@ -134,7 +153,7 @@ func (a *Monitor) RunMonitorLoop(ctx context.Context) {
 		defer cancel()
 	}
 
-	// Tier 2: cluster reconciler. Triggered by PubSub notifications for started batches;
+	// Cluster reconciler: Triggered by PubSub notifications for started batches;
 	// falls back to max_time_between_polls if no notification arrives.
 	notifyTier2 := sched.Add(defaultMinTimeBetweenPolls, defaultMaxTimeBetweenPolls, func() {
 		a.vlogf("Started: Reconciling our records against google's")
@@ -144,7 +163,7 @@ func (a *Monitor) RunMonitorLoop(ctx context.Context) {
 		a.vlogf("Completed: Reconciling our records against google's")
 	})
 
-	// Provisioning poll: provisioning. Triggered by job_created events; falls back to 1-minute timer.
+	// Provisioner: Responsible for requesting VMs for pending tasks. Triggered by job_created events; falls back to 1-minute timer.
 	notifyProvisioning := sched.Add(defaultMinTimeBetweenPolls, defaultMaxTimeBetweenPolls, func() {
 		a.vlogf("Started: Checking for workpools which need new workers")
 		if err := a.runProvisioningPoll(ctx); err != nil {
@@ -153,7 +172,7 @@ func (a *Monitor) RunMonitorLoop(ctx context.Context) {
 		a.vlogf("Completed: Checking for workpools which need new workers")
 	})
 
-	// Tier 1: task recovery. Fixed 30-second interval; no notification trigger.
+	// Task recovery: Fixed 30-second interval; no notification trigger.
 	sched.Add(defaultMinTimeBetweenPolls, defaultMaxTimeBetweenPolls, func() {
 		a.vlogf("Started: Checking for ophaned jobs")
 		if err := a.runRequeueOrphanedTasks(ctx); err != nil {
@@ -162,8 +181,7 @@ func (a *Monitor) RunMonitorLoop(ctx context.Context) {
 		a.vlogf("Completed: Checking for ophaned jobs")
 	})
 
-	// Tier 3: batch startup monitor. Triggered by PubSub notifications for pending batches;
-	// same fallback timing as tier 2.
+	// Startup monitor: Triggered by PubSub notifications for pending batches; and fallback timer
 	notifyTier3 := sched.Add(defaultMinTimeBetweenPolls, defaultMaxTimeBetweenPolls, func() {
 		a.vlogf("Started: Checking to see if workers successfully starting")
 		if err := a.runBatchStartupMonitor(ctx); err != nil {
@@ -301,66 +319,90 @@ func (a *Monitor) routeNotification(ctx context.Context, batchID string, notifyT
 	}
 }
 
-// saveState persists workpool state and publishes a workpool_state_change event.
-// Publish errors are logged but not returned so they don't block state writes.
-func (a *Monitor) saveState(ctx context.Context, state *WorkPoolState) error {
+// saveState persists workpool state and publishes a workpool_state_change
+// event carrying message. Publish errors are logged but not returned so
+// they don't block state writes.
+func (a *Monitor) saveState(ctx context.Context, state *WorkPoolState, message string) error {
 	if err := a.pools.SaveState(ctx, state); err != nil {
 		return err
 	}
 	if a.workpoolStatePublisher != nil {
-		if err := a.workpoolStatePublisher.PublishWorkpoolStateChange(ctx, state.WorkpoolID, string(state.State), state.StateMessage); err != nil {
+		if err := a.workpoolStatePublisher.PublishWorkpoolStateChange(ctx, state.WorkpoolID, string(state.State), message); err != nil {
 			log.Printf("saveState: publish workpool_state_change for %s: %v", state.WorkpoolID, err)
 		}
 	}
 	return nil
 }
 
-// recordIncident updates the workpool state for a watchdog anomaly.
-// Mutates state in place; callers must SaveState after calling this.
-func recordIncident(state *WorkPoolState, message string, now time.Time) {
-	if state.State != WorkPoolStatusHalted {
-		state.State = WorkPoolStatusUnhealthy
+// recordIncident publishes a workpool_incident event for a watchdog anomaly.
+// It is purely a log-to-Events operation — it does not mutate WorkPoolState.
+// The ok/unhealthy transition is decided by the WorkPool summary poll
+// (updateWorkPoolSummary), which derives it (along with the
+// StateMessage/LastIncidentAt/IncidentCount shown on WorkPoolSummary) from
+// recent workpool_incident events — see EventStore.ListRecentWorkpoolIncidents.
+func (a *Monitor) recordIncident(ctx context.Context, workpoolID, message string) {
+	if a.workpoolIncidents != nil {
+		if err := a.workpoolIncidents.PublishWorkpoolIncident(ctx, workpoolID, message); err != nil {
+			log.Printf("recordIncident: publish workpool_incident for %s: %v", workpoolID, err)
+		}
 	}
-	state.StateMessage = message
-	state.LastIncidentAt = now
-	state.IncidentCount++
 }
 
-// checkHaltThreshold transitions the workpool to halted if the last N classified batches
-// all failed. Saves state if it transitions.
+// markBatchFailed records batch as failed, logs an incident, publishes a
+// batch_failed event, and checks the halt threshold. Centralizes the
+// pattern repeated across cluster_reconciler.go and
+// batch_startup_monitor.go's failure-detection call sites.
+func (a *Monitor) markBatchFailed(ctx context.Context, ws *WorkPoolWithState, batch *BatchAPIRequest, reason string, now time.Time) error {
+	batch.Status = BatchStatusFailed
+	batch.Unhealthy = true
+	a.recordIncident(ctx, ws.Pool.WorkpoolID, reason)
+	if err := a.batches.Save(ctx, batch); err != nil {
+		return fmt.Errorf("save batch: %w", err)
+	}
+	if a.batchOutcomes != nil {
+		if err := a.batchOutcomes.PublishBatchFailed(ctx, ws.Pool.WorkpoolID, reason); err != nil {
+			log.Printf("markBatchFailed: publish batch_failed for workpool %s: %v", ws.Pool.WorkpoolID, err)
+		}
+	}
+	return a.checkHaltThreshold(ctx, ws.Pool, ws.State)
+}
+
+// checkHaltThreshold transitions the workpool to halted if the last N batch
+// outcomes recorded in the Events log within defaultHaltCheckWindow all
+// failed. Saves state if it transitions. The halt transition is reported
+// only via workpool_state_change — it is not itself published as a
+// workpool_incident (that event type is reserved for the anomalies that led
+// up to the halt).
 func (a *Monitor) checkHaltThreshold(ctx context.Context, pool *WorkPool, state *WorkPoolState) error {
 	n := pool.MaxConsecutiveFailedBatches
 	if n <= 0 {
 		n = defaultMaxConsecutiveFailedBatches
 	}
 
-	// Pending batches are excluded — they haven't been classified yet.
-	recent, err := a.batches.ListByWorkpool(ctx, pool.WorkpoolID, []BatchStatus{
-		BatchStatusFailed, BatchStatusStarted, BatchStatusCompleted,
-	})
+	since := a.clock.Now().Add(-defaultHaltCheckWindow)
+	recent, err := a.events.ListRecentBatchOutcomes(ctx, pool.WorkpoolID, since)
 	if err != nil {
-		return fmt.Errorf("list recent batches for workpool %s: %w", pool.WorkpoolID, err)
+		return fmt.Errorf("list recent batch outcomes for workpool %s: %w", pool.WorkpoolID, err)
 	}
 
-	// ListByWorkpool returns DESC by SubmittedAt; take only the most recent n.
+	// ListRecentBatchOutcomes returns most-recent-first; take only the most recent n.
 	if len(recent) > n {
 		recent = recent[:n]
 	}
 
 	if len(recent) == n {
 		allFailed := true
-		for _, b := range recent {
-			if b.Status != BatchStatusFailed {
+		for _, o := range recent {
+			if !o.Failed {
 				allFailed = false
 				break
 			}
 		}
 		if allFailed {
 			state.State = WorkPoolStatusHalted
-			state.StateMessage = fmt.Sprintf(
-				"Last %d batches all failed — possible configuration problem", n)
-			state.LastIncidentAt = a.clock.Now()
-			if err := a.saveState(ctx, state); err != nil {
+			haltMessage := fmt.Sprintf(
+				"Last %d batches all failed within the last hour — possible configuration problem", n)
+			if err := a.saveState(ctx, state, haltMessage); err != nil {
 				return fmt.Errorf("save workpool %s: %w", pool.WorkpoolID, err)
 			}
 		}

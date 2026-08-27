@@ -15,7 +15,7 @@ func TestSummaryPoll_JobCreated_IdleToOK(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
 	w.Pools.Add(pool)
-	w.Pools.AddState(&WorkPoolState{WorkpoolID: "pool-1", State: WorkPoolStatusIdle, StateMessage: "no tasks"})
+	w.Pools.AddState(&WorkPoolState{WorkpoolID: "pool-1", State: WorkPoolStatusIdle})
 	// A job_created event is always accompanied by the task(s) it creates.
 	w.Tasks.Add(&Task{TaskID: "t1", WorkpoolID: "pool-1", Status: TaskStatusPending})
 	w.Events.AddEvent("pool-1", epoch.Add(1*time.Minute))
@@ -25,14 +25,13 @@ func TestSummaryPoll_JobCreated_IdleToOK(t *testing.T) {
 
 	got := w.Pools.MustGetState("pool-1")
 	assert.Equal(t, WorkPoolStatusOK, got.State)
-	assert.Empty(t, got.StateMessage)
 }
 
 func TestSummaryPoll_JobCreated_HaltedUnchanged(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
 	w.Pools.Add(pool)
-	w.Pools.AddState(&WorkPoolState{WorkpoolID: "pool-1", State: WorkPoolStatusHalted, StateMessage: "consecutive failures"})
+	w.Pools.AddState(&WorkPoolState{WorkpoolID: "pool-1", State: WorkPoolStatusHalted})
 	// Non-terminal (started) worker prevents the halted→idle transition so we can
 	// test that a job_created event alone doesn't unblock a halted pool.
 	w.Workers.Add(&Worker{WorkerID: "w1", WorkpoolID: "pool-1", Status: "started"})
@@ -92,8 +91,8 @@ func TestHaltThreshold_NConsecutiveFailed_Halted(t *testing.T) {
 	state := defaultState("pool-1")
 	w.Pools.AddState(state)
 
-	w.Batches.Add(&BatchAPIRequest{BatchID: "b1", WorkpoolID: "pool-1", Status: BatchStatusFailed, SubmittedAt: epoch.Add(1 * time.Minute)})
-	w.Batches.Add(&BatchAPIRequest{BatchID: "b2", WorkpoolID: "pool-1", Status: BatchStatusFailed, SubmittedAt: epoch.Add(2 * time.Minute)})
+	w.Events.AddBatchOutcome("pool-1", true, epoch.Add(1*time.Minute))
+	w.Events.AddBatchOutcome("pool-1", true, epoch.Add(2*time.Minute))
 
 	err := w.A.checkHaltThreshold(context.Background(), pool, state)
 	require.NoError(t, err)
@@ -109,15 +108,15 @@ func TestHaltThreshold_NMinusOneFailures_NotHalted(t *testing.T) {
 	w.Pools.AddState(state)
 
 	// Only 2 failed, threshold is 3.
-	w.Batches.Add(&BatchAPIRequest{BatchID: "b1", WorkpoolID: "pool-1", Status: BatchStatusFailed, SubmittedAt: epoch.Add(1 * time.Minute)})
-	w.Batches.Add(&BatchAPIRequest{BatchID: "b2", WorkpoolID: "pool-1", Status: BatchStatusFailed, SubmittedAt: epoch.Add(2 * time.Minute)})
+	w.Events.AddBatchOutcome("pool-1", true, epoch.Add(1*time.Minute))
+	w.Events.AddBatchOutcome("pool-1", true, epoch.Add(2*time.Minute))
 
 	err := w.A.checkHaltThreshold(context.Background(), pool, state)
 	require.NoError(t, err)
 	assert.NotEqual(t, WorkPoolStatusHalted, w.Pools.MustGetState("pool-1").State)
 }
 
-func TestHaltThreshold_PatternBrokenByStarted_NotHalted(t *testing.T) {
+func TestHaltThreshold_PatternBrokenBySucceeded_NotHalted(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
 	pool.MaxConsecutiveFailedBatches = 2
@@ -125,16 +124,16 @@ func TestHaltThreshold_PatternBrokenByStarted_NotHalted(t *testing.T) {
 	state := defaultState("pool-1")
 	w.Pools.AddState(state)
 
-	// Most recent batch is started (not failed) → streak broken.
-	w.Batches.Add(&BatchAPIRequest{BatchID: "b1", WorkpoolID: "pool-1", Status: BatchStatusFailed, SubmittedAt: epoch.Add(1 * time.Minute)})
-	w.Batches.Add(&BatchAPIRequest{BatchID: "b2", WorkpoolID: "pool-1", Status: BatchStatusStarted, SubmittedAt: epoch.Add(2 * time.Minute)})
+	// Most recent outcome is a success → streak broken.
+	w.Events.AddBatchOutcome("pool-1", true, epoch.Add(1*time.Minute))
+	w.Events.AddBatchOutcome("pool-1", false, epoch.Add(2*time.Minute))
 
 	err := w.A.checkHaltThreshold(context.Background(), pool, state)
 	require.NoError(t, err)
 	assert.NotEqual(t, WorkPoolStatusHalted, w.Pools.MustGetState("pool-1").State)
 }
 
-func TestHaltThreshold_PendingBatchesExcluded(t *testing.T) {
+func TestHaltThreshold_OutcomesOutsideWindowExcluded(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
 	pool.MaxConsecutiveFailedBatches = 2
@@ -142,14 +141,15 @@ func TestHaltThreshold_PendingBatchesExcluded(t *testing.T) {
 	state := defaultState("pool-1")
 	w.Pools.AddState(state)
 
-	// Two failed + one pending. The pending should not count.
-	w.Batches.Add(&BatchAPIRequest{BatchID: "b1", WorkpoolID: "pool-1", Status: BatchStatusFailed, SubmittedAt: epoch.Add(1 * time.Minute)})
-	w.Batches.Add(&BatchAPIRequest{BatchID: "b2", WorkpoolID: "pool-1", Status: BatchStatusFailed, SubmittedAt: epoch.Add(2 * time.Minute)})
-	w.Batches.Add(&BatchAPIRequest{BatchID: "b3", WorkpoolID: "pool-1", Status: BatchStatusPending, SubmittedAt: epoch.Add(3 * time.Minute)})
+	// Two failures within the last hour, plus an older one outside the window.
+	// The older one should not count, so we still only have 2 counted outcomes.
+	w.Events.AddBatchOutcome("pool-1", true, epoch.Add(-2*time.Hour))
+	w.Events.AddBatchOutcome("pool-1", true, epoch.Add(1*time.Minute))
+	w.Events.AddBatchOutcome("pool-1", true, epoch.Add(2*time.Minute))
 
 	err := w.A.checkHaltThreshold(context.Background(), pool, state)
 	require.NoError(t, err)
-	// 2 most recent classified are both failed → halt.
+	// 2 most recent within-window outcomes are both failures → halt.
 	assert.Equal(t, WorkPoolStatusHalted, w.Pools.MustGetState("pool-1").State)
 }
 
@@ -161,8 +161,8 @@ func TestHaltThreshold_AlreadyHaltedStaysHalted(t *testing.T) {
 	state := &WorkPoolState{WorkpoolID: "pool-1", State: WorkPoolStatusHalted}
 	w.Pools.AddState(state)
 
-	w.Batches.Add(&BatchAPIRequest{BatchID: "b1", WorkpoolID: "pool-1", Status: BatchStatusFailed, SubmittedAt: epoch.Add(1 * time.Minute)})
-	w.Batches.Add(&BatchAPIRequest{BatchID: "b2", WorkpoolID: "pool-1", Status: BatchStatusFailed, SubmittedAt: epoch.Add(2 * time.Minute)})
+	w.Events.AddBatchOutcome("pool-1", true, epoch.Add(1*time.Minute))
+	w.Events.AddBatchOutcome("pool-1", true, epoch.Add(2*time.Minute))
 
 	err := w.A.checkHaltThreshold(context.Background(), pool, state)
 	require.NoError(t, err)
@@ -171,23 +171,63 @@ func TestHaltThreshold_AlreadyHaltedStaysHalted(t *testing.T) {
 
 // ---- recordIncident helper ----
 
-func TestRecordIncident_SetsUnhealthyAndCounts(t *testing.T) {
-	state := defaultState("pool-1")
+// recordIncident is purely a log-to-Events operation now; it doesn't touch
+// WorkPoolState at all. The ok/unhealthy transition is decided by the
+// WorkPool summary poll instead — see TestSummaryPoll_RecentIncident_* below.
+func TestRecordIncident_PublishesIncident(t *testing.T) {
+	w := newWorld()
 
-	recordIncident(state, "something went wrong", epoch)
+	w.A.recordIncident(context.Background(), "pool-1", "something went wrong")
 
-	assert.Equal(t, WorkPoolStatusUnhealthy, state.State)
-	assert.Equal(t, "something went wrong", state.StateMessage)
-	assert.Equal(t, epoch, state.LastIncidentAt)
-	assert.Equal(t, 1, state.IncidentCount)
+	require.Len(t, w.Events.WorkpoolIncidents, 1)
+	incident := w.Events.WorkpoolIncidents[0]
+	assert.Equal(t, "pool-1", incident.WorkpoolID)
+	assert.Equal(t, "something went wrong", incident.Message)
+	assert.Equal(t, epoch, incident.Timestamp)
 }
 
-func TestRecordIncident_DoesNotOverwriteHalted(t *testing.T) {
-	state := &WorkPoolState{WorkpoolID: "pool-1", State: WorkPoolStatusHalted}
+// TestIncident_FlowsThroughToWorkPoolSummary is an end-to-end trace: an
+// incident recorded by the cluster reconciler (tier 2) is published as a
+// workpool_incident event, and the next WorkPool summary poll derives
+// StateMessage/LastIncidentAt/IncidentCount from that event rather than from
+// any field persisted on WorkPoolState.
+func TestIncident_FlowsThroughToWorkPoolSummary(t *testing.T) {
+	w := newWorld()
+	pool := defaultPool("pool-1")
+	w.Pools.Add(pool)
+	w.Workers.Add(&Worker{WorkerID: "w1", WorkpoolID: "pool-1", Status: "started"})
+	w.Batches.Add(&BatchAPIRequest{
+		BatchID:    "b1",
+		JobID:      "job-1",
+		WorkpoolID: "pool-1",
+		Status:     BatchStatusStarted,
+	})
+	w.BatchAPI.AddJob("job-1", "b1", "pool-1", 2, BatchJobStatusFailed)
 
-	recordIncident(state, "another problem", epoch)
+	ctx := context.Background()
+	require.NoError(t, w.A.runClusterReconciler(ctx))
 
-	// Status stays halted; message and count still updated.
-	assert.Equal(t, WorkPoolStatusHalted, state.State)
-	assert.Equal(t, "another problem", state.StateMessage)
+	// The cluster reconciler only logs the incident to the Events log — it no
+	// longer flips WorkPoolState.State itself. That transition is owned by
+	// the WorkPool summary poll.
+	require.Len(t, w.Events.WorkpoolIncidents, 1)
+
+	require.NoError(t, w.A.runWorkPoolSummaryPoll(ctx))
+
+	var summary *WorkPoolSummary
+	for _, s := range w.WorkPoolSummaries.Summaries {
+		if s.WorkpoolID == "pool-1" {
+			summary = s
+		}
+	}
+	require.NotNil(t, summary)
+	// The summary poll derives both the banner state and the
+	// message/count/timestamp from the same recent-incidents query, so they
+	// agree: a recent incident makes the workpool unhealthy, not just a
+	// stale display field.
+	assert.Equal(t, WorkPoolStatusUnhealthy, summary.State)
+	assert.Equal(t, WorkPoolStatusUnhealthy, w.Pools.MustGetState("pool-1").State)
+	assert.Equal(t, 1, summary.IncidentCount)
+	assert.Equal(t, w.Events.WorkpoolIncidents[0].Message, summary.StateMessage)
+	assert.Equal(t, w.Events.WorkpoolIncidents[0].Timestamp, summary.LastIncidentAt)
 }

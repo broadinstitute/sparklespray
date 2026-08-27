@@ -246,12 +246,12 @@ An append-only log of every event published to `sparkles-events`. The document I
 
 Each event document contains the same fields as the corresponding Pub/Sub message, plus an `expiry` field for TTL-based garbage collection:
 
-| Field       | Type      | Description                                                                                                                       |
-| ----------- | --------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `event_id`  | string    | UUID uniquely identifying this event                                                                                              |
-| `type`      | string    | Event type — `worker_started`, `worker_stopped`, `task_state_update`, `job_created`, `job_terminated`, or `workpool_state_change` |
-| `timestamp` | timestamp | When the event was recorded                                                                                                       |
-| `expiry`    | timestamp | When this document may be deleted (7-day TTL)                                                                                     |
+| Field       | Type      | Description                                                                                                                                                                               |
+| ----------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `event_id`  | string    | UUID uniquely identifying this event                                                                                                                                                      |
+| `type`      | string    | Event type — `worker_started`, `worker_stopped`, `task_state_update`, `job_created`, `job_terminated`, `workpool_state_change`, `batch_failed`, `batch_succeeded`, or `workpool_incident` |
+| `timestamp` | timestamp | When the event was recorded                                                                                                                                                               |
+| `expiry`    | timestamp | When this document may be deleted (7-day TTL)                                                                                                                                             |
 
 Additional fields present on **worker events** (`worker_started`, `worker_stopped`):
 
@@ -283,6 +283,64 @@ Additional fields present on **workpool state change events** (`workpool_state_c
 | `workpool_id`   | string | ID of the workpool whose state changed                                                          |
 | `new_state`     | string | The workpool's new state — `idle`, `ok`, `unhealthy`, or `halted`                               |
 | `state_message` | string | Human-readable description of the state or incident; empty when transitioning to `idle` or `ok` |
+
+Additional fields present on **batch outcome events** (`batch_failed`, `batch_succeeded`):
+
+| Field           | Type   | Description                                                                                       |
+| --------------- | ------ | ------------------------------------------------------------------------------------------------- |
+| `workpool_id`   | string | ID of the workpool the batch attempt belongs to                                                   |
+| `state_message` | string | (`batch_failed` only) Human-readable failure reason, e.g. the error returned by the GCP Batch API |
+
+One `batch_failed`/`batch_succeeded` event is published per **batch attempt
+outcome**, not per worker — a batch that registers several workers still
+counts as a single success. `batch_failed` is published both when an
+already-created batch is later judged to have failed (no workers ever
+registered, GCP reported a job failure, too many zombie workers, etc. — see
+`markBatchFailed` in `v100/monitor/monitor.go`) and when the initial
+`CreateJob` call to the GCP Batch API itself fails synchronously, before any
+`BatchAPIRequest` document exists (`submitBatch` in
+`v100/monitor/provision.go`) — the latter case has no corresponding
+`BatchAPIRequest` at all, since no batch was ever created.
+
+`batch_succeeded` is published once per batch, the first time it's confirmed
+to have at least one worker registered (`checkBatchStartup` in
+`v100/monitor/batch_startup_monitor.go`).
+
+The monitor's `checkHaltThreshold` (`v100/monitor/monitor.go`) queries this
+collection — filtered to `type in [batch_failed, batch_succeeded]` for a
+workpool, within the last hour — to decide whether to halt a workpool: if the
+most recent `MaxConsecutiveFailedBatches` outcomes in that window are all
+`batch_failed`, the workpool transitions to `halted`. This replaced an
+earlier version of the check that queried `BatchAPIRequests` directly, which
+could never see synchronous `CreateJob` failures since those never produce a
+`BatchAPIRequest` document.
+
+Additional fields present on **workpool incident events** (`workpool_incident`):
+
+| Field           | Type   | Description                                    |
+| --------------- | ------ | ---------------------------------------------- |
+| `workpool_id`   | string | ID of the workpool the anomaly was detected on |
+| `state_message` | string | Human-readable description of the anomaly      |
+
+`workpool_incident` is published by `recordIncident` (`v100/monitor/monitor.go`)
+every time the watchdog (tier 2/tier 3) detects a batch/worker anomaly — a
+batch failing outright, a subset of VMs failing to register within the grace
+period, or a zombie worker being terminated. `recordIncident` is purely a
+log-to-Events operation; it does not mutate `WorkPoolState` itself. Unlike
+`batch_failed`/`batch_succeeded`, halting itself is **not** published as a
+`workpool_incident` — it's reported only via `workpool_state_change`.
+
+`WorkPoolSummary`'s `state_message`/`last_incident_at`/`incident_count`
+fields, _and_ the `ok`↔`unhealthy` portion of `WorkPoolState.State` itself,
+are all derived together by querying this collection for `workpool_incident`
+events within the last hour each time the WorkPool summary poll runs
+(`updateWorkPoolSummary` in `v100/monitor/workpool_summary_poll.go`) — a
+workpool with one or more recent incidents is `unhealthy`; with none, it's
+`ok`. None of this is carried as persisted mutable state between polls; it's
+a **windowed** view recomputed fresh each time, so it self-heals as old
+incidents age out of the one-hour window rather than accumulating as an
+all-time count. (`idle`/`halted`, the other two `WorkPoolState.State` values,
+are decided independently — see `cluster-health.md`.)
 
 Every write to `sparkles-events` is mirrored to this collection atomically before (or as part of) the publish, so the `Events` collection is the durable record and Pub/Sub is the real-time delivery mechanism.
 
@@ -467,6 +525,40 @@ The monitor subscribes to this topic via the `monitor-events-in` subscription an
 ```
 
 `state_message` is empty when transitioning to `idle` or `ok`; it contains a human-readable incident description when transitioning to `unhealthy` or `halted`.
+
+**BatchFailedEvent** — published once per failed batch attempt, including
+synchronous `CreateJob` failures that never produced a `BatchAPIRequest`:
+
+```json
+{
+  "type": "batch_failed",
+  "workpool_id": "...",
+  "reason": "..."
+}
+```
+
+**BatchSucceededEvent** — published once per batch, the first time it's confirmed to have at least one worker registered:
+
+```json
+{
+  "type": "batch_succeeded",
+  "workpool_id": "..."
+}
+```
+
+**WorkpoolIncidentEvent** — published by `recordIncident` every time the watchdog detects a batch/worker anomaly:
+
+```json
+{
+  "type": "workpool_incident",
+  "workpool_id": "...",
+  "reason": "..."
+}
+```
+
+`WorkPoolSummary.state_message`/`last_incident_at`/`incident_count` are computed from these events (windowed to the last hour) rather than from persisted state — see the `Events` collection section above.
+
+Both are consumed by `checkHaltThreshold` (see the `Events` collection section above) to decide whether to halt a workpool.
 
 **TaskStateUpdate** — published on every task state transition:
 

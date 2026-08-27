@@ -77,6 +77,34 @@ type WorkpoolStateChangeEvent struct {
 	StateMessage string `json:"state_message"`
 }
 
+// BatchFailedEvent is published to sparkles-events and recorded in Events
+// whenever a batch attempt (or a CreateJob call that never became a batch)
+// fails.
+type BatchFailedEvent struct {
+	Type       string `json:"type"`
+	WorkpoolID string `json:"workpool_id"`
+	Reason     string `json:"reason"`
+}
+
+// BatchSucceededEvent is published to sparkles-events and recorded in Events
+// once per batch, the first time it is confirmed healthy (its first worker
+// registers).
+type BatchSucceededEvent struct {
+	Type       string `json:"type"`
+	WorkpoolID string `json:"workpool_id"`
+}
+
+// WorkpoolIncidentEvent is published to sparkles-events and recorded in
+// Events whenever the watchdog detects a batch/worker anomaly for a
+// workpool. WorkPoolSummary's state_message/last_incident_at/incident_count
+// fields are derived by querying recent workpool_incident events rather than
+// from persisted mutable state.
+type WorkpoolIncidentEvent struct {
+	Type       string `json:"type"`
+	WorkpoolID string `json:"workpool_id"`
+	Reason     string `json:"reason"`
+}
+
 // EventPublisher writes events to the sparkles-events Pub/Sub topic and
 // records a corresponding document in the Events Firestore collection.
 // Firestore is written first (durable record), then Pub/Sub (real-time
@@ -183,6 +211,53 @@ func (ep *EventPublisher) PublishWorkpoolStateChange(ctx context.Context, workpo
 		WorkpoolID:   workpoolID,
 		NewState:     state,
 		StateMessage: stateMessage,
+	}
+	return ep.recordAndPublish(ctx, record, event)
+}
+
+// PublishBatchFailed records and publishes a batch_failed event.
+// Satisfies the monitor.BatchOutcomePublisher interface.
+func (ep *EventPublisher) PublishBatchFailed(ctx context.Context, workpoolID, reason string) error {
+	event := BatchFailedEvent{Type: "batch_failed", WorkpoolID: workpoolID, Reason: reason}
+	now := time.Now()
+	record := EventRecord{
+		EventID:      uuid.New().String(),
+		Type:         "batch_failed",
+		Timestamp:    now,
+		Expiry:       now.Add(eventTTL),
+		WorkpoolID:   workpoolID,
+		StateMessage: reason,
+	}
+	return ep.recordAndPublish(ctx, record, event)
+}
+
+// PublishBatchSucceeded records and publishes a batch_succeeded event.
+// Satisfies the monitor.BatchOutcomePublisher interface.
+func (ep *EventPublisher) PublishBatchSucceeded(ctx context.Context, workpoolID string) error {
+	event := BatchSucceededEvent{Type: "batch_succeeded", WorkpoolID: workpoolID}
+	now := time.Now()
+	record := EventRecord{
+		EventID:    uuid.New().String(),
+		Type:       "batch_succeeded",
+		Timestamp:  now,
+		Expiry:     now.Add(eventTTL),
+		WorkpoolID: workpoolID,
+	}
+	return ep.recordAndPublish(ctx, record, event)
+}
+
+// PublishWorkpoolIncident records and publishes a workpool_incident event.
+// Satisfies the monitor.WorkpoolIncidentPublisher interface.
+func (ep *EventPublisher) PublishWorkpoolIncident(ctx context.Context, workpoolID, reason string) error {
+	event := WorkpoolIncidentEvent{Type: "workpool_incident", WorkpoolID: workpoolID, Reason: reason}
+	now := time.Now()
+	record := EventRecord{
+		EventID:      uuid.New().String(),
+		Type:         "workpool_incident",
+		Timestamp:    now,
+		Expiry:       now.Add(eventTTL),
+		WorkpoolID:   workpoolID,
+		StateMessage: reason,
 	}
 	return ep.recordAndPublish(ctx, record, event)
 }

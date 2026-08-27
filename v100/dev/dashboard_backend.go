@@ -1484,6 +1484,9 @@ type eventResponse struct {
 	JobID      string    `json:"job_id,omitempty"`
 	OldState   string    `json:"old_state,omitempty"`
 	NewState   string    `json:"new_state,omitempty"`
+	// StateMessage carries the workpool_state_change message and the
+	// batch_failed reason (both stored in EventRecord.StateMessage).
+	StateMessage string `json:"state_message,omitempty"`
 }
 
 func (s *dashboardServer) handleListEvents(w http.ResponseWriter, r *http.Request) {
@@ -1583,16 +1586,17 @@ func (s *dashboardServer) handleListEvents(w http.ResponseWriter, r *http.Reques
 		}
 		lastTimestamp = ev.Timestamp
 		events = append(events, eventResponse{
-			EventID:    ev.EventID,
-			Type:       ev.Type,
-			Timestamp:  ev.Timestamp,
-			Expiry:     ev.Expiry,
-			WorkerID:   ev.WorkerID,
-			WorkpoolID: ev.WorkpoolID,
-			TaskID:     ev.TaskID,
-			JobID:      ev.JobID,
-			OldState:   ev.OldState,
-			NewState:   ev.NewState,
+			EventID:      ev.EventID,
+			Type:         ev.Type,
+			Timestamp:    ev.Timestamp,
+			Expiry:       ev.Expiry,
+			WorkerID:     ev.WorkerID,
+			WorkpoolID:   ev.WorkpoolID,
+			TaskID:       ev.TaskID,
+			JobID:        ev.JobID,
+			OldState:     ev.OldState,
+			NewState:     ev.NewState,
+			StateMessage: ev.StateMessage,
 		})
 	}
 

@@ -135,6 +135,11 @@ func (a *Monitor) submitBatch(ctx context.Context, pool *WorkPool, vmCount int, 
 		DBName:                a.dbName,
 	})
 	if err != nil {
+		if a.batchOutcomes != nil {
+			if pubErr := a.batchOutcomes.PublishBatchFailed(ctx, pool.WorkpoolID, err.Error()); pubErr != nil {
+				log.Printf("submitBatch: publish batch_failed for workpool %s: %v", pool.WorkpoolID, pubErr)
+			}
+		}
 		return fmt.Errorf("create GCP batch job: %w", err)
 	}
 

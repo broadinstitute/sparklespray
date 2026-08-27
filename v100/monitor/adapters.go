@@ -84,11 +84,8 @@ func toWorkPool(f *firestoreWorkPool) *WorkPool {
 
 func toWorkPoolState(workpoolID string, summary *WorkPoolSummary) *WorkPoolState {
 	return &WorkPoolState{
-		WorkpoolID:     workpoolID,
-		State:          summary.State,
-		StateMessage:   summary.StateMessage,
-		LastIncidentAt: summary.LastIncidentAt,
-		IncidentCount:  summary.IncidentCount,
+		WorkpoolID: workpoolID,
+		State:      summary.State,
 	}
 }
 
@@ -163,14 +160,13 @@ func (s *FirestoreWorkPoolStore) Get(ctx context.Context, workpoolID string) (*W
 	return &WorkPoolWithState{Pool: pool, State: state}, nil
 }
 
-// SaveState writes the mutable state fields into WorkPoolSummary using a partial
-// merge so that the computed metrics fields are not overwritten.
+// SaveState writes the mutable state field into WorkPoolSummary using a
+// partial merge so that the computed metrics fields (including
+// state_message/last_incident_at/incident_count, which the WorkPool summary
+// poll derives from the Events log) are not overwritten.
 func (s *FirestoreWorkPoolStore) SaveState(ctx context.Context, state *WorkPoolState) error {
 	data := map[string]any{
-		"state":            string(state.State),
-		"state_message":    state.StateMessage,
-		"last_incident_at": state.LastIncidentAt,
-		"incident_count":   state.IncidentCount,
+		"state": string(state.State),
 	}
 	_, err := s.fs.Collection(workPoolSummaryCollection).Doc(state.WorkpoolID).Set(ctx, data, firestore.MergeAll)
 	return err
@@ -755,9 +751,10 @@ func NewFirestoreEventStore(fs *firestore.Client) *FirestoreEventStore {
 }
 
 type firestoreEventRecord struct {
-	Type       string    `firestore:"type"`
-	Timestamp  time.Time `firestore:"timestamp"`
-	WorkpoolID string    `firestore:"workpool_id"`
+	Type         string    `firestore:"type"`
+	Timestamp    time.Time `firestore:"timestamp"`
+	WorkpoolID   string    `firestore:"workpool_id"`
+	StateMessage string    `firestore:"state_message"`
 }
 
 func (s *FirestoreEventStore) ListJobCreatedSince(ctx context.Context, since time.Time) ([]JobCreatedRecord, error) {
@@ -784,6 +781,66 @@ func (s *FirestoreEventStore) ListJobCreatedSince(ctx context.Context, since tim
 		results = append(results, JobCreatedRecord{
 			WorkpoolID: rec.WorkpoolID,
 			Timestamp:  rec.Timestamp,
+		})
+	}
+	return results, nil
+}
+
+func (s *FirestoreEventStore) ListRecentBatchOutcomes(ctx context.Context, workpoolID string, since time.Time) ([]BatchOutcome, error) {
+	q := s.fs.Collection(eventsCollection).
+		Where("workpool_id", "==", workpoolID).
+		Where("type", "in", []string{"batch_failed", "batch_succeeded"}).
+		Where("timestamp", ">", since).
+		OrderBy("timestamp", firestore.Desc)
+	iter := q.Documents(ctx)
+	defer iter.Stop()
+
+	var results []BatchOutcome
+	for {
+		snap, err := iter.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		var rec firestoreEventRecord
+		if err := snap.DataTo(&rec); err != nil {
+			continue
+		}
+		results = append(results, BatchOutcome{
+			Failed:    rec.Type == "batch_failed",
+			Timestamp: rec.Timestamp,
+		})
+	}
+	return results, nil
+}
+
+func (s *FirestoreEventStore) ListRecentWorkpoolIncidents(ctx context.Context, workpoolID string, since time.Time) ([]WorkpoolIncident, error) {
+	q := s.fs.Collection(eventsCollection).
+		Where("workpool_id", "==", workpoolID).
+		Where("type", "==", "workpool_incident").
+		Where("timestamp", ">", since).
+		OrderBy("timestamp", firestore.Desc)
+	iter := q.Documents(ctx)
+	defer iter.Stop()
+
+	var results []WorkpoolIncident
+	for {
+		snap, err := iter.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		var rec firestoreEventRecord
+		if err := snap.DataTo(&rec); err != nil {
+			continue
+		}
+		results = append(results, WorkpoolIncident{
+			Message:   rec.StateMessage,
+			Timestamp: rec.Timestamp,
 		})
 	}
 	return results, nil

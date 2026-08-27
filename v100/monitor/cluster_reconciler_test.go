@@ -27,17 +27,20 @@ func TestTier2_FailedBatch_MarksFailedAndUnhealthy(t *testing.T) {
 	})
 	w.BatchAPI.AddJob("job-1", "b1", "pool-1", 2, BatchJobStatusFailed)
 
-	err := w.A.runClusterReconciler(context.Background())
+	ctx := context.Background()
+	err := w.A.runClusterReconciler(ctx)
 	require.NoError(t, err)
 
 	b := w.Batches.MustGet("b1")
 	assert.Equal(t, BatchStatusFailed, b.Status)
 	assert.True(t, b.Unhealthy)
 	assert.Contains(t, w.BatchAPI.TerminatedJobs, "job-1")
-	ps := w.Pools.MustGetState("pool-1")
-	assert.Equal(t, WorkPoolStatusUnhealthy, ps.State)
-	// IncidentCount proves recordIncident was called.
-	assert.Greater(t, ps.IncidentCount, 0)
+	// The cluster reconciler only logs the incident to the Events log now;
+	// the WorkPool summary poll is what decides the unhealthy transition.
+	assert.NotEmpty(t, w.Events.WorkpoolIncidents)
+
+	require.NoError(t, w.A.runWorkPoolSummaryPoll(ctx))
+	assert.Equal(t, WorkPoolStatusUnhealthy, w.Pools.MustGetState("pool-1").State)
 }
 
 func TestTier2_SucceededBatch_MarksCompleted(t *testing.T) {
@@ -70,16 +73,10 @@ func TestTier2_FailedBatchTriggersHaltThreshold(t *testing.T) {
 	pool.MaxConsecutiveFailedBatches = 2
 	w.Pools.Add(pool)
 
-	// Two prior failed batches.
-	for i, id := range []string{"b0", "b1"} {
-		w.Batches.Add(&BatchAPIRequest{
-			BatchID:     id,
-			JobID:       "job-" + id,
-			WorkpoolID:  "pool-1",
-			Status:      BatchStatusFailed,
-			SubmittedAt: epoch.Add(time.Duration(i) * time.Minute),
-		})
-		w.BatchAPI.AddJob("job-"+id, id, "pool-1", 1, BatchJobStatusFailed)
+	// Two prior failed batches, recorded as batch_failed events (this is what
+	// markBatchFailed would have published when those batches were reconciled).
+	for i := range 2 {
+		w.Events.AddBatchOutcome("pool-1", true, epoch.Add(time.Duration(i)*time.Minute))
 	}
 	// Third batch now failing → should halt.
 	w.Batches.Add(&BatchAPIRequest{
@@ -119,16 +116,18 @@ func TestTier2_Anomaly1_MoreVMsThanExpected_AbortBatch(t *testing.T) {
 	// GCP has 3 VMs for a batch that requested 2.
 	w.BatchAPI.AddJob("job-1", "b1", "pool-1", 3, BatchJobStatusRunning)
 
-	err := w.A.runClusterReconciler(context.Background())
+	ctx := context.Background()
+	err := w.A.runClusterReconciler(ctx)
 	require.NoError(t, err)
 
 	b := w.Batches.MustGet("b1")
 	assert.Equal(t, BatchStatusFailed, b.Status)
 	assert.True(t, b.Unhealthy)
 	assert.Contains(t, w.BatchAPI.TerminatedJobs, "job-1")
-	ps := w.Pools.MustGetState("pool-1")
-	assert.Equal(t, WorkPoolStatusUnhealthy, ps.State)
-	assert.Greater(t, ps.IncidentCount, 0)
+	assert.NotEmpty(t, w.Events.WorkpoolIncidents)
+
+	require.NoError(t, w.A.runWorkPoolSummaryPoll(ctx))
+	assert.Equal(t, WorkPoolStatusUnhealthy, w.Pools.MustGetState("pool-1").State)
 }
 
 func TestTier2_Anomaly1_ExactVMCount_NoTermination(t *testing.T) {

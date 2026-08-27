@@ -2,6 +2,7 @@ package monitor
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"time"
 )
@@ -126,32 +127,50 @@ func (a *Monitor) updateWorkPoolSummary(ctx context.Context, ws *WorkPoolWithSta
 	}
 
 	log.Printf("pool %s has %d nonterminals", state.WorkpoolID, nonTerminal)
+
+	// StateMessage/LastIncidentAt/IncidentCount, and the ok/unhealthy
+	// decision below, are both derived from the same workpool_incident
+	// events recorded in the last hour, rather than carried as persisted
+	// mutable state — see recordIncident.
+	var stateMessage string
+	var lastIncidentAt time.Time
+	incidentCount := 0
+	if a.events != nil {
+		incidents, err := a.events.ListRecentWorkpoolIncidents(ctx, pool.WorkpoolID, a.clock.Now().Add(-defaultHaltCheckWindow))
+		if err != nil {
+			return fmt.Errorf("list recent workpool incidents for workpool %s: %w", pool.WorkpoolID, err)
+		}
+		incidentCount = len(incidents)
+		if incidentCount > 0 {
+			// ListRecentWorkpoolIncidents returns most-recent-first.
+			stateMessage = incidents[0].Message
+			lastIncidentAt = incidents[0].Timestamp
+		}
+	}
+
 	oldState := state.State
 	var newState WorkPoolStatus
-	if nonTerminal == 0 {
+	switch {
+	case nonTerminal == 0:
 		newState = WorkPoolStatusIdle
-	} else {
-		// so we know the workpool is not idle and it's either
-		// ok or unhealthy. If we've already flagged it as unhealthy,
-		// let it stay that way until it fully drains.
-		if state.State == WorkPoolStatusHalted || state.State == WorkPoolStatusOK {
-			// do nothing, no change
-			newState = oldState
-		} else {
-			// remaining case: state.State must be idle
-			newState = WorkPoolStatusOK
-			state.StateMessage = ""
-			if err := a.saveState(ctx, state); err != nil {
-				return err
-			}
-		}
+	case oldState == WorkPoolStatusHalted:
+		// Halted is sticky; only draining to zero nonTerminal work (above)
+		// clears it. checkHaltThreshold owns entering this state.
+		newState = WorkPoolStatusHalted
+	case incidentCount > 0:
+		newState = WorkPoolStatusUnhealthy
+	default:
+		newState = WorkPoolStatusOK
 	}
 
 	if newState != oldState {
 		a.vlogfIfChanged("Updating state", string(oldState), string(newState))
 		state.State = newState
-		state.StateMessage = ""
-		if err := a.saveState(ctx, state); err != nil {
+		message := ""
+		if newState == WorkPoolStatusUnhealthy {
+			message = stateMessage
+		}
+		if err := a.saveState(ctx, state, message); err != nil {
 			return err
 		}
 	}
@@ -168,9 +187,9 @@ func (a *Monitor) updateWorkPoolSummary(ctx context.Context, ws *WorkPoolWithSta
 		Expiry:                        now.Add(7 * 24 * time.Hour),
 		LastUpdated:                   now,
 		State:                         state.State,
-		StateMessage:                  state.StateMessage,
-		LastIncidentAt:                state.LastIncidentAt,
-		IncidentCount:                 state.IncidentCount,
+		StateMessage:                  stateMessage,
+		LastIncidentAt:                lastIncidentAt,
+		IncidentCount:                 incidentCount,
 		ExpectedPreemptibleWorkers:    expectedPreemptible,
 		ExpectedNonpreemptibleWorkers: expectedNonpreemptible,
 		UnhealthyBatchCount:           unhealthyCount,
@@ -188,9 +207,9 @@ func (a *Monitor) updateWorkPoolSummary(ctx context.Context, ws *WorkPoolWithSta
 		Timestamp:                     now,
 		Expiry:                        now.Add(7 * 24 * time.Hour),
 		State:                         state.State,
-		StateMessage:                  state.StateMessage,
-		LastIncidentAt:                state.LastIncidentAt,
-		IncidentCount:                 state.IncidentCount,
+		StateMessage:                  stateMessage,
+		LastIncidentAt:                lastIncidentAt,
+		IncidentCount:                 incidentCount,
 		ExpectedPreemptibleWorkers:    expectedPreemptible,
 		ExpectedNonpreemptibleWorkers: expectedNonpreemptible,
 		UnhealthyBatchCount:           unhealthyCount,

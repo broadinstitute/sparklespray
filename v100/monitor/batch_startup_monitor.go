@@ -62,49 +62,31 @@ func (a *Monitor) checkBatchStartup(ctx context.Context, ws *WorkPoolWithState, 
 	}
 
 	if apiStatus == BatchJobStatusFailed && batch.RegisteredWorkerCount == 0 {
-		batch.Status = BatchStatusFailed
-		batch.Unhealthy = true
-		recordIncident(ws.State, fmt.Sprintf("Batch job %s failed before any workers started", batch.JobID), now)
-		if err := a.batches.Save(ctx, batch); err != nil {
-			return fmt.Errorf("save batch: %w", err)
-		}
-		if err := a.saveState(ctx, ws.State); err != nil {
-			return fmt.Errorf("save pool: %w", err)
-		}
-		return a.checkHaltThreshold(ctx, ws.Pool, ws.State)
+		return a.markBatchFailed(ctx, ws, batch, fmt.Sprintf("Batch job %s failed before any workers started", batch.JobID), now)
 	}
 
 	if apiStatus == BatchJobStatusSucceeded && batch.RegisteredWorkerCount == 0 {
-		batch.Status = BatchStatusFailed
-		batch.Unhealthy = true
-		recordIncident(ws.State, fmt.Sprintf("Batch job %s completed with no workers registered", batch.JobID), now)
-		if err := a.batches.Save(ctx, batch); err != nil {
-			return fmt.Errorf("save batch: %w", err)
-		}
-		if err := a.saveState(ctx, ws.State); err != nil {
-			return fmt.Errorf("save pool: %w", err)
-		}
-		return a.checkHaltThreshold(ctx, ws.Pool, ws.State)
+		return a.markBatchFailed(ctx, ws, batch, fmt.Sprintf("Batch job %s completed with no workers registered", batch.JobID), now)
 	}
 
 	if batch.RegisteredWorkerCount >= 1 {
 		batch.Status = BatchStatusStarted
-		return a.batches.Save(ctx, batch)
+		if err := a.batches.Save(ctx, batch); err != nil {
+			return err
+		}
+		// This branch only runs for batches still in BatchStatusPending (tier 3
+		// only processes pending batches), so it fires exactly once per batch —
+		// the first poll where a worker has registered.
+		if a.batchOutcomes != nil {
+			if err := a.batchOutcomes.PublishBatchSucceeded(ctx, ws.Pool.WorkpoolID); err != nil {
+				log.Printf("checkBatchStartup: publish batch_succeeded for workpool %s: %v", ws.Pool.WorkpoolID, err)
+			}
+		}
+		return nil
 	}
 
 	if batch.RunningSince == nil && now.Sub(batch.SubmittedAt) > defaultMaxTimeInQueue {
-		batch.Status = BatchStatusFailed
-		batch.Unhealthy = true
-		recordIncident(ws.State,
-			fmt.Sprintf("Batch job %s never left the queue within max_time_in_queue", batch.JobID),
-			now)
-		if err := a.batches.Save(ctx, batch); err != nil {
-			return fmt.Errorf("save batch: %w", err)
-		}
-		if err := a.saveState(ctx, ws.State); err != nil {
-			return fmt.Errorf("save pool: %w", err)
-		}
-		return a.checkHaltThreshold(ctx, ws.Pool, ws.State)
+		return a.markBatchFailed(ctx, ws, batch, fmt.Sprintf("Batch job %s never left the queue within max_time_in_queue", batch.JobID), now)
 	}
 
 	return nil

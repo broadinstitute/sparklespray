@@ -53,10 +53,8 @@ func TestAdapterRoundTrips(t *testing.T) {
 		}
 
 		if err := pools.SaveState(ctx, &monitor.WorkPoolState{
-			WorkpoolID:   poolID,
-			State:        monitor.WorkPoolStatusOK,
-			StateMessage: "all good",
-			IncidentCount: 3,
+			WorkpoolID: poolID,
+			State:      monitor.WorkPoolStatusOK,
 		}); err != nil {
 			t.Fatalf("SaveState: %v", err)
 		}
@@ -66,9 +64,6 @@ func TestAdapterRoundTrips(t *testing.T) {
 		}
 		if updated.State.State != monitor.WorkPoolStatusOK {
 			t.Errorf("State after SaveState: want ok, got %s", updated.State.State)
-		}
-		if updated.State.IncidentCount != 3 {
-			t.Errorf("IncidentCount after SaveState: want 3, got %d", updated.State.IncidentCount)
 		}
 	})
 

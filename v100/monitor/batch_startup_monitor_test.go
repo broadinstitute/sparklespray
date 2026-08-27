@@ -62,6 +62,9 @@ func TestTier3_FailedJob_MarksFailedAndUnhealthy(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
 	w.Pools.Add(pool)
+	// A pending task means the workpool isn't idle — only the summarizer
+	// (not the batch startup monitor) transitions workpool state now.
+	w.Tasks.Add(&Task{TaskID: "t1", WorkpoolID: "pool-1", Status: TaskStatusPending})
 
 	w.Batches.Add(&BatchAPIRequest{
 		BatchID:     "b1",
@@ -72,12 +75,18 @@ func TestTier3_FailedJob_MarksFailedAndUnhealthy(t *testing.T) {
 	})
 	w.BatchAPI.AddJob("job-1", "b1", "pool-1", 1, BatchJobStatusFailed)
 
-	err := w.A.runBatchStartupMonitor(context.Background())
+	ctx := context.Background()
+	err := w.A.runBatchStartupMonitor(ctx)
 	require.NoError(t, err)
 
 	b := w.Batches.MustGet("b1")
 	assert.Equal(t, BatchStatusFailed, b.Status)
 	assert.True(t, b.Unhealthy)
+	// The batch startup monitor only logs the incident to the Events log
+	// now; the WorkPool summary poll is what decides the unhealthy transition.
+	assert.NotEmpty(t, w.Events.WorkpoolIncidents)
+
+	require.NoError(t, w.A.runWorkPoolSummaryPoll(ctx))
 	assert.Equal(t, WorkPoolStatusUnhealthy, w.Pools.MustGetState("pool-1").State)
 }
 
@@ -85,6 +94,7 @@ func TestTier3_SucceededWithNoWorkers_MarksFailedAndUnhealthy(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
 	w.Pools.Add(pool)
+	w.Tasks.Add(&Task{TaskID: "t1", WorkpoolID: "pool-1", Status: TaskStatusPending})
 
 	w.Batches.Add(&BatchAPIRequest{
 		BatchID:               "b1",
@@ -96,12 +106,16 @@ func TestTier3_SucceededWithNoWorkers_MarksFailedAndUnhealthy(t *testing.T) {
 	})
 	w.BatchAPI.AddJob("job-1", "b1", "pool-1", 1, BatchJobStatusSucceeded)
 
-	err := w.A.runBatchStartupMonitor(context.Background())
+	ctx := context.Background()
+	err := w.A.runBatchStartupMonitor(ctx)
 	require.NoError(t, err)
 
 	b := w.Batches.MustGet("b1")
 	assert.Equal(t, BatchStatusFailed, b.Status)
 	assert.True(t, b.Unhealthy)
+	assert.NotEmpty(t, w.Events.WorkpoolIncidents)
+
+	require.NoError(t, w.A.runWorkPoolSummaryPoll(ctx))
 	assert.Equal(t, WorkPoolStatusUnhealthy, w.Pools.MustGetState("pool-1").State)
 }
 
