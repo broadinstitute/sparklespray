@@ -443,6 +443,17 @@ func (s *FakeWorkerStore) Add(w *Worker) {
 	s.workers[w.WorkerID] = &cp
 }
 
+func (s *FakeWorkerStore) MustGet(workerID string) *Worker {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	w := s.workers[workerID]
+	if w == nil {
+		panic(fmt.Sprintf("worker %s not found in fake store", workerID))
+	}
+	cp := *w
+	return &cp
+}
+
 func (s *FakeWorkerStore) ListExpired(ctx context.Context, now time.Time) ([]*Worker, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -498,12 +509,12 @@ func (s *FakeWorkerStore) CountActive(ctx context.Context, workpoolID string, no
 	return count, nil
 }
 
-func (s *FakeWorkerStore) MarkStopped(ctx context.Context, workerID string) error {
+func (s *FakeWorkerStore) MarkZombie(ctx context.Context, workerID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if w, ok := s.workers[workerID]; ok {
-		w.Status = "stopped"
+		w.Status = "zombie"
 	}
 	return nil
 }

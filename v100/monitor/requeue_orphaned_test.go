@@ -31,6 +31,26 @@ func TestTaskRecovery_ExpiredWorkerTasksReset(t *testing.T) {
 	}
 }
 
+func TestTaskRecovery_ExpiredWorker_MarkedZombieAndIncidentRecorded(t *testing.T) {
+	w := newWorld()
+
+	w.Workers.Add(&Worker{
+		WorkerID:        "w1",
+		WorkpoolID:      "pool-1",
+		Status:          "started",
+		HeartbeatExpiry: epoch.Add(-1 * time.Second), // already expired
+	})
+
+	err := w.A.runRequeueOrphanedTasks(context.Background())
+	require.NoError(t, err)
+
+	// A crashed/unresponsive worker is distinct from one that shut down
+	// cleanly — "zombie", not "stopped".
+	assert.Equal(t, "zombie", w.Workers.MustGet("w1").Status)
+	require.Len(t, w.Events.WorkpoolIncidents, 1)
+	assert.Equal(t, "pool-1", w.Events.WorkpoolIncidents[0].WorkpoolID)
+}
+
 func TestTaskRecovery_ExpiredWorkerNoTasks_NoChange(t *testing.T) {
 	w := newWorld()
 

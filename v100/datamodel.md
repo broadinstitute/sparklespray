@@ -164,11 +164,11 @@ One document per active worker process. The document ID is the `worker_id` (a UU
 | `workpool_id`      | string    | Workpool this worker serves                                                                                 |
 | `batch_id`         | string    | ID of the `BatchAPIRequests` document that spawned this worker                                              |
 | `instance_name`    | string    | GCP VM instance name; used by the monitor for surgical VM termination                                       |
-| `status`           | string    | `started` or `stopped`                                                                                      |
+| `status`           | string    | `started`, `stopped` (clean shutdown), or `zombie` (heartbeat expired without a clean shutdown)             |
 | `expiry`           | timestamp | Time after which this record can be garbage-collected (set 7 days out at startup; zeroed on clean shutdown) |
 | `heartbeat_expiry` | timestamp | Rolling deadline updated every heartbeat period; used to detect crashed workers                             |
 
-The worker updates `heartbeat_expiry` every minute while running. On a clean shutdown the worker sets both `expiry` and `heartbeat_expiry` to the current time and flips `status` to `stopped`.
+The worker updates `heartbeat_expiry` every minute while running. On a clean shutdown the worker sets both `expiry` and `heartbeat_expiry` to the current time and flips `status` to `stopped`. If `heartbeat_expiry` passes without a clean shutdown, task recovery (the monitor's `runRequeueOrphanedTasks` poller) flips `status` to `zombie` instead — distinguishing "crashed or preempted" from "shut down cleanly" — and records a `workpool_incident` event.
 
 ---
 
@@ -323,9 +323,14 @@ Additional fields present on **workpool incident events** (`workpool_incident`):
 | `state_message` | string | Human-readable description of the anomaly      |
 
 `workpool_incident` is published by `recordIncident` (`v100/monitor/monitor.go`)
-every time the watchdog (cluster reconciler/batch startup monitor) detects a batch/worker anomaly — a
-batch failing outright, a subset of VMs failing to register within the grace
-period, or a zombie worker being terminated. `recordIncident` is purely a
+every time the watchdog (task recovery/cluster reconciler/batch startup
+monitor) detects a batch/worker anomaly — a batch failing outright, a subset
+of VMs failing to register within the grace period, a zombie VM being
+terminated by the cluster reconciler (heartbeat expired but the VM is still
+running per GCP), or a worker's own heartbeat expiring without a clean
+shutdown (task recovery marks it `zombie` — see the `Workers` collection
+above; a distinct, Worker-`status`-level concept from the cluster
+reconciler's VM-level zombie check). `recordIncident` is purely a
 log-to-Events operation; it does not mutate `WorkPoolState` itself. Unlike
 `batch_failed`/`batch_succeeded`, halting itself is **not** published as a
 `workpool_incident` — it's reported only via `workpool_state_change`.
@@ -736,7 +741,7 @@ Every state transition publishes a `task_state_update` event to `sparkles-events
    The worker calls `RecordFailed` when an infrastructure or system error prevents the task from completing. `failure_reason` is populated and `owning_worker_id` is cleared. Can occur from `claimed`, `running`, or `writing`.
 
 7. **Any active state → `pending`**  
-   The monitor's task recovery loop runs periodically and scans for worker records whose `heartbeat_expiry` has passed. For each crashed or preempted worker, any task in an active state (`claimed`, `running`, or `writing`) is reset to `pending` so it can be picked up by a healthy worker.
+   The monitor's task recovery loop runs periodically and scans for worker records whose `heartbeat_expiry` has passed. For each crashed or preempted worker, the worker's `status` is flipped to `zombie` (recording a `workpool_incident` event), and any task in an active state (`claimed`, `running`, or `writing`) is reset to `pending` so it can be picked up by a healthy worker.
 
 8. **Any state → `killed`**  
    An external administrative action via the `sparkles kill` command. `owning_worker_id` is cleared. A best-effort `kill_job` control message is sent to all workers via `sparkles-worker-in` so any in-flight task for that job is aborted promptly.

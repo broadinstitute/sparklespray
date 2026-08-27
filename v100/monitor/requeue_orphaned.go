@@ -18,9 +18,14 @@ func (a *Monitor) runRequeueOrphanedTasks(ctx context.Context) error {
 	}
 
 	for _, w := range expired {
-		if err := a.workers.MarkStopped(ctx, w.WorkerID); err != nil {
-			log.Printf("task recovery: mark worker %s stopped: %v", w.WorkerID, err)
+		// A heartbeat expiring without a clean shutdown means the worker
+		// crashed, was preempted, or otherwise stopped responding — distinct
+		// from "stopped" (a clean shutdown), and worth recording as an
+		// incident.
+		if err := a.workers.MarkZombie(ctx, w.WorkerID); err != nil {
+			log.Printf("task recovery: mark worker %s zombie: %v", w.WorkerID, err)
 		}
+		a.recordIncident(ctx, w.WorkpoolID, fmt.Sprintf("Worker %s stopped responding (heartbeat expired)", w.WorkerID))
 
 		tasks, err := a.tasks.ListByWorker(ctx, w.WorkerID, activeTasks)
 		if err != nil {

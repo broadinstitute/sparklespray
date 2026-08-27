@@ -10,12 +10,12 @@ Several independent state machines are layered together. The one people
 usually mean by "cluster health" is `WorkPoolStatus`, but it's derived from —
 and interacts with — the others.
 
-| State machine    | Values                                                                                             | Owner                                                    |
-| ---------------- | -------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
-| `WorkPoolStatus` | `idle`, `ok`, `unhealthy`, `halted`                                                                | The monitor; stored on `WorkPoolState`/`WorkPoolSummary` |
-| `BatchStatus`    | `pending`, `started`, `failed`, `completed`, `deleted`                                             | The monitor; stored on `BatchAPIRequest`                 |
-| Worker status    | `started`, `stopped`                                                                               | The worker process itself, via heartbeats                |
-| Task status      | `pending`, `claimed`, `running`, `writing`, plus terminal (`success`, `error`, `failed`, `killed`) | Workers, as tasks execute                                |
+| State machine    | Values                                                                                             | Owner                                                                                            |
+| ---------------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `WorkPoolStatus` | `idle`, `ok`, `unhealthy`, `halted`                                                                | The monitor; stored on `WorkPoolState`/`WorkPoolSummary`                                         |
+| `BatchStatus`    | `pending`, `started`, `failed`, `completed`, `deleted`                                             | The monitor; stored on `BatchAPIRequest`                                                         |
+| Worker status    | `started`, `stopped`, `zombie`                                                                     | The worker process itself (`started`/`stopped`), or task recovery on heartbeat expiry (`zombie`) |
+| Task status      | `pending`, `claimed`, `running`, `writing`, plus terminal (`success`, `error`, `failed`, `killed`) | Workers, as tasks execute                                                                        |
 
 `WorkPoolStatus` is the one surfaced most prominently (dashboard, `sparkles dev submit`'s polling loop) and the one this document focuses on.
 
@@ -75,8 +75,18 @@ alongside `terminated`.
 stateDiagram-v2
     [*] --> started: worker registers (worker_started event)
     started --> stopped: clean shutdown (worker_stopped event)
-    started --> stopped: heartbeat expires — task recovery calls MarkStopped
+    started --> zombie: heartbeat expires without a clean shutdown — task recovery calls MarkZombie
 ```
+
+`zombie` and `stopped` are deliberately distinct: `stopped` means the
+worker shut down cleanly (it wrote its own status); `zombie` means task
+recovery found a heartbeat that expired without one — the worker crashed,
+was preempted, or otherwise stopped responding. Task recovery also
+publishes a `workpool_incident` event when this happens. This is a
+different, `Worker.status`-level concept from the cluster reconciler's
+zombie _VM_ check (Anomaly 3 in the `BatchStatus` section below), which
+cross-references heartbeat expiry against whether the VM is still running
+in GCP, independent of this field.
 
 ### Task status
 
@@ -154,16 +164,19 @@ tasks (status not in `success`/`error`/`failed`/`killed`):
 
 ### `ok`/`idle` → `unhealthy`
 
-`recordIncident` (`monitor.go:343`) is called from the cluster reconciler
-(`cluster_reconciler.go`) and the batch startup monitor (`batch_startup_monitor.go`) whenever
-they detect an anomaly:
+`recordIncident` (`monitor.go:343`) is called from task recovery
+(`requeue_orphaned.go`), the cluster reconciler (`cluster_reconciler.go`),
+and the batch startup monitor (`batch_startup_monitor.go`) whenever they
+detect an anomaly:
 
-- A batch fails outright (see `markBatchFailed` below).
+- A worker's heartbeat expires without a clean shutdown — task recovery
+  marks it `zombie` (`requeue_orphaned.go`; see "Worker status" above).
+- A batch fails outright (see `markBatchFailed`/`markBatchTerminated` below).
 - A subset of VMs fail to register a worker within the grace period, while
   others in the same batch succeed (`cluster_reconciler.go`, "Some workers
   registered; surgically terminate the VMs that never did").
-- A zombie worker (heartbeat expired, VM still running) is terminated, below
-  the abort threshold (`cluster_reconciler.go`, per-zombie loop).
+- A zombie VM (heartbeat expired, VM still running per GCP) is terminated,
+  below the abort threshold (`cluster_reconciler.go`, per-zombie loop).
 
 `recordIncident` is now purely a log-to-Events operation — it publishes a
 `workpool_incident` event carrying a human-readable message and does **not**

@@ -483,9 +483,9 @@ func (s *FirestoreWorkerStore) ListAllForWorkpool(ctx context.Context, workpoolI
 	return collectWorkers(iter)
 }
 
-func (s *FirestoreWorkerStore) MarkStopped(ctx context.Context, workerID string) error {
+func (s *FirestoreWorkerStore) MarkZombie(ctx context.Context, workerID string) error {
 	_, err := s.fs.Collection(workerCollection).Doc(workerID).Update(ctx, []firestore.Update{
-		{Path: "status", Value: "stopped"},
+		{Path: "status", Value: "zombie"},
 	})
 	return err
 }

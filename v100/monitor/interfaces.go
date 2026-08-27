@@ -129,7 +129,7 @@ type Worker struct {
 	WorkpoolID      string
 	BatchID         string    // which batch submitted this worker
 	InstanceName    string    // GCP instance name recorded at startup; enables surgical VM termination
-	Status          string    // "started" or "stopped"
+	Status          string    // "started", "stopped" (clean shutdown), or "zombie" (heartbeat expired without a clean shutdown)
 	HeartbeatExpiry time.Time // rolling deadline; used to detect crashed/preempted workers
 }
 
@@ -230,8 +230,10 @@ type WorkerStore interface {
 	CountActive(ctx context.Context, workpoolID string, now time.Time) (int, error)
 	// ListAllForWorkpool returns all Workers registered for the given workpool.
 	ListAllForWorkpool(ctx context.Context, workpoolID string) ([]*Worker, error)
-	// MarkStopped sets the worker's status to "stopped".
-	MarkStopped(ctx context.Context, workerID string) error
+	// MarkZombie sets the worker's status to "zombie" — used by task recovery
+	// when a worker's heartbeat expires without a clean shutdown, so it can
+	// be distinguished from a worker that stopped cleanly.
+	MarkZombie(ctx context.Context, workerID string) error
 }
 
 // TaskStore reads and updates Task documents.
