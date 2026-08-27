@@ -39,7 +39,7 @@ func (a *Monitor) reconcileWorkpool(ctx context.Context, ws *WorkPoolWithState) 
 			log.Printf("cluster reconciler: batch %s: %v", batch.BatchID, err)
 		}
 		if done {
-			// batch was failed/completed; reload pool state so we don't overwrite a halted status.
+			// batch was failed/terminated/completed; reload pool state so we don't overwrite a halted status.
 			ws, err = a.pools.Get(ctx, ws.Pool.WorkpoolID)
 			if err != nil {
 				return fmt.Errorf("reload workpool after batch %s: %w", batch.BatchID, err)
@@ -116,7 +116,7 @@ func (a *Monitor) reconcileVMs(ctx context.Context, ws *WorkPoolWithState, batch
 		if err := a.batchAPI.TerminateJob(ctx, batch.JobID); err != nil {
 			log.Printf("cluster reconciler: terminate job %s (over-provisioning): %v", batch.JobID, err)
 		}
-		return a.markBatchFailed(ctx, ws, batch,
+		return a.markBatchTerminated(ctx, ws, batch,
 			fmt.Sprintf("Over-provisioning: %d VMs running, expected %d", len(gcpVMs), batch.ExpectedVMCount),
 			now)
 	}
@@ -130,7 +130,7 @@ func (a *Monitor) reconcileVMs(ctx context.Context, ws *WorkPoolWithState, batch
 			if err := a.batchAPI.TerminateJob(ctx, batch.JobID); err != nil {
 				log.Printf("cluster reconciler: terminate job %s (no workers): %v", batch.JobID, err)
 			}
-			return a.markBatchFailed(ctx, ws, batch,
+			return a.markBatchTerminated(ctx, ws, batch,
 				fmt.Sprintf("Batch %s: no worker registered within grace period", batch.BatchID),
 				now)
 		}
@@ -175,7 +175,7 @@ func (a *Monitor) reconcileVMs(ctx context.Context, ws *WorkPoolWithState, batch
 		if err := a.batchAPI.TerminateJob(ctx, batch.JobID); err != nil {
 			log.Printf("cluster reconciler: terminate job %s (too many zombies): %v", batch.JobID, err)
 		}
-		return a.markBatchFailed(ctx, ws, batch,
+		return a.markBatchTerminated(ctx, ws, batch,
 			fmt.Sprintf("Too many zombie workers (%d), aborting batch", len(zombies)),
 			now)
 	}

@@ -417,6 +417,10 @@ type batchRequestResponse struct {
 	RegisteredWorkerCount int        `json:"registered_worker_count"`
 	Status                string     `json:"status"`
 	Unhealthy             bool       `json:"unhealthy"`
+	// TerminationReason is populated when status is "terminated" — it
+	// explains why the monitor itself decided to kill the job (as opposed
+	// to "failed", where GCP reported the failure).
+	TerminationReason string `json:"termination_reason,omitempty"`
 }
 
 func (s *dashboardServer) handleListBatches(w http.ResponseWriter, r *http.Request) {
@@ -428,6 +432,7 @@ func (s *dashboardServer) handleListBatches(w http.ResponseWriter, r *http.Reque
 		monitor.BatchStatusStarted,
 		monitor.BatchStatusCompleted,
 		monitor.BatchStatusFailed,
+		monitor.BatchStatusTerminated,
 	}
 	batches, err := store.ListByWorkpool(ctx, workpoolID, allStatuses)
 	if err != nil {
@@ -448,6 +453,7 @@ func (s *dashboardServer) handleListBatches(w http.ResponseWriter, r *http.Reque
 			RegisteredWorkerCount: b.RegisteredWorkerCount,
 			Status:                string(b.Status),
 			Unhealthy:             b.Unhealthy,
+			TerminationReason:     b.TerminationReason,
 		})
 	}
 	writeJSON(w, http.StatusOK, result)
@@ -568,6 +574,7 @@ func (s *dashboardServer) handleGetBatch(w http.ResponseWriter, r *http.Request)
 		RegisteredWorkerCount: batch.RegisteredWorkerCount,
 		Status:                string(batch.Status),
 		Unhealthy:             batch.Unhealthy,
+		TerminationReason:     batch.TerminationReason,
 	})
 }
 

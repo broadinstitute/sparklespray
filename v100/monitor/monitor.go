@@ -348,12 +348,31 @@ func (a *Monitor) recordIncident(ctx context.Context, workpoolID, message string
 	}
 }
 
-// markBatchFailed records batch as failed, logs an incident, publishes a
-// batch_failed event, and checks the halt threshold. Centralizes the
-// pattern repeated across cluster_reconciler.go and
-// batch_startup_monitor.go's failure-detection call sites.
+// markBatchFailed records batch as failed (GCP itself reported the job as
+// failed), logs an incident, publishes a batch_failed event, and checks the
+// halt threshold. Use markBatchTerminated instead when the monitor is the
+// one deciding to kill an otherwise-live job.
 func (a *Monitor) markBatchFailed(ctx context.Context, ws *WorkPoolWithState, batch *BatchAPIRequest, reason string, now time.Time) error {
-	batch.Status = BatchStatusFailed
+	return a.markBatchDone(ctx, ws, batch, BatchStatusFailed, reason, now)
+}
+
+// markBatchTerminated records batch as terminated (the monitor's own
+// bookkeeping — VM counts, worker registrations, heartbeats — found an
+// anomaly and killed a job GCP hadn't reported any problem with), sets
+// TerminationReason, logs an incident, publishes a batch_failed event (the
+// same outcome event type as markBatchFailed — both mean "this batch didn't
+// work out" for halt-counting purposes), and checks the halt threshold.
+func (a *Monitor) markBatchTerminated(ctx context.Context, ws *WorkPoolWithState, batch *BatchAPIRequest, reason string, now time.Time) error {
+	batch.TerminationReason = reason
+	return a.markBatchDone(ctx, ws, batch, BatchStatusTerminated, reason, now)
+}
+
+// markBatchDone centralizes the pattern repeated across
+// cluster_reconciler.go and batch_startup_monitor.go's failure-detection
+// call sites: set batch.Status/Unhealthy, save it, log an incident, publish
+// a batch_failed event, and check the halt threshold.
+func (a *Monitor) markBatchDone(ctx context.Context, ws *WorkPoolWithState, batch *BatchAPIRequest, status BatchStatus, reason string, now time.Time) error {
+	batch.Status = status
 	batch.Unhealthy = true
 	a.recordIncident(ctx, ws.Pool.WorkpoolID, reason)
 	if err := a.batches.Save(ctx, batch); err != nil {
@@ -361,7 +380,7 @@ func (a *Monitor) markBatchFailed(ctx context.Context, ws *WorkPoolWithState, ba
 	}
 	if a.batchOutcomes != nil {
 		if err := a.batchOutcomes.PublishBatchFailed(ctx, ws.Pool.WorkpoolID, reason); err != nil {
-			log.Printf("markBatchFailed: publish batch_failed for workpool %s: %v", ws.Pool.WorkpoolID, err)
+			log.Printf("markBatchDone: publish batch_failed for workpool %s: %v", ws.Pool.WorkpoolID, err)
 		}
 	}
 	return a.checkHaltThreshold(ctx, ws.Pool, ws.State)

@@ -121,7 +121,10 @@ func TestClusterReconciler_Anomaly1_MoreVMsThanExpected_AbortBatch(t *testing.T)
 	require.NoError(t, err)
 
 	b := w.Batches.MustGet("b1")
-	assert.Equal(t, BatchStatusFailed, b.Status)
+	// The monitor itself decided to kill this job (GCP hadn't reported any
+	// problem) — BatchStatusTerminated, not BatchStatusFailed.
+	assert.Equal(t, BatchStatusTerminated, b.Status)
+	assert.NotEmpty(t, b.TerminationReason)
 	assert.True(t, b.Unhealthy)
 	assert.Contains(t, w.BatchAPI.TerminatedJobs, "job-1")
 	assert.NotEmpty(t, w.Events.WorkpoolIncidents)
@@ -204,7 +207,8 @@ func TestClusterReconciler_Anomaly2_NoWorkersAfterGrace_WholeBatchTerminated(t *
 	require.NoError(t, err)
 
 	b := w.Batches.MustGet("b1")
-	assert.Equal(t, BatchStatusFailed, b.Status)
+	assert.Equal(t, BatchStatusTerminated, b.Status)
+	assert.NotEmpty(t, b.TerminationReason)
 	assert.True(t, b.Unhealthy)
 	assert.Contains(t, w.BatchAPI.TerminatedJobs, "job-1")
 }
@@ -329,7 +333,8 @@ func TestClusterReconciler_Anomaly3_ZombieAboveThreshold_WholeBatchAborted(t *te
 
 	assert.Contains(t, w.BatchAPI.TerminatedJobs, "job-1")
 	b := w.Batches.MustGet("b1")
-	assert.Equal(t, BatchStatusFailed, b.Status)
+	assert.Equal(t, BatchStatusTerminated, b.Status)
+	assert.NotEmpty(t, b.TerminationReason)
 }
 
 func TestClusterReconciler_Anomaly3_ZombieVMGone_NoTermination(t *testing.T) {

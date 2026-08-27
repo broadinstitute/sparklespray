@@ -23,10 +23,16 @@ type BatchStatus string
 const (
 	BatchStatusPending   BatchStatus = "pending"
 	BatchStatusStarted   BatchStatus = "started"
+	// BatchStatusFailed marks a batch that GCP itself reported as failed.
 	BatchStatusFailed    BatchStatus = "failed"
 	BatchStatusCompleted BatchStatus = "completed"
 	// BatchStatusDeleted marks a batch whose GCP Batch job no longer exists (404 from the API).
 	BatchStatusDeleted BatchStatus = "deleted"
+	// BatchStatusTerminated marks a batch the monitor itself decided to kill —
+	// GCP hadn't reported any problem with the job; the monitor's own
+	// bookkeeping (VM counts, worker registrations, heartbeats) found an
+	// anomaly instead. See BatchAPIRequest.TerminationReason.
+	BatchStatusTerminated BatchStatus = "terminated"
 )
 
 // BatchJobStatus is the status returned by the GCP Batch API.
@@ -113,7 +119,8 @@ type BatchAPIRequest struct {
 	RunningSince          *time.Time // nil until the job first reaches RUNNING
 	RegisteredWorkerCount int        // monotonic; incremented at worker registration, never decremented
 	Status                BatchStatus
-	Unhealthy             bool // sticky; never cleared; independent of Status
+	Unhealthy             bool   // sticky; never cleared; independent of Status
+	TerminationReason     string // populated when Status == BatchStatusTerminated; explains why the monitor killed the job
 }
 
 // Worker is the subset of the Workers Firestore document needed by the monitor.

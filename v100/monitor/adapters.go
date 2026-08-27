@@ -209,6 +209,7 @@ type firestoreBatchRequest struct {
 	RegisteredWorkerCount int        `firestore:"registered_worker_count"`
 	Status                string     `firestore:"status"`
 	Unhealthy             bool       `firestore:"unhealthy"`
+	TerminationReason     string     `firestore:"termination_reason"`
 }
 
 func toBatchRequest(f *firestoreBatchRequest) *BatchAPIRequest {
@@ -224,6 +225,7 @@ func toBatchRequest(f *firestoreBatchRequest) *BatchAPIRequest {
 		RegisteredWorkerCount: f.RegisteredWorkerCount,
 		Status:                BatchStatus(f.Status),
 		Unhealthy:             f.Unhealthy,
+		TerminationReason:     f.TerminationReason,
 	}
 }
 
@@ -240,6 +242,7 @@ func fromBatchRequest(b *BatchAPIRequest) *firestoreBatchRequest {
 		RegisteredWorkerCount: b.RegisteredWorkerCount,
 		Status:                string(b.Status),
 		Unhealthy:             b.Unhealthy,
+		TerminationReason:     b.TerminationReason,
 	}
 }
 

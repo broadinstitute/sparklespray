@@ -46,16 +46,28 @@ sticky. `halted` has no other way out.
 stateDiagram-v2
     [*] --> pending: submitBatch (CreateJob succeeds)
     pending --> started: batch startup monitor — first worker registers
-    pending --> failed: batch startup monitor — no workers before GCP failure/success, or queue timeout
+    pending --> failed: batch startup monitor — GCP reported FAILED/SUCCEEDED with no workers, or queue timeout
     pending --> deleted: batch startup monitor — GCP job reports 404
     started --> completed: cluster reconciler — GCP job SUCCEEDED
-    started --> failed: cluster reconciler — GCP failure, over-provisioning, startup grace period exceeded, or too many zombies
+    started --> failed: cluster reconciler — GCP reported job FAILED
+    started --> terminated: cluster reconciler — monitor calls TerminateJob (over-provisioning, startup grace period exceeded, or too many zombies)
     started --> deleted: cluster reconciler — GCP job reports 404
 ```
 
 The batch startup monitor owns `pending`; the cluster reconciler owns `started`. A synchronous `CreateJob`
 failure in `submitBatch` never reaches `pending` at all — no `BatchAPIRequest`
 document is created for it (see "Batch outcome events" below).
+
+`failed` and `terminated` are deliberately distinct: `failed` means GCP
+itself reported the job as failed; `terminated` means the monitor's own
+bookkeeping (VM counts, worker registrations, heartbeats) found an anomaly
+and killed an otherwise-live job. `pending → failed` doesn't split the same
+way — none of the batch startup monitor's three failure checks call
+`TerminateJob` (the GCP job is already failed/succeeded/still-queued in each
+case), so there's no monitor-initiated termination to distinguish at that
+stage. See "`BatchStatus` lifecycle" below for the call sites, and
+`BatchAPIRequest.TerminationReason` for the human-readable reason recorded
+alongside `terminated`.
 
 ### Worker status
 
@@ -261,20 +273,28 @@ after a successful call to the GCP Batch API's `CreateJob`, starting in
 - The **batch startup monitor** owns `pending` batches. It promotes a batch to `started` the
   first time a worker registers (`RegisteredWorkerCount >= 1`), or to
   `failed` if it fails/completes with zero workers registered, or if it
-  never leaves the queue within `max_time_in_queue`.
-- The **cluster reconciler** owns `started` batches. It promotes to `completed` on GCP-reported
-  success, or to `failed` on GCP-reported failure, over-provisioning, no
-  worker registering within the startup grace period, or too many zombie
-  workers.
+  never leaves the queue within `max_time_in_queue`. None of these three
+  checks call `TerminateJob`, so they always land on `failed`, never
+  `terminated`.
+- The **cluster reconciler** owns `started` batches. It promotes to
+  `completed` on GCP-reported success, to `failed` on GCP-reported failure
+  (`reconcileBatch`), or to `terminated` — via its own `TerminateJob` call —
+  on over-provisioning, no worker registering within the startup grace
+  period, or too many zombie workers (all three in `reconcileVMs`).
 - Either poller can mark a batch `deleted` if the GCP Batch API reports 404 for
   its job (manually deleted or expired).
 
-Whenever a batch is marked `failed` in full (as opposed to a partial,
-batch-continues incident — see above), the code goes through the
-`markBatchFailed` helper (`monitor.go:355`), which: sets
-`Status = failed`/`Unhealthy = true` on the batch, saves it, calls
-`recordIncident` (logs to Events only) and `PublishBatchFailed`, and calls
-`checkHaltThreshold`.
+Whenever a batch is marked done in full (as opposed to a partial,
+batch-continues incident — see above), the code goes through `markBatchDone`
+(`monitor.go:374`) via one of two thin wrappers: `markBatchFailed`
+(`monitor.go:355`, for the GCP-reported case) or `markBatchTerminated`
+(`monitor.go:365`, for the monitor-initiated case, which also sets
+`BatchAPIRequest.TerminationReason` to the same message). Either way,
+`markBatchDone` sets `Status`/`Unhealthy = true` on the batch, saves it,
+calls `recordIncident` (logs to Events only) and `PublishBatchFailed` (the
+same event type for both — `checkHaltThreshold` treats `failed` and
+`terminated` identically, since both mean "this batch didn't work out"),
+and calls `checkHaltThreshold`.
 
 ## Batch outcome events (`batch_failed` / `batch_succeeded`)
 
@@ -309,3 +329,49 @@ Two places don't fully reflect the batch-outcome-events change above yet:
    (`workpool_summary_poll.go:70-92`). Since a `CreateJob` failure never
    produces one, these dashboard-facing counts don't reflect it at all, even
    though it's now visible in the `Events` log and does count toward halting.
+
+## Future work
+
+### Base `ok → unhealthy` on recent `batch_failed` counts instead of any incident
+
+Today, the WorkPool summary poll flips to `unhealthy` the moment
+`incidentCount > 0` — i.e. **any** `workpool_incident` event in the last
+hour, including partial incidents that don't fail a whole batch (a subset
+of VMs failing to register, a single zombie worker being terminated; see
+"Some workers registered; surgically terminate the VMs that never did" and
+the per-zombie loop above). That makes `unhealthy` a fairly sensitive,
+somewhat noisy signal — one terminated zombie VM in an otherwise healthy
+fleet is enough to flip the whole workpool's banner state.
+
+An alternative worth considering: base `ok → unhealthy` on counting recent
+`batch_failed` events instead — "too many batch failures in the last hour" —
+using the same `EventStore.ListRecentBatchOutcomes` query
+`checkHaltThreshold` already uses for the halt decision. Yes, this is
+directly queryable from the `Events` log today; no new event type or query
+shape is needed, just a second consumer of the existing query:
+
+- Add a threshold (e.g. `MaxRecentFailedBatches`) distinct from
+  `MaxConsecutiveFailedBatches`, presumably smaller — `unhealthy` would act
+  as an earlier warning on the way to `halted`, not a separate signal.
+- Compute `failedCount` from `ListRecentBatchOutcomes` over the same
+  `defaultHaltCheckWindow`.
+- `ok → unhealthy` when `failedCount >= MaxRecentFailedBatches`, replacing
+  the `incidentCount > 0` check in `updateWorkPoolSummary`.
+
+Trade-offs to weigh before doing this:
+
+- **Pro**: `unhealthy` and `halted` would become two thresholds over the
+  exact same signal (batch outcomes) rather than two independent signals
+  (`workpool_incident` vs. `batch_failed`) that can currently disagree. This
+  would also close "Known asymmetries" item 1 above for free: `submitBatch`'s
+  `CreateJob` failure already publishes `batch_failed` (just not
+  `workpool_incident`), so it would start counting toward `unhealthy` too,
+  not just toward `halted`.
+- **Con**: loses direct visibility into partial incidents (VM startup
+  failures below the whole-batch-failure threshold, zombie terminations) as
+  a driver of the banner `WorkPoolStatus`. Those would still show up in the
+  `Events` log and still populate `WorkPoolSummary`'s
+  `IncidentCount`/`StateMessage` (still published by `recordIncident`) — they'd
+  just no longer flip the state itself. Whether that's an acceptable loss
+  depends on whether operators currently rely on the banner state for those
+  partial cases, versus only reading the incident detail fields.
