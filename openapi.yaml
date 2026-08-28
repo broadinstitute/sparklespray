@@ -4,6 +4,8 @@ info:
   description: |-
     Sparkles
   version: 1.0.12
+security:
+  - bearerAuth: []
 paths:
   /api/v1/job:
     post:
@@ -25,6 +27,12 @@ paths:
                 $ref: "#/components/schemas/SubmitJobResponse"
         "400":
           description: Invalid input
+        "403":
+          description: Missing or invalid API key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "422":
           description: Validation exception
         default:
@@ -330,6 +338,9 @@ components:
         - error
 
   securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
     api_key:
       type: apiKey
       name: api_key

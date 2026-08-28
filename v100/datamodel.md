@@ -515,7 +515,7 @@ expired without a clean shutdown — see the `Workers` collection and the
 }
 ```
 
-The monitor subscribes to this topic via the `monitor-events-in` subscription and triggers an immediate provisioning poll on `job_created` receipt, rather than waiting for the next timer tick. The `dev submit` command creates a short-lived ephemeral subscription (`devsubmit-monitor-<id>`) to log events as they arrive, and deletes it on exit.
+The monitor subscribes to this topic via the `monitor-events-in` subscription and triggers an immediate provisioning poll on `job_created` receipt, rather than waiting for the next timer tick.
 
 **JobTerminatedEvent** — published by the monitor when all tasks in a job have reached a terminal state (`success`, `error`, `failed`, or `killed`). This event signals that the job is done; it does not indicate whether the job succeeded or failed — consumers should query `JobSummary` for that.
 

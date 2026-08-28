@@ -14,16 +14,6 @@ func Command() cli.Command {
 		Name: "dev",
 		Subcommands: []cli.Command{
 			{
-				Name:      "submit",
-				ArgsUsage: "<job-spec-json> <workpool-spec-json>",
-				Flags: []cli.Flag{
-					cli.StringFlag{Name: "project"},
-					cli.StringFlag{Name: "db", Value: defaultDB},
-					cli.StringFlag{Name: "gcs-prefix", Usage: "GCS prefix for task result and log paths (e.g. gs://my-bucket/results)"},
-				},
-				Action: runDevSubmit,
-			},
-			{
 				Name:      "set-config",
 				ArgsUsage: "<config-json>",
 				Usage:     "Load a SparklesConfig JSON file into Firestore (SparklesConfig/default), used by dashboard-backend",
@@ -32,6 +22,16 @@ func Command() cli.Command {
 					cli.StringFlag{Name: "db", Value: defaultDB},
 				},
 				Action: runSetConfig,
+			},
+			{
+				Name:      "add-api-key",
+				ArgsUsage: "<user>",
+				Usage:     "Generate an API key for a user and store it in Firestore (APIKeys collection)",
+				Flags: []cli.Flag{
+					cli.StringFlag{Name: "project"},
+					cli.StringFlag{Name: "db", Value: defaultDB},
+				},
+				Action: runAddAPIKey,
 			},
 			{
 				Name:      "export",

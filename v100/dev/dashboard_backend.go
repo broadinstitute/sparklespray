@@ -51,8 +51,7 @@ const (
 // SparklesConfig/default at dashboard-backend startup.
 type SparklesConfig struct {
 	// GCSPrefix is the GCS prefix under which task result and log paths are
-	// written, e.g. "gs://my-bucket/results". Mirrors the --gcs-prefix flag
-	// accepted by "dev submit" (see v100/dev/submit.go).
+	// written, e.g. "gs://my-bucket/results".
 	GCSPrefix string `firestore:"gcs_prefix" json:"gcsPrefix"`
 	// SubscriberSA is the service account email used to generate short-lived
 	// Pub/Sub tokens for the subscription endpoint. If empty, that endpoint
@@ -592,9 +591,7 @@ func (s *dashboardServer) handleGetBatch(w http.ResponseWriter, r *http.Request)
 // ----- POST /api/v1/job -----
 //
 // Request/response shapes mirror components/schemas/SubmitJobBody and
-// SubmitJobResponse in openapi.yaml. The write path (workpool upsert, job +
-// task creation, job summary, job_created event) mirrors devSubmit in
-// v100/dev/submit.go, minus the CLI-only polling/printing loop.
+// SubmitJobResponse in openapi.yaml.
 
 // submitFileToLocalizeRequest mirrors openapi's FileToLocalize schema, which
 // already matches v100.FileToLocalize's json tags.
@@ -700,6 +697,10 @@ func (s *dashboardServer) handleSubmitJob(w http.ResponseWriter, r *http.Request
 			writeError(w, http.StatusBadRequest, "BAD_REQUEST", "each task requires 'command'")
 			return
 		}
+	}
+
+	if user := userFromContext(ctx); user != "" {
+		req.Labels = append(req.Labels, v100.Label{Name: "user", Value: user})
 	}
 
 	applyWorkpoolDefaults(&req.Workpool, s.config)
@@ -1810,5 +1811,5 @@ func runDevDashboardBackend(c *cli.Context) error {
 	mux.HandleFunc("POST /api/v1/subscriptions/{subscription_id}/unsubscribe", srv.handleDeleteSubscription)
 
 	log.Printf("dashboard-backend listening on %s", addr)
-	return http.ListenAndServe(addr, corsMiddleware(mux))
+	return http.ListenAndServe(addr, corsMiddleware(apiKeyAuthMiddleware(fsClient, mux)))
 }

@@ -25,6 +25,7 @@ procs:
     cmd: ["${SPARKLES}", "dev", "dashboard-backend", "--project", "${PROJECT}"]
   shell:
     cmd: ["bash"]
+    stop: "SIGKILL"
 EOF
 
 # GOOGLE_APPLICATION_CREDENTIALS=$HOME/.sparkles-cache/service-keys/ts-i28btmv9nw4jok.json go run . --project ts-i28btmv9nw4jok --subscriber-sa sparkles-dashboard-user@depmap-portal-pipeline.iam.gserviceaccount.com
