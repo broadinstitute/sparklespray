@@ -81,6 +81,13 @@ type WorkPool struct {
 	Region       string          `firestore:"region"`
 	Zones        []string        `firestore:"zones"`
 
+	// WorkpoolSpecHash is the sha256 (hex-encoded) of the canonical JSON of
+	// the WorkpoolSpec this record was created from, including Labels.
+	// Computed by computeWorkpoolSpecHash (v100/dev/submit.go) at submission
+	// time; the same hash (truncated) is used to derive the workpool ID
+	// itself when one isn't explicitly given (see resolveWorkpoolID).
+	WorkpoolSpecHash string `firestore:"workpool_spec_hash"`
+
 	// Provisioning parameters
 	MaxWorkerCount               int `firestore:"max_worker_count"`
 	MaxPreemptibleWorkerAttempts int `firestore:"max_preemptible_worker_attempts"`

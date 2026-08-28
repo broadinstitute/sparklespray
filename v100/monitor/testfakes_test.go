@@ -30,6 +30,7 @@ type FakeCreatedJob struct {
 	WorkpoolID  string
 	VMCount     int
 	Preemptible bool
+	Labels      []Label
 }
 
 type FakeBatchAPIClient struct {
@@ -121,6 +122,7 @@ func (f *FakeBatchAPIClient) CreateJob(ctx context.Context, spec *WorkerJobSpec)
 		WorkpoolID:  spec.WorkpoolID,
 		VMCount:     spec.VMCount,
 		Preemptible: spec.Preemptible,
+		Labels:      spec.Labels,
 	})
 
 	return jobID, nil

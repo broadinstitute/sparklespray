@@ -45,6 +45,7 @@ type firestoreWorkPool struct {
 	EmptyVolumes          []EmptyVolume   `firestore:"empty_volumes"`
 	Resources             []ResourceEntry `firestore:"resources"`
 	ServiceAccount        string          `firestore:"service_account"`
+	Labels                []Label         `firestore:"labels"`
 
 	MaxWorkerCount               int `firestore:"max_worker_count"`
 	MaxPreemptibleWorkerAttempts int `firestore:"max_preemptible_worker_attempts"`
@@ -73,6 +74,7 @@ func toWorkPool(f *firestoreWorkPool) *WorkPool {
 		EmptyVolumes:                 f.EmptyVolumes,
 		Resources:                    f.Resources,
 		ServiceAccount:               f.ServiceAccount,
+		Labels:                       f.Labels,
 		MaxWorkerCount:               f.MaxWorkerCount,
 		MaxPreemptibleWorkerAttempts: f.MaxPreemptibleWorkerAttempts,
 		MaxWorkersPerRequest:         f.MaxWorkersPerRequest,
@@ -210,6 +212,7 @@ type firestoreBatchRequest struct {
 	Status                string     `firestore:"status"`
 	Unhealthy             bool       `firestore:"unhealthy"`
 	TerminationReason     string     `firestore:"termination_reason"`
+	Labels                []Label    `firestore:"labels"`
 }
 
 func toBatchRequest(f *firestoreBatchRequest) *BatchAPIRequest {
@@ -226,6 +229,7 @@ func toBatchRequest(f *firestoreBatchRequest) *BatchAPIRequest {
 		Status:                BatchStatus(f.Status),
 		Unhealthy:             f.Unhealthy,
 		TerminationReason:     f.TerminationReason,
+		Labels:                f.Labels,
 	}
 }
 
@@ -243,6 +247,7 @@ func fromBatchRequest(b *BatchAPIRequest) *firestoreBatchRequest {
 		Status:                string(b.Status),
 		Unhealthy:             b.Unhealthy,
 		TerminationReason:     b.TerminationReason,
+		Labels:                b.Labels,
 	}
 }
 

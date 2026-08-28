@@ -88,6 +88,23 @@ func formatBindMountArgs(rootDir string, volumes []EmptyVolume) string {
 	return b.String()
 }
 
+// gcpJobLabels builds the GCE label map for a Batch job's VMs: the
+// workpool's user-defined labels (spec.Labels, propagated from
+// WorkPool.Labels for filtering/billing attribution), plus the reserved
+// labelWorkpool label the monitor relies on to find a batch's VMs — which
+// always wins if a user label happens to reuse that key. GCP label keys and
+// values must match its own restricted charset (lowercase letters, digits,
+// '-', '_'); invalid user labels surface as a CreateJob error, handled the
+// same as any other batch_failed outcome.
+func gcpJobLabels(spec *WorkerJobSpec) map[string]string {
+	labels := make(map[string]string, len(spec.Labels)+1)
+	for _, l := range spec.Labels {
+		labels[l.Name] = l.Value
+	}
+	labels[labelWorkpool] = spec.WorkpoolID
+	return labels
+}
+
 func (c *GCPBatchAPIClient) CreateJob(ctx context.Context, spec *WorkerJobSpec) (string, error) {
 	if len(spec.Resources) == 0 {
 		return "", fmt.Errorf("workpool %s has no resources configured", spec.WorkpoolID)
@@ -177,9 +194,7 @@ func (c *GCPBatchAPIClient) CreateJob(ctx context.Context, spec *WorkerJobSpec) 
 			ServiceAccount: &batch.ServiceAccount{
 				Email: spec.ServiceAccount,
 			},
-			Labels: map[string]string{
-				labelWorkpool: spec.WorkpoolID,
-			},
+			Labels: gcpJobLabels(spec),
 		},
 		LogsPolicy: &batch.LogsPolicy{
 			Destination: "CLOUD_LOGGING",

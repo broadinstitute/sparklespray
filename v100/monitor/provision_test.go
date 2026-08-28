@@ -20,6 +20,27 @@ func TestProvision_NoPendingTasks_NoBatchCreated(t *testing.T) {
 	assert.Equal(t, 0, w.Batches.Count())
 }
 
+func TestProvision_CopiesPoolLabelsOntoJobAndBatchRequest(t *testing.T) {
+	w := newWorld()
+	pool := defaultPool("pool-1")
+	pool.Labels = []Label{{Name: "team", Value: "alice"}}
+	pool.MaxPreemptibleWorkerAttempts = 0 // force non-preemptible for a single batch
+	w.Pools.Add(pool)
+	for i := 0; i < 3; i++ {
+		w.Tasks.Add(&Task{TaskID: taskID(i), WorkpoolID: "pool-1", Status: TaskStatusPending})
+	}
+
+	err := w.A.runProvisioningPoll(context.Background())
+	require.NoError(t, err)
+
+	require.Len(t, w.BatchAPI.CreatedJobs, 1)
+	assert.Equal(t, []Label{{Name: "team", Value: "alice"}}, w.BatchAPI.CreatedJobs[0].Labels)
+
+	require.Equal(t, 1, w.Batches.Count())
+	batchID := w.BatchAPI.CreatedJobs[0].BatchID
+	assert.Equal(t, []Label{{Name: "team", Value: "alice"}}, w.Batches.MustGet(batchID).Labels)
+}
+
 func TestProvision_DemandMetByRequestedVMs_NoBatchCreated(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")

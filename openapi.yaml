@@ -72,10 +72,8 @@ components:
 
         labels:
           type: array
-          description: |-
-            Key/value labels attached to the job and copied onto every task, e.g. for
-            filtering or billing attribution. Stored as `Job.Labels` / `Task.Labels`
-            (firestore field `labels`), a list of `Label`.
+          description: |
+            Key/value labels attached to the job for descriptive information about each job
           items:
             $ref: "#/components/schemas/Label"
 
@@ -148,6 +146,20 @@ components:
             `WorkPool.Resources` (firestore field `resources`), a list of `ResourceEntry`.
           items:
             $ref: "#/components/schemas/ResourceEntry"
+        labels:
+          type: array
+          description: |-
+            Key/value labels attached to the workpool, e.g. for filtering or billing
+            attribution. Stored as `WorkPool.Labels` (firestore field `labels`), a list
+            of `Label`; also copied onto every `BatchAPIRequest` created for this
+            workpool (`BatchAPIRequest.Labels`) and onto the GCE VM labels of the
+            underlying GCP Batch job (`gcpJobLabels` in v100/monitor/batch_api.go,
+            alongside the reserved `sparkles-workpool` label). Also folded into the
+            workpool's spec hash (see `id` above and `WorkPool.WorkpoolSpecHash`), so
+            two specs differing only in labels resolve to different workpools when
+            `id` is omitted.
+          items:
+            $ref: "#/components/schemas/Label"
         emptyVolumes:
           type: array
           description: |-

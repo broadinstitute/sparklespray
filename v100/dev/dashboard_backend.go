@@ -420,7 +420,8 @@ type batchRequestResponse struct {
 	// TerminationReason is populated when status is "terminated" — it
 	// explains why the monitor itself decided to kill the job (as opposed
 	// to "failed", where GCP reported the failure).
-	TerminationReason string `json:"termination_reason,omitempty"`
+	TerminationReason string          `json:"termination_reason,omitempty"`
+	Labels            []labelResponse `json:"labels"`
 }
 
 func (s *dashboardServer) handleListBatches(w http.ResponseWriter, r *http.Request) {
@@ -442,6 +443,10 @@ func (s *dashboardServer) handleListBatches(w http.ResponseWriter, r *http.Reque
 	}
 	result := make([]batchRequestResponse, 0, len(batches))
 	for _, b := range batches {
+		batchLabels := make([]labelResponse, len(b.Labels))
+		for i, l := range b.Labels {
+			batchLabels[i] = labelResponse{Name: l.Name, Value: l.Value}
+		}
 		result = append(result, batchRequestResponse{
 			BatchID:               b.BatchID,
 			JobID:                 b.JobID,
@@ -454,6 +459,7 @@ func (s *dashboardServer) handleListBatches(w http.ResponseWriter, r *http.Reque
 			Status:                string(b.Status),
 			Unhealthy:             b.Unhealthy,
 			TerminationReason:     b.TerminationReason,
+			Labels:                batchLabels,
 		})
 	}
 	writeJSON(w, http.StatusOK, result)
@@ -563,6 +569,10 @@ func (s *dashboardServer) handleGetBatch(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to get batch")
 		return
 	}
+	batchLabels := make([]labelResponse, len(batch.Labels))
+	for i, l := range batch.Labels {
+		batchLabels[i] = labelResponse{Name: l.Name, Value: l.Value}
+	}
 	writeJSON(w, http.StatusOK, batchRequestResponse{
 		BatchID:               batch.BatchID,
 		JobID:                 batch.JobID,
@@ -575,6 +585,7 @@ func (s *dashboardServer) handleGetBatch(w http.ResponseWriter, r *http.Request)
 		Status:                string(batch.Status),
 		Unhealthy:             batch.Unhealthy,
 		TerminationReason:     batch.TerminationReason,
+		Labels:                batchLabels,
 	})
 }
 
@@ -699,6 +710,12 @@ func (s *dashboardServer) handleSubmitJob(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to resolve workpool id")
 		return
 	}
+	workpoolSpecHash, err := computeWorkpoolSpecHash(&req.Workpool)
+	if err != nil {
+		log.Printf("dashboard: SubmitJob computeWorkpoolSpecHash: %v", err)
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to hash workpool spec")
+		return
+	}
 
 	if !workpoolIDRe.MatchString(workpoolID) {
 		log.Printf("dashboard: SubmitJob: workpool.id %q is invalid", workpoolID)
@@ -715,6 +732,8 @@ func (s *dashboardServer) handleSubmitJob(w http.ResponseWriter, r *http.Request
 		ServiceAccount:        req.Workpool.ServiceAccount,
 		Resources:             req.Workpool.Resources,
 		EmptyVolumes:          req.Workpool.EmptyVolumes,
+		Labels:                req.Workpool.Labels,
+		WorkpoolSpecHash:      workpoolSpecHash,
 		Expiry:                now.Add(7 * 24 * time.Hour),
 		Region:                req.Workpool.Region,
 		Zones:                 req.Workpool.Zones,

@@ -48,6 +48,7 @@ type WorkpoolSpec struct {
 	Region                string               `json:"region"`
 	Zones                 []string             `json:"zones"`
 	ServiceAccount        string               `json:"serviceAccount"`
+	Labels                []v100.Label         `json:"labels"`
 
 	MaxWorkerCount               int `json:"maxWorkerCount"`
 	MaxPreemptibleWorkerAttempts int `json:"maxPreemptibleWorkerAttempts"`
@@ -92,16 +93,29 @@ func readJSON[T any](path string) (*T, error) {
 	return &v, nil
 }
 
-func resolveWorkpoolID(workpoolSpec *WorkpoolSpec) (string, error) {
-	if workpoolSpec.ID != "" {
-		return workpoolSpec.ID, nil
-	}
+// computeWorkpoolSpecHash returns the hex-encoded sha256 of the canonical
+// JSON of workpoolSpec, including Labels — used both to derive a
+// deterministic workpool ID (resolveWorkpoolID) when one isn't given, and to
+// populate WorkPool.WorkpoolSpecHash so the exact spec a workpool was
+// created from can be identified later.
+func computeWorkpoolSpecHash(workpoolSpec *WorkpoolSpec) (string, error) {
 	canonical, err := json.Marshal(workpoolSpec)
 	if err != nil {
 		return "", fmt.Errorf("canonicalizing workpool spec: %w", err)
 	}
 	sum := sha256.Sum256(canonical)
-	return "wp-" + hex.EncodeToString(sum[:])[:20], nil
+	return hex.EncodeToString(sum[:]), nil
+}
+
+func resolveWorkpoolID(workpoolSpec *WorkpoolSpec) (string, error) {
+	if workpoolSpec.ID != "" {
+		return workpoolSpec.ID, nil
+	}
+	hash, err := computeWorkpoolSpecHash(workpoolSpec)
+	if err != nil {
+		return "", err
+	}
+	return "wp-" + hash[:20], nil
 }
 
 func devSubmit(jobSpecFile, workpoolSpecFile, project, db, gcsPrefix string) error {
@@ -178,6 +192,10 @@ func devSubmit(jobSpecFile, workpoolSpecFile, project, db, gcsPrefix string) err
 	if err != nil {
 		return err
 	}
+	workpoolSpecHash, err := computeWorkpoolSpecHash(workpoolSpec)
+	if err != nil {
+		return err
+	}
 	workpool := v100.WorkPool{
 		WorkpoolID:            workpoolID,
 		MachineType:           workpoolSpec.MachineType,
@@ -186,6 +204,8 @@ func devSubmit(jobSpecFile, workpoolSpecFile, project, db, gcsPrefix string) err
 		ServiceAccount:        workpoolSpec.ServiceAccount,
 		Resources:             workpoolSpec.Resources,
 		EmptyVolumes:          workpoolSpec.EmptyVolumes,
+		Labels:                workpoolSpec.Labels,
+		WorkpoolSpecHash:      workpoolSpecHash,
 		Expiry:                time.Now().Add(7 * 24 * time.Hour),
 		Region:                workpoolSpec.Region,
 		Zones:                 workpoolSpec.Zones,

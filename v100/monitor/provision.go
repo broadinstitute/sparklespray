@@ -132,6 +132,7 @@ func (a *Monitor) submitBatch(ctx context.Context, pool *WorkPool, vmCount int, 
 		EmptyVolumes:          pool.EmptyVolumes,
 		Resources:             pool.Resources,
 		ServiceAccount:        pool.ServiceAccount,
+		Labels:                pool.Labels,
 		DBName:                a.dbName,
 	})
 	if err != nil {
@@ -152,6 +153,7 @@ func (a *Monitor) submitBatch(ctx context.Context, pool *WorkPool, vmCount int, 
 		SubmittedAt:     now,
 		Expiry:          now.Add(7 * 24 * time.Hour),
 		Status:          BatchStatusPending,
+		Labels:          pool.Labels,
 	}
 	if err := a.batches.Create(ctx, batch); err != nil {
 		return fmt.Errorf("save batch record: %w", err)

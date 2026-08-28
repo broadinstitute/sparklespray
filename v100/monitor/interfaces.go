@@ -74,6 +74,7 @@ type WorkPool struct {
 	EmptyVolumes          []EmptyVolume
 	Resources             []ResourceEntry
 	ServiceAccount        string
+	Labels                []Label
 
 	// Provisioning parameters
 	MaxWorkerCount               int
@@ -119,8 +120,9 @@ type BatchAPIRequest struct {
 	RunningSince          *time.Time // nil until the job first reaches RUNNING
 	RegisteredWorkerCount int        // monotonic; incremented at worker registration, never decremented
 	Status                BatchStatus
-	Unhealthy             bool   // sticky; never cleared; independent of Status
-	TerminationReason     string // populated when Status == BatchStatusTerminated; explains why the monitor killed the job
+	Unhealthy             bool    // sticky; never cleared; independent of Status
+	TerminationReason     string  // populated when Status == BatchStatusTerminated; explains why the monitor killed the job
+	Labels                []Label // copied from WorkPool.Labels at submission time
 }
 
 // Worker is the subset of the Workers Firestore document needed by the monitor.
@@ -178,6 +180,7 @@ type WorkerJobSpec struct {
 	ServiceAccount        string
 	DBName                string
 	Resources             []ResourceEntry
+	Labels                []Label
 	LingerTime            time.Duration
 }
 
