@@ -37,6 +37,9 @@ function parseBreadcrumbs(
     } else if (segs[2] === "summary") {
       items.push({ label: jobLabel, href: `/jobs/${jobId}` });
       items.push({ label: "completed summary" });
+    } else if (segs[2] === "events") {
+      items.push({ label: jobLabel, href: `/jobs/${jobId}` });
+      items.push({ label: "events" });
     } else {
       items.push({ label: jobLabel });
     }

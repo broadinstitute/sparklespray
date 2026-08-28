@@ -9,7 +9,6 @@ import ClusterLogs from "./pages/ClusterLogs";
 import WorkPoolDetail from "./pages/WorkPoolDetail";
 import WorkerDetail from "./pages/WorkerDetail";
 import BatchDetail from "./pages/BatchDetail";
-import PerfOverview from "./pages/PerfOverview";
 import NotImplemented from "./pages/NotImplemented";
 
 function AppRoutes() {
@@ -30,7 +29,8 @@ function AppRoutes() {
             path="/jobs/:jobId/tasks/:taskId/log"
             element={<TaskDetail />}
           />
-          <Route path="/jobs/:jobId/summary" element={<PerfOverview />} />
+          <Route path="/jobs/:jobId/summary" element={<JobDetail />} />
+          <Route path="/jobs/:jobId/events" element={<JobDetail />} />
           <Route path="/workpools/:workpoolId" element={<WorkPoolDetail />} />
           <Route
             path="/workpools/:workpoolId/workers"
@@ -50,6 +50,10 @@ function AppRoutes() {
           />
           <Route
             path="/workpools/:workpoolId/jobs"
+            element={<WorkPoolDetail />}
+          />
+          <Route
+            path="/workpools/:workpoolId/events"
             element={<WorkPoolDetail />}
           />
           <Route path="/clusters/:clusterId" element={<ClusterDetail />} />

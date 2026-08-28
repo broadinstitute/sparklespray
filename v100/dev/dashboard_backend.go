@@ -20,12 +20,12 @@ import (
 	v100 "github.com/broadinstitute/sparklespray/v100"
 	"github.com/broadinstitute/sparklespray/v100/monitor"
 	"github.com/google/uuid"
+	"github.com/urfave/cli"
 	iamcredentials "google.golang.org/api/iamcredentials/v1"
 	"google.golang.org/api/iterator"
 	"google.golang.org/grpc/codes"
 	grpcstatus "google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/durationpb"
-	"github.com/urfave/cli"
 )
 
 // ----- handler context -----
@@ -131,11 +131,11 @@ func newSubID() string {
 // ----- GET /api/v1/workpools -----
 
 type workpoolSummaryResponse struct {
-	WorkpoolID    string          `json:"workpool_id"`
-	MachineType   string          `json:"machine_type"`
-	Region        string          `json:"region"`
-	State         string          `json:"state"`
-	StateMessage  string          `json:"state_message"`
+	WorkpoolID     string          `json:"workpool_id"`
+	MachineType    string          `json:"machine_type"`
+	Region         string          `json:"region"`
+	State          string          `json:"state"`
+	StateMessage   string          `json:"state_message"`
 	LastIncidentAt *string         `json:"last_incident_at"`
 	IncidentCount  int             `json:"incident_count"`
 	Labels         []labelResponse `json:"labels"`
@@ -209,22 +209,22 @@ func (s *dashboardServer) handleListWorkpools(w http.ResponseWriter, r *http.Req
 // ----- GET /api/v1/workpool/{workpool_id} -----
 
 type workpoolDetailResponse struct {
-	WorkpoolID            string               `json:"workpool_id"`
-	MachineType           string               `json:"machine_type"`
-	Region                string               `json:"region"`
-	Zones                 []string             `json:"zones"`
-	RootDir               string               `json:"root_dir"`
-	SparklesWorkerGCSPath string               `json:"sparkles_worker_gcs_path"`
-	Resources             []v100.ResourceEntry `json:"resources"`
-	EmptyVolumes          []v100.EmptyVolume   `json:"empty_volumes"`
-	Labels                []labelResponse      `json:"labels"`
-	MaxWorkerCount               int            `json:"max_worker_count"`
-	MaxPreemptibleWorkerAttempts int            `json:"max_preemptible_worker_attempts"`
-	State          string    `json:"state"`
-	StateMessage   string    `json:"state_message"`
-	LastIncidentAt *string   `json:"last_incident_at"`
-	IncidentCount  int       `json:"incident_count"`
-	Expiry         time.Time `json:"expiry"`
+	WorkpoolID                   string               `json:"workpool_id"`
+	MachineType                  string               `json:"machine_type"`
+	Region                       string               `json:"region"`
+	Zones                        []string             `json:"zones"`
+	RootDir                      string               `json:"root_dir"`
+	SparklesWorkerGCSPath        string               `json:"sparkles_worker_gcs_path"`
+	Resources                    []v100.ResourceEntry `json:"resources"`
+	EmptyVolumes                 []v100.EmptyVolume   `json:"empty_volumes"`
+	Labels                       []labelResponse      `json:"labels"`
+	MaxWorkerCount               int                  `json:"max_worker_count"`
+	MaxPreemptibleWorkerAttempts int                  `json:"max_preemptible_worker_attempts"`
+	State                        string               `json:"state"`
+	StateMessage                 string               `json:"state_message"`
+	LastIncidentAt               *string              `json:"last_incident_at"`
+	IncidentCount                int                  `json:"incident_count"`
+	Expiry                       time.Time            `json:"expiry"`
 }
 
 func (s *dashboardServer) handleGetWorkpool(w http.ResponseWriter, r *http.Request) {
@@ -269,10 +269,10 @@ func (s *dashboardServer) handleGetWorkpool(w http.ResponseWriter, r *http.Reque
 		Labels:                       detailLabels,
 		MaxWorkerCount:               wp.MaxWorkerCount,
 		MaxPreemptibleWorkerAttempts: wp.MaxPreemptibleWorkerAttempts,
-		State:         string(ws.State),
-		StateMessage:  ws.StateMessage,
-		IncidentCount: ws.IncidentCount,
-		Expiry:        wp.Expiry,
+		State:                        string(ws.State),
+		StateMessage:                 ws.StateMessage,
+		IncidentCount:                ws.IncidentCount,
+		Expiry:                       wp.Expiry,
 	}
 	if !ws.LastIncidentAt.IsZero() {
 		t := ws.LastIncidentAt.Format(time.RFC3339)
@@ -1274,21 +1274,21 @@ type taskLogEntry struct {
 	// log_update fields
 	Content string `json:"content,omitempty"`
 	// metric_update fields — use raw map so absent fields are truly absent
-	ProcessCount         *int32              `json:"process_count,omitempty"`
-	TotalMemory          *int64              `json:"total_memory,omitempty"`
-	TotalData            *int64              `json:"total_data,omitempty"`
-	TotalShared          *int64              `json:"total_shared,omitempty"`
-	TotalResident        *int64              `json:"total_resident,omitempty"`
-	CpuUser              *float64            `json:"cpu_user,omitempty"`
-	CpuSystem            *float64            `json:"cpu_system,omitempty"`
-	CpuIdle              *float64            `json:"cpu_idle,omitempty"`
-	CpuIowait            *float64            `json:"cpu_iowait,omitempty"`
-	MemTotal             *int64              `json:"mem_total,omitempty"`
-	MemAvailable         *int64              `json:"mem_available,omitempty"`
-	MemFree              *int64              `json:"mem_free,omitempty"`
-	MemPressureSomeAvg10 *int32              `json:"mem_pressure_some_avg10,omitempty"`
-	MemPressureFullAvg10 *int32              `json:"mem_pressure_full_avg10,omitempty"`
-	Volumes              []v100.VolumeUsage  `json:"volumes,omitempty"`
+	ProcessCount         *int32             `json:"process_count,omitempty"`
+	TotalMemory          *int64             `json:"total_memory,omitempty"`
+	TotalData            *int64             `json:"total_data,omitempty"`
+	TotalShared          *int64             `json:"total_shared,omitempty"`
+	TotalResident        *int64             `json:"total_resident,omitempty"`
+	CpuUser              *float64           `json:"cpu_user,omitempty"`
+	CpuSystem            *float64           `json:"cpu_system,omitempty"`
+	CpuIdle              *float64           `json:"cpu_idle,omitempty"`
+	CpuIowait            *float64           `json:"cpu_iowait,omitempty"`
+	MemTotal             *int64             `json:"mem_total,omitempty"`
+	MemAvailable         *int64             `json:"mem_available,omitempty"`
+	MemFree              *int64             `json:"mem_free,omitempty"`
+	MemPressureSomeAvg10 *int32             `json:"mem_pressure_some_avg10,omitempty"`
+	MemPressureFullAvg10 *int32             `json:"mem_pressure_full_avg10,omitempty"`
+	Volumes              []v100.VolumeUsage `json:"volumes,omitempty"`
 }
 
 func (s *dashboardServer) handleGetTaskLog(w http.ResponseWriter, r *http.Request) {
@@ -1494,6 +1494,8 @@ type eventResponse struct {
 	// StateMessage carries the workpool_state_change message and the
 	// batch_failed reason (both stored in EventRecord.StateMessage).
 	StateMessage string `json:"state_message,omitempty"`
+	// CleanlyTerminated is populated for worker_stopped events.
+	CleanlyTerminated bool `json:"cleanly_terminated,omitempty"`
 }
 
 func (s *dashboardServer) handleListEvents(w http.ResponseWriter, r *http.Request) {
@@ -1558,7 +1560,12 @@ func (s *dashboardServer) handleListEvents(w http.ResponseWriter, r *http.Reques
 	} else if taskID != "" {
 		cq = cq.Where("task_id", "==", taskID)
 	}
-	cq = cq.OrderBy("timestamp", firestore.Asc).Limit(limit)
+	sortDir := firestore.Asc
+	descending := q.Get("order") == "desc"
+	if descending {
+		sortDir = firestore.Desc
+	}
+	cq = cq.OrderBy("timestamp", sortDir).Limit(limit)
 
 	iter := cq.Documents(ctx)
 	defer iter.Stop()
@@ -1593,22 +1600,26 @@ func (s *dashboardServer) handleListEvents(w http.ResponseWriter, r *http.Reques
 		}
 		lastTimestamp = ev.Timestamp
 		events = append(events, eventResponse{
-			EventID:      ev.EventID,
-			Type:         ev.Type,
-			Timestamp:    ev.Timestamp,
-			Expiry:       ev.Expiry,
-			WorkerID:     ev.WorkerID,
-			WorkpoolID:   ev.WorkpoolID,
-			TaskID:       ev.TaskID,
-			JobID:        ev.JobID,
-			OldState:     ev.OldState,
-			NewState:     ev.NewState,
-			StateMessage: ev.StateMessage,
+			EventID:           ev.EventID,
+			Type:              ev.Type,
+			Timestamp:         ev.Timestamp,
+			Expiry:            ev.Expiry,
+			WorkerID:          ev.WorkerID,
+			WorkpoolID:        ev.WorkpoolID,
+			TaskID:            ev.TaskID,
+			JobID:             ev.JobID,
+			OldState:          ev.OldState,
+			NewState:          ev.NewState,
+			StateMessage:      ev.StateMessage,
+			CleanlyTerminated: ev.CleanlyTerminated,
 		})
 	}
 
 	resp := map[string]any{"events": events}
-	if !lastTimestamp.IsZero() {
+	// next_after is a cursor for incremental forward polling (see
+	// EventProvider on the frontend); it only makes sense in ascending
+	// order, where the last-iterated event is also the most recent one.
+	if !descending && !lastTimestamp.IsZero() {
 		resp["next_after"] = lastTimestamp.Format(time.RFC3339)
 	}
 	writeJSON(w, http.StatusOK, resp)

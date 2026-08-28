@@ -16,6 +16,9 @@ export interface WorkerStartedEvent extends WorkerEvent {
 
 export interface WorkerStoppedEvent extends WorkerEvent {
   type: "worker_stopped";
+  // true for a normal, self-reported shutdown; false when task recovery
+  // marked the worker a zombie (heartbeat expired without a clean shutdown).
+  cleanly_terminated: boolean;
 }
 
 export interface JobCreatedEvent extends BaseEvent {
@@ -38,6 +41,30 @@ export interface TaskStateUpdateEvent extends BaseEvent {
   new_state: string;
 }
 
+export interface WorkpoolStateChangeEvent extends BaseEvent {
+  type: "workpool_state_change";
+  workpool_id: string;
+  new_state: string;
+  state_message: string;
+}
+
+export interface BatchFailedEvent extends BaseEvent {
+  type: "batch_failed";
+  workpool_id: string;
+  state_message: string;
+}
+
+export interface BatchSucceededEvent extends BaseEvent {
+  type: "batch_succeeded";
+  workpool_id: string;
+}
+
+export interface WorkpoolIncidentEvent extends BaseEvent {
+  type: "workpool_incident";
+  workpool_id: string;
+  state_message: string;
+}
+
 export type AnyTaskEvent = TaskStateUpdateEvent;
 
 export type AnyEvent =
@@ -45,7 +72,26 @@ export type AnyEvent =
   | WorkerStoppedEvent
   | JobCreatedEvent
   | JobTerminatedEvent
-  | TaskStateUpdateEvent;
+  | TaskStateUpdateEvent
+  | WorkpoolStateChangeEvent
+  | BatchFailedEvent
+  | BatchSucceededEvent
+  | WorkpoolIncidentEvent;
+
+// A raw event as returned by GET /api/v1/events, before it's known which
+// event type it is. All fields beyond the base ones are optional since
+// which are populated depends on `type`. Used by generic event-log UI (the
+// Events tab) that doesn't need to know each event shape up front.
+export interface RawEvent extends BaseEvent {
+  worker_id?: string;
+  workpool_id?: string;
+  task_id?: string;
+  job_id?: string;
+  old_state?: string;
+  new_state?: string;
+  state_message?: string;
+  cleanly_terminated?: boolean;
+}
 
 export interface BackendJobSummary {
   job_id: string;

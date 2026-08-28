@@ -1,7 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
-import { useParams } from "react-router-dom";
 import type { TaskSummaryRecord } from "../types";
-import TabBar from "../components/TabBar";
 import {
   BarChart,
   Bar,
@@ -243,8 +241,10 @@ function DrillDown({ metric }: { metric: MetricDef }) {
   );
 }
 
-export default function PerfOverview() {
-  const { jobId } = useParams<{ jobId: string }>();
+// Renders the "Completed Summary" tab's content (metric list + drill-down).
+// The job header and TabBar are owned by JobDetail, which hosts this tab
+// alongside Overview/Tasks/Events so all tabs share the same top section.
+export default function PerfOverview({ jobId }: { jobId: string }) {
   const [tasks, setTasks] = useState<TaskSummaryRecord[]>([]);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
 
@@ -278,14 +278,6 @@ export default function PerfOverview() {
 
   const perf = useMemo(() => computeJobPerf(tasks), [tasks]);
 
-  if (!jobId) {
-    return (
-      <div style={{ padding: "2rem", fontFamily: "monospace" }}>
-        Invalid job ID.
-      </div>
-    );
-  }
-
   const {
     entries,
     execStats,
@@ -296,16 +288,6 @@ export default function PerfOverview() {
     blockReadStats,
     blockWriteStats,
   } = perf;
-
-  const jobTabs = [
-    { label: "Overview", href: `/jobs/${jobId}`, matchExact: true },
-    { label: "Tasks", href: `/jobs/${jobId}/tasks` },
-    {
-      label: "Completed Summary",
-      href: `/jobs/${jobId}/summary`,
-      matchExact: true,
-    },
-  ];
 
   const groups: MetricGroup[] = [
     {
@@ -419,32 +401,19 @@ export default function PerfOverview() {
     : null;
 
   return (
-    <div
-      style={{
-        padding: "2rem",
-        fontFamily: "monospace",
-      }}
-    >
-      <div style={{ marginBottom: "1.5rem" }}>
-        <h1
-          style={{ margin: "0 0 1.5rem", fontSize: "1.3rem", fontWeight: 700 }}
-        >
-          {jobId}
-        </h1>
-        <TabBar tabs={jobTabs} />
-        <div
-          style={{
-            display: "flex",
-            alignItems: "baseline",
-            gap: "1rem",
-            marginTop: "1rem",
-          }}
-        >
-          <span style={{ fontWeight: 700 }}>Completed Task Metrics</span>
-          <span style={{ color: "#aaa", fontSize: "0.82rem" }}>
-            {entries.length} tasks
-          </span>
-        </div>
+    <div style={{ fontFamily: "monospace" }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "baseline",
+          gap: "1rem",
+          marginBottom: "1.25rem",
+        }}
+      >
+        <span style={{ fontWeight: 700 }}>Completed Task Metrics</span>
+        <span style={{ color: "#aaa", fontSize: "0.82rem" }}>
+          {entries.length} tasks
+        </span>
       </div>
 
       {entries.length === 0 ? (

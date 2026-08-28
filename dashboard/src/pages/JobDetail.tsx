@@ -5,6 +5,8 @@ import TabBar from "../components/TabBar";
 import { RangeRefreshBar } from "../components/RefreshControls";
 import type { RangeChange } from "../components/RefreshControls";
 import { mergeEvents, useEvents } from "../data/EventProvider";
+import EventsPanel from "../components/EventsPanel";
+import PerfOverview from "./PerfOverview";
 import type { TaskStatus } from "../data/events";
 import { getJobTasks } from "../data/events";
 import { computeTimeSeriesFromHistory } from "../data/jobTimeSeries";
@@ -321,8 +323,11 @@ export default function JobDetail() {
   const [localEvents, setLocalEvents] = useState<AnyEvent[]>([]);
 
   const isTasksTab = location.pathname.endsWith("/tasks");
+  const isEventsTab = location.pathname.endsWith("/events");
+  const isSummaryTab = location.pathname.endsWith("/summary");
   const [range, setRange] = useState<RangeChange | null>(null);
-  const overviewActive = !isTasksTab && (range?.live ?? true);
+  const overviewActive =
+    !isTasksTab && !isEventsTab && !isSummaryTab && (range?.live ?? true);
 
   // Events are only used for the tasks tab (per-task status + attempt counts).
   useEffect(() => {
@@ -400,6 +405,7 @@ export default function JobDetail() {
       href: `/jobs/${jobId}/summary`,
       matchExact: true,
     },
+    { label: "Events", href: `/jobs/${jobId}/events`, matchExact: true },
   ];
 
   const statusOrder: TaskStatus[] = [
@@ -457,7 +463,7 @@ export default function JobDetail() {
       <TabBar tabs={jobTabs} />
 
       {/* Overview tab */}
-      {!isTasksTab && (
+      {!isTasksTab && !isEventsTab && !isSummaryTab && (
         <div
           style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}
         >
@@ -532,6 +538,12 @@ export default function JobDetail() {
           </div>
         </div>
       )}
+
+      {/* Completed Summary tab */}
+      {isSummaryTab && <PerfOverview jobId={jobId} />}
+
+      {/* Events tab */}
+      {isEventsTab && <EventsPanel filterField="job_id" filterValue={jobId} />}
 
       {/* Tasks tab */}
       {isTasksTab && (

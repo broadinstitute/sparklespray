@@ -7,6 +7,7 @@ import { RangeRefreshBar } from "../components/RefreshControls";
 import type { RangeChange } from "../components/RefreshControls";
 import JobsTable from "../components/JobsTable";
 import type { JobsTableRow } from "../components/JobsTable";
+import EventsPanel from "../components/EventsPanel";
 
 const MONO = "'IBM Plex Mono', monospace";
 
@@ -872,6 +873,12 @@ function JobsTab({ workpoolId }: { workpoolId: string }) {
   return <JobsTable jobs={rows} emptyMessage="No jobs found." />;
 }
 
+// ── Events tab ────────────────────────────────────────────────────────────────
+
+function EventsTab({ workpoolId }: { workpoolId: string }) {
+  return <EventsPanel filterField="workpool_id" filterValue={workpoolId} />;
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function WorkPoolDetailPage() {
@@ -881,7 +888,8 @@ export default function WorkPoolDetailPage() {
   const isWorkers = location.pathname.endsWith("/workers");
   const isBatches = location.pathname.endsWith("/batches");
   const isJobs = location.pathname.endsWith("/jobs");
-  const isOverview = !isWorkers && !isBatches && !isJobs;
+  const isEvents = location.pathname.endsWith("/events");
+  const isOverview = !isWorkers && !isBatches && !isJobs && !isEvents;
 
   if (!workpoolId) {
     return (
@@ -908,6 +916,11 @@ export default function WorkPoolDetailPage() {
       href: `/workpools/${workpoolId}/jobs`,
       matchExact: true,
     },
+    {
+      label: "Events",
+      href: `/workpools/${workpoolId}/events`,
+      matchExact: true,
+    },
   ];
 
   return (
@@ -922,6 +935,7 @@ export default function WorkPoolDetailPage() {
       {isWorkers && <WorkersTab workpoolId={workpoolId} />}
       {isBatches && <BatchesTab workpoolId={workpoolId} />}
       {isJobs && <JobsTab workpoolId={workpoolId} />}
+      {isEvents && <EventsTab workpoolId={workpoolId} />}
     </div>
   );
 }
