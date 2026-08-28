@@ -60,6 +60,7 @@ func NewApp() *cli.App {
 			Usage:     "Submit a job to a running dashboard-backend (POST /api/v1/job)",
 			Flags: []cli.Flag{
 				cli.StringFlag{Name: "url", Usage: "base URL of the dashboard-backend (required)"},
+				cli.StringFlag{Name: "params", Usage: "CSV file of template parameters, one row per task, used to expand a \"task_template\" in the job JSON into \"tasks\""},
 			},
 			Action: runSubmit,
 		},
