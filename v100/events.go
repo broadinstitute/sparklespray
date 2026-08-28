@@ -26,6 +26,10 @@ type EventRecord struct {
 	// Worker event fields (populated for worker_started and worker_stopped)
 	WorkerID   string `firestore:"worker_id"`
 	WorkpoolID string `firestore:"workpool_id"`
+	// CleanlyTerminated is populated for worker_stopped: true when the worker
+	// self-reported a normal shutdown, false when it was marked a zombie
+	// (heartbeat expired without a clean shutdown).
+	CleanlyTerminated bool `firestore:"cleanly_terminated"`
 	// Task state update fields (populated for task_state_update)
 	TaskID   string `firestore:"task_id"`
 	JobID    string `firestore:"job_id"`
@@ -41,6 +45,10 @@ type WorkerEvent struct {
 	Type       string `json:"type"`
 	WorkerID   string `json:"worker_id"`
 	WorkpoolID string `json:"workpool_id"`
+	// CleanlyTerminated is populated for worker_stopped: true when the worker
+	// self-reported a normal shutdown, false when it was marked a zombie
+	// (heartbeat expired without a clean shutdown).
+	CleanlyTerminated bool `json:"cleanly_terminated,omitempty"`
 }
 
 // TaskStateUpdate is published to sparkles-events and recorded in Events on
@@ -152,14 +160,28 @@ func (ep *EventPublisher) recordAndPublish(ctx context.Context, record EventReco
 func (ep *EventPublisher) PublishWorkerEvent(ctx context.Context, event WorkerEvent) error {
 	now := time.Now()
 	record := EventRecord{
-		EventID:    uuid.New().String(),
-		Type:       event.Type,
-		Timestamp:  now,
-		Expiry:     now.Add(eventTTL),
-		WorkerID:   event.WorkerID,
-		WorkpoolID: event.WorkpoolID,
+		EventID:           uuid.New().String(),
+		Type:              event.Type,
+		Timestamp:         now,
+		Expiry:            now.Add(eventTTL),
+		WorkerID:          event.WorkerID,
+		WorkpoolID:        event.WorkpoolID,
+		CleanlyTerminated: event.CleanlyTerminated,
 	}
 	return ep.recordAndPublish(ctx, record, event)
+}
+
+// PublishWorkerStopped records and publishes a worker_stopped event.
+// Satisfies the monitor.WorkerEventPublisher interface. cleanlyTerminated is
+// false when the worker was marked a zombie (heartbeat expired without a
+// clean shutdown), true for a normal, self-reported shutdown.
+func (ep *EventPublisher) PublishWorkerStopped(ctx context.Context, workerID, workpoolID string, cleanlyTerminated bool) error {
+	return ep.PublishWorkerEvent(ctx, WorkerEvent{
+		Type:              "worker_stopped",
+		WorkerID:          workerID,
+		WorkpoolID:        workpoolID,
+		CleanlyTerminated: cleanlyTerminated,
+	})
 }
 
 // PublishJobTerminated records and publishes a job termination event.

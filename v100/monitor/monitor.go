@@ -48,6 +48,7 @@ type Monitor struct {
 	workpoolStatePublisher WorkpoolStatePublisher
 	batchOutcomes          BatchOutcomePublisher
 	workpoolIncidents      WorkpoolIncidentPublisher
+	workerEvents           WorkerEventPublisher
 	workPoolSummaries      WorkPoolSummaryStore
 	events                 EventStore
 	lastEventTime          time.Time
@@ -90,6 +91,11 @@ func (a *Monitor) SetBatchOutcomePublisher(p BatchOutcomePublisher) {
 // SetWorkpoolIncidentPublisher sets the publisher used to emit workpool_incident events.
 func (a *Monitor) SetWorkpoolIncidentPublisher(p WorkpoolIncidentPublisher) {
 	a.workpoolIncidents = p
+}
+
+// SetWorkerEventPublisher sets the publisher used to emit worker_stopped events.
+func (a *Monitor) SetWorkerEventPublisher(p WorkerEventPublisher) {
+	a.workerEvents = p
 }
 
 // SetExpiryStore sets the store used to garbage-collect expired documents.

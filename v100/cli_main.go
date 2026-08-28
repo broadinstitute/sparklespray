@@ -170,6 +170,7 @@ func runMonitor(c *cli.Context) error {
 	m.SetWorkpoolStatePublisher(ep)
 	m.SetBatchOutcomePublisher(ep)
 	m.SetWorkpoolIncidentPublisher(ep)
+	m.SetWorkerEventPublisher(ep)
 	if linger := c.Int("linger"); linger > 0 {
 		m.SetLingerDuration(time.Duration(linger) * time.Minute)
 	}

@@ -74,19 +74,20 @@ alongside `terminated`.
 ```mermaid
 stateDiagram-v2
     [*] --> started: worker registers (worker_started event)
-    started --> stopped: clean shutdown (worker_stopped event)
-    started --> zombie: heartbeat expires without a clean shutdown — task recovery calls MarkZombie
+    started --> stopped: clean shutdown (worker_stopped event, cleanly_terminated=true)
+    started --> zombie: heartbeat expires without a clean shutdown — task recovery calls MarkZombie (worker_stopped event, cleanly_terminated=false)
 ```
 
 `zombie` and `stopped` are deliberately distinct: `stopped` means the
 worker shut down cleanly (it wrote its own status); `zombie` means task
 recovery found a heartbeat that expired without one — the worker crashed,
-was preempted, or otherwise stopped responding. Task recovery also
-publishes a `workpool_incident` event when this happens. This is a
-different, `Worker.status`-level concept from the cluster reconciler's
-zombie _VM_ check (Anomaly 3 in the `BatchStatus` section below), which
-cross-references heartbeat expiry against whether the VM is still running
-in GCP, independent of this field.
+was preempted, or otherwise stopped responding. Either transition publishes
+a `worker_stopped` event, distinguished by its `cleanly_terminated` field;
+task recovery also publishes a `workpool_incident` event when it marks a
+worker a zombie. This is a different, `Worker.status`-level concept from the
+cluster reconciler's zombie _VM_ check (Anomaly 3 in the `BatchStatus`
+section below), which cross-references heartbeat expiry against whether the
+VM is still running in GCP, independent of this field.
 
 ### Task status
 

@@ -302,7 +302,7 @@ func runSimWorker(ctx context.Context, cfg simConfig, batchID string, fsClient *
 			log.Printf("simulate: stopping worker %s: %v", workerID[:8], err)
 		}
 		if err := ep.PublishWorkerEvent(ctx, v100.WorkerEvent{
-			Type: "worker_stopped", WorkerID: workerID, WorkpoolID: cfg.workpoolID,
+			Type: "worker_stopped", WorkerID: workerID, WorkpoolID: cfg.workpoolID, CleanlyTerminated: true,
 		}); err != nil {
 			log.Printf("simulate: publishing worker_stopped: %v", err)
 		}

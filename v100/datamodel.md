@@ -255,10 +255,11 @@ Each event document contains the same fields as the corresponding Pub/Sub messag
 
 Additional fields present on **worker events** (`worker_started`, `worker_stopped`):
 
-| Field         | Type   | Description                |
-| ------------- | ------ | -------------------------- |
-| `worker_id`   | string | ID of the worker           |
-| `workpool_id` | string | Workpool the worker serves |
+| Field                | Type   | Description                                                                                                                           |
+| -------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `worker_id`          | string | ID of the worker                                                                                                                      |
+| `workpool_id`        | string | Workpool the worker serves                                                                                                            |
+| `cleanly_terminated` | bool   | (`worker_stopped` only) `true` when the worker self-reported a normal shutdown; `false` when task recovery marked it a zombie instead |
 
 Additional fields present on **task state update events** (`task_state_update`):
 
@@ -493,9 +494,16 @@ Published by workers to report lifecycle events. Messages are JSON-encoded. Ever
 {
   "type": "worker_started" | "worker_stopped",
   "worker_id": "...",
-  "workpool_id": "..."
+  "workpool_id": "...",
+  "cleanly_terminated": true
 }
 ```
+
+`cleanly_terminated` is only meaningful on `worker_stopped`: `true` when the
+worker itself published the event as part of a normal shutdown; `false` when
+task recovery published it after marking the worker a zombie (its heartbeat
+expired without a clean shutdown — see the `Workers` collection and the
+`workpool_incident` description below).
 
 **JobCreatedEvent** — published when a new job is submitted:
 

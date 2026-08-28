@@ -694,7 +694,17 @@ type FakeEventStore struct {
 	Events            []JobCreatedRecord
 	BatchOutcomes     []fakeBatchOutcome
 	WorkpoolIncidents []fakeWorkpoolIncident
+	WorkerStopped     []fakeWorkerStopped
 	Clock             scheduler.Clock
+}
+
+// fakeWorkerStopped records a worker_stopped event published via
+// PublishWorkerStopped.
+type fakeWorkerStopped struct {
+	WorkerID          string
+	WorkpoolID        string
+	CleanlyTerminated bool
+	Timestamp         time.Time
 }
 
 // fakeWorkpoolIncident pairs a WorkpoolIncident with the workpool it belongs
@@ -802,6 +812,17 @@ func (f *FakeEventStore) AddWorkpoolIncident(workpoolID, message string, ts time
 	})
 }
 
+// PublishWorkerStopped implements WorkerEventPublisher.
+func (f *FakeEventStore) PublishWorkerStopped(_ context.Context, workerID, workpoolID string, cleanlyTerminated bool) error {
+	f.WorkerStopped = append(f.WorkerStopped, fakeWorkerStopped{
+		WorkerID:          workerID,
+		WorkpoolID:        workpoolID,
+		CleanlyTerminated: cleanlyTerminated,
+		Timestamp:         f.now(),
+	})
+	return nil
+}
+
 // ---- World: test fixture builder ----
 
 type World struct {
@@ -834,6 +855,7 @@ func newWorld() *World {
 	a.SetEventStore(events)
 	a.SetBatchOutcomePublisher(events)
 	a.SetWorkpoolIncidentPublisher(events)
+	a.SetWorkerEventPublisher(events)
 
 	return &World{
 		Clock:             clock,

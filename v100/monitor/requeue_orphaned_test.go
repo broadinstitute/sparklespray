@@ -49,6 +49,11 @@ func TestTaskRecovery_ExpiredWorker_MarkedZombieAndIncidentRecorded(t *testing.T
 	assert.Equal(t, "zombie", w.Workers.MustGet("w1").Status)
 	require.Len(t, w.Events.WorkpoolIncidents, 1)
 	assert.Equal(t, "pool-1", w.Events.WorkpoolIncidents[0].WorkpoolID)
+
+	require.Len(t, w.Events.WorkerStopped, 1)
+	assert.Equal(t, "w1", w.Events.WorkerStopped[0].WorkerID)
+	assert.Equal(t, "pool-1", w.Events.WorkerStopped[0].WorkpoolID)
+	assert.False(t, w.Events.WorkerStopped[0].CleanlyTerminated)
 }
 
 func TestTaskRecovery_ExpiredWorkerNoTasks_NoChange(t *testing.T) {

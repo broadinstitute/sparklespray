@@ -996,9 +996,10 @@ func (ws *workerState) shutdown() {
 	}
 
 	if err := ws.publisher.PublishWorkerEvent(ctx, WorkerEvent{
-		Type:       "worker_stopped",
-		WorkerID:   ws.workerID,
-		WorkpoolID: ws.workpoolID,
+		Type:              "worker_stopped",
+		WorkerID:          ws.workerID,
+		WorkpoolID:        ws.workpoolID,
+		CleanlyTerminated: true,
 	}); err != nil {
 		log.Printf("Failed to publish worker_stopped: %v", err)
 	}

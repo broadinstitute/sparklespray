@@ -424,6 +424,15 @@ type WorkpoolIncidentPublisher interface {
 	PublishWorkpoolIncident(ctx context.Context, workpoolID, reason string) error
 }
 
+// WorkerEventPublisher emits a worker_stopped event when a worker's active
+// lifecycle ends. Defined here (not in v100) to avoid an import cycle.
+type WorkerEventPublisher interface {
+	// PublishWorkerStopped records that a worker stopped. cleanlyTerminated
+	// is false when the worker was marked a zombie (its heartbeat expired
+	// without a clean shutdown), true for a normal, self-reported shutdown.
+	PublishWorkerStopped(ctx context.Context, workerID, workpoolID string, cleanlyTerminated bool) error
+}
+
 // Notification is delivered on the channel returned by PubSubReceiver.Notifications.
 // Exactly one of BatchID or Err is set: Err is non-nil when the receive loop fails fatally.
 type Notification struct {
