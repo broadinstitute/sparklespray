@@ -54,6 +54,8 @@ type firestoreWorkPool struct {
 	VMShutdownGracePeriodSec    int `firestore:"vm_shutdown_grace_period_sec"`
 	MaxZombiesBeforeAbort       int `firestore:"max_zombies_before_abort"`
 	MaxConsecutiveFailedBatches int `firestore:"max_consecutive_failed_batches"`
+
+	LingerTimeSec int `firestore:"linger_time_sec"`
 }
 
 func secToDur(secs int, defaultDur time.Duration) time.Duration {
@@ -81,6 +83,7 @@ func toWorkPool(f *firestoreWorkPool) *WorkPool {
 		VMShutdownGracePeriod:        secToDur(f.VMShutdownGracePeriodSec, defaultVMShutdownGracePeriod),
 		MaxZombiesBeforeAbort:        f.MaxZombiesBeforeAbort,
 		MaxConsecutiveFailedBatches:  f.MaxConsecutiveFailedBatches,
+		LingerTime:                   time.Duration(f.LingerTimeSec) * time.Second,
 	}
 }
 

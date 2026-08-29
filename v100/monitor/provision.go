@@ -134,6 +134,7 @@ func (a *Monitor) submitBatch(ctx context.Context, pool *WorkPool, vmCount int, 
 		ServiceAccount:        pool.ServiceAccount,
 		Labels:                pool.Labels,
 		DBName:                a.dbName,
+		LingerTime:            pool.LingerTime,
 	})
 	if err != nil {
 		if a.batchOutcomes != nil {

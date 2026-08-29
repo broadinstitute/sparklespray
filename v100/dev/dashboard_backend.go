@@ -662,6 +662,9 @@ func applyWorkpoolDefaults(spec *WorkpoolSpec, config *SparklesConfig) {
 	if spec.MaxConsecutiveFailedBatches == 0 {
 		spec.MaxConsecutiveFailedBatches = 5
 	}
+	if spec.LingerTimeSec == 0 {
+		spec.LingerTimeSec = 600
+	}
 }
 
 // workpoolIDRe matches valid workpool IDs: at most 35 characters, starting
@@ -746,6 +749,8 @@ func (s *dashboardServer) handleSubmitJob(w http.ResponseWriter, r *http.Request
 		VMShutdownGracePeriodSec:    req.Workpool.VMShutdownGracePeriodSec,
 		MaxZombiesBeforeAbort:       req.Workpool.MaxZombiesBeforeAbort,
 		MaxConsecutiveFailedBatches: req.Workpool.MaxConsecutiveFailedBatches,
+
+		LingerTimeSec: req.Workpool.LingerTimeSec,
 	}
 	if _, err := s.fs.Collection(v100.WorkpoolCollection).Doc(workpoolID).Set(ctx, workpool); err != nil {
 		log.Printf("dashboard: SubmitJob writing workpool %s: %v", workpoolID, err)

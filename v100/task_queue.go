@@ -98,6 +98,11 @@ type WorkPool struct {
 	MaxZombiesBeforeAbort       int `firestore:"max_zombies_before_abort"`
 	MaxConsecutiveFailedBatches int `firestore:"max_consecutive_failed_batches"`
 
+	// LingerTimeSec is how long a leader worker keeps polling for new tasks
+	// after its queue empties before exiting (0 = exit immediately). Passed
+	// to newly provisioned workers as --linger.
+	LingerTimeSec int `firestore:"linger_time_sec"`
+
 	// State fields (written by the monitor; stored in WorkPoolSummary collection)
 	State         string    `firestore:"state"`
 	StateMessage  string    `firestore:"state_message"`

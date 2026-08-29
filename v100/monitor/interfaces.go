@@ -85,6 +85,11 @@ type WorkPool struct {
 	VMShutdownGracePeriod       time.Duration // default: 1min
 	MaxZombiesBeforeAbort       int           // default: 3
 	MaxConsecutiveFailedBatches int           // default: 2
+
+	// LingerTime is how long a leader worker keeps polling for new tasks
+	// after its queue empties before exiting (0 = exit immediately).
+	// Forwarded to newly provisioned workers as WorkerJobSpec.LingerTime.
+	LingerTime time.Duration
 }
 
 // WorkPoolState holds the mutable runtime state for a workpool. It is stored in
