@@ -17,6 +17,11 @@ const taskLogCollection = "TaskLog"
 const taskEventLogTTL = 7 * 24 * time.Hour
 const metricsInterval = 1 * time.Minute
 
+// MetricsInterval is the interval at which OpenTaskEventLog polls resource
+// metrics, exported so callers outside this package (e.g. "sparkles dev
+// test-profile-command") can default to the same cadence used in production.
+const MetricsInterval = metricsInterval
+
 // registeredTask holds the state for a task currently running on this worker.
 type registeredTask struct {
 	tel    *TaskEventLog

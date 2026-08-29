@@ -112,6 +112,15 @@ func Command() cli.Command {
 				Action: runDevCleanExpired,
 			},
 			{
+				Name:      "test-profile-command",
+				ArgsUsage: "<docker-image> <command...>",
+				Usage:     "Run a command in a docker image with the worker's periodic metric collection, printing each sample as JSON to stdout (use -- before the image if <command> has its own flags)",
+				Flags: []cli.Flag{
+					cli.DurationFlag{Name: "interval", Usage: "metric sampling interval (default: same as production, 1m)"},
+				},
+				Action: runDevTestProfileCommand,
+			},
+			{
 				Name:  "batchapi-emulator",
 				Usage: "Run a local batch API emulator for testing",
 				Flags: []cli.Flag{

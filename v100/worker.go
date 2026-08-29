@@ -34,6 +34,11 @@ const workerInTopic = "sparkles-worker-in"
 const workerCollection = "Workers"
 const dockerExecutable = "/usr/bin/docker"
 
+// DockerExecutable is exported so callers outside this package (e.g.
+// "sparkles dev test-profile-command") exec the same docker binary
+// production workers use.
+const DockerExecutable = dockerExecutable
+
 type WorkerRecord struct {
 	WorkerID        string    `firestore:"worker_id"`
 	WorkpoolID      string    `firestore:"workpool_id"`

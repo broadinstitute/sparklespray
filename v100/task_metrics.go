@@ -219,6 +219,24 @@ func getVolumeUsage(paths ...string) []VolumeUsage {
 	return volumes
 }
 
+// CPUStats exposes cpuStats to callers outside this package (e.g. "sparkles
+// dev test-profile-command") that want to drive CollectMetrics themselves
+// outside the normal per-task polling loop in OpenTaskEventLog.
+type CPUStats = cpuStats
+
+// CollectMetrics is an exported wrapper around collectMetrics for such
+// callers.
+func CollectMetrics(taskID, workDir string, prev *CPUStats) (*ResourceUsageEvent, *CPUStats) {
+	return collectMetrics(taskID, workDir, prev)
+}
+
+// GetCPUStats is an exported wrapper around getCPUStats, for callers that
+// want to seed an initial CPUStats baseline (see OpenTaskEventLog).
+func GetCPUStats() *CPUStats {
+	s, _ := getCPUStats()
+	return s
+}
+
 // collectMetrics samples current system and process metrics for the given
 // task. prev is the cpuStats snapshot from the previous call (or nil for the
 // first sample of a task) and is used to turn the cumulative /proc/stat
