@@ -3,6 +3,7 @@ import { useParams, Link } from "react-router-dom";
 import type { BatchRecord } from "./WorkPoolDetail";
 import { StatusBadge } from "./WorkPoolDetail";
 import { RefreshToggle } from "../components/RefreshControls";
+import { apiFetch } from "../api/client";
 
 const MONO = "'IBM Plex Mono', monospace";
 
@@ -49,7 +50,7 @@ function useBatch(
     let cancelled = false;
     const poll = async () => {
       try {
-        const r = await fetch(`/api/v1/batch/${batchId}`);
+        const r = await apiFetch(`/api/v1/batch/${batchId}`);
         if (!r.ok || cancelled) return;
         const data = await r.json();
         if (!cancelled) {

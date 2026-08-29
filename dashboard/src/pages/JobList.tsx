@@ -7,6 +7,7 @@ import JobsTable, {
   workerPoolColor,
 } from "../components/JobsTable";
 import type { BackendJobSummary } from "../types";
+import { apiFetch } from "../api/client";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -61,7 +62,7 @@ function useWorkerPools(
     async function poll() {
       while (!cancelled) {
         try {
-          const res = await fetch("/api/v1/workpools");
+          const res = await apiFetch("/api/v1/workpools");
           if (res.ok) {
             const data: WorkpoolInfo[] = await res.json();
             setWorkpools(data);
@@ -70,7 +71,7 @@ function useWorkerPools(
             await Promise.all(
               data.map(async (wp) => {
                 try {
-                  const r = await fetch(
+                  const r = await apiFetch(
                     `/api/v1/workpool/${wp.workpool_id}/workers?status=started`
                   );
                   if (r.ok) {

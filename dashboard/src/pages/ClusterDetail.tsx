@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useParams } from "react-router-dom";
+import { apiFetch } from "../api/client";
 
 const POLL_MS = 30_000;
 
@@ -35,8 +36,8 @@ export default function ClusterDetail() {
       while (!cancelled) {
         try {
           const [wpRes, wRes] = await Promise.all([
-            fetch(`/api/v1/workpool/${clusterId}`),
-            fetch(`/api/v1/workpool/${clusterId}/workers?status=started`),
+            apiFetch(`/api/v1/workpool/${clusterId}`),
+            apiFetch(`/api/v1/workpool/${clusterId}/workers?status=started`),
           ]);
           if (wpRes.ok) setWorkpool(await wpRes.json());
           if (wRes.ok) setWorkers(await wRes.json());

@@ -12,6 +12,7 @@ import {
 } from "recharts";
 import { computeJobPerf, makeHistogram } from "../data/jobPerf";
 import type { PerfStats } from "../data/jobPerf";
+import { apiFetch } from "../api/client";
 
 const TICK = { fontSize: 11, fontFamily: "monospace" };
 const MARGIN = { top: 4, right: 16, left: 8, bottom: 24 };
@@ -256,7 +257,7 @@ export default function PerfOverview({ jobId }: { jobId: string }) {
     async function poll() {
       while (!cancelled) {
         try {
-          const res = await fetch(
+          const res = await apiFetch(
             `/api/v1/job/${jobId}/tasks?status=success,error,failed,killed`
           );
           if (res.ok) {

@@ -8,6 +8,7 @@ import type { RangeChange } from "../components/RefreshControls";
 import JobsTable from "../components/JobsTable";
 import type { JobsTableRow } from "../components/JobsTable";
 import EventsPanel from "../components/EventsPanel";
+import { apiFetch } from "../api/client";
 
 const MONO = "'IBM Plex Mono', monospace";
 
@@ -82,7 +83,7 @@ function useWorkPoolDetail(
     let cancelled = false;
     const poll = async () => {
       try {
-        const r = await fetch(`/api/v1/workpool/${workpoolId}`);
+        const r = await apiFetch(`/api/v1/workpool/${workpoolId}`);
         if (!r.ok || cancelled) return;
         const data = await r.json();
         if (!cancelled) setDetail(data);
@@ -109,7 +110,9 @@ function useWorkPoolSummaryHistory(
     let cancelled = false;
     const poll = async () => {
       try {
-        const r = await fetch(`/api/v1/workpool/${workpoolId}/summary-history`);
+        const r = await apiFetch(
+          `/api/v1/workpool/${workpoolId}/summary-history`
+        );
         if (!r.ok || cancelled) return;
         const data = await r.json();
         if (!cancelled) {
@@ -138,7 +141,7 @@ function useWorkers(
     let cancelled = false;
     const poll = async () => {
       try {
-        const r = await fetch(
+        const r = await apiFetch(
           `/api/v1/workpool/${workpoolId}/workers?status=all`
         );
         if (!r.ok || cancelled) return;
@@ -172,7 +175,7 @@ function useJobs(workpoolId: string | undefined, active: boolean): JobRecord[] {
     let cancelled = false;
     const poll = async () => {
       try {
-        const r = await fetch(
+        const r = await apiFetch(
           `/api/v1/jobs?workpool_id=${encodeURIComponent(workpoolId)}`
         );
         if (!r.ok || cancelled) return;
@@ -200,7 +203,7 @@ function useBatches(
     let cancelled = false;
     const poll = async () => {
       try {
-        const r = await fetch(`/api/v1/workpool/${workpoolId}/batches`);
+        const r = await apiFetch(`/api/v1/workpool/${workpoolId}/batches`);
         if (!r.ok || cancelled) return;
         const data = await r.json();
         if (!cancelled) setBatches(data);

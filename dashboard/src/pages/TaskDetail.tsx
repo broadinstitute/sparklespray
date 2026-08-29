@@ -10,6 +10,7 @@ import EventLog from "../components/EventLog";
 import TabBar from "../components/TabBar";
 import { RangeRefreshBar, RefreshToggle } from "../components/RefreshControls";
 import type { RangeChange } from "../components/RefreshControls";
+import { apiFetch } from "../api/client";
 
 const MONO = "'IBM Plex Mono', monospace";
 const SANS = "'IBM Plex Sans', sans-serif";
@@ -73,7 +74,7 @@ export default function TaskDetail() {
 
   useEffect(() => {
     if (!taskId) return;
-    fetch(`/api/v1/task/${taskId}`)
+    apiFetch(`/api/v1/task/${taskId}`)
       .then((r) => r.json())
       .then((d) =>
         setTaskInfo({

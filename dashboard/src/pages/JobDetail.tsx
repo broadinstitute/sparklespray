@@ -19,6 +19,7 @@ import type {
   TaskStateUpdateEvent,
   TaskSummaryRecord,
 } from "../types";
+import { apiFetch } from "../api/client";
 
 const STATUS_COLORS: Record<TaskStatus, { bg: string; text: string }> = {
   pending: { bg: "#e3f2fd", text: "#1565c0" },
@@ -233,7 +234,7 @@ function useJobSummary(
     let cancelled = false;
     const poll = async () => {
       try {
-        const r = await fetch(`/api/v1/job/${jobId}/summary`);
+        const r = await apiFetch(`/api/v1/job/${jobId}/summary`);
         if (!r.ok || cancelled) return;
         const raw = await r.json();
         if (cancelled) return;
@@ -270,7 +271,7 @@ function useJobTaskRecords(jobId: string | undefined): TaskSummaryRecord[] {
     let cancelled = false;
     const poll = async () => {
       try {
-        const r = await fetch(`/api/v1/job/${jobId}/tasks`);
+        const r = await apiFetch(`/api/v1/job/${jobId}/tasks`);
         if (!r.ok || cancelled) return;
         const data: TaskSummaryRecord[] = await r.json();
         if (!cancelled) setRecords(data);
@@ -297,7 +298,7 @@ function useJobSummaryHistory(
     let cancelled = false;
     const poll = async () => {
       try {
-        const r = await fetch(`/api/v1/job/${jobId}/summary-history`);
+        const r = await apiFetch(`/api/v1/job/${jobId}/summary-history`);
         if (!r.ok || cancelled) return;
         const data = await r.json();
         if (!cancelled) {

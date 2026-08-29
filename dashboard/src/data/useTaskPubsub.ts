@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import type { ResourceDataPoint, VolumeDataPoint } from "../types";
+import { apiFetch } from "../api/client";
 
 interface SubscriptionCreds {
   subscriptionId: string;
@@ -140,7 +141,7 @@ export function useTaskPubsub(
 
     async function start() {
       try {
-        const res = await fetch(`/api/v1/task/${taskId}/subscription`, {
+        const res = await apiFetch(`/api/v1/task/${taskId}/subscription`, {
           method: "POST",
         });
         if (!res.ok || cancelledRef.current) {
@@ -228,7 +229,7 @@ export function useTaskPubsub(
       const c = credsRef.current;
       credsRef.current = null;
       if (c) {
-        fetch(
+        apiFetch(
           `/api/v1/task/${taskId}/subscription/${c.subscriptionId}/unsubscribe`,
           {
             method: "POST",

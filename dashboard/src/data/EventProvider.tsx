@@ -7,6 +7,7 @@ import {
   useState,
 } from "react";
 import type { AnyEvent, BackendJobSummary, JobDetail } from "../types";
+import { apiFetch } from "../api/client";
 
 const POLL_INTERVAL_MS = 5_000;
 const PAGE_LIMIT = 1000;
@@ -86,7 +87,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
           continue;
         }
         try {
-          const res = await fetch("/api/v1/jobs");
+          const res = await apiFetch("/api/v1/jobs");
           if (res.ok) {
             const rawData: Omit<
               BackendJobSummary,
@@ -99,7 +100,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
             for (const j of data) {
               if (!pendingJobFetchesRef.current.has(j.job_id)) {
                 pendingJobFetchesRef.current.add(j.job_id);
-                fetch(`/api/v1/job/${j.job_id}`)
+                apiFetch(`/api/v1/job/${j.job_id}`)
                   .then((r) => (r.ok ? r.json() : null))
                   .then(
                     (
@@ -172,7 +173,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
               const cursor = jobCursorRef.current[jobId];
               if (cursor) params.set("after", cursor);
 
-              const res = await fetch(`/api/v1/events?${params}`);
+              const res = await apiFetch(`/api/v1/events?${params}`);
               if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
               const data: {

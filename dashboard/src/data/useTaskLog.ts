@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import type { ResourceDataPoint, VolumeDataPoint } from "../types";
+import { apiFetch } from "../api/client";
 
 interface ResourceUsageUpdate {
   type: "metric_update";
@@ -110,7 +111,7 @@ export function useTaskLog(
       // metrics to stream, we just need to fetch what's already stored.
       if (isActive && !streamActivatedRef.current) {
         streamActivatedRef.current = true;
-        fetch(`/api/v1/task/${taskId}/stream`, {
+        apiFetch(`/api/v1/task/${taskId}/stream`, {
           method: "POST",
         }).catch(() => {});
       }
@@ -128,7 +129,7 @@ export function useTaskLog(
           });
           if (cursorRef.current) params.set("after", cursorRef.current);
 
-          const res = await fetch(`/api/v1/task/${taskId}/log?${params}`);
+          const res = await apiFetch(`/api/v1/task/${taskId}/log?${params}`);
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
           const data: {

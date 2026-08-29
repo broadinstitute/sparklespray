@@ -3,6 +3,7 @@ import { useParams, Link } from "react-router-dom";
 import type { WorkerRecord } from "./WorkPoolDetail";
 import { StatusBadge } from "./WorkPoolDetail";
 import { RefreshToggle } from "../components/RefreshControls";
+import { apiFetch } from "../api/client";
 
 const MONO = "'IBM Plex Mono', monospace";
 
@@ -47,7 +48,7 @@ function useWorker(
     let cancelled = false;
     const poll = async () => {
       try {
-        const r = await fetch(`/api/v1/worker/${workerId}`);
+        const r = await apiFetch(`/api/v1/worker/${workerId}`);
         if (!r.ok || cancelled) return;
         const data = await r.json();
         if (!cancelled) {

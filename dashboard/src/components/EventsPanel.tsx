@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { RawEvent } from "../types";
+import { apiFetch } from "../api/client";
 
 const MONO = "'IBM Plex Mono', monospace";
 const POLL_INTERVAL_MS = 5_000;
@@ -81,7 +82,7 @@ function useEventsInWindow(
           order: "desc",
           limit: String(FETCH_LIMIT),
         });
-        const res = await fetch(`/api/v1/events?${params}`);
+        const res = await apiFetch(`/api/v1/events?${params}`);
         if (!res.ok || cancelled) return;
         const data: { events: RawEvent[] } = await res.json();
         if (cancelled) return;
