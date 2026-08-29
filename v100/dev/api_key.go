@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
+	"time"
 
 	"cloud.google.com/go/firestore"
 	"github.com/google/uuid"
@@ -72,14 +74,65 @@ func userFromContext(ctx context.Context) string {
 	return user
 }
 
+// apiKeyCacheTTL is how long a successful API-key lookup is cached before
+// apiKeyAuthMiddleware will hit Firestore again for that key.
+const apiKeyCacheTTL = 10 * time.Minute
+
+// apiKeyCacheEntry is a cached (user, expiry) pair for a single API key.
+type apiKeyCacheEntry struct {
+	user      string
+	expiresAt time.Time
+}
+
+// apiKeyCache caches APIKeys Firestore lookups in memory so
+// apiKeyAuthMiddleware doesn't re-fetch the same key's user on every request.
+// Safe for concurrent use.
+type apiKeyCache struct {
+	mu      sync.Mutex
+	entries map[string]apiKeyCacheEntry
+}
+
+func newAPIKeyCache() *apiKeyCache {
+	return &apiKeyCache{entries: make(map[string]apiKeyCacheEntry)}
+}
+
+// lookup returns the user associated with key, reading through to Firestore
+// (and populating the cache) on a miss or expired entry.
+func (c *apiKeyCache) lookup(ctx context.Context, fs *firestore.Client, key string) (string, error) {
+	c.mu.Lock()
+	entry, ok := c.entries[key]
+	c.mu.Unlock()
+	if ok && time.Now().Before(entry.expiresAt) {
+		return entry.user, nil
+	}
+
+	snap, err := fs.Collection(APIKeyCollection).Doc(key).Get(ctx)
+	if err != nil {
+		return "", err
+	}
+	var rec APIKeyRecord
+	if err := snap.DataTo(&rec); err != nil {
+		return "", err
+	}
+
+	c.mu.Lock()
+	c.entries[key] = apiKeyCacheEntry{user: rec.User, expiresAt: time.Now().Add(apiKeyCacheTTL)}
+	c.mu.Unlock()
+
+	return rec.User, nil
+}
+
 // apiKeyAuthMiddleware requires every request under /api/ to carry a valid
 // "Authorization: Bearer <key>" header, where <key> is looked up in the
-// APIKeys Firestore collection. On success, the user the key was issued to is
-// stashed in the request context (retrievable via userFromContext) so
-// downstream handlers can attribute the request to a user (e.g. job
-// submission labels). Requests that fail to authenticate get a 403 response
-// matching openapi.yaml's Error schema.
+// APIKeys Firestore collection (cached in memory for apiKeyCacheTTL so
+// Firestore isn't hit on every request). On success, the user the key was
+// issued to is stashed in the request context (retrievable via
+// userFromContext) so downstream handlers can attribute the request to a user
+// (e.g. job submission labels). Requests that fail to authenticate get a 403
+// response matching openapi.yaml's Error schema.
 func apiKeyAuthMiddleware(fs *firestore.Client, next http.Handler) http.Handler {
+	cache := newAPIKeyCache()
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.HasPrefix(r.URL.Path, "/api/") {
 			next.ServeHTTP(w, r)
@@ -92,18 +145,13 @@ func apiKeyAuthMiddleware(fs *firestore.Client, next http.Handler) http.Handler 
 			return
 		}
 
-		snap, err := fs.Collection(APIKeyCollection).Doc(key).Get(r.Context())
+		user, err := cache.lookup(r.Context(), fs, key)
 		if err != nil {
 			writeError(w, http.StatusForbidden, "FORBIDDEN", "missing or invalid API key")
 			return
 		}
-		var rec APIKeyRecord
-		if err := snap.DataTo(&rec); err != nil {
-			writeError(w, http.StatusForbidden, "FORBIDDEN", "missing or invalid API key")
-			return
-		}
 
-		ctx := context.WithValue(r.Context(), userContextKey, rec.User)
+		ctx := context.WithValue(r.Context(), userContextKey, user)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
