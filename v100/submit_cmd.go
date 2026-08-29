@@ -165,6 +165,10 @@ func runSubmit(c *cli.Context) error {
 	if url == "" {
 		return fmt.Errorf("--url is required")
 	}
+	apiKey := os.Getenv("SPARKLES_API_KEY")
+	if apiKey == "" {
+		return fmt.Errorf("SPARKLES_API_KEY environment variable is required")
+	}
 	jobFile := c.Args().Get(0)
 	if jobFile == "" {
 		return fmt.Errorf("job json file path is required")
@@ -204,7 +208,14 @@ func runSubmit(c *cli.Context) error {
 	}
 
 	endpoint := strings.TrimRight(url, "/") + "/api/v1/job"
-	resp, err := http.Post(endpoint, "application/json", bytes.NewReader(body))
+	req, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("building request to %s: %w", endpoint, err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("posting job to %s: %w", endpoint, err)
 	}
