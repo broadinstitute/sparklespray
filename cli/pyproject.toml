@@ -21,10 +21,10 @@ google-cloud-batch = "^0.17.31"
 google-cloud-compute = "^1.30.0"
 
 [tool.poetry.dev-dependencies]
-pytest = "^7.1.2"
+pytest = "^9.0.3"
 
 [tool.poetry.group.dev.dependencies]
-pytest = "^7.2.0"
+pytest = ">=7.2,<10.0"
 grpcio-tools = "^1.51.1"
 pytest-cov = "^4.0.0"
 black = "^22.12.0"
