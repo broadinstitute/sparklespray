@@ -1810,9 +1810,28 @@ func runDevDashboardBackend(c *cli.Context) error {
 	}
 	defer psClient.Close()
 
+	handler, err := newDashboardHandler(ctx, project, fsClient, psClient)
+	if err != nil {
+		return err
+	}
+
+	log.Printf("dashboard-backend listening on %s", addr)
+	return http.ListenAndServe(addr, handler)
+}
+
+// newDashboardHandler builds the dashboard-backend's HTTP handler — the REST
+// API plus the embedded UI — against already-created clients, so it can be
+// served on its own (runDevDashboardBackend) or alongside the monitor in a
+// single process (runServe).
+func newDashboardHandler(
+	ctx context.Context,
+	project string,
+	fsClient *firestore.Client,
+	psClient *pubsub.Client,
+) (http.Handler, error) {
 	config, err := loadSparklesConfig(ctx, fsClient)
 	if err != nil {
-		return fmt.Errorf("loading sparkles config: %w", err)
+		return nil, fmt.Errorf("loading sparkles config: %w", err)
 	}
 
 	srv := &dashboardServer{
@@ -1851,6 +1870,5 @@ func runDevDashboardBackend(c *cli.Context) error {
 	// everything else, with an SPA fallback for client-side routes.
 	mux.Handle("/", webui.Handler())
 
-	log.Printf("dashboard-backend listening on %s", addr)
-	return http.ListenAndServe(addr, corsMiddleware(apiKeyAuthMiddleware(fsClient, mux)))
+	return corsMiddleware(apiKeyAuthMiddleware(fsClient, mux)), nil
 }

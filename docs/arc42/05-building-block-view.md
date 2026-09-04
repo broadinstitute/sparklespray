@@ -24,8 +24,9 @@ v100/
 
 ## 5.2 Level 2: `monitor/`
 
-The control-plane process (`sparkles monitor`). Owns everything under
-"autoscaling" and "cluster health."
+The autoscaling/watchdog half of the control plane, run by `sparkles serve`
+(or `sparkles dev monitor` on its own). Owns everything under "autoscaling"
+and "cluster health."
 
 | File                                            | Responsibility                                                                                                                                                                         |
 | ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

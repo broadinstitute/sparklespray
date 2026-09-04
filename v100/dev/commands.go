@@ -85,13 +85,24 @@ func Command() cli.Command {
 			},
 			{
 				Name:  "dashboard-backend",
-				Usage: "Start an HTTP dashboard backend implementing the API described in docs/design/dashboard-api.md",
+				Usage: "Start only the HTTP dashboard backend (see \"sparkles serve\" to run it together with the monitor)",
 				Flags: []cli.Flag{
 					cli.StringFlag{Name: "project"},
 					cli.StringFlag{Name: "db", Value: defaultDB},
 					cli.StringFlag{Name: "addr", Value: ":8080", Usage: "address to listen on"},
 				},
 				Action: runDevDashboardBackend,
+			},
+			{
+				Name:  "monitor",
+				Usage: "Start only the monitor (see \"sparkles serve\" to run it together with the dashboard backend)",
+				Flags: []cli.Flag{
+					cli.StringFlag{Name: "project", Usage: "GCP project ID (required)"},
+					cli.StringFlag{Name: "db", Value: defaultDB, Usage: "Firestore database"},
+					cli.BoolFlag{Name: "verbose, v", Usage: "log a message at the start of every poll"},
+					cli.IntFlag{Name: "linger", Value: 0, Usage: "exit after this many minutes with no active tasks (0 = run forever)"},
+				},
+				Action: runDevMonitor,
 			},
 			{
 				Name:  "create-topics",

@@ -1,14 +1,20 @@
-# Deploying the dashboard-backend (with UI) to a remote server
+# Deploying the control plane (dashboard-backend + monitor) to a remote server
 
 ## Overview
 
-`sparkles` is a single self-contained binary bundling the `worker`,
-`submit`, `kill`, and `monitor` commands plus a `dev` subcommand tree
-(`dev dashboard-backend`, `dev set-config`, `dev create-topics`, `dev add-api-key`, ...). As of this change, `dev dashboard-backend` also serves
-the built dashboard frontend directly: the API lives at `/api/v1/...` and the
-UI is served from `/` on the same port. That means the whole control plane —
-API + UI — is one binary and one process on one host; there is nothing
-separate to install or keep in sync.
+`sparkles` is a single self-contained binary bundling the `worker`, `submit`,
+and `kill` commands, the `serve` command, and a `dev` subcommand tree
+(`dev set-config`, `dev create-topics`, `dev add-api-key`, ...).
+
+`sparkles serve` is the deployment entry point: it runs the entire control
+plane in **one process** — the monitor (autoscaling and watchdog polls) plus
+the dashboard-backend, which serves both the REST API at `/api/v1/...` and the
+embedded dashboard UI at `/` on the same port. So one binary, one process, one
+port on one host; there is nothing separate to install or keep in sync.
+
+The two halves can still be run on their own for debugging —
+`sparkles dev monitor` and `sparkles dev dashboard-backend` — but production
+deployments should use `serve`.
 
 ## Prerequisites
 
@@ -77,11 +83,17 @@ so upgrades are: copy the new binary in, repoint the symlink, restart.
 ## Running it
 
 ```
-/opt/sparkles/sparkles dev dashboard-backend \
+/opt/sparkles/sparkles serve \
   --project <gcp-project> \
   --db <firestore-db, default "sparkles"> \
   --addr :8080
 ```
+
+This starts the monitor and the dashboard-backend together. `serve` shuts both
+down on `SIGINT`/`SIGTERM`, draining in-flight HTTP requests first, so
+`systemctl restart` and `systemctl stop` are clean. If either half fails
+fatally the process exits rather than limping along half-alive — let the
+service manager restart it (`Restart=on-failure` below).
 
 GCP auth is picked up from the environment (ADC); set
 `GOOGLE_APPLICATION_CREDENTIALS` if not using an attached service account.
@@ -122,12 +134,12 @@ alternative is an SA in `W` granted the roles above on `C`.
 
 ```ini
 [Unit]
-Description=Sparkles dashboard-backend
+Description=Sparkles control plane (monitor + dashboard-backend)
 After=network-online.target
 Wants=network-online.target
 
 [Service]
-ExecStart=/opt/sparkles/sparkles dev dashboard-backend --project my-gcp-project --db sparkles --addr :8080
+ExecStart=/opt/sparkles/sparkles serve --project my-gcp-project --db sparkles --addr :8080
 Environment=GOOGLE_APPLICATION_CREDENTIALS=/opt/sparkles/gcp-sa-key.json
 Restart=on-failure
 RestartSec=5

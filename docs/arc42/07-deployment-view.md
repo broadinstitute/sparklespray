@@ -58,18 +58,25 @@ frontend deployment in production.
 
 ## 7.4 Control-plane processes
 
-- **Monitor** (`sparkles monitor`) and **dashboard-backend**
-  (`sparkles dev dashboard-backend`) are meant to run as long-lived
-  processes. Nothing in `v100/` prescribes a specific hosting platform —
-  a small always-on VM or any container platform works.
-- `start.sh` shows the local-dev pattern, which is deliberately _not_ the
-  embedded-UI production path from §7.2: it uses `mprocs` to run
-  `sparkles monitor`, `sparkles dev dashboard-backend`, and a separate
-  `npm run dev` process for the `dashboard` frontend (Vite dev server,
-  proxying `/api` to the backend's port) concurrently against sample
-  config/workpool/job JSON files — this gives hot-reload on frontend edits,
-  which the embedded/production binary doesn't support (the UI is baked in
-  at `build-server.sh` time).
+- **`sparkles serve`** is the deployment entry point: one long-lived process
+  running both the monitor's polls and the dashboard-backend's HTTP server
+  (API + embedded UI) against shared Firestore/Pub-Sub clients. It shuts both
+  halves down on `SIGINT`/`SIGTERM`, draining in-flight requests first, and
+  exits if either half fails fatally rather than running half-alive — so a
+  service manager's restart policy is the recovery mechanism. Nothing in
+  `v100/` prescribes a hosting platform; a small always-on VM or any
+  container platform works.
+- The halves can still be run separately — **`sparkles dev monitor`** and
+  **`sparkles dev dashboard-backend`** — which is useful when restarting or
+  attaching to just one of them. They're under `dev` because running them
+  apart is a development convenience, not the deployment shape.
+- `start.sh` shows the local-dev pattern: `mprocs` running `sparkles serve`
+  alongside a separate `npm run dev` process for the `dashboard` frontend
+  (Vite dev server, proxying `/api` to the backend's port), against sample
+  config/workpool/job JSON files. The separate frontend process is
+  deliberately _not_ the embedded-UI production path from §7.2 — it gives
+  hot-reload on frontend edits, which the production binary can't (its UI is
+  baked in at `build-server.sh` time).
 
 ## 7.5 GCP resources used
 

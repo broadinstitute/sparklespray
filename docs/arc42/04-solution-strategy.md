@@ -1,9 +1,11 @@
 # 4. Solution Strategy
 
-- **One binary, three roles.** `worker`, `monitor`, and `dev dashboard-backend`
-  are all subcommands of the same static Go binary. This collapses the
-  Python implementation's separate install/venv story into "download one
-  file from GCS, `chmod +x`, run" for VM bootstrap.
+- **One binary, one deployed process.** The worker (`worker`) and the control
+  plane (`serve`, which runs the monitor and dashboard-backend together) are
+  subcommands of the same static Go binary. This collapses the Python
+  implementation's separate install/venv story into "download one file from
+  GCS, `chmod +x`, run" for VM bootstrap, and means a control-plane host runs
+  a single process rather than two that have to be supervised in lockstep.
 
 - **Firestore as the single source of truth, with a strict `status` vs.
   `state` split.** Primary entities (`Tasks`, `Workers`, `BatchAPIRequests`)

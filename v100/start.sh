@@ -16,13 +16,14 @@ SPARKLES="$(pwd)/bin/sparkles"
 
 cat > /tmp/mprocs-sparkles.yaml <<EOF
 procs:
-  monitor:
-    cmd: ["${SPARKLES}", "monitor", "--project", "${PROJECT}", "--verbose"]
+  # "serve" runs the monitor and the dashboard backend in one process, the
+  # same way it's deployed. Run "dev monitor" / "dev dashboard-backend"
+  # separately if you need to restart just one of them.
+  serve:
+    cmd: ["${SPARKLES}", "serve", "--project", "${PROJECT}", "--verbose"]
     log: "monitor.log"
   frontend:
     cmd: ["bash", "-c", "cd ../dashboard && npm run dev"]
-  backend:
-    cmd: ["${SPARKLES}", "dev", "dashboard-backend", "--project", "${PROJECT}"]
   shell:
     cmd: ["bash"]
     stop: "SIGKILL"

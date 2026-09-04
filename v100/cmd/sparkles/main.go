@@ -14,7 +14,7 @@ var Version = "dev"
 func main() {
 	app := v100.NewApp()
 	app.Version = Version
-	app.Commands = append(app.Commands, dev.Command())
+	app.Commands = append(app.Commands, dev.ServeCommand(), dev.Command())
 	if err := app.Run(os.Args); err != nil {
 		log.Fatal(err)
 	}

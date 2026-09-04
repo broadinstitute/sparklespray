@@ -4,13 +4,21 @@ Recorded as short ADR-style entries. Where a decision is only visible via
 a source comment or design doc rather than a formal ADR file, that's
 noted.
 
-## AD-1: Single static Go binary in three roles
+## AD-1: Single static Go binary; control plane is a single process
 
-**Decision**: `worker`, `monitor`, and the dashboard-backend are all
-subcommands of one binary, replacing the Python implementation's
-installable package + virtualenv setup.
+**Decision**: the worker and the control plane are subcommands of one binary,
+replacing the Python implementation's installable package + virtualenv setup.
+`sparkles serve` runs the monitor and the dashboard-backend together in one
+process against shared Firestore/Pub-Sub clients; each can still be run alone
+under `sparkles dev` for debugging.
 **Consequence**: worker VM bootstrap is "download one file from GCS,
-`chmod +x`, run" — no runtime install step on the VM at all.
+`chmod +x`, run" — no runtime install step on the VM at all — and a
+control-plane host supervises one unit instead of two that must be started,
+restarted, and upgraded together.
+**Tradeoff**: the two halves share a fate. A fatal error in either exits the
+process, so recovery depends on the service manager's restart policy rather
+than one half surviving the other. That's deliberate: a monitor-less backend
+accepts jobs nothing will ever provision for, which is worse than being down.
 
 ## AD-2: Workers claim tasks directly from Firestore, not via the monitor
 

@@ -7,19 +7,20 @@ without hand-managing VM lifecycle, retries, or preemption.
 
 The implementation lives entirely under [`v100/`](v100): a single static Go
 binary (`sparkles`) that acts as the CLI, the worker process that runs on
-each VM, the autoscaling/watchdog control-plane ("monitor"), and the
-dashboard-backend (which also serves the dashboard UI). It replaced an
-earlier Python CLI implementation, which has been removed from the repo.
+each VM, and the control plane — `sparkles serve`, which runs the
+autoscaling/watchdog monitor and the dashboard-backend (REST API + dashboard
+UI) together in one process. It replaced an earlier Python CLI
+implementation, which has been removed from the repo.
 
 ## Repository layout
 
 | Path                      | What it is                                                                                                                                                                                     |
 | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`v100/`](v100)           | The Go implementation: CLI (`submit`/`kill`), `worker`, `monitor`, and `dev` subcommands (including `dashboard-backend`). See `v100/*.go` and `v100/dev/`, `v100/monitor/`.                    |
+| [`v100/`](v100)           | The Go implementation: CLI (`submit`/`kill`), `worker`, `serve` (monitor + dashboard-backend), and `dev` subcommands. See `v100/*.go`, `v100/dev/`, `v100/monitor/`.                           |
 | [`dashboard/`](dashboard) | The React/Vite dashboard frontend. Built and embedded into the `sparkles` binary for production (see `v100/build-server.sh`); run standalone via `npm run dev` for local frontend development. |
 | [`docs/`](docs)           | All current documentation — architecture (arc42), design docs, and the remote-deployment guide. Start at [`docs/README.md`](docs/README.md).                                                   |
 | [`examples/`](examples)   | Pre-v100 example job specs. Predate the Go rewrite and aren't verified against it — treat as inspiration, not working examples.                                                                |
-| `start-dashboard-emu.sh`  | Runs the whole stack locally against Firestore/Pub-Sub emulators (monitor, dashboard-backend, dashboard dev server, a synthetic load generator) — no real GCP project needed.                  |
+| `start-dashboard-emu.sh`  | Runs the stack locally against Firestore/Pub-Sub emulators (dashboard-backend, dashboard dev server, and a synthetic load generator in place of a real monitor) — no GCP project needed.       |
 
 ## Building
 
@@ -28,7 +29,7 @@ cd v100
 go build -o bin/sparkles ./cmd/sparkles
 ```
 
-This produces one binary with `worker`, `submit`, `kill`, `monitor`, and
+This produces one binary with `worker`, `submit`, `kill`, `serve`, and
 `dev ...` subcommands (`./bin/sparkles --help`). To also embed the dashboard
 UI into the binary (needs Node/npm in addition to Go), use
 `v100/build-server.sh` instead — see
@@ -36,15 +37,16 @@ UI into the binary (needs Node/npm in addition to Go), use
 
 ## Running locally
 
-`./start-dashboard-emu.sh` builds the binary and brings up the monitor,
+`./start-dashboard-emu.sh` builds the binary and brings up the
 dashboard-backend, dashboard dev server, and a synthetic load generator
 against local Firestore/Pub-Sub emulators — no GCP project or credentials
-required. `v100/start.sh` is the equivalent for a real GCP project (reads
+required. `v100/start.sh` is the equivalent for a real GCP project: it runs
+`sparkles serve` plus the frontend dev server (reads
 `v100/sample-config.json`, requires `gcloud` auth).
 
 ## Submitting a job against a real GCP project
 
-Once a monitor and dashboard-backend are running against a real project
+Once `sparkles serve` is running against a real project
 (see [docs/deploying-dashboard-backend.md](docs/deploying-dashboard-backend.md)
 for the one-time `sparkles dev create-topics` / `set-config` / `add-api-key`
 setup):
