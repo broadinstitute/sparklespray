@@ -1866,7 +1866,7 @@ func newDashboardHandler(
 	// Unmatched /api/... paths get a JSON 404 rather than falling through to
 	// the "/" catch-all below and being served the dashboard UI's index.html.
 	mux.HandleFunc("/api/", handleAPINotFound)
-	// Serve the embedded dashboard UI (built by build-server.sh) for
+	// Serve the embedded dashboard UI (built by build.sh) for
 	// everything else, with an SPA fallback for client-side routes.
 	mux.Handle("/", webui.Handler())
 

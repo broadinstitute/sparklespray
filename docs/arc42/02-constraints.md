@@ -3,8 +3,7 @@
 ## 2.1 Technical Constraints
 
 - **Language/runtime**: Go (single static binary, `CGO_ENABLED=0`), built via
-  `build-linux-amd64.sh`. Chosen so worker VMs need no language runtime
-  installed.
+  `v100/build.sh`. Chosen so worker VMs need no language runtime installed.
 - **CLI framework**: [`github.com/urfave/cli`](https://github.com/urfave/cli)
   v1 — _not_ Cobra. (`cli_main.go`, `dev/commands.go`)
 - **GCP-only**: the system is built directly against GCP APIs (Batch,

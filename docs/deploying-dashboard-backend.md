@@ -18,7 +18,7 @@ deployments should use `serve`.
 
 ## Prerequisites
 
-- A Linux x86_64 host to run the binary on (matches `build-server.sh`'s
+- A Linux x86_64 host to run the binary on (matches `build.sh`'s
   `GOOS=linux GOARCH=amd64` build).
 - GCP credentials reachable from that host, with access to Firestore,
   Pub/Sub, and GCS in the target project — either a service account key file
@@ -48,7 +48,7 @@ From a machine with Node/npm and Go installed (it does not need to be the
 target server):
 
 ```
-./v100/build-server.sh <version>
+./v100/build.sh [version]
 ```
 
 This builds the frontend (`npm ci && npm run build` in `dashboard/`), copies
@@ -56,26 +56,27 @@ the build output into the binary's embedded assets, and cross-compiles a
 single static binary at:
 
 ```
-v100/bin/sparkles-server-linux-amd64-<version>
+v100/bin/sparkles-linux-amd64-<version>
 ```
 
-(This is a different artifact from `v100/build-linux-amd64.sh`'s
-`sparkles-linux-amd64-<version>`, which is the cheap worker-VM build that
-skips the frontend build entirely since worker VMs never serve the
-dashboard.)
+`version` defaults to `git describe --tags --always --dirty` if omitted. This
+is the same binary used to bootstrap worker VMs (see
+`v100/upload-worker-binary.sh`) — there's no separate "server" build; the
+frontend build is cheap enough that a worker VM downloading it costs nothing
+extra at boot.
 
 ## Copying the binary to the server
 
 ```
-gcloud compute scp v100/bin/sparkles-server-linux-amd64-<version> \
-  my-host:/opt/sparkles/sparkles-server-<version>
+gcloud compute scp v100/bin/sparkles-linux-amd64-<version> \
+  my-host:/opt/sparkles/sparkles-<version>
 ```
 
 (or plain `scp` if not using GCE). A suggested layout on the server:
 
 ```
-/opt/sparkles/sparkles-server-<version>   # versioned binaries, one per release
-/opt/sparkles/sparkles -> sparkles-server-<version>  # symlink to the active one
+/opt/sparkles/sparkles-<version>   # versioned binaries, one per release
+/opt/sparkles/sparkles -> sparkles-<version>  # symlink to the active one
 ```
 
 so upgrades are: copy the new binary in, repoint the symlink, restart.

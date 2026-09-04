@@ -14,26 +14,35 @@ implementation, which has been removed from the repo.
 
 ## Repository layout
 
-| Path                      | What it is                                                                                                                                                                                     |
-| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`v100/`](v100)           | The Go implementation: CLI (`submit`/`kill`), `worker`, `serve` (monitor + dashboard-backend), and `dev` subcommands. See `v100/*.go`, `v100/dev/`, `v100/monitor/`.                           |
-| [`dashboard/`](dashboard) | The React/Vite dashboard frontend. Built and embedded into the `sparkles` binary for production (see `v100/build-server.sh`); run standalone via `npm run dev` for local frontend development. |
-| [`docs/`](docs)           | All current documentation — architecture (arc42), design docs, and the remote-deployment guide. Start at [`docs/README.md`](docs/README.md).                                                   |
-| [`examples/`](examples)   | Pre-v100 example job specs. Predate the Go rewrite and aren't verified against it — treat as inspiration, not working examples.                                                                |
-| `start-dashboard-emu.sh`  | Runs the stack locally against Firestore/Pub-Sub emulators (dashboard-backend, dashboard dev server, and a synthetic load generator in place of a real monitor) — no GCP project needed.       |
+| Path                      | What it is                                                                                                                                                                               |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`v100/`](v100)           | The Go implementation: CLI (`submit`/`kill`), `worker`, `serve` (monitor + dashboard-backend), and `dev` subcommands. See `v100/*.go`, `v100/dev/`, `v100/monitor/`.                     |
+| [`dashboard/`](dashboard) | The React/Vite dashboard frontend. Built and embedded into the `sparkles` binary (see `v100/build.sh`); run standalone via `npm run dev` for local frontend development.                 |
+| [`docs/`](docs)           | All current documentation — architecture (arc42), design docs, and the remote-deployment guide. Start at [`docs/README.md`](docs/README.md).                                             |
+| [`examples/`](examples)   | Pre-v100 example job specs. Predate the Go rewrite and aren't verified against it — treat as inspiration, not working examples.                                                          |
+| `start-dashboard-emu.sh`  | Runs the stack locally against Firestore/Pub-Sub emulators (dashboard-backend, dashboard dev server, and a synthetic load generator in place of a real monitor) — no GCP project needed. |
 
 ## Building
 
 ```
-cd v100
-go build -o bin/sparkles ./cmd/sparkles
+./v100/build.sh
 ```
 
-This produces one binary with `worker`, `submit`, `kill`, `serve`, and
-`dev ...` subcommands (`./bin/sparkles --help`). To also embed the dashboard
-UI into the binary (needs Node/npm in addition to Go), use
-`v100/build-server.sh` instead — see
-[docs/deploying-dashboard-backend.md](docs/deploying-dashboard-backend.md).
+Produces one self-contained binary — `v100/bin/sparkles-linux-amd64-<version>`
+— with `worker`, `submit`, `kill`, `serve`, and `dev ...` subcommands
+(`./bin/sparkles --help`), with the dashboard UI embedded. The same binary
+bootstraps worker VMs and is deployed as the control plane; needs Node/npm in
+addition to Go, since it builds the frontend. `<version>` defaults to
+`git describe --tags --always --dirty`, or pass one explicitly:
+`./v100/build.sh v1.2.3`.
+
+For quick local iteration on Go code only (skips the frontend build, and
+serves a placeholder page instead of the real UI at `/`), plain
+`go build -o bin/sparkles ./cmd/sparkles` from `v100/` still works.
+
+See [docs/deploying-dashboard-backend.md](docs/deploying-dashboard-backend.md)
+for deploying the built binary, and `v100/upload-worker-binary.sh` for
+publishing it to the GCS path worker VMs bootstrap from.
 
 ## Running locally
 

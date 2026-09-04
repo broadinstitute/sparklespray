@@ -5,26 +5,38 @@
 There is **no Dockerfile anywhere in the repository** and no container
 image is built for worker or monitor. Instead:
 
-- `build-linux-amd64.sh` cross-compiles a single static binary
-  (`CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build ./cmd/sparkles`, version
-  stamped via `-ldflags`) and uploads it directly to a GCS path, e.g.
-  `gs://sparkles-test-0625/bin/sparkles-linux-amd64-dev`.
+- `v100/build.sh [version]` cross-compiles a single static binary
+  (`CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build ./cmd/sparkles`) to
+  `v100/bin/sparkles-linux-amd64-<version>`, version-stamped via `-ldflags`.
+  `version` defaults to `git describe --tags --always --dirty` if not given.
+  The same binary is used both to bootstrap worker VMs and to run the
+  control plane (§7.4) — see §7.2 for what else this script does.
+- `v100/upload-worker-binary.sh [version] [gcs-path]` runs `build.sh` and
+  then `gcloud storage cp`s the result to the fixed GCS path worker VMs
+  bootstrap from (`sparklesWorkerGCSPath` in `SparklesConfig`/workpool
+  specs — see §7.3), e.g. `gs://sparkles-test-0625/bin/sparkles-linux-amd64-dev`.
+  That path is a stable "latest" location the upload overwrites, not
+  versioned per artifact — VMs always pull whatever was most recently
+  uploaded there.
 
 ## 7.2 Dashboard UI embedding
 
 The dashboard frontend (`dashboard/`, a separate React/Vite/npm project) is
 built and embedded directly into the `sparkles` binary, so the whole control
 plane — REST API and UI — is one process on one port; there is no separate
-frontend deployment in production.
+frontend deployment in production. Worker VMs never serve HTTP and thus never
+use the embedded UI, but building it into every artifact (rather than
+maintaining a second, UI-less binary) keeps there being exactly one build
+script and one artifact to reason about — the frontend build is cheap enough
+that a worker VM downloading the extra bytes at boot costs nothing material.
 
-- `v100/build-server.sh` runs `npm ci && npm run build` in `dashboard/`,
-  copies the resulting `dashboard/dist/*` into `v100/dev/webui/dist/`, then
-  cross-compiles `./cmd/sparkles` (same target as `build-linux-amd64.sh`,
-  `linux/amd64`) into a distinctly-named `sparkles-server-linux-amd64-<version>`
-  artifact. `v100/dev/webui/webui.go` `//go:embed all:dist`s that directory
-  into the binary; a tracked placeholder `index.html` keeps `go build ./...`
-  compiling on a fresh checkout with no Node/npm step (`go:embed` requires at
-  least one matched file).
+- `v100/build.sh` runs `npm ci && npm run build` in `dashboard/`, copies the
+  resulting `dashboard/dist/*` into `v100/dev/webui/dist/`, then
+  cross-compiles `./cmd/sparkles`. `v100/dev/webui/webui.go` `//go:embed all:dist`s that directory into the binary; a tracked placeholder
+  `index.html` keeps `go build ./...` compiling on a fresh checkout with no
+  Node/npm step (`go:embed` requires at least one matched file), at the cost
+  of a plain `go build` (skipping `build.sh`) serving that placeholder
+  instead of the real UI.
 - At runtime, `dashboard_backend.go`'s `http.ServeMux` registers
   `webui.Handler()` on `"/"` (serving embedded files, with an SPA fallback to
   `index.html` for react-router client-side routes) and an explicit
@@ -76,7 +88,7 @@ frontend deployment in production.
   config/workpool/job JSON files. The separate frontend process is
   deliberately _not_ the embedded-UI production path from §7.2 — it gives
   hot-reload on frontend edits, which the production binary can't (its UI is
-  baked in at `build-server.sh` time).
+  baked in at `build.sh` time).
 
 ## 7.5 GCP resources used
 

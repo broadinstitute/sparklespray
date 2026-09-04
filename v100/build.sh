@@ -1,15 +1,20 @@
 #!/usr/bin/env bash
-# Builds a self-contained "sparkles" binary with the dashboard frontend
-# embedded, for deploying the control plane (monitor + dashboard-backend +
-# UI) to a remote server as a single artifact. See
-# v100/docs/deploying-dashboard-backend.md.
+# Builds the "sparkles" binary: worker + submit/kill CLI + serve (monitor +
+# dashboard-backend, with the dashboard UI embedded) + dev subcommands, all
+# in one self-contained linux/amd64 executable. The same binary bootstraps
+# worker VMs (see monitor/batch_api.go) and is deployed as the control plane
+# via "sparkles serve" -- see docs/deploying-dashboard-backend.md.
+#
+# Usage: build.sh [version]
+#   version defaults to `git describe --tags --always --dirty`.
 set -euo pipefail
 
-VERSION=${1:-dev}
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DASHBOARD_DIR="${REPO_ROOT}/dashboard"
 EMBED_DIST="${REPO_ROOT}/v100/dev/webui/dist"
-OUTPUT="${REPO_ROOT}/v100/bin/sparkles-server-linux-amd64-${VERSION}"
+
+VERSION=${1:-$(git -C "${REPO_ROOT}" describe --tags --always --dirty)}
+OUTPUT="${REPO_ROOT}/v100/bin/sparkles-linux-amd64-${VERSION}"
 
 echo "Building frontend..."
 ( cd "${DASHBOARD_DIR}" && npm ci && npm run build )

@@ -1,5 +1,5 @@
 // Package webui embeds the built dashboard frontend (dashboard/dist, copied
-// in by build-server.sh before compilation) and serves it as a static
+// in by build.sh before compilation) and serves it as a static
 // site with an SPA fallback, so the dashboard-backend binary can serve the
 // UI itself without a separate web server or deploy step.
 package webui

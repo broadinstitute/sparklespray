@@ -46,7 +46,7 @@ dependencies, and can be run apart via `sparkles dev monitor` /
 Scope of this documentation: the `v100/` Go module. The `dashboard/`
 frontend's _source_ (a separate Node/npm project) is out of scope as a
 codebase, but its _build output_ is embedded into the `sparkles` binary at
-build time (`v100/build-server.sh` → `v100/dev/webui`) and served by
+build time (`v100/build.sh` → `v100/dev/webui`) and served by
 `dashboard-backend`, so at runtime there is no separate frontend
 deployment to treat as an external system. `v100/` is the only active
 implementation in the repository — the Python CLI it replaced has been
