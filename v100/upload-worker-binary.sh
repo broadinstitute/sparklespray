@@ -13,7 +13,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 VERSION=${1:-$(git -C "${REPO_ROOT}" describe --tags --always --dirty)}
-GCS_PATH=${2:-${GCS_PATH:-gs://sparkles-test-0625/bin/sparkles-linux-amd64-dev}}
+GCS_PATH=${2:-${GCS_PATH:-gs://sparkles-test-0625/bin/sparkles-linux-amd64-${VERSION}}}
 
 "${REPO_ROOT}/build.sh" "${VERSION}"
 
