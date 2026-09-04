@@ -24,11 +24,11 @@ jobs:
         with:
           go-version-file: v100/go.mod
 
-      - name: Set up Java (required by the Firestore/Pub-Sub emulators)
+      - name: Set up Java (Firestore emulator requires a Java 21+ JRE)
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: "21"
 
       # The gcloud CLI preinstalled on GitHub-hosted runners is package-manager
       # installed and can't self-update components; install a component-manager
