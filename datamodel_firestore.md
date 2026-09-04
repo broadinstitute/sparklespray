@@ -1,8 +1,14 @@
 # Sparklespray: Firestore Data Model
 
+> **Historical:** this document describes the pre-v100 (`SparklesV6`) design.
+> The Python CLI (`cli/sparklespray/`), `simulator/main.go`, and
+> `dashboard-backend/main.go` referenced below have all since been deleted
+> and superseded by the Go rewrite under `v100/`. See `v100/datamodel.md` and
+> `v100/docs/arc42/` for the current Firestore data model.
+
 All collections live in a single GCP project and use the `SparklesV6` prefix for versioning.
 
-**Services referenced:**
+**Services referenced (historical, since deleted/replaced by `v100/`):**
 
 - **CLI** — Python CLI (`cli/sparklespray/`)
 - **Worker** — Go worker binary (`src/sparklesworker/`) and its simulator (`simulator/main.go`)

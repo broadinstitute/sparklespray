@@ -1,8 +1,14 @@
 # Sparklespray: Pub/Sub Data Model
 
+> **Historical:** this document describes the pre-v100 (`SparklesV6`) design.
+> The Python CLI (`cli/sparklespray/`), `simulator/main.go`, and
+> `dashboard-backend/main.go` referenced below have all since been deleted
+> and superseded by the Go rewrite under `v100/`. See `v100/datamodel.md` and
+> `v100/docs/arc42/` for the current Pub/Sub topics and data model.
+
 Sparklespray uses three Pub/Sub topics. All topic names are versioned with the `v6` suffix to allow in-place schema migrations.
 
-**Services referenced:**
+**Services referenced (historical, since deleted/replaced by `v100/`):**
 
 - **CLI** — Python CLI (`cli/sparklespray/`)
 - **Worker** — Go worker binary (`src/sparklesworker/`) and its simulator (`simulator/main.go`)
