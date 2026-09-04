@@ -85,7 +85,7 @@ func Command() cli.Command {
 			},
 			{
 				Name:  "dashboard-backend",
-				Usage: "Start an HTTP dashboard backend implementing the API described in dashboard-api.md",
+				Usage: "Start an HTTP dashboard backend implementing the API described in docs/design/dashboard-api.md",
 				Flags: []cli.Flag{
 					cli.StringFlag{Name: "project"},
 					cli.StringFlag{Name: "db", Value: defaultDB},

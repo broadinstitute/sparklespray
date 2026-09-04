@@ -13,7 +13,7 @@ Three deliverables:
    by container lifecycle, not manual control.
 2. **`RemoteBatchAPIClient`** — a Go struct implementing `BatchAPIClient` that proxies calls to
    the emulator over HTTP.
-3. **Wiring** — check `SPARKLES_BATCH_API_EMULATOR` in `runAutoscale`; if set, use the remote
+3. **Wiring** — check `SPARKLES_BATCH_API_EMULATOR` in `runMonitor`; if set, use the remote
    client instead of the real GCP one.
 
 ---
@@ -30,7 +30,7 @@ sparkles dev batchapi-emulator --addr :8742 --queueTime 0s
 
 This keeps everything in one binary, avoids separate build targets, and groups it with the
 existing `sparkles dev submit` subcommand under `dev`.  
-Source: `v100/autoscaler/emulator/server.go` (package `emulator`), wired into
+Source: `v100/monitor/emulator/server.go` (package `emulator`), wired into
 `v100/cli_main.go`.
 
 ### In-memory state
@@ -131,7 +131,7 @@ emulator is killed.
 
 ## 2. `RemoteBatchAPIClient`
 
-**File:** `v100/autoscaler/remote_batch_client.go`  
+**File:** `v100/monitor/remote_batch_client.go`  
 **Package:** `autoscaler`
 
 ```go
@@ -161,9 +161,9 @@ backends.
 
 ---
 
-## 3. Wiring into `runAutoscale`
+## 3. Wiring into `runMonitor`
 
-In `v100/cli_main.go`, `runAutoscale` currently unconditionally creates a `GCPBatchAPIClient`.
+In `v100/cli_main.go`, `runMonitor` currently unconditionally creates a `GCPBatchAPIClient`.
 Change it to:
 
 ```go
@@ -184,11 +184,11 @@ No other changes to the autoscaler core.
 
 ## File summary
 
-| File                                     | Role                                                                |
-| ---------------------------------------- | ------------------------------------------------------------------- |
-| `v100/autoscaler/emulator/server.go`     | HTTP emulator server (new)                                          |
-| `v100/autoscaler/remote_batch_client.go` | `RemoteBatchAPIClient` impl (new)                                   |
-| `v100/cli_main.go`                       | Wire env-var switch + add `dev batchapi-emulator` subcommand (edit) |
+| File                                  | Role                                                                |
+| ------------------------------------- | ------------------------------------------------------------------- |
+| `v100/monitor/emulator/server.go`     | HTTP emulator server (new)                                          |
+| `v100/monitor/remote_batch_client.go` | `RemoteBatchAPIClient` impl (new)                                   |
+| `v100/cli_main.go`                    | Wire env-var switch + add `dev batchapi-emulator` subcommand (edit) |
 
 ---
 

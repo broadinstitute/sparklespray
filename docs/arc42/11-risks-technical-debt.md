@@ -26,12 +26,13 @@ current code before acting on any of them.
   names/Firestore tags), with no compiler-enforced consistency. A future
   field addition/rename in one without the other would silently
   desynchronize Firestore reads/writes between the two packages.
-- **Design docs vs. implementation drift.** `autoscale-imp.md` still
-  refers to a `v100/autoscaler/` package; the actual package was renamed
-  to `v100/monitor/` (`484ff16 Rename autoscaler → monitor`). Anyone
-  reading `autoscale-imp.md` for file locations will be misled — it's
-  useful for design intent only. Treat `cluster-health.md` and
-  `datamodel.md` as the implementation-accurate docs.
+- **Design docs vs. implementation drift.** An earlier planning doc
+  (`autoscale-imp.md`) referred to a `v100/autoscaler/` package that was
+  renamed to `v100/monitor/` (`484ff16 Rename autoscaler → monitor`) and
+  was deleted outright once superseded, rather than kept around to mislead
+  readers about file locations. Treat `docs/design/cluster-health.md` and
+  `docs/design/datamodel.md` as the implementation-accurate docs; watch for
+  the same kind of drift in the remaining design docs as `v100/` evolves.
 - **"Shuffle up to 100 and race" task claiming (AD-2)** may become a
   contention/throughput bottleneck as worker-count-per-job scales up;
   no load-test data is cited in the design docs establishing where this

@@ -1,6 +1,6 @@
 # Sparklespray Dashboard API
 
-This document specifies the REST API for the Sparklespray v100 dashboard backend. It is adapted from the original `dashboard-backend` implementation, with names and structure updated to match the v100 data model described in `v100/datamodel.md`.
+This document specifies the REST API for the Sparklespray v100 dashboard backend. It is adapted from the original `dashboard-backend` implementation, with names and structure updated to match the v100 data model described in `docs/design/datamodel.md`.
 
 ---
 

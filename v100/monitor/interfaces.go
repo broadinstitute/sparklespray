@@ -49,7 +49,7 @@ const (
 	BatchJobStatusDeleted BatchJobStatus = "DELETED"
 )
 
-// TaskStatus mirrors the active task states from datamodel.md.
+// TaskStatus mirrors the active task states from docs/design/datamodel.md.
 type TaskStatus string
 
 const (

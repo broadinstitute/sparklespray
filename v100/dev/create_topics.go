@@ -18,7 +18,7 @@ type topicSpec struct {
 }
 
 // sparklesTopics is the canonical list of Pub/Sub topics and subscriptions
-// required by sparklespray, as described in datamodel.md.
+// required by sparklespray, as described in docs/design/datamodel.md.
 var sparklesTopics = []topicSpec{
 	{
 		topic:         "sparkles-events",
