@@ -18,11 +18,34 @@ jobs:
         working-directory: v100
     steps:
       - uses: actions/checkout@v4
+
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version-file: v100/go.mod
+
+      - name: Set up Java (required by the Firestore/Pub-Sub emulators)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      # The gcloud CLI preinstalled on GitHub-hosted runners is package-manager
+      # installed and can't self-update components; install a component-manager
+      # -compatible copy so `gcloud components install` works below.
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Install Firestore/Pub-Sub emulator components
+        run: gcloud components install beta cloud-firestore-emulator pubsub-emulator --quiet
+
+      - name: Install fake-gcs-server (GCS emulator)
+        run: |
+          go install github.com/fsouza/fake-gcs-server@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
       - name: Build
         run: go build ./...
+
       - name: Test
         run: go test ./...
