@@ -74,7 +74,7 @@ func (a *Monitor) reconcileBatch(ctx context.Context, ws *WorkPoolWithState, bat
 	}
 
 	if apiStatus == BatchJobStatusFailed {
-		if err := a.batchAPI.PrintBatchDebuggingInfo(ctx, batch.JobID); err != nil {
+		if err := a.batchAPI.PrintBatchDebuggingInfo(ctx, batch.ProjectID, batch.JobID); err != nil {
 			log.Printf("cluster reconciler: print batch debugging info for %s: %v", batch.JobID, err)
 		}
 		if err := a.batchAPI.TerminateJob(ctx, batch.JobID); err != nil {
@@ -93,7 +93,7 @@ func (a *Monitor) reconcileBatch(ctx context.Context, ws *WorkPoolWithState, bat
 }
 
 func (a *Monitor) reconcileVMs(ctx context.Context, ws *WorkPoolWithState, batch *BatchAPIRequest, apiStatus BatchJobStatus, now time.Time) error {
-	gcpVMs, err := a.batchAPI.ListRunningVMs(ctx, "sparkles-worker-batch", batch.BatchID, ws.Pool.Zones)
+	gcpVMs, err := a.batchAPI.ListRunningVMs(ctx, batch.ProjectID, "sparkles-worker-batch", batch.BatchID, ws.Pool.Zones)
 	if err != nil {
 		return fmt.Errorf("list running VMs: %w", err)
 	}
@@ -139,7 +139,7 @@ func (a *Monitor) reconcileVMs(ctx context.Context, ws *WorkPoolWithState, batch
 		batchDirty := false
 		for instanceName, vmInfo := range gcpVMs {
 			if !registeredInstances[instanceName] {
-				if err := a.batchAPI.TerminateVM(ctx, vmInfo.Zone, instanceName); err != nil {
+				if err := a.batchAPI.TerminateVM(ctx, batch.ProjectID, vmInfo.Zone, instanceName); err != nil {
 					log.Printf("cluster reconciler: terminate VM %s: %v", instanceName, err)
 				}
 				batch.Unhealthy = true
@@ -182,7 +182,7 @@ func (a *Monitor) reconcileVMs(ctx context.Context, ws *WorkPoolWithState, batch
 
 	batchDirty := false
 	for _, z := range zombies {
-		if err := a.batchAPI.TerminateVM(ctx, gcpVMs[z.InstanceName].Zone, z.InstanceName); err != nil {
+		if err := a.batchAPI.TerminateVM(ctx, batch.ProjectID, gcpVMs[z.InstanceName].Zone, z.InstanceName); err != nil {
 			log.Printf("cluster reconciler: terminate zombie VM %s: %v", z.InstanceName, err)
 		}
 		batch.Unhealthy = true

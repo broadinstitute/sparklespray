@@ -36,6 +36,7 @@ const (
 // in WorkPoolSummary, not here.
 type firestoreWorkPool struct {
 	WorkpoolID            string          `firestore:"workpool_id"`
+	ProjectID             string          `firestore:"project_id"`
 	MachineType           string          `firestore:"machine_type"`
 	Region                string          `firestore:"region"`
 	Zones                 []string        `firestore:"zones"`
@@ -68,6 +69,7 @@ func secToDur(secs int, defaultDur time.Duration) time.Duration {
 func toWorkPool(f *firestoreWorkPool) *WorkPool {
 	return &WorkPool{
 		WorkpoolID:                   f.WorkpoolID,
+		ProjectID:                    f.ProjectID,
 		Region:                       f.Region,
 		Zones:                        f.Zones,
 		MachineType:                  f.MachineType,
@@ -205,6 +207,7 @@ func (s *FirestoreWorkPoolStore) loadAllSummaryStates(ctx context.Context) (map[
 type firestoreBatchRequest struct {
 	BatchID               string     `firestore:"batch_id"`
 	JobID                 string     `firestore:"job_id"`
+	ProjectID             string     `firestore:"project_id"`
 	WorkpoolID            string     `firestore:"workpool_id"`
 	ExpectedVMCount       int        `firestore:"expected_vm_count"`
 	Preemptible           bool       `firestore:"preemptible"`
@@ -222,6 +225,7 @@ func toBatchRequest(f *firestoreBatchRequest) *BatchAPIRequest {
 	return &BatchAPIRequest{
 		BatchID:               f.BatchID,
 		JobID:                 f.JobID,
+		ProjectID:             f.ProjectID,
 		WorkpoolID:            f.WorkpoolID,
 		ExpectedVMCount:       f.ExpectedVMCount,
 		Preemptible:           f.Preemptible,
@@ -240,6 +244,7 @@ func fromBatchRequest(b *BatchAPIRequest) *firestoreBatchRequest {
 	return &firestoreBatchRequest{
 		BatchID:               b.BatchID,
 		JobID:                 b.JobID,
+		ProjectID:             b.ProjectID,
 		WorkpoolID:            b.WorkpoolID,
 		ExpectedVMCount:       b.ExpectedVMCount,
 		Preemptible:           b.Preemptible,

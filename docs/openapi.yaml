@@ -3,7 +3,7 @@ info:
   title: Sparkles
   description: |-
     Sparkles
-  version: 1.0.12
+  version: 1.0.13
 security:
   - bearerAuth: []
 paths:
@@ -47,9 +47,11 @@ components:
     SubmitJobBody:
       type: object
       description: |-
-        A job submission. Corresponds to the `JobSpec` struct used by the
-        `sparkles dev submit` CLI command (v100/dev/submit.go), combined with
-        the `WorkpoolSpec` it currently reads from a separate file.
+        A job submission. Corresponds to `submitJobRequest`
+        (v100/dev/dashboard_backend.go). The `sparkles submit` CLI
+        (v100/submit_cmd.go) reads a JSON file in this shape - with `workpool`
+        inline, see v100/sample-job.json - optionally expands its `task_template`
+        against a CSV of parameters, and POSTs the result unchanged.
       required:
         - tasks
         - workpool
@@ -72,8 +74,8 @@ components:
           type: array
           description: |-
             Files to localize onto every task in this job, in addition to any files listed
-            on the individual task. Corresponds to `JobSpec.FilesToLocalize` in
-            v100/dev/submit.go, which today is copied onto every generated `Task` -
+            on the individual task. Corresponds to `submitJobRequest.FilesToLocalize`
+            in v100/dev/dashboard_backend.go, which is copied onto every generated `Task` -
             there is currently no way to give a subset of tasks different job-level files.
           items:
             $ref: "#/components/schemas/FileToLocalize"
@@ -109,8 +111,8 @@ components:
       type: object
       description: |-
         Describes the pool of worker VMs that will execute this job's tasks.
-        Corresponds to Go's `WorkpoolSpec` (v100/dev/submit.go), which is persisted
-        as a `WorkPool` record (v100/task_queue.go).
+        Corresponds to Go's `WorkpoolSpec` (v100/dev/workpool_spec.go), which is
+        persisted as a `WorkPool` record (v100/task_queue.go).
       required:
         - machineType
       properties:
@@ -122,8 +124,30 @@ components:
             with a lowercase letter, and contain only lowercase letters, numbers, and
             '-' (enforced server-side by `workpoolIDRe` in v100/dev/dashboard_backend.go).
             If omitted, the server derives one deterministically by hashing the
-            canonical JSON of this spec (`resolveWorkpoolID` in v100/dev/submit.go), so
-            identical workpool specs resolve to the same, reusable workpool.
+            canonical JSON of this spec (`resolveWorkpoolID` in
+            v100/dev/workpool_spec.go), so identical workpool specs resolve to the
+            same, reusable workpool. Every field of this spec is folded into that
+            hash, so changing any of them (including `projectID`) yields a
+            different workpool.
+        projectID:
+          type: string
+          pattern: "^[a-z][a-z0-9-]{4,28}[a-z0-9]$"
+          description: |-
+            Optional GCP project to create this workpool's Batch jobs - and therefore
+            its worker VMs - in. If omitted, the project the dashboard-backend/monitor
+            was started with is used.
+
+            This only moves the *workload*: the control plane (Firestore, Pub/Sub, the
+            job/task records) always stays in the backend's own project, the worker
+            binary is still launched with the backend's project so it can claim tasks,
+            and the Batch job's state-change notifications are still published to the
+            backend project's `batch-api-notifications` topic.
+
+            Only the format is validated (`projectIDRe` in
+            v100/dev/dashboard_backend.go); whether jobs can actually be created there
+            depends on the backend's service account having permission in that
+            project. See docs/deploying-dashboard-backend.md for the required IAM
+            grants.
         machineType:
           type: string
           description: GCE machine type to use for worker VMs.
@@ -182,10 +206,9 @@ components:
           type: number
           description: |-
             Seconds an idle worker VM should linger before shutting down, so it can pick
-            up more work without a fresh VM boot. NOTE: as of this writing this field is
-            read from the CLI's workpool spec file but is not wired through to the
-            persisted `WorkPool` record (v100.WorkPool has no corresponding field) -
-            it is currently a no-op server-side.
+            up more work without a fresh VM boot. Persisted as
+            `WorkPool.LingerTimeSec` (firestore field `linger_time_sec`) and forwarded
+            to provisioned workers as `--linger`.
 
         # mutable fields - can be adjusted on an existing, already-running workpool
         maxWorkerCount:
@@ -274,8 +297,9 @@ components:
     Task:
       type: object
       description: |-
-        A single unit of work within a job. Corresponds to Go's `JobSpecTask`
-        (v100/dev/submit.go) on submission, persisted as `Task` (v100/task_queue.go).
+        A single unit of work within a job. Corresponds to Go's `submitTaskRequest`
+        (v100/dev/dashboard_backend.go) on submission, persisted as `Task`
+        (v100/task_queue.go).
       required:
         - image
         - command

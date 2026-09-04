@@ -27,11 +27,26 @@ const (
 
 // GCPBatchAPIClient implements BatchAPIClient using the GCP Batch API and
 // Compute Engine API.
+//
+// project is the control-plane project the monitor was started with. It is
+// used both as the default for workload operations (see resolveProject) and,
+// unconditionally, for the two things that must stay in the control plane
+// regardless of where a workpool's VMs run: the Batch job's Pub/Sub
+// notification topic and the --project the worker binary is launched with.
 type GCPBatchAPIClient struct {
 	project    string
 	batchSvc   *batch.Service
 	computeSvc *compute.Service
 	loggingSvc *loggingv2.Service
+}
+
+// resolveProject returns the project a workload operation should target:
+// projectID when a workpool overrides it, otherwise the client's own project.
+func (c *GCPBatchAPIClient) resolveProject(projectID string) string {
+	if projectID != "" {
+		return projectID
+	}
+	return c.project
 }
 
 func NewGCPBatchAPIClient(ctx context.Context, project string, opts ...option.ClientOption) (*GCPBatchAPIClient, error) {
@@ -144,6 +159,10 @@ func (c *GCPBatchAPIClient) CreateJob(ctx context.Context, spec *WorkerJobSpec) 
 		})
 	}
 
+	// --project is deliberately c.project, not spec.ProjectID: it's the project
+	// the worker uses for Firestore and Pub/Sub to claim tasks and report
+	// state, which stays in the control plane even when the VM itself runs
+	// in another project.
 	workerArgs := fmt.Sprintf("--stream --batch %s --project %s --db %s --workpool %s --work-dir %s --resources %s --linger %d", spec.BatchID, c.project, spec.DBName, spec.WorkpoolID, spec.RootDir, formatResources(spec.Resources), spec.LingerTime/time.Second) +
 		formatBindMountArgs(spec.RootDir, spec.EmptyVolumes)
 	log.Printf("worker args: %s", workerArgs)
@@ -199,6 +218,11 @@ func (c *GCPBatchAPIClient) CreateJob(ctx context.Context, spec *WorkerJobSpec) 
 		LogsPolicy: &batch.LogsPolicy{
 			Destination: "CLOUD_LOGGING",
 		},
+		// These topics are deliberately in c.project, not spec.ProjectID: this
+		// is the topic the monitor subscribes to (see NewGCPPubSubReceiver), so
+		// pointing it at a workload project would mean never hearing about
+		// state changes. Cross-project delivery requires granting the workload
+		// project's Batch service agent publish rights on this topic.
 		Notifications: []*batch.JobNotification{
 			{
 				PubsubTopic: fmt.Sprintf("projects/%s/topics/%s", c.project, pubsubNotificationTopic),
@@ -215,7 +239,7 @@ func (c *GCPBatchAPIClient) CreateJob(ctx context.Context, spec *WorkerJobSpec) 
 		},
 	}
 
-	parent := fmt.Sprintf("projects/%s/locations/%s", c.project, spec.Region)
+	parent := fmt.Sprintf("projects/%s/locations/%s", c.resolveProject(spec.ProjectID), spec.Region)
 	created, err := c.batchSvc.Projects.Locations.Jobs.Create(parent, job).JobId(spec.BatchID).Context(ctx).Do()
 	if err != nil {
 		return "", fmt.Errorf("batch create job: %w", err)
@@ -252,14 +276,15 @@ func (c *GCPBatchAPIClient) GetJobStatus(ctx context.Context, jobID string) (Bat
 	}
 }
 
-func (c *GCPBatchAPIClient) ListRunningVMs(ctx context.Context, filterLabelName, filterLabelValue string, zones []string) (map[string]VMInfo, error) {
+func (c *GCPBatchAPIClient) ListRunningVMs(ctx context.Context, projectID, filterLabelName, filterLabelValue string, zones []string) (map[string]VMInfo, error) {
 	filter := fmt.Sprintf("labels.%s=%s AND status=RUNNING", filterLabelName, filterLabelValue)
+	project := c.resolveProject(projectID)
 
 	result := make(map[string]VMInfo)
 	for _, zone := range zones {
 		pageToken := ""
 		for {
-			call := c.computeSvc.Instances.List(c.project, zone).Filter(filter).Context(ctx)
+			call := c.computeSvc.Instances.List(project, zone).Filter(filter).Context(ctx)
 			if pageToken != "" {
 				call = call.PageToken(pageToken)
 			}
@@ -285,8 +310,8 @@ func (c *GCPBatchAPIClient) ListRunningVMs(ctx context.Context, filterLabelName,
 	return result, nil
 }
 
-func (c *GCPBatchAPIClient) TerminateVM(ctx context.Context, zone, instanceName string) error {
-	_, err := c.computeSvc.Instances.Delete(c.project, zone, instanceName).Context(ctx).Do()
+func (c *GCPBatchAPIClient) TerminateVM(ctx context.Context, projectID, zone, instanceName string) error {
+	_, err := c.computeSvc.Instances.Delete(c.resolveProject(projectID), zone, instanceName).Context(ctx).Do()
 	if err != nil {
 		return fmt.Errorf("delete instance %s in %s: %w", instanceName, zone, err)
 	}
@@ -301,7 +326,7 @@ func (c *GCPBatchAPIClient) TerminateJob(ctx context.Context, jobID string) erro
 	return nil
 }
 
-func (c *GCPBatchAPIClient) PrintBatchDebuggingInfo(ctx context.Context, jobID string) error {
+func (c *GCPBatchAPIClient) PrintBatchDebuggingInfo(ctx context.Context, projectID, jobID string) error {
 	job, err := c.batchSvc.Projects.Locations.Jobs.Get(jobID).Context(ctx).Do()
 	if err != nil {
 		return fmt.Errorf("getting batch job %s: %w", jobID, err)
@@ -341,17 +366,20 @@ func (c *GCPBatchAPIClient) PrintBatchDebuggingInfo(ctx context.Context, jobID s
 	queryStart := startTime.Add(-5 * time.Minute).UTC().Format(time.RFC3339)
 	queryEnd := endTime.Add(5 * time.Minute).UTC().Format(time.RFC3339)
 
+	// Batch writes its logs into the project the job ran in.
+	project := c.resolveProject(projectID)
+
 	filter := fmt.Sprintf(
 		`(logName="projects/%s/logs/batch_task_logs" OR logName="projects/%s/logs/batch_agent_logs") `+
 			`labels.job_uid="%s" `+
 			`timestamp>="%s" `+
 			`timestamp<="%s" `+
 			`severity>=DEFAULT`,
-		c.project, c.project, job.Uid, queryStart, queryEnd,
+		project, project, job.Uid, queryStart, queryEnd,
 	)
 
 	resp, err := c.loggingSvc.Entries.List(&loggingv2.ListLogEntriesRequest{
-		ResourceNames: []string{fmt.Sprintf("projects/%s", c.project)},
+		ResourceNames: []string{fmt.Sprintf("projects/%s", project)},
 		Filter:        filter,
 		OrderBy:       "timestamp asc",
 	}).Context(ctx).Do()

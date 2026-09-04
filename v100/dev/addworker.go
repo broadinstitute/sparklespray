@@ -44,6 +44,7 @@ func runDevAddWorker(c *cli.Context) error {
 	jobID, err := batchClient.CreateJob(ctx, &monitor.WorkerJobSpec{
 		WorkpoolID:            workpoolID,
 		BatchID:               batchID,
+		ProjectID:             workpoolSpec.ProjectID,
 		Region:                workpoolSpec.Region,
 		MachineType:           workpoolSpec.MachineType,
 		VMCount:               vmCount,
@@ -71,6 +72,7 @@ func runDevAddWorker(c *cli.Context) error {
 	if err := batchStore.Create(ctx, &monitor.BatchAPIRequest{
 		BatchID:         batchID,
 		JobID:           jobID,
+		ProjectID:       workpoolSpec.ProjectID,
 		WorkpoolID:      workpoolID,
 		ExpectedVMCount: vmCount,
 		Preemptible:     preemptible,

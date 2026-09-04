@@ -27,10 +27,19 @@ type fakeJob struct {
 type FakeCreatedJob struct {
 	JobID       string
 	BatchID     string
+	ProjectID   string
 	WorkpoolID  string
 	VMCount     int
 	Preemptible bool
 	Labels      []Label
+}
+
+// FakeTerminatedVM records one TerminateVM call, including which project it
+// targeted, so tests can assert cross-project routing.
+type FakeTerminatedVM struct {
+	ProjectID    string
+	Zone         string
+	InstanceName string
 }
 
 type FakeBatchAPIClient struct {
@@ -39,7 +48,7 @@ type FakeBatchAPIClient struct {
 	nextJobID int
 
 	CreatedJobs    []FakeCreatedJob
-	TerminatedVMs  []string
+	TerminatedVMs  []FakeTerminatedVM
 	TerminatedJobs []string
 }
 
@@ -119,6 +128,7 @@ func (f *FakeBatchAPIClient) CreateJob(ctx context.Context, spec *WorkerJobSpec)
 	f.CreatedJobs = append(f.CreatedJobs, FakeCreatedJob{
 		JobID:       jobID,
 		BatchID:     spec.BatchID,
+		ProjectID:   spec.ProjectID,
 		WorkpoolID:  spec.WorkpoolID,
 		VMCount:     spec.VMCount,
 		Preemptible: spec.Preemptible,
@@ -139,7 +149,9 @@ func (f *FakeBatchAPIClient) GetJobStatus(ctx context.Context, jobID string) (Ba
 	return j.status, nil
 }
 
-func (f *FakeBatchAPIClient) ListRunningVMs(ctx context.Context, filterLabelName, filterLabelValue string, zones []string) (map[string]VMInfo, error) {
+// projectID is accepted but not used for filtering: the fake, like the
+// emulator, keeps a single flat namespace of VMs.
+func (f *FakeBatchAPIClient) ListRunningVMs(ctx context.Context, projectID, filterLabelName, filterLabelValue string, zones []string) (map[string]VMInfo, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
@@ -167,14 +179,18 @@ func (f *FakeBatchAPIClient) ListRunningVMs(ctx context.Context, filterLabelName
 	return result, nil
 }
 
-func (f *FakeBatchAPIClient) TerminateVM(ctx context.Context, zone, instanceName string) error {
+func (f *FakeBatchAPIClient) TerminateVM(ctx context.Context, projectID, zone, instanceName string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
 	for _, j := range f.jobs {
 		delete(j.activeVMs, instanceName)
 	}
-	f.TerminatedVMs = append(f.TerminatedVMs, instanceName)
+	f.TerminatedVMs = append(f.TerminatedVMs, FakeTerminatedVM{
+		ProjectID:    projectID,
+		Zone:         zone,
+		InstanceName: instanceName,
+	})
 	return nil
 }
 
@@ -191,7 +207,7 @@ func (f *FakeBatchAPIClient) TerminateJob(ctx context.Context, jobID string) err
 	return nil
 }
 
-func (f *FakeBatchAPIClient) PrintBatchDebuggingInfo(ctx context.Context, jobID string) error {
+func (f *FakeBatchAPIClient) PrintBatchDebuggingInfo(ctx context.Context, projectID, jobID string) error {
 	return nil
 }
 

@@ -86,6 +86,36 @@ so upgrades are: copy the new binary in, repoint the symlink, restart.
 GCP auth is picked up from the environment (ADC); set
 `GOOGLE_APPLICATION_CREDENTIALS` if not using an attached service account.
 
+## Running workloads in another project
+
+By default a job's worker VMs run in the same project the backend and monitor
+were started with. A submission can override this per workpool by setting
+`workpool.projectID` in the `POST /api/v1/job` body: the GCP Batch job, and
+therefore the worker VMs, are created in that project instead.
+
+Only the workload moves. The control plane stays put:
+
+- Firestore, Pub/Sub, and the job/task records remain in the backend's own
+  project.
+- The worker binary is still launched with `--project <backend project>`, since
+  that's where it claims tasks and reports state.
+- The Batch job's state-change notifications are still published to the backend
+  project's `batch-api-notifications` topic, because that's what the monitor
+  subscribes to.
+
+The backend validates only the _format_ of `projectID`; everything else is IAM.
+For a workload project `W` and control-plane project `C`, you need:
+
+| Grant                                                                                                                                                | Where                                    | Why                                                                                                                |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| Backend/monitor SA: `roles/batch.jobsEditor` (or equivalent `batch.jobs.create`/`get`/`cancel`), `compute.instances.list`/`delete`, and Logging read | project `W`                              | Create and reconcile Batch jobs and their VMs; fetch batch logs on failure                                         |
+| `W`'s Batch service agent (`service-<W-number>@gcp-sa-batch.iam.gserviceaccount.com`): `roles/pubsub.publisher`                                      | on `C`'s `batch-api-notifications` topic | Without it the monitor never receives Batch state changes and falls back to timer polling — slower, but not broken |
+| Worker VM SA (`workpool.serviceAccount`): Firestore, Pub/Sub, and GCS access                                                                         | project `C`                              | Workers claim tasks and stream results against the control plane                                                   |
+
+Note that attaching a service account belonging to `C` to VMs in `W` can be
+blocked by the `iam.disableCrossProjectServiceAccountUsage` org policy; the
+alternative is an SA in `W` granted the roles above on `C`.
+
 ## systemd unit example
 
 `/etc/systemd/system/sparkles-dashboard.service`:

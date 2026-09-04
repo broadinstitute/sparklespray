@@ -18,6 +18,22 @@ current code before acting on any of them.
   are never created for that failure class. Dashboard-visible batch
   counts can therefore undercount failures relative to what actually
   drove a workpool to `halted`.
+- **VM reconciliation is inert: all three anomaly checks never fire.**
+  `reconcileVMs` filters running VMs by the GCE label
+  `sparkles-worker-batch` (`monitor/cluster_reconciler.go`), but the only
+  label ever set on a worker VM is `sparkles-workpool`
+  (`labelWorkpool`/`gcpJobLabels` in `monitor/batch_api.go`). So
+  `ListRunningVMs` always returns an empty map, and over-provisioning
+  detection, per-VM startup-failure termination, and zombie-VM
+  termination all silently no-op. Task recovery is unaffected
+  (`requeue_orphaned.go` makes no GCP calls), but zombie VMs are never
+  actually shut down, so a preempted-then-hung VM keeps costing money.
+  Compounding it, `Worker.instance_name` is stored as the compound path
+  `project/<p>/zone/<z>/instance/<i>` (`worker.go`) while the VM map is
+  keyed by bare instance name, so those lookups can't match either.
+  **Fix both together:** correcting the label alone would make every
+  registered VM look unregistered and start terminating healthy workers
+  once past the startup grace period.
 
 ## 11.2 Structural risks
 

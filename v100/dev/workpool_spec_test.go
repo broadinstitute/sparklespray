@@ -60,6 +60,21 @@ func TestResolveWorkpoolID_DerivedFromHashWhenIDOmitted(t *testing.T) {
 	assert.Equal(t, "wp-"+hash[:20], id)
 }
 
+func TestResolveWorkpoolID_DiffersWithProjectID(t *testing.T) {
+	base := &WorkpoolSpec{MachineType: "n2-standard-2"}
+	withProject := &WorkpoolSpec{
+		MachineType: "n2-standard-2",
+		ProjectID:   "workload-project",
+	}
+
+	baseID, err := resolveWorkpoolID(base)
+	require.NoError(t, err)
+	projectID, err := resolveWorkpoolID(withProject)
+	require.NoError(t, err)
+
+	assert.NotEqual(t, baseID, projectID, "projectID must be folded into the derived workpool ID")
+}
+
 func TestResolveWorkpoolID_DiffersWithLabels(t *testing.T) {
 	base := &WorkpoolSpec{MachineType: "n2-standard-2"}
 	withLabel := &WorkpoolSpec{

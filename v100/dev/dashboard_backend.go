@@ -680,6 +680,12 @@ func applyWorkpoolDefaults(spec *WorkpoolSpec, config *SparklesConfig) {
 // with a lowercase letter, followed by lowercase letters, numbers, or '-'.
 var workpoolIDRe = regexp.MustCompile(`^[a-z][a-z0-9-]{0,34}$`)
 
+// projectIDRe matches valid GCP project IDs: 6-30 characters, starting with a
+// lowercase letter, containing lowercase letters, numbers, or '-', and not
+// ending in '-'. Whether the backend can actually create Batch jobs in that
+// project is left to IAM.
+var projectIDRe = regexp.MustCompile(`^[a-z][a-z0-9-]{4,28}[a-z0-9]$`)
+
 func (s *dashboardServer) handleSubmitJob(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
@@ -694,6 +700,10 @@ func (s *dashboardServer) handleSubmitJob(w http.ResponseWriter, r *http.Request
 	}
 	if req.Workpool.MachineType == "" {
 		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "'workpool.machineType' is required")
+		return
+	}
+	if req.Workpool.ProjectID != "" && !projectIDRe.MatchString(req.Workpool.ProjectID) {
+		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "'workpool.projectID' must be a valid GCP project ID: 6-30 characters, starting with a lowercase letter, containing only lowercase letters, numbers, and '-', and not ending in '-'")
 		return
 	}
 	if len(req.Tasks) == 0 {
@@ -739,6 +749,7 @@ func (s *dashboardServer) handleSubmitJob(w http.ResponseWriter, r *http.Request
 	now := time.Now()
 	workpool := v100.WorkPool{
 		WorkpoolID:            workpoolID,
+		ProjectID:             req.Workpool.ProjectID,
 		MachineType:           req.Workpool.MachineType,
 		RootDir:               req.Workpool.RootDir,
 		SparklesWorkerGCSPath: req.Workpool.SparklesWorkerGCSPath,

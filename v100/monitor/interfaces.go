@@ -65,7 +65,12 @@ const (
 // WorkPools Firestore collection (written once at creation, never updated).
 // Mutable runtime state lives in WorkPoolState, which is stored in WorkPoolSummary.
 type WorkPool struct {
-	WorkpoolID            string
+	WorkpoolID string
+	// ProjectID, if set, is the GCP project this workpool's Batch jobs (and
+	// therefore its worker VMs) are created in. Empty means the project the
+	// monitor was started with. The control plane (Firestore, Pub/Sub) always
+	// stays in the monitor's own project.
+	ProjectID             string
 	Region                string   // GCP region for Batch jobs, e.g. "us-central1"
 	Zones                 []string // GCP zones to query for running VMs, e.g. ["us-central1-a", "us-central1-b"]
 	MachineType           string   // GCP machine type, e.g. "n1-standard-4"
@@ -115,8 +120,14 @@ type WorkPoolWithState struct {
 
 // BatchAPIRequest corresponds to the BatchAPIRequest Firestore collection.
 type BatchAPIRequest struct {
-	BatchID               string
-	JobID                 string
+	BatchID string
+	JobID   string
+	// ProjectID is the GCP project this batch's job and VMs live in, copied
+	// from WorkPool.ProjectID at submission time. Pinned per batch rather than
+	// read back from the workpool so that a workpool whose spec is later
+	// overwritten with a different project doesn't strand in-flight batches.
+	// Empty means the monitor's own project.
+	ProjectID             string
 	WorkpoolID            string
 	ExpectedVMCount       int
 	Preemptible           bool
@@ -172,8 +183,11 @@ type EmptyVolume struct {
 
 // WorkerJobSpec holds all parameters needed to create a GCP Batch job for workers.
 type WorkerJobSpec struct {
-	WorkpoolID            string
-	BatchID               string
+	WorkpoolID string
+	BatchID    string
+	// ProjectID is the GCP project to create the Batch job in. Empty means the
+	// BatchAPIClient's own project.
+	ProjectID             string
 	Region                string
 	MachineType           string
 	VMCount               int
@@ -193,16 +207,22 @@ type WorkerJobSpec struct {
 
 // BatchAPIClient wraps the GCP Batch API. All methods receive a context for cancellation.
 //
-// ListRunningVMs filters by a single GCE label. Pass filterLabelName as either
-// "sparkles-worker-batch" (to scope to one batch's VMs) or "sparkles-worker-workpool"
-// (to scope to all VMs across a workpool).
+// The methods that address a project directly (CreateJob via spec.ProjectID,
+// and ListRunningVMs/TerminateVM/PrintBatchDebuggingInfo via a projectID
+// argument) treat an empty project as "the client's own project", so callers
+// with no per-workpool override keep the previous behavior. GetJobStatus and
+// TerminateJob need no project: they take a fully-qualified job resource name,
+// which already embeds it.
+//
+// ListRunningVMs filters by a single GCE label; see labelWorkpool in
+// batch_api.go for the label actually set on worker VMs.
 type BatchAPIClient interface {
 	CreateJob(ctx context.Context, spec *WorkerJobSpec) (jobID string, err error)
 	GetJobStatus(ctx context.Context, jobID string) (BatchJobStatus, error)
-	ListRunningVMs(ctx context.Context, filterLabelName, filterLabelValue string, zones []string) (map[string]VMInfo, error)
-	TerminateVM(ctx context.Context, zone, instanceName string) error
+	ListRunningVMs(ctx context.Context, projectID, filterLabelName, filterLabelValue string, zones []string) (map[string]VMInfo, error)
+	TerminateVM(ctx context.Context, projectID, zone, instanceName string) error
 	TerminateJob(ctx context.Context, jobID string) error
-	PrintBatchDebuggingInfo(ctx context.Context, jobID string) error
+	PrintBatchDebuggingInfo(ctx context.Context, projectID, jobID string) error
 }
 
 // WorkPoolStore reads WorkPool config and reads/writes WorkPoolState.

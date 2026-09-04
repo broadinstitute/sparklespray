@@ -12,7 +12,12 @@ import (
 
 // WorkpoolSpec is the JSON schema for the workpool spec file passed to "dev add-worker".
 type WorkpoolSpec struct {
-	ID                    string               `json:"id"`
+	ID string `json:"id"`
+	// ProjectID, if set, is the GCP project the Batch jobs (and therefore the
+	// worker VMs) are created in. Empty means the project the
+	// dashboard-backend/monitor was started with. The control plane
+	// (Firestore, Pub/Sub) always stays in the latter.
+	ProjectID             string               `json:"projectID"`
 	MachineType           string               `json:"machineType"`
 	RootDir               string               `json:"rootDir"`
 	SparklesWorkerGCSPath string               `json:"sparklesWorkerGCSPath"`

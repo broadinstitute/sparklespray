@@ -111,7 +111,9 @@ func (c *RemoteBatchAPIClient) GetJobStatus(ctx context.Context, jobID string) (
 
 // ListRunningVMs fans out one GET /vms/{zone} request per zone in parallel, then merges
 // the results, matching the per-zone pagination required by the real GCP Compute API.
-func (c *RemoteBatchAPIClient) ListRunningVMs(ctx context.Context, filterLabelName, filterLabelValue string, zones []string) (map[string]VMInfo, error) {
+//
+// projectID is ignored: the emulator holds a single flat namespace of VMs.
+func (c *RemoteBatchAPIClient) ListRunningVMs(ctx context.Context, projectID, filterLabelName, filterLabelValue string, zones []string) (map[string]VMInfo, error) {
 	type zoneResult struct {
 		vms map[string]VMInfo
 		err error
@@ -149,7 +151,8 @@ func (c *RemoteBatchAPIClient) ListRunningVMs(ctx context.Context, filterLabelNa
 	return merged, nil
 }
 
-func (c *RemoteBatchAPIClient) TerminateVM(ctx context.Context, zone, instanceName string) error {
+// projectID is ignored; see ListRunningVMs.
+func (c *RemoteBatchAPIClient) TerminateVM(ctx context.Context, projectID, zone, instanceName string) error {
 	path := fmt.Sprintf("/vms/%s/%s", url.PathEscape(zone), url.PathEscape(instanceName))
 	if err := c.do(ctx, http.MethodDelete, path, nil, nil); err != nil {
 		return fmt.Errorf("remote TerminateVM: %w", err)
@@ -165,6 +168,6 @@ func (c *RemoteBatchAPIClient) TerminateJob(ctx context.Context, jobID string) e
 	return nil
 }
 
-func (c *RemoteBatchAPIClient) PrintBatchDebuggingInfo(ctx context.Context, jobID string) error {
+func (c *RemoteBatchAPIClient) PrintBatchDebuggingInfo(ctx context.Context, projectID, jobID string) error {
 	return nil
 }

@@ -69,8 +69,13 @@ type EmptyVolume struct {
 }
 
 type WorkPool struct {
-	WorkpoolID   string          `firestore:"workpool_id"`
-	MachineType  string          `firestore:"machine_type"`
+	WorkpoolID string `firestore:"workpool_id"`
+	// ProjectID, if set, is the GCP project the Batch jobs (and therefore the
+	// worker VMs) for this workpool are created in. Empty means the project
+	// the monitor was started with. The control plane (Firestore, Pub/Sub)
+	// always stays in the monitor's own project.
+	ProjectID   string `firestore:"project_id"`
+	MachineType string `firestore:"machine_type"`
 	RootDir               string          `firestore:"root_dir"`
 	SparklesWorkerGCSPath string          `firestore:"sparkles_worker_gcs_path"`
 	ServiceAccount        string          `firestore:"service_account"`
@@ -83,7 +88,7 @@ type WorkPool struct {
 
 	// WorkpoolSpecHash is the sha256 (hex-encoded) of the canonical JSON of
 	// the WorkpoolSpec this record was created from, including Labels.
-	// Computed by computeWorkpoolSpecHash (v100/dev/submit.go) at submission
+	// Computed by computeWorkpoolSpecHash (v100/dev/workpool_spec.go) at submission
 	// time; the same hash (truncated) is used to derive the workpool ID
 	// itself when one isn't explicitly given (see resolveWorkpoolID).
 	WorkpoolSpecHash string `firestore:"workpool_spec_hash"`

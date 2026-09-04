@@ -41,6 +41,47 @@ func TestProvision_CopiesPoolLabelsOntoJobAndBatchRequest(t *testing.T) {
 	assert.Equal(t, []Label{{Name: "team", Value: "alice"}}, w.Batches.MustGet(batchID).Labels)
 }
 
+func TestProvision_CopiesPoolProjectIDOntoJobAndBatchRequest(t *testing.T) {
+	w := newWorld()
+	pool := defaultPool("pool-1")
+	pool.ProjectID = "workload-project"
+	pool.MaxPreemptibleWorkerAttempts = 0 // force non-preemptible for a single batch
+	w.Pools.Add(pool)
+	for i := 0; i < 3; i++ {
+		w.Tasks.Add(&Task{TaskID: taskID(i), WorkpoolID: "pool-1", Status: TaskStatusPending})
+	}
+
+	err := w.A.runProvisioningPoll(context.Background())
+	require.NoError(t, err)
+
+	require.Len(t, w.BatchAPI.CreatedJobs, 1)
+	assert.Equal(t, "workload-project", w.BatchAPI.CreatedJobs[0].ProjectID)
+
+	// Pinned on the batch record too, so reconciliation targets the project the
+	// VMs are actually in even if the workpool spec is later overwritten.
+	require.Equal(t, 1, w.Batches.Count())
+	batchID := w.BatchAPI.CreatedJobs[0].BatchID
+	assert.Equal(t, "workload-project", w.Batches.MustGet(batchID).ProjectID)
+}
+
+func TestProvision_NoPoolProjectID_LeavesProjectEmpty(t *testing.T) {
+	w := newWorld()
+	pool := defaultPool("pool-1")
+	pool.MaxPreemptibleWorkerAttempts = 0
+	w.Pools.Add(pool)
+	for i := 0; i < 3; i++ {
+		w.Tasks.Add(&Task{TaskID: taskID(i), WorkpoolID: "pool-1", Status: TaskStatusPending})
+	}
+
+	err := w.A.runProvisioningPoll(context.Background())
+	require.NoError(t, err)
+
+	// Empty means "the client's own project" — the pre-existing behavior.
+	require.Len(t, w.BatchAPI.CreatedJobs, 1)
+	assert.Empty(t, w.BatchAPI.CreatedJobs[0].ProjectID)
+	assert.Empty(t, w.Batches.MustGet(w.BatchAPI.CreatedJobs[0].BatchID).ProjectID)
+}
+
 func TestProvision_DemandMetByRequestedVMs_NoBatchCreated(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")

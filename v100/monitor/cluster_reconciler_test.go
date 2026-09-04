@@ -299,10 +299,42 @@ func TestClusterReconciler_Anomaly3_ZombieBelowThreshold_SurgicalTermination(t *
 
 	// Only the zombie VM terminated, job preserved.
 	assert.Len(t, w.BatchAPI.TerminatedVMs, 1)
-	assert.Contains(t, w.BatchAPI.TerminatedVMs, vmName("b1", 0))
+	assert.Equal(t, vmName("b1", 0), w.BatchAPI.TerminatedVMs[0].InstanceName)
 	assert.Empty(t, w.BatchAPI.TerminatedJobs)
 	b := w.Batches.MustGet("b1")
 	assert.True(t, b.Unhealthy)
+}
+
+// The batch's own ProjectID — not the workpool's current one — is what VM
+// operations target, so a workpool respecced onto a different project can't
+// strand a batch's in-flight VMs.
+func TestClusterReconciler_TerminateVM_UsesBatchProjectID(t *testing.T) {
+	w := newWorld()
+	pool := defaultPool("pool-1")
+	pool.VMShutdownGracePeriod = 1 * time.Minute
+	pool.MaxZombiesBeforeAbort = 3
+	pool.ProjectID = "respecced-project"
+	w.Pools.Add(pool)
+
+	runningSince := epoch.Add(-10 * time.Minute)
+	w.Batches.Add(&BatchAPIRequest{
+		BatchID:               "b1",
+		JobID:                 "job-1",
+		ProjectID:             "original-project",
+		WorkpoolID:            "pool-1",
+		ExpectedVMCount:       1,
+		RegisteredWorkerCount: 1,
+		Status:                BatchStatusStarted,
+		RunningSince:          &runningSince,
+	})
+	w.BatchAPI.AddJob("job-1", "b1", "pool-1", 1, BatchJobStatusRunning)
+	w.Workers.Add(&Worker{WorkerID: "w1", BatchID: "b1", InstanceName: vmName("b1", 0), HeartbeatExpiry: epoch.Add(-2 * time.Minute)})
+
+	err := w.A.runClusterReconciler(context.Background())
+	require.NoError(t, err)
+
+	require.Len(t, w.BatchAPI.TerminatedVMs, 1)
+	assert.Equal(t, "original-project", w.BatchAPI.TerminatedVMs[0].ProjectID)
 }
 
 func TestClusterReconciler_Anomaly3_ZombieAboveThreshold_WholeBatchAborted(t *testing.T) {
