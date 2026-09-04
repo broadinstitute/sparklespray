@@ -18,6 +18,7 @@ import (
 	"cloud.google.com/go/pubsub/v2"
 	pubsubpb "cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
 	v100 "github.com/broadinstitute/sparklespray/v100"
+	"github.com/broadinstitute/sparklespray/v100/dev/webui"
 	"github.com/broadinstitute/sparklespray/v100/monitor"
 	"github.com/google/uuid"
 	"github.com/urfave/cli"
@@ -102,6 +103,14 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 // writeError writes a body matching openapi.yaml's Error schema: {"code": ..., "error": ...}.
 func writeError(w http.ResponseWriter, httpStatus int, code, msg string) {
 	writeJSON(w, httpStatus, map[string]string{"error": msg, "code": code})
+}
+
+// handleAPINotFound answers unmatched /api/... paths with a JSON 404
+// (matching openapi.yaml's Error schema) instead of letting them fall
+// through to the "/" catch-all registered for the embedded dashboard UI and
+// get served index.html with a 200.
+func handleAPINotFound(w http.ResponseWriter, r *http.Request) {
+	writeError(w, http.StatusNotFound, "NOT_FOUND", "no such API endpoint")
 }
 
 func corsMiddleware(next http.Handler) http.Handler {
@@ -1814,6 +1823,13 @@ func runDevDashboardBackend(c *cli.Context) error {
 	mux.HandleFunc("GET /api/v1/events", srv.handleListEvents)
 	mux.HandleFunc("POST /api/v1/subscriptions", srv.handleCreateSubscription)
 	mux.HandleFunc("POST /api/v1/subscriptions/{subscription_id}/unsubscribe", srv.handleDeleteSubscription)
+
+	// Unmatched /api/... paths get a JSON 404 rather than falling through to
+	// the "/" catch-all below and being served the dashboard UI's index.html.
+	mux.HandleFunc("/api/", handleAPINotFound)
+	// Serve the embedded dashboard UI (built by build-server.sh) for
+	// everything else, with an SPA fallback for client-side routes.
+	mux.Handle("/", webui.Handler())
 
 	log.Printf("dashboard-backend listening on %s", addr)
 	return http.ListenAndServe(addr, corsMiddleware(apiKeyAuthMiddleware(fsClient, mux)))
