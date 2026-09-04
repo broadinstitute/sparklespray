@@ -51,9 +51,10 @@ target server):
 ./v100/build.sh [version]
 ```
 
-This builds the frontend (`npm ci && npm run build` in `dashboard/`), copies
-the build output into the binary's embedded assets, and cross-compiles a
-single static binary at:
+This builds the frontend (`npm ci && npm run build` in `dashboard/` —
+skipped if nothing under `dashboard/` has changed since the last build; pass
+`--force` to rebuild it anyway), copies the build output into the binary's
+embedded assets, and cross-compiles a single static binary at:
 
 ```
 v100/bin/sparkles-linux-amd64-<version>

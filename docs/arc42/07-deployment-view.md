@@ -32,11 +32,15 @@ that a worker VM downloading the extra bytes at boot costs nothing material.
 
 - `v100/build.sh` runs `npm ci && npm run build` in `dashboard/`, copies the
   resulting `dashboard/dist/*` into `v100/dev/webui/dist/`, then
-  cross-compiles `./cmd/sparkles`. `v100/dev/webui/webui.go` `//go:embed all:dist`s that directory into the binary; a tracked placeholder
-  `index.html` keeps `go build ./...` compiling on a fresh checkout with no
-  Node/npm step (`go:embed` requires at least one matched file), at the cost
-  of a plain `go build` (skipping `build.sh`) serving that placeholder
-  instead of the real UI.
+  cross-compiles `./cmd/sparkles`. It skips the frontend build (an mtime
+  check against a `.frontend-build-marker` breadcrumb, not a content hash)
+  when nothing under `dashboard/` looks newer than the last build — `--force`
+  overrides this. `v100/dev/webui/webui.go` `//go:embed all:dist`s the
+  `dist/` directory into the binary; a tracked placeholder `index.html` keeps
+  `go build ./...` compiling on a fresh checkout with no Node/npm step
+  (`go:embed` requires at least one matched file), at the cost of a plain
+  `go build` (skipping `build.sh`) serving that placeholder instead of the
+  real UI.
 - At runtime, `dashboard_backend.go`'s `http.ServeMux` registers
   `webui.Handler()` on `"/"` (serving embedded files, with an SPA fallback to
   `index.html` for react-router client-side routes) and an explicit

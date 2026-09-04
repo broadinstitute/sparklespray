@@ -51,9 +51,11 @@ simulator/sparklespray-simulator
 fake-home/
 
 # Frontend build output embedded into the sparkles binary via go:embed
-# (v100/dev/webui). Real build output (from v100/build-server.sh) is never
+# (v100/dev/webui). Real build output (from v100/build.sh) is never
 # committed; only a placeholder index.html is tracked so `go build` succeeds
 # on a fresh checkout without Node/npm installed.
 !v100/dev/webui/dist/
 v100/dev/webui/dist/*
 !v100/dev/webui/dist/index.html
+# build.sh's breadcrumb for skipping an unchanged frontend rebuild.
+v100/dev/webui/.frontend-build-marker
