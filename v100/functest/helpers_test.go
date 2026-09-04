@@ -1,9 +1,9 @@
 package functest_test
 
 import (
+	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"os"
@@ -45,18 +45,57 @@ func freePort() int {
 	return l.Addr().(*net.TCPAddr).Port
 }
 
-// waitForPort polls addr until it accepts TCP connections or timeout expires.
-func waitForPort(addr string, timeout time.Duration) error {
+// dialOnce reports whether addr currently accepts TCP connections.
+func dialOnce(addr string) bool {
+	conn, err := net.Dial("tcp", addr)
+	if err != nil {
+		return false
+	}
+	conn.Close()
+	return true
+}
+
+// runEmulator starts cmd with its combined stdout/stderr captured, waits for
+// addr to accept connections, and registers a cleanup that kills the
+// process. If the process exits before addr comes up, or the timeout
+// expires first, it fails the test with the captured output attached so
+// CI failures are debuggable without reproducing locally.
+func runEmulator(t *testing.T, name string, cmd *exec.Cmd, addr string, timeout time.Duration) {
+	t.Helper()
+	var output bytes.Buffer
+	cmd.Stdout = &output
+	cmd.Stderr = &output
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("starting %s (%s): %v", name, cmd.Path, err)
+	}
+
+	waitDone := make(chan error, 1)
+	go func() { waitDone <- cmd.Wait() }()
+	t.Cleanup(func() {
+		if cmd.ProcessState == nil {
+			cmd.Process.Kill() //nolint:errcheck
+		}
+		<-waitDone
+	})
+
 	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		conn, err := net.Dial("tcp", addr)
-		if err == nil {
-			conn.Close()
-			return nil
+	for {
+		if dialOnce(addr) {
+			return
+		}
+		select {
+		case err := <-waitDone:
+			waitDone <- err // let Cleanup's <-waitDone still observe it
+			t.Fatalf("%s (%s) exited before accepting connections on %s: %v\n--- output ---\n%s",
+				name, cmd.Path, addr, err, output.String())
+		default:
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s (%s) to accept connections on %s\n--- output so far ---\n%s",
+				name, cmd.Path, addr, output.String())
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	return fmt.Errorf("timed out waiting for %s to accept connections", addr)
 }
 
 // startFirestoreEmulator starts the gcloud Firestore emulator, sets
@@ -71,15 +110,7 @@ func startFirestoreEmulator(t *testing.T) {
 	addr := fmt.Sprintf("localhost:%d", port)
 	cmd := exec.Command("gcloud", "beta", "emulators", "firestore", "start",
 		"--host-port="+addr, "--database-mode=firestore-native")
-	cmd.Stdout = io.Discard
-	cmd.Stderr = io.Discard
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("starting Firestore emulator: %v", err)
-	}
-	t.Cleanup(func() { cmd.Process.Kill(); cmd.Wait() }) //nolint:errcheck
-	if err := waitForPort(addr, 30*time.Second); err != nil {
-		t.Fatalf("Firestore emulator did not start in time: %v", err)
-	}
+	runEmulator(t, "Firestore emulator", cmd, addr, 30*time.Second)
 	t.Setenv("FIRESTORE_EMULATOR_HOST", addr)
 	log.Printf("Firestore emulator listening on %s", addr)
 }
@@ -95,15 +126,7 @@ func startPubSubEmulator(t *testing.T) {
 	addr := fmt.Sprintf("localhost:%d", port)
 	cmd := exec.Command("gcloud", "beta", "emulators", "pubsub", "start",
 		"--host-port="+addr, "--project="+testProject)
-	cmd.Stdout = io.Discard
-	cmd.Stderr = io.Discard
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("starting PubSub emulator: %v", err)
-	}
-	t.Cleanup(func() { cmd.Process.Kill(); cmd.Wait() }) //nolint:errcheck
-	if err := waitForPort(addr, 30*time.Second); err != nil {
-		t.Fatalf("PubSub emulator did not start in time: %v", err)
-	}
+	runEmulator(t, "PubSub emulator", cmd, addr, 30*time.Second)
 	t.Setenv("PUBSUB_EMULATOR_HOST", addr)
 	log.Printf("PubSub emulator listening on %s", addr)
 }
@@ -124,15 +147,7 @@ func startGCSEmulator(t *testing.T) {
 		"-port", strconv.Itoa(port),
 		"-backend", "memory",
 		"-public-host", addr)
-	cmd.Stdout = io.Discard
-	cmd.Stderr = io.Discard
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("starting fake-gcs-server: %v", err)
-	}
-	t.Cleanup(func() { cmd.Process.Kill(); cmd.Wait() }) //nolint:errcheck
-	if err := waitForPort(addr, 15*time.Second); err != nil {
-		t.Fatalf("fake-gcs-server did not start in time: %v", err)
-	}
+	runEmulator(t, "fake-gcs-server", cmd, addr, 15*time.Second)
 	t.Setenv("GCS_EMULATOR_ENDPOINT", endpoint)
 	log.Printf("fake-gcs-server listening on %s", addr)
 
