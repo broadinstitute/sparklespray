@@ -3,59 +3,26 @@ name: build
 on:
   push:
     paths:
-      - "*.py"
-      - "**/pyproject.toml"
-      - "**/*.py"
-      - .github/workflows/build.yaml
-      - "**/*.go"
-
-env:
-  PYTHON_VERSION: "3.11"
-  POETRY_VERSION: "1.4.2"
+      - "v100/**"
+      - ".github/workflows/build.yaml"
+  pull_request:
+    paths:
+      - "v100/**"
+      - ".github/workflows/build.yaml"
 
 jobs:
-  build-docker-image:
+  build-and-test:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: v100
     steps:
-      - uses: actions/checkout@v3
-      # we don't actually care about the resulting image because it
-      # is rebuilt on demand by cli -- just make sure building is successful
-      # in the CI build
-      - name: build docker image
-        working-directory: cli/sparklespray/worker
-        run: docker build .
-
-  test-python:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - name: Set up Python ${{ env.PYTHON_VERSION }}
-        uses: actions/setup-python@v4
+      - uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v5
         with:
-          python-version: ${{ env.PYTHON_VERSION }}
-      # the following logic for caching taken from https://gist.github.com/gh640/233a6daf68e9e937115371c0ecd39c61
-      # Poetry cache depends on OS, Python version and Poetry version.
-      - name: Cache Poetry cache
-        uses: actions/cache@v3
-        with:
-          path: ~/.cache/pypoetry
-          key: poetry-cache-${{ runner.os }}-${{ steps.setup_python.outputs.python-version }}-${{ env.POETRY_VERSION }}
-      # virtualenv cache should depends on OS, Python version and `poetry.lock` (and optionally workflow files).
-      - name: Cache Packages
-        uses: actions/cache@v3
-        with:
-          path: ~/.local
-          key: poetry-local-${{ runner.os }}-${{ steps.setup_python.outputs.python-version }}-${{ hashFiles('**/poetry.lock') }}-${{ hashFiles('.github/workflows/*.yml') }}
-      - name: Set up poetry
-        uses: abatilo/actions-poetry@v2
-        with:
-          poetry-version: ${{ env.POETRY_VERSION }}
-      - name: Install dependencies
-        run: poetry install
-        working-directory: cli
-      - name: Run pyratchet
-        working-directory: cli
-        run: poetry run pyright-ratchet run pyright
-      - name: Run tests
-        run: poetry run pytest
-        working-directory: cli
+          go-version-file: v100/go.mod
+      - name: Build
+        run: go build ./...
+      - name: Test
+        run: go test ./...
