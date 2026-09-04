@@ -41,8 +41,8 @@ Ranked, most important first:
 
 ## 1.3 Stakeholders
 
-| Role                                                   | Concern                                                                                                                                 |
-| ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
-| End users (researchers/engineers submitting jobs)      | Simple CLI to submit/kill jobs and see progress; jobs complete correctly and cheaply.                                                   |
-| Sparkles operators/maintainers                         | Keep the control-plane (monitor, dashboard-backend) running reliably; diagnose incidents from Firestore/Events; keep GCP spend bounded. |
-| Dashboard frontend (separate project, outside `v100/`) | Stable REST API (`openapi.yaml`) to show job/task/workpool/worker status and logs.                                                      |
+| Role                                                                                                 | Concern                                                                                                                                 |
+| ---------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| End users (researchers/engineers submitting jobs)                                                    | Simple CLI to submit/kill jobs and see progress; jobs complete correctly and cheaply.                                                   |
+| Sparkles operators/maintainers                                                                       | Keep the control-plane (monitor, dashboard-backend) running reliably; diagnose incidents from Firestore/Events; keep GCP spend bounded. |
+| Dashboard frontend (`dashboard/`, source outside `v100/`, build embedded into the `sparkles` binary) | Stable REST API (`openapi.yaml`) to show job/task/workpool/worker status and logs.                                                      |

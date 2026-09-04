@@ -5,40 +5,44 @@
 ```mermaid
 graph LR
     User["Researcher / engineer"]
-    Frontend["Dashboard frontend<br/>(separate Node/npm project, browser)"]
-    Sparkles["sparkles<br/>(v100 system)"]
+    Browser["Browser<br/>(dashboard UI)"]
+    Sparkles["sparkles<br/>(v100 system)<br/>serves UI + REST API"]
     GCP["Google Cloud Platform<br/>Firestore, Pub/Sub, GCS,<br/>Batch API, Compute Engine,<br/>Cloud Logging, IAM Credentials"]
 
     User -->|"sparkles submit / sparkles kill"| Sparkles
-    Frontend <--> Sparkles
+    Browser <--> Sparkles
     Sparkles --> GCP
 ```
 
 External actors / systems:
 
-| Actor                      | Interaction                                                                                                                                           |
-| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **End user**               | Runs `sparkles submit` / `sparkles kill` CLI; authenticates to the dashboard-backend via `SPARKLES_API_KEY`.                                          |
-| **Dashboard frontend**     | Separate project; consumes the dashboard-backend's REST API (`openapi.yaml`) for job/task/workpool/worker status and log streaming; not part of v100. |
-| **GCP Batch API**          | Creates/monitors VM "jobs" that run the worker binary.                                                                                                |
-| **GCP Compute Engine API** | Lists/terminates individual worker VMs during anomaly handling.                                                                                       |
-| **Cloud Firestore**        | System of record for all application state.                                                                                                           |
-| **Cloud Pub/Sub**          | Event bus for lifecycle events, worker control messages, and Batch API notifications.                                                                 |
-| **Cloud Storage (GCS)**    | Task input/output file transfer; hosts the worker binary for VM bootstrap.                                                                            |
-| **Cloud Logging**          | Batch job logs (`LogsPolicy: CLOUD_LOGGING`).                                                                                                         |
-| **IAM Credentials API**    | Mints short-lived tokens for a Pub/Sub "subscriber" service account used by the dashboard-backend's browser-facing subscription endpoint.             |
+| Actor                      | Interaction                                                                                                                                                                                                                        |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **End user**               | Runs `sparkles submit` / `sparkles kill` CLI; authenticates to the dashboard-backend via `SPARKLES_API_KEY`.                                                                                                                       |
+| **Browser (dashboard UI)** | Loads the dashboard UI and calls its REST API (`openapi.yaml`) for job/task/workpool/worker status and log streaming, both served by `sparkles dev dashboard-backend` itself — see [Deployment View](07-deployment-view.md), §7.2. |
+| **GCP Batch API**          | Creates/monitors VM "jobs" that run the worker binary.                                                                                                                                                                             |
+| **GCP Compute Engine API** | Lists/terminates individual worker VMs during anomaly handling.                                                                                                                                                                    |
+| **Cloud Firestore**        | System of record for all application state.                                                                                                                                                                                        |
+| **Cloud Pub/Sub**          | Event bus for lifecycle events, worker control messages, and Batch API notifications.                                                                                                                                              |
+| **Cloud Storage (GCS)**    | Task input/output file transfer; hosts the worker binary for VM bootstrap.                                                                                                                                                         |
+| **Cloud Logging**          | Batch job logs (`LogsPolicy: CLOUD_LOGGING`).                                                                                                                                                                                      |
+| **IAM Credentials API**    | Mints short-lived tokens for a Pub/Sub "subscriber" service account used by the dashboard-backend's browser-facing subscription endpoint.                                                                                          |
 
 ## 3.2 Technical Context
 
 Three roles are all built from the same `sparkles` binary:
 
-| Process                                         | Started by             | Talks to                                                                                                                                                                                          |
-| ----------------------------------------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **CLI client** (`submit`, `kill`)               | End user, ad hoc       | Dashboard-backend HTTP API (`submit`); Firestore + Pub/Sub directly (`kill`)                                                                                                                      |
-| **Worker** (`worker`)                           | GCP Batch, one per VM  | Firestore (claim/update tasks, register itself), GCS (file transfer), Pub/Sub (`sparkles-events` publish, per-worker control subscription), Docker daemon on the VM host, Compute metadata server |
-| **Monitor** (`monitor`)                         | Operator, long-running | Firestore (all collections), Pub/Sub (`sparkles-events`, `batch-api-notifications` subscribe), GCP Batch API, Compute Engine API, Cloud Logging API                                               |
-| **Dashboard-backend** (`dev dashboard-backend`) | Operator, long-running | Firestore (read/write Jobs/Tasks on submit), Pub/Sub (publish `job_created`, browser-facing subscription helper), IAM Credentials API                                                             |
+| Process                                         | Started by             | Talks to                                                                                                                                                                                                                                 |
+| ----------------------------------------------- | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **CLI client** (`submit`, `kill`)               | End user, ad hoc       | Dashboard-backend HTTP API (`submit`); Firestore + Pub/Sub directly (`kill`)                                                                                                                                                             |
+| **Worker** (`worker`)                           | GCP Batch, one per VM  | Firestore (claim/update tasks, register itself), GCS (file transfer), Pub/Sub (`sparkles-events` publish, per-worker control subscription), Docker daemon on the VM host, Compute metadata server                                        |
+| **Monitor** (`monitor`)                         | Operator, long-running | Firestore (all collections), Pub/Sub (`sparkles-events`, `batch-api-notifications` subscribe), GCP Batch API, Compute Engine API, Cloud Logging API                                                                                      |
+| **Dashboard-backend** (`dev dashboard-backend`) | Operator, long-running | Firestore (read/write Jobs/Tasks on submit), Pub/Sub (publish `job_created`, browser-facing subscription helper), IAM Credentials API; also serves the embedded dashboard UI (static assets + SPA) directly to browsers on the same port |
 
-Scope of this documentation: the `v100/` Go module. The `dashboard`
-frontend and the legacy Python implementation at the repository root are
-out of scope, treated as external systems.
+Scope of this documentation: the `v100/` Go module. The `dashboard/`
+frontend's _source_ (a separate Node/npm project) is out of scope as a
+codebase, but its _build output_ is embedded into the `sparkles` binary at
+build time (`v100/build-server.sh` → `v100/dev/webui`) and served by
+`dashboard-backend`, so at runtime there is no separate frontend
+deployment to treat as an external system. The legacy Python implementation
+at the repository root is out of scope, treated as historical.

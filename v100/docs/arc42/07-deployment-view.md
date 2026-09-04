@@ -10,7 +10,33 @@ image is built for worker or monitor. Instead:
   stamped via `-ldflags`) and uploads it directly to a GCS path, e.g.
   `gs://sparkles-test-0625/bin/sparkles-linux-amd64-dev`.
 
-## 7.2 Worker VMs
+## 7.2 Dashboard UI embedding
+
+The dashboard frontend (`dashboard/`, a separate React/Vite/npm project) is
+built and embedded directly into the `sparkles` binary, so the whole control
+plane — REST API and UI — is one process on one port; there is no separate
+frontend deployment in production.
+
+- `v100/build-server.sh` runs `npm ci && npm run build` in `dashboard/`,
+  copies the resulting `dashboard/dist/*` into `v100/dev/webui/dist/`, then
+  cross-compiles `./cmd/sparkles` (same target as `build-linux-amd64.sh`,
+  `linux/amd64`) into a distinctly-named `sparkles-server-linux-amd64-<version>`
+  artifact. `v100/dev/webui/webui.go` `//go:embed all:dist`s that directory
+  into the binary; a tracked placeholder `index.html` keeps `go build ./...`
+  compiling on a fresh checkout with no Node/npm step (`go:embed` requires at
+  least one matched file).
+- At runtime, `dashboard_backend.go`'s `http.ServeMux` registers
+  `webui.Handler()` on `"/"` (serving embedded files, with an SPA fallback to
+  `index.html` for react-router client-side routes) and an explicit
+  `"/api/"` 404 handler, so unmatched API paths never fall through to the UI
+  fallback. `apiKeyAuthMiddleware` only gates paths under `/api/`, so the UI
+  loads with no auth and the app itself prompts for/stores an API key in the
+  browser.
+- See [v100/docs/deploying-dashboard-backend.md](../deploying-dashboard-backend.md)
+  for the full remote-install walkthrough (prerequisites, building, copying
+  the binary, a systemd unit example).
+
+## 7.3 Worker VMs
 
 - Provisioned on demand by the GCP Batch API using a stock VM image (no
   custom image).
@@ -30,18 +56,22 @@ image is built for worker or monitor. Instead:
   shutdown grace period, linger time (`WorkPool` fields, see
   `datamodel.md`).
 
-## 7.3 Control-plane processes
+## 7.4 Control-plane processes
 
 - **Monitor** (`sparkles monitor`) and **dashboard-backend**
   (`sparkles dev dashboard-backend`) are meant to run as long-lived
   processes. Nothing in `v100/` prescribes a specific hosting platform —
   a small always-on VM or any container platform works.
-- `start.sh` shows the local-dev deployment pattern: uses `mprocs` to run
-  `sparkles monitor`, `sparkles dev dashboard-backend`, and the separate
-  `dashboard` frontend (a Node/npm project outside `v100/`) concurrently
-  against sample config/workpool/job JSON files.
+- `start.sh` shows the local-dev pattern, which is deliberately _not_ the
+  embedded-UI production path from §7.2: it uses `mprocs` to run
+  `sparkles monitor`, `sparkles dev dashboard-backend`, and a separate
+  `npm run dev` process for the `dashboard` frontend (Vite dev server,
+  proxying `/api` to the backend's port) concurrently against sample
+  config/workpool/job JSON files — this gives hot-reload on frontend edits,
+  which the embedded/production binary doesn't support (the UI is baked in
+  at `build-server.sh` time).
 
-## 7.4 GCP resources used
+## 7.5 GCP resources used
 
 | Service                 | Used for                                                                            |
 | ----------------------- | ----------------------------------------------------------------------------------- |
@@ -54,7 +84,7 @@ image is built for worker or monitor. Instead:
 | IAM Credentials API     | Short-lived tokens for the dashboard-backend's Pub/Sub "subscriber" service account |
 | Compute metadata server | Worker reads its own instance name at startup (skippable via `--no-gcp`)            |
 
-## 7.5 Local development / test deployment
+## 7.6 Local development / test deployment
 
 - Firestore, Pub/Sub, and GCS emulators (`gcloud beta emulators ...`,
   `fake-gcs-server`) stand in for real GCP in functional tests
