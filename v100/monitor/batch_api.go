@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -84,6 +85,18 @@ func validGoogleLabel(s string) bool {
 	return true
 }
 
+// safePathRe matches an absolute path built only from characters that can't
+// break out of the shell strings CreateJob builds below (workerArgs and the
+// Script.Text chmod/exec line): no spaces, quotes, or shell metacharacters
+// like ; | & $ ` ( ) < > #.
+var safePathRe = regexp.MustCompile(`^/[A-Za-z0-9_./-]*$`)
+
+// validSafePath reports whether s is safe to interpolate unquoted into a
+// shell command line: an absolute path containing only [A-Za-z0-9_./-].
+func validSafePath(s string) bool {
+	return safePathRe.MatchString(s)
+}
+
 func formatResources(resources []ResourceEntry) string {
 	parts := make([]string, len(resources))
 	for i, r := range resources {
@@ -135,6 +148,20 @@ func (c *GCPBatchAPIClient) CreateJob(ctx context.Context, spec *WorkerJobSpec) 
 
 	if spec.Region == "" {
 		return "", fmt.Errorf("workpool %s has no region configured", spec.WorkpoolID)
+	}
+
+	// RootDir and every EmptyVolume mount point are interpolated unquoted into
+	// the shell script below (workerArgs, and the chmod/exec line in
+	// Script.Text), so they're restricted to a safe path charset rather than
+	// trusted verbatim -- otherwise a workpool spec could inject arbitrary
+	// shell commands into the VM's startup script.
+	if !validSafePath(spec.RootDir) {
+		return "", fmt.Errorf("workpool %s has an invalid root dir %q: must be an absolute path containing only letters, digits, '.', '_', '-', and '/'", spec.WorkpoolID, spec.RootDir)
+	}
+	for _, ev := range spec.EmptyVolumes {
+		if !validSafePath(ev.MountPoint) {
+			return "", fmt.Errorf("workpool %s has an invalid empty volume mount point %q: must be an absolute path containing only letters, digits, '.', '_', '-', and '/'", spec.WorkpoolID, ev.MountPoint)
+		}
 	}
 
 	provisioningModel := "STANDARD"
