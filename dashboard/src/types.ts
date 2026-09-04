@@ -127,6 +127,8 @@ export interface JobSummaryHistoryEntry {
 
 export interface WorkPoolDetail {
   workpool_id: string;
+  /** Empty when the workpool runs its VMs in the backend's own project. */
+  project_id: string;
   machine_type: string;
   region: string;
   zones: string[];

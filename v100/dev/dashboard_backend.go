@@ -217,7 +217,10 @@ func (s *dashboardServer) handleListWorkpools(w http.ResponseWriter, r *http.Req
 // ----- GET /api/v1/workpool/{workpool_id} -----
 
 type workpoolDetailResponse struct {
-	WorkpoolID                   string               `json:"workpool_id"`
+	WorkpoolID string `json:"workpool_id"`
+	// ProjectID is empty when the workpool didn't override it, meaning its
+	// Batch jobs/VMs run in whichever project the backend was started with.
+	ProjectID                    string               `json:"project_id"`
 	MachineType                  string               `json:"machine_type"`
 	Region                       string               `json:"region"`
 	Zones                        []string             `json:"zones"`
@@ -267,6 +270,7 @@ func (s *dashboardServer) handleGetWorkpool(w http.ResponseWriter, r *http.Reque
 	}
 	resp := workpoolDetailResponse{
 		WorkpoolID:                   wp.WorkpoolID,
+		ProjectID:                    wp.ProjectID,
 		MachineType:                  wp.MachineType,
 		Region:                       wp.Region,
 		Zones:                        wp.Zones,
@@ -415,8 +419,11 @@ func (s *dashboardServer) handleGetWorkpoolSummaryHistory(w http.ResponseWriter,
 // ----- GET /api/v1/workpool/{workpool_id}/batches -----
 
 type batchRequestResponse struct {
-	BatchID               string     `json:"batch_id"`
-	JobID                 string     `json:"job_id"`
+	BatchID string `json:"batch_id"`
+	JobID   string `json:"job_id"`
+	// ProjectID is the project this batch's job and VMs live in, pinned at
+	// submission time. Empty means the backend's own project.
+	ProjectID             string     `json:"project_id"`
 	WorkpoolID            string     `json:"workpool_id"`
 	ExpectedVMCount       int        `json:"expected_vm_count"`
 	Preemptible           bool       `json:"preemptible"`
@@ -458,6 +465,7 @@ func (s *dashboardServer) handleListBatches(w http.ResponseWriter, r *http.Reque
 		result = append(result, batchRequestResponse{
 			BatchID:               b.BatchID,
 			JobID:                 b.JobID,
+			ProjectID:             b.ProjectID,
 			WorkpoolID:            b.WorkpoolID,
 			ExpectedVMCount:       b.ExpectedVMCount,
 			Preemptible:           b.Preemptible,
@@ -584,6 +592,7 @@ func (s *dashboardServer) handleGetBatch(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, batchRequestResponse{
 		BatchID:               batch.BatchID,
 		JobID:                 batch.JobID,
+		ProjectID:             batch.ProjectID,
 		WorkpoolID:            batch.WorkpoolID,
 		ExpectedVMCount:       batch.ExpectedVMCount,
 		Preemptible:           batch.Preemptible,

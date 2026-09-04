@@ -52,6 +52,11 @@ export interface WorkerRecord {
 export interface BatchRecord {
   batch_id: string;
   job_id: string;
+  /**
+   * Project this batch's job and VMs live in, pinned at submission time.
+   * Empty means the backend's own project.
+   */
+  project_id: string;
   workpool_id: string;
   expected_vm_count: number;
   preemptible: boolean;
@@ -478,6 +483,16 @@ function WorkPoolPropertiesPanel({
       )}
 
       <SectionHeader>Configuration</SectionHeader>
+      <DetailRow
+        label="project"
+        value={
+          detail.project_id || (
+            // Empty means the workpool never overrode it, so its VMs run in
+            // whichever project the backend was started with.
+            <span style={{ color: "#999" }}>backend default</span>
+          )
+        }
+      />
       <DetailRow label="machine type" value={detail.machine_type || dash} />
       <DetailRow label="region" value={detail.region || dash} />
       <DetailRow
