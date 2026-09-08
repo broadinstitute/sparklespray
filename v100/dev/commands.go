@@ -126,9 +126,10 @@ func Command() cli.Command {
 			{
 				Name:      "test-profile-command",
 				ArgsUsage: "<docker-image> <command...>",
-				Usage:     "Run a command in a docker image with the worker's periodic metric collection, printing each sample as JSON to stdout (use -- before the image if <command> has its own flags)",
+				Usage:     "Run a command in a docker image with the worker's metric collection, printing each sample as JSON to stdout (use -- before the image if <command> has its own flags)",
 				Flags: []cli.Flag{
-					cli.DurationFlag{Name: "interval", Usage: "metric sampling interval (default: same as production, 1m)"},
+					cli.DurationFlag{Name: "interval", Usage: "use a fixed sampling interval instead of the adaptive schedule (1s, doubling to 60s)"},
+					cli.StringFlag{Name: "container", Usage: "sample an already-running container by name instead of starting one"},
 				},
 				Action: runDevTestProfileCommand,
 			},

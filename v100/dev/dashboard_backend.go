@@ -1102,35 +1102,26 @@ func (s *dashboardServer) handleGetJobSummaryHistory(w http.ResponseWriter, r *h
 
 // ----- GET /api/v1/task/{task_id} -----
 
-type resourceUsageResponse struct {
-	StartTime       time.Time `json:"start_time"`
-	EndTime         time.Time `json:"end_time"`
-	ElapsedSeconds  float64   `json:"elapsed_seconds"`
-	MaxMemoryBytes  int64     `json:"max_memory_bytes"`
-	CPUUserUSec     int64     `json:"cpu_user_usec"`
-	CPUSystemUSec   int64     `json:"cpu_system_usec"`
-	BlockReadBytes  int64     `json:"block_read_bytes"`
-	BlockWriteBytes int64     `json:"block_write_bytes"`
-	ExitCode        int       `json:"exit_code"`
-	OOMKilled       bool      `json:"oom_killed"`
-}
+// v100.ResourceUsage is serialised directly rather than copied into a separate
+// response struct: it carries json tags matching its firestore tags, so a
+// hand-written mirror would only be a second place to forget a field.
 
 type taskResponse struct {
-	TaskID         string                 `json:"task_id"`
-	TaskIndex      int                    `json:"task_index"`
-	JobID          string                 `json:"job_id"`
-	WorkpoolID     string                 `json:"workpool_id"`
-	Status         string                 `json:"status"`
-	Command        []string               `json:"command"`
-	DockerImage    string                 `json:"docker_image"`
-	ResultPath     string                 `json:"result_path,omitempty"`
-	LogPath        string                 `json:"log_path,omitempty"`
-	OwningWorkerID string                 `json:"owning_worker_id,omitempty"`
-	FailureReason  string                 `json:"failure_reason,omitempty"`
-	Labels         []labelResponse        `json:"labels"`
-	ExitCode       *int                   `json:"exit_code,omitempty"`
-	ResourceUsage  *resourceUsageResponse `json:"resource_usage,omitempty"`
-	VMConsoleURL   string                 `json:"vm_console_url,omitempty"`
+	TaskID         string              `json:"task_id"`
+	TaskIndex      int                 `json:"task_index"`
+	JobID          string              `json:"job_id"`
+	WorkpoolID     string              `json:"workpool_id"`
+	Status         string              `json:"status"`
+	Command        []string            `json:"command"`
+	DockerImage    string              `json:"docker_image"`
+	ResultPath     string              `json:"result_path,omitempty"`
+	LogPath        string              `json:"log_path,omitempty"`
+	OwningWorkerID string              `json:"owning_worker_id,omitempty"`
+	FailureReason  string              `json:"failure_reason,omitempty"`
+	Labels         []labelResponse     `json:"labels"`
+	ExitCode       *int                `json:"exit_code,omitempty"`
+	ResourceUsage  *v100.ResourceUsage `json:"resource_usage,omitempty"`
+	VMConsoleURL   string              `json:"vm_console_url,omitempty"`
 }
 
 // instanceNameRe parses the custom "project/<project>/zone/<zone>/instance/<instance>"
@@ -1138,11 +1129,11 @@ type taskResponse struct {
 var instanceNameRe = regexp.MustCompile(`^project/([^/]+)/zone/([^/]+)/instance/([^/]+)$`)
 
 type taskSummaryResponse struct {
-	TaskID        string                 `json:"task_id"`
-	TaskIndex     int                    `json:"task_index"`
-	Status        string                 `json:"status"`
-	ExitCode      *int                   `json:"exit_code,omitempty"`
-	ResourceUsage *resourceUsageResponse `json:"resource_usage,omitempty"`
+	TaskID        string              `json:"task_id"`
+	TaskIndex     int                 `json:"task_index"`
+	Status        string              `json:"status"`
+	ExitCode      *int                `json:"exit_code,omitempty"`
+	ResourceUsage *v100.ResourceUsage `json:"resource_usage,omitempty"`
 }
 
 func (s *dashboardServer) handleGetTask(w http.ResponseWriter, r *http.Request) {
@@ -1187,21 +1178,7 @@ func (s *dashboardServer) handleGetTask(w http.ResponseWriter, r *http.Request) 
 		ec := task.ExitCode
 		resp.ExitCode = &ec
 	}
-	if task.ResourceUsage != nil {
-		ru := task.ResourceUsage
-		resp.ResourceUsage = &resourceUsageResponse{
-			StartTime:       ru.StartTime,
-			EndTime:         ru.EndTime,
-			ElapsedSeconds:  ru.ElapsedSeconds,
-			MaxMemoryBytes:  ru.MaxMemoryBytes,
-			CPUUserUSec:     ru.CPUUserUSec,
-			CPUSystemUSec:   ru.CPUSystemUSec,
-			BlockReadBytes:  ru.BlockReadBytes,
-			BlockWriteBytes: ru.BlockWriteBytes,
-			ExitCode:        ru.ExitCode,
-			OOMKilled:       ru.OOMKilled,
-		}
-	}
+	resp.ResourceUsage = task.ResourceUsage
 	if task.OwningWorkerID != "" {
 		if wsnap, werr := s.fs.Collection("Workers").Doc(task.OwningWorkerID).Get(ctx); werr == nil {
 			var wr v100.WorkerRecord
@@ -1298,21 +1275,7 @@ func (s *dashboardServer) handleGetJobTasks(w http.ResponseWriter, r *http.Reque
 			ec := task.ExitCode
 			entry.ExitCode = &ec
 		}
-		if task.ResourceUsage != nil {
-			ru := task.ResourceUsage
-			entry.ResourceUsage = &resourceUsageResponse{
-				StartTime:       ru.StartTime,
-				EndTime:         ru.EndTime,
-				ElapsedSeconds:  ru.ElapsedSeconds,
-				MaxMemoryBytes:  ru.MaxMemoryBytes,
-				CPUUserUSec:     ru.CPUUserUSec,
-				CPUSystemUSec:   ru.CPUSystemUSec,
-				BlockReadBytes:  ru.BlockReadBytes,
-				BlockWriteBytes: ru.BlockWriteBytes,
-				ExitCode:        ru.ExitCode,
-				OOMKilled:       ru.OOMKilled,
-			}
-		}
+		entry.ResourceUsage = task.ResourceUsage
 		result = append(result, entry)
 	}
 	writeJSON(w, http.StatusOK, result)
@@ -1320,29 +1283,23 @@ func (s *dashboardServer) handleGetJobTasks(w http.ResponseWriter, r *http.Reque
 
 // ----- GET /api/v1/task/{task_id}/log -----
 
-// taskLogEntry is the unified JSON shape for both log_update and metric_update entries.
+// taskLogEntry is the unified JSON shape for both log_update and
+// metric_update entries. It is a discriminated union: exactly one of Content
+// or Metric is populated, according to Type.
+//
+// The metric payload is nested rather than flattened alongside Content so that
+// a consumer can reuse one MetricSample type instead of carrying ~40 optional
+// fields on the log branch.
 type taskLogEntry struct {
 	TaskID    string    `json:"task_id"`
 	Type      string    `json:"type"`
 	Timestamp time.Time `json:"timestamp"`
-	// log_update fields
+
+	// log_update
 	Content string `json:"content,omitempty"`
-	// metric_update fields — use raw map so absent fields are truly absent
-	ProcessCount         *int32             `json:"process_count,omitempty"`
-	TotalMemory          *int64             `json:"total_memory,omitempty"`
-	TotalData            *int64             `json:"total_data,omitempty"`
-	TotalShared          *int64             `json:"total_shared,omitempty"`
-	TotalResident        *int64             `json:"total_resident,omitempty"`
-	CpuUser              *float64           `json:"cpu_user,omitempty"`
-	CpuSystem            *float64           `json:"cpu_system,omitempty"`
-	CpuIdle              *float64           `json:"cpu_idle,omitempty"`
-	CpuIowait            *float64           `json:"cpu_iowait,omitempty"`
-	MemTotal             *int64             `json:"mem_total,omitempty"`
-	MemAvailable         *int64             `json:"mem_available,omitempty"`
-	MemFree              *int64             `json:"mem_free,omitempty"`
-	MemPressureSomeAvg10 *int32             `json:"mem_pressure_some_avg10,omitempty"`
-	MemPressureFullAvg10 *int32             `json:"mem_pressure_full_avg10,omitempty"`
-	Volumes              []v100.VolumeUsage `json:"volumes,omitempty"`
+
+	// metric_update
+	Metric *v100.MetricSample `json:"metric,omitempty"`
 }
 
 func (s *dashboardServer) handleGetTaskLog(w http.ResponseWriter, r *http.Request) {
@@ -1414,67 +1371,28 @@ func (s *dashboardServer) handleGetTaskLog(w http.ResponseWriter, r *http.Reques
 		switch entryType {
 		case "log_update":
 			entry.Content, _ = data["content"].(string)
-		case "metric_update":
-			if v, ok := data["process_count"].(int64); ok {
-				v32 := int32(v)
-				entry.ProcessCount = &v32
+		case v100.MetricUpdateEventType:
+			// Skip documents written by a worker on a different metric schema.
+			// Without this check an older document would decode into the
+			// current struct as all zeros -- i.e. as a container that used no
+			// CPU and had no memory pressure -- which is a plausible-looking
+			// lie rather than a visible failure. Old documents linger for the
+			// TaskLog TTL, so this is the normal case after a rollout.
+			if schema, _ := data["metric_schema"].(int64); schema != int64(v100.MetricSchemaCurrent) {
+				log.Printf("dashboard: TaskLog/%s: skipping metric_schema=%d (want %d)",
+					snap.Ref.ID, schema, v100.MetricSchemaCurrent)
+				continue
 			}
-			if v, ok := data["total_memory"].(int64); ok {
-				entry.TotalMemory = &v
+			var ms v100.MetricSample
+			if err := snap.DataTo(&ms); err != nil {
+				// A type mismatch here means the stored schema and this
+				// binary genuinely disagree; failing loudly beats serving a
+				// silently truncated sample.
+				log.Printf("dashboard: TaskLog/%s: decoding metric sample: %v", snap.Ref.ID, err)
+				writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "malformed metric document")
+				return
 			}
-			if v, ok := data["total_data"].(int64); ok {
-				entry.TotalData = &v
-			}
-			if v, ok := data["total_shared"].(int64); ok {
-				entry.TotalShared = &v
-			}
-			if v, ok := data["total_resident"].(int64); ok {
-				entry.TotalResident = &v
-			}
-			if v, ok := data["cpu_user"].(float64); ok {
-				entry.CpuUser = &v
-			}
-			if v, ok := data["cpu_system"].(float64); ok {
-				entry.CpuSystem = &v
-			}
-			if v, ok := data["cpu_idle"].(float64); ok {
-				entry.CpuIdle = &v
-			}
-			if v, ok := data["cpu_iowait"].(float64); ok {
-				entry.CpuIowait = &v
-			}
-			if v, ok := data["mem_total"].(int64); ok {
-				entry.MemTotal = &v
-			}
-			if v, ok := data["mem_available"].(int64); ok {
-				entry.MemAvailable = &v
-			}
-			if v, ok := data["mem_free"].(int64); ok {
-				entry.MemFree = &v
-			}
-			if v, ok := data["mem_pressure_some_avg10"].(int64); ok {
-				v32 := int32(v)
-				entry.MemPressureSomeAvg10 = &v32
-			}
-			if v, ok := data["mem_pressure_full_avg10"].(int64); ok {
-				v32 := int32(v)
-				entry.MemPressureFullAvg10 = &v32
-			}
-			if vols, ok := data["volumes"].([]interface{}); ok {
-				for _, vi := range vols {
-					if vm, ok := vi.(map[string]interface{}); ok {
-						vol := v100.VolumeUsage{}
-						vol.Location, _ = vm["location"].(string)
-						if tg, ok := vm["total_gb"].(float64); ok {
-							vol.TotalGB = tg
-						}
-						if ug, ok := vm["used_gb"].(float64); ok {
-							vol.UsedGB = ug
-						}
-						entry.Volumes = append(entry.Volumes, vol)
-					}
-				}
-			}
+			entry.Metric = &ms
 		}
 		entries = append(entries, entry)
 	}

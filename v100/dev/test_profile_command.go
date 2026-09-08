@@ -15,23 +15,28 @@ import (
 )
 
 // runDevTestProfileCommand runs <docker-image> <command...> under Docker and
-// drives the worker's periodic resource-metric collection (the same
-// v100.CollectMetrics code path polled by OpenTaskEventLog for every real
-// task) on the same interval, printing each sample as JSON to stdout instead
-// of publishing it to Firestore. Useful for inspecting/debugging what the
-// worker's metric_update events actually report.
+// drives the worker's metric collection (the same code path polled by
+// OpenTaskEventLog for every real task) against it, printing each sample as
+// JSON to stdout instead of publishing it to Firestore.
+//
+// This is the primary way to inspect what the worker's metric_update events
+// actually report on a given host -- in particular whether the container's
+// cgroup could be located and which counters that kernel exposes.
+//
+// With --container, it attaches to an already-running container by name
+// instead of starting one, which makes it a fast loop for debugging cgroup
+// path resolution against a container you started by hand.
 func runDevTestProfileCommand(c *cli.Context) error {
+	if existing := c.String("container"); existing != "" {
+		return profileExistingContainer(c, existing)
+	}
+
 	args := []string(c.Args())
 	if len(args) < 2 {
-		return fmt.Errorf("usage: sparkles dev test-profile-command [--interval DURATION] [--] <docker-image> <command...>")
+		return fmt.Errorf("usage: sparkles dev test-profile-command [--interval DURATION] [--container NAME] [--] <docker-image> <command...>")
 	}
 	image := args[0]
 	command := args[1:]
-
-	interval := c.Duration("interval")
-	if interval <= 0 {
-		interval = v100.MetricsInterval
-	}
 
 	workDir, err := os.MkdirTemp("", "sparkles-test-profile-*")
 	if err != nil {
@@ -45,7 +50,7 @@ func runDevTestProfileCommand(c *cli.Context) error {
 	dockerArgs = append(dockerArgs, command...)
 
 	fmt.Fprintf(os.Stderr, "Running: %s %s\n", v100.DockerExecutable, strings.Join(dockerArgs, " "))
-	fmt.Fprintf(os.Stderr, "Sampling metrics every %s\n", interval)
+	describeSchedule(c, os.Stderr)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -57,31 +62,45 @@ func runDevTestProfileCommand(c *cli.Context) error {
 		return fmt.Errorf("starting docker: %w", err)
 	}
 
-	// Same periodic collection loop as OpenTaskEventLog (v100/task_event_log.go),
-	// just printed to stdout instead of published to Firestore/a local file.
+	sampler := v100.NewMetricSampler(containerName, workDir, containerName)
+	enc := json.NewEncoder(os.Stdout)
+
+	// Mirrors the poll loop in OpenTaskEventLog: one goroutine owns the
+	// sampler, and the final sample is taken by that same goroutine so the
+	// CPU baseline is never shared across goroutines.
 	pollDone := make(chan struct{})
+	finalize := make(chan struct{})
 	go func() {
 		defer close(pollDone)
-		prev := v100.GetCPUStats()
-		enc := json.NewEncoder(os.Stdout)
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
+		encode := func(final bool) {
+			if err := enc.Encode(sampler.Sample(final)); err != nil {
+				fmt.Fprintf(os.Stderr, "encoding metric sample: %v\n", err)
+			}
+		}
+		delay := firstDelay(c)
+		timer := time.NewTimer(delay)
+		defer timer.Stop()
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case <-ticker.C:
-				var event *v100.ResourceUsageEvent
-				event, prev = v100.CollectMetrics(containerName, workDir, prev)
-				if err := enc.Encode(event); err != nil {
-					fmt.Fprintf(os.Stderr, "encoding metric event: %v\n", err)
-				}
+			case <-finalize:
+				encode(true)
+				return
+			case <-timer.C:
+				encode(false)
+				delay = nextDelay(c, delay)
+				timer.Reset(delay)
 			}
 		}
 	}()
 
 	runErr := cmd.Wait()
-	cancel()
+
+	// Take the final sample while the container still exists: "docker rm"
+	// destroys its cgroup, and the cumulative counters read here are what
+	// close the gap between the last periodic sample and exit.
+	close(finalize)
 	<-pollDone
 
 	if rmOut, rmErr := exec.Command(v100.DockerExecutable, "rm", "-f", containerName).CombinedOutput(); rmErr != nil {
@@ -92,4 +111,55 @@ func runDevTestProfileCommand(c *cli.Context) error {
 		return fmt.Errorf("docker command failed: %w", runErr)
 	}
 	return nil
+}
+
+// profileExistingContainer samples an already-running container until
+// interrupted, without starting or removing anything.
+func profileExistingContainer(c *cli.Context, name string) error {
+	workDir, err := os.MkdirTemp("", "sparkles-test-profile-*")
+	if err != nil {
+		return fmt.Errorf("creating work dir: %w", err)
+	}
+	defer os.RemoveAll(workDir)
+
+	fmt.Fprintf(os.Stderr, "Attaching to container %s (ctrl-c to stop)\n", name)
+	describeSchedule(c, os.Stderr)
+
+	sampler := v100.NewMetricSampler(name, workDir, name)
+	enc := json.NewEncoder(os.Stdout)
+
+	delay := firstDelay(c)
+	for {
+		time.Sleep(delay)
+		if err := enc.Encode(sampler.Sample(false)); err != nil {
+			return fmt.Errorf("encoding metric sample: %w", err)
+		}
+		delay = nextDelay(c, delay)
+	}
+}
+
+// firstDelay is the delay before the first sample: the worker's adaptive
+// schedule unless --interval pins it to a fixed cadence.
+func firstDelay(c *cli.Context) time.Duration {
+	if interval := c.Duration("interval"); interval > 0 {
+		return interval
+	}
+	return v100.MetricsFirstDelay
+}
+
+// nextDelay advances the schedule, honouring a fixed --interval if given.
+func nextDelay(c *cli.Context, cur time.Duration) time.Duration {
+	if interval := c.Duration("interval"); interval > 0 {
+		return interval
+	}
+	return v100.NextMetricsDelay(cur)
+}
+
+func describeSchedule(c *cli.Context, w *os.File) {
+	if interval := c.Duration("interval"); interval > 0 {
+		fmt.Fprintf(w, "Sampling metrics every %s\n", interval)
+		return
+	}
+	fmt.Fprintf(w, "Sampling metrics on the adaptive schedule (%s, doubling to %s)\n",
+		v100.MetricsFirstDelay, v100.MetricsMaxDelay)
 }

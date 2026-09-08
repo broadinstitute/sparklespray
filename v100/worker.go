@@ -156,6 +156,13 @@ func executeTask(task *Task, resources Resources, completions chan<- taskComplet
 func executeDockerCommand(ctx context.Context, imageName string, command []string, workDir string, extraDockerArgs []string, tel *TaskEventLog) (*ResourceUsage, error) {
 	containerName := "sparkles-" + uuid.New().String()[:8]
 
+	// Register the container before starting it. The metrics poller is already
+	// running concurrently with the blocking cmd.Run below, but until now it
+	// had no way to tell which container belonged to it; resolution of the
+	// container's cgroup is lazy and retried, so registering a name that does
+	// not exist yet is expected.
+	tel.SetContainer(containerName)
+
 	args := append([]string{"run", "--name", containerName, "-w", workDir}, extraDockerArgs...)
 	args = append(args, imageName)
 	args = append(args, command...)
@@ -195,8 +202,13 @@ func executeDockerCommand(ctx context.Context, imageName string, command []strin
 	pw.Close()
 	pipeErr := <-pipeErrCh
 
-	// Collect resource usage while the container still exists, then remove it.
-	ru := collectDockerResourceUsage(containerName)
+	// Take the final metric sample while the container still exists: docker rm
+	// destroys its cgroup. The counters read here are cumulative, so this is
+	// also what closes the gap between the last periodic sample and exit --
+	// and for a task too short to have been sampled at all, it is the only
+	// sample there will be.
+	final := tel.TriggerFinalSample()
+	ru := buildResourceUsage(containerName, final)
 	if rmOut, rmErr := exec.Command(dockerExecutable, "rm", "-f", containerName).CombinedOutput(); rmErr != nil {
 		log.Printf("docker rm %s: %v: %s", containerName, rmErr, rmOut)
 	}

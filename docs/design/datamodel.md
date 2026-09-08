@@ -72,20 +72,42 @@ One document per task. The document ID is the `task_id`.
 | `destination`   | string | Relative path under the working directory where the file is written (e.g. `inputs/file.txt`) |
 | `is_executable` | bool   | If true, the file is made executable after download. Defaults to false if omitted.           |
 
-**ResourceUsage** (embedded object) — written by the worker once per task, after the Docker container exits and before `docker rm` is called. Fields are zero when the underlying cgroup or `docker inspect` data was unavailable. Collected from Linux cgroup files (v1 or v2, auto-detected) plus `docker inspect` for timing.
+**ResourceUsage** (embedded object) — written by the worker once per task. It is assembled from `docker inspect` (timing and exit) plus the metrics poller's **final sample**, taken after the container exits but before `docker rm` is called, while its cgroup still exists.
 
-| Field               | Type      | Description                                                                                                            |
-| ------------------- | --------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `start_time`        | timestamp | Container start time (from `docker inspect .State.StartedAt`)                                                          |
-| `end_time`          | timestamp | Container finish time (from `docker inspect .State.FinishedAt`)                                                        |
-| `elapsed_seconds`   | float64   | Wall-clock duration in seconds (`end_time - start_time`)                                                               |
-| `max_memory_bytes`  | int64     | Peak RSS of the container's cgroup (cgroup v2: `memory.peak`; cgroup v1: `memory.max_usage_in_bytes`)                  |
-| `cpu_user_usec`     | int64     | User-mode CPU time in microseconds (cgroup v2: `cpu.stat user_usec`; cgroup v1: `cpuacct.usage_user` ÷ 1000)           |
-| `cpu_system_usec`   | int64     | Kernel-mode CPU time in microseconds (cgroup v2: `cpu.stat system_usec`; cgroup v1: `cpuacct.usage_sys` ÷ 1000)        |
-| `block_read_bytes`  | int64     | Total bytes read from block devices (cgroup v2: `io.stat rbytes`; cgroup v1: `blkio.throttle.io_service_bytes Read`)   |
-| `block_write_bytes` | int64     | Total bytes written to block devices (cgroup v2: `io.stat wbytes`; cgroup v1: `blkio.throttle.io_service_bytes Write`) |
-| `exit_code`         | int       | Container exit code (from `docker inspect .State.ExitCode`)                                                            |
-| `oom_killed`        | bool      | True if the container was killed by the OOM killer (from `docker inspect .State.OOMKilled`)                            |
+Because the cgroup counters are cumulative, this summary covers the whole run — including whatever happened between the last periodic `metric_update` and exit. The `container_*` fields carry exactly the same names as in `metric_update` entries, so the summary and the last periodic sample are directly comparable.
+
+Requires **cgroup v2**; see the note on unavailable values below the `metric_update` table.
+
+| Field                                  | Type      | Description                                                                                                                             |
+| -------------------------------------- | --------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `start_time`                           | timestamp | Container start time (`docker inspect .State.StartedAt`)                                                                                |
+| `end_time`                             | timestamp | Container finish time (`docker inspect .State.FinishedAt`)                                                                              |
+| `elapsed_seconds`                      | float64   | Wall-clock duration in seconds (`end_time - start_time`); the denominator that makes the counters below interpretable                   |
+| `exit_code`                            | int       | Container exit code (`docker inspect .State.ExitCode`)                                                                                  |
+| `oom_killed`                           | bool      | True if the container's **main process** was OOM-killed (`docker inspect .State.OOMKilled`)                                             |
+| `container_oom_kill_count`             | int64     | Count of OOM-killed processes in the cgroup, **including children** (`memory.events oom_kill`) — catches kills that `oom_killed` misses |
+| `container_cpu_usage_usec`             | int64     | Total CPU time, user + system (`cpu.stat usage_usec`)                                                                                   |
+| `container_cpu_user_usec`              | int64     | User-mode CPU time (`cpu.stat user_usec`)                                                                                               |
+| `container_cpu_system_usec`            | int64     | Kernel-mode CPU time (`cpu.stat system_usec`)                                                                                           |
+| `container_cpu_throttled_usec`         | int64     | Time runnable but denied CPU by a quota (`cpu.stat throttled_usec`); non-zero only when a CPU limit is set                              |
+| `container_cpu_throttled_periods`      | int64     | Number of throttled scheduling periods (`cpu.stat nr_throttled`)                                                                        |
+| `container_memory_peak_bytes`          | int64     | Peak memory high-water mark (`memory.peak`; needs kernel ≥ 5.19)                                                                        |
+| `container_memory_limit_bytes`         | int64     | Memory limit (`memory.max`); unavailable when unlimited                                                                                 |
+| `container_memory_major_faults`        | int64     | Major (disk-backed) page faults (`memory.stat pgmajfault`)                                                                              |
+| `container_memory_workingset_refaults` | int64     | Pages evicted then faulted back in (`memory.stat workingset_refault_file` + `_anon`) — distinguishes real thrashing from cold reads     |
+| `container_cpu_stall_some_usec`        | int64     | Cumulative µs at least one task was stalled waiting for CPU (`cpu.pressure`) — reveals a task starved by an oversubscribed host         |
+| `container_cpu_stall_full_usec`        | int64     | Cumulative µs _all_ tasks were CPU-stalled; frequently unavailable, as many kernels emit no `full` line for `cpu.pressure`              |
+| `container_memory_stall_some_usec`     | int64     | Cumulative µs stalled on memory (`memory.pressure`) — separates thrashing near the limit from a slow disk                               |
+| `container_memory_stall_full_usec`     | int64     | Cumulative µs all tasks were memory-stalled                                                                                             |
+| `container_io_stall_some_usec`         | int64     | Cumulative µs stalled on I/O (`io.pressure`) — **this is "how long was the task blocked on I/O"**                                       |
+| `container_io_stall_full_usec`         | int64     | Cumulative µs all tasks were I/O-stalled                                                                                                |
+| `container_io_read_bytes`              | int64     | Bytes read from block devices (`io.stat rbytes`)                                                                                        |
+| `container_io_write_bytes`             | int64     | Bytes written to block devices (`io.stat wbytes`)                                                                                       |
+| `container_io_read_ops`                | int64     | Read operations (`io.stat rios`); with bytes, distinguishes many-small-random from few-big-sequential I/O                               |
+| `container_io_write_ops`               | int64     | Write operations (`io.stat wios`)                                                                                                       |
+| `container_pids_peak`                  | int64     | Peak process/thread count (`pids.peak`, kernel ≥ 6.1; else `pids.current`) — reveals unexpected fan-out                                 |
+
+Quantities deliberately **not** stored, because they are derivable and belong at display time: CPU efficiency (`container_cpu_usage_usec / (elapsed_seconds × cores)`), I/O stall fraction (`container_io_stall_full_usec / elapsed_seconds`), memory headroom (`container_memory_peak_bytes / container_memory_limit_bytes`), and **unaccounted wait** (`elapsed − cpu_usage − all stalls`), which is how time blocked on the network is inferred — a socket wait is a voluntary sleep, so it appears in neither `iowait` nor `io.pressure`.
 
 **Status values:**
 
@@ -374,33 +396,53 @@ All entries share these common fields:
 | --------- | ------ | ------------------------------------------------------- |
 | `content` | string | Raw stdout/stderr text for this chunk (arbitrary bytes) |
 
-**`metric_update` entries** — a periodic resource usage sample collected once per minute while the task is running:
+**`metric_update` entries** — one resource usage sample.
 
-| Field                     | Type          | Description                                                                                                       |
-| ------------------------- | ------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `process_count`           | int32         | Number of processes visible in `/proc`                                                                            |
-| `total_memory`            | int64         | Total virtual memory size across all processes (bytes)                                                            |
-| `total_data`              | int64         | Total data-segment size across all processes (bytes)                                                              |
-| `total_shared`            | int64         | Total shared memory across all processes (bytes)                                                                  |
-| `total_resident`          | int64         | Total resident set size across all processes (bytes)                                                              |
-| `cpu_user`                | int64         | Cumulative user-mode CPU time (jiffies) from `/proc/stat`                                                         |
-| `cpu_system`              | int64         | Cumulative kernel-mode CPU time (jiffies) from `/proc/stat`                                                       |
-| `cpu_idle`                | int64         | Cumulative idle CPU time (jiffies) from `/proc/stat`                                                              |
-| `cpu_iowait`              | int64         | Cumulative I/O-wait CPU time (jiffies) from `/proc/stat`                                                          |
-| `mem_total`               | int64         | System total memory (bytes) from `/proc/meminfo`                                                                  |
-| `mem_available`           | int64         | System available memory (bytes) from `/proc/meminfo`                                                              |
-| `mem_free`                | int64         | System free memory (bytes) from `/proc/meminfo`                                                                   |
-| `mem_pressure_some_avg10` | int32         | Memory pressure "some" 10-second average × 100 (e.g. 150 = 1.50%) from `/proc/pressure/memory`; -1 if unavailable |
-| `mem_pressure_full_avg10` | int32         | Memory pressure "full" 10-second average × 100; -1 if unavailable                                                 |
-| `volumes`                 | []VolumeUsage | Disk volume usage snapshots at the time of the update                                                             |
+Sampling is **adaptive**: the first sample is taken 1 second after the task starts and the delay then doubles up to a 60-second ceiling (1, 2, 4, 8, 16, 32, 60, 60, …). This replaced a fixed one-minute interval, under which any task shorter than a minute produced _no samples at all_. One further sample is taken after the container exits, flagged `final`.
 
-**VolumeUsage** (embedded object):
+Each sample carries both **host** metrics (the environment the task ran in — relevant because one worker runs several containers per VM) and **container** metrics (what this task itself did).
 
-| Field      | Type    | Description                                     |
-| ---------- | ------- | ----------------------------------------------- |
-| `location` | string  | Mount path of the volume (e.g. `/`, `/scratch`) |
-| `total_gb` | float64 | Total capacity of the volume (GiB)              |
-| `used_gb`  | float64 | Space currently used on the volume (GiB)        |
+| Field                                              | Type         | Description                                                                                                                                                                            |
+| -------------------------------------------------- | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `metric_schema`                                    | int32        | Metric layout version. Readers **must** skip samples with an unexpected value — see below                                                                                              |
+| `seq`                                              | int32        | 0-based sample index within the task, so a consumer can detect a lost sample                                                                                                           |
+| `final`                                            | bool         | True for the single post-exit sample; that one also becomes the task's `resource_usage` summary                                                                                        |
+| `host_cpu_user_pct`                                | float64      | Host user-mode CPU, % of total across all cores since the previous sample (`/proc/stat`)                                                                                               |
+| `host_cpu_system_pct`                              | float64      | Host kernel-mode CPU %                                                                                                                                                                 |
+| `host_cpu_idle_pct`                                | float64      | Host idle %                                                                                                                                                                            |
+| `host_cpu_iowait_pct`                              | float64      | Host I/O-wait %; retained so the four CPU percentages sum to 100                                                                                                                       |
+| `host_memory_total_bytes`                          | int64        | Host `MemTotal` (`/proc/meminfo`)                                                                                                                                                      |
+| `host_memory_available_bytes`                      | int64        | Host `MemAvailable`                                                                                                                                                                    |
+| `host_cpu_stall_{some,full}_usec`                  | int64        | Cumulative host CPU stall µs (`/proc/pressure/cpu`)                                                                                                                                    |
+| `host_memory_stall_{some,full}_usec`               | int64        | Cumulative host memory stall µs (`/proc/pressure/memory`)                                                                                                                              |
+| `host_io_stall_{some,full}_usec`                   | int64        | Cumulative host I/O stall µs (`/proc/pressure/io`)                                                                                                                                     |
+| `host_volumes`                                     | []HostVolume | Disk usage per mount point at sample time                                                                                                                                              |
+| `container_present`                                | bool         | False when the container's cgroup could not be located; every `container_*` field is then unavailable. Expected for the first sample of a task, since the container does not exist yet |
+| `container_memory_current_bytes`                   | int64        | Current container memory (`memory.current`)                                                                                                                                            |
+| `container_cpu_{usage,user,system}_usec`           | int64        | Cumulative container CPU time (`cpu.stat`)                                                                                                                                             |
+| `container_{cpu,memory,io}_stall_{some,full}_usec` | int64        | Cumulative container stall µs (`{cpu,memory,io}.pressure`)                                                                                                                             |
+| `container_io_{read,write}_{bytes,ops}`            | int64        | Cumulative container block I/O (`io.stat`)                                                                                                                                             |
+
+Samples also repeat the high-water and cumulative container fields documented under **ResourceUsage** above (`container_memory_peak_bytes`, `container_memory_limit_bytes`, `container_cpu_throttled_usec`, `container_cpu_throttled_periods`, `container_memory_major_faults`, `container_memory_workingset_refaults`, `container_memory_oom_kill_count`, `container_pids_peak`). Carrying them in every sample shows _when_ throttling or an OOM kill occurred rather than only that it did, and it lets the final summary be a pure projection of the last sample with no second pass over the cgroup.
+
+**Two conventions worth understanding:**
+
+- **`-1` means "unavailable", not zero.** A metric the kernel does not expose is reported as `-1` so it stays distinguishable from a genuine zero: "did no I/O" and "this kernel has no I/O accounting" are different facts. Common causes are a kernel too old for a given file (`memory.peak` needs ≥ 5.19, `pids.peak` ≥ 6.1), a `cpu.pressure` file with no `full` line (widespread), an unlimited `memory.max`, cgroup v1 (unsupported — all container fields are `-1`), or a cgroup already torn down when the final sample was taken.
+- **PSI stalls are stored as cumulative `total=` microseconds, not `avg10`.** An average has a ~10-second ramp, which makes it meaningless for a task that runs for three seconds — precisely the case this design set out to fix. Totals difference exactly over any interval (`total[t] − total[t−1]`) and the post-exit read is the _same counter_, so the periodic samples and the final summary compose into one gap-free series. Averages are derivable from totals; totals are not recoverable from averages. Consumers wanting a rate should difference consecutive samples and divide by the elapsed wall time between them.
+
+Because sample spacing is deliberately non-uniform, any chart must use a time-scaled x-axis; a categorical axis would badly distort the early, most detailed part of every task.
+
+**Schema versioning.** `metric_schema` exists because `TaskLog` documents live for 7 days, so after a rollout the collection holds samples in both the old and new layouts. A reader that decodes an old document into the current shape gets **all zeros** — indistinguishable from a container that used no CPU and had no memory pressure. Readers must therefore compare `metric_schema` and skip mismatches rather than trusting the decode.
+
+**HostVolume** (embedded object):
+
+| Field         | Type   | Description                                     |
+| ------------- | ------ | ----------------------------------------------- |
+| `location`    | string | Mount path of the volume (e.g. `/`, `/scratch`) |
+| `total_bytes` | int64  | Total capacity of the volume                    |
+| `used_bytes`  | int64  | Space currently used on the volume              |
+
+Bytes rather than gigabytes so the fields stay integers: Firestore's `DataTo` refuses to decode a stored double into an `int64` field, so a float unit here would permanently fix the wire type. Unit conversion belongs at display.
 
 ---
 

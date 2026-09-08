@@ -253,18 +253,34 @@ Get a single task's current state and metadata.
     "start_time": "RFC3339 timestamp",
     "end_time": "RFC3339 timestamp",
     "elapsed_seconds": "float64",
-    "max_memory_bytes": "integer",
-    "cpu_user_usec": "integer",
-    "cpu_system_usec": "integer",
-    "block_read_bytes": "integer",
-    "block_write_bytes": "integer",
     "exit_code": "integer",
-    "oom_killed": "boolean"
+    "oom_killed": "boolean",
+    "container_oom_kill_count": "integer (includes OOM-killed children)",
+    "container_cpu_usage_usec": "integer",
+    "container_cpu_user_usec": "integer",
+    "container_cpu_system_usec": "integer",
+    "container_cpu_throttled_usec": "integer",
+    "container_cpu_throttled_periods": "integer",
+    "container_memory_peak_bytes": "integer",
+    "container_memory_limit_bytes": "integer",
+    "container_memory_major_faults": "integer",
+    "container_memory_workingset_refaults": "integer",
+    "container_cpu_stall_some_usec": "integer",
+    "container_cpu_stall_full_usec": "integer",
+    "container_memory_stall_some_usec": "integer",
+    "container_memory_stall_full_usec": "integer",
+    "container_io_stall_some_usec": "integer",
+    "container_io_stall_full_usec": "integer",
+    "container_io_read_bytes": "integer",
+    "container_io_write_bytes": "integer",
+    "container_io_read_ops": "integer",
+    "container_io_write_ops": "integer",
+    "container_pids_peak": "integer"
   }
 }
 ```
 
-`resource_usage` is omitted when absent (task has not yet completed or metrics were not collected).
+`resource_usage` is omitted when absent (task has not yet completed). Any individual field is `-1` when that metric could not be collected — see the conventions under [`GET /api/v1/task/{task_id}/log`](#get-apiv1tasktask_idlog). Field semantics and cgroup sources are documented in [datamodel.md](datamodel.md).
 
 **Errors**: `404` if not found.
 
@@ -275,6 +291,8 @@ Get a single task's current state and metadata.
 ### `GET /api/v1/task/{task_id}/log`
 
 Get streaming log and metric entries for a task. Both `log_update` and `metric_update` entries are stored in the `TaskLog` collection and returned together, distinguished by their `type` field.
+
+Entries are a discriminated union: `content` is populated for `log_update`, and the nested `metric` object for `metric_update`. The metric payload is nested rather than flattened so a client can reuse a single metric type instead of carrying ~40 optional fields on the log branch.
 
 **Path parameters**:
 
@@ -297,23 +315,58 @@ Get streaming log and metric entries for a task. Both `log_update` and `metric_u
 
       "content": "string (only present when type == log_update)",
 
-      "process_count": "integer (only present when type == metric_update)",
-      "total_memory": "integer",
-      "total_data": "integer",
-      "total_shared": "integer",
-      "total_resident": "integer",
-      "cpu_user": "integer (jiffies)",
-      "cpu_system": "integer (jiffies)",
-      "cpu_idle": "integer (jiffies)",
-      "cpu_iowait": "integer (jiffies)",
-      "mem_total": "integer (bytes)",
-      "mem_available": "integer (bytes)",
-      "mem_free": "integer (bytes)",
-      "mem_pressure_some_avg10": "integer (hundredths of a percent; -1 if unavailable)",
-      "mem_pressure_full_avg10": "integer (hundredths of a percent; -1 if unavailable)",
-      "volumes": [
-        { "location": "string", "total_gb": "float64", "used_gb": "float64" }
-      ]
+      "metric": {
+        "task_id": "string",
+        "type": "metric_update",
+        "timestamp": "RFC3339 timestamp",
+        "metric_schema": "integer",
+        "seq": "integer (0-based sample index within the task)",
+        "final": "boolean (true for the single post-exit sample)",
+
+        "host_cpu_user_pct": "float64 (% of total CPU across all cores)",
+        "host_cpu_system_pct": "float64",
+        "host_cpu_idle_pct": "float64",
+        "host_cpu_iowait_pct": "float64",
+        "host_memory_total_bytes": "integer",
+        "host_memory_available_bytes": "integer",
+        "host_cpu_stall_some_usec": "integer (cumulative microseconds)",
+        "host_cpu_stall_full_usec": "integer",
+        "host_memory_stall_some_usec": "integer",
+        "host_memory_stall_full_usec": "integer",
+        "host_io_stall_some_usec": "integer",
+        "host_io_stall_full_usec": "integer",
+        "host_volumes": [
+          {
+            "location": "string",
+            "total_bytes": "integer",
+            "used_bytes": "integer"
+          }
+        ],
+
+        "container_present": "boolean (false => every container_* field is -1)",
+        "container_memory_current_bytes": "integer",
+        "container_memory_peak_bytes": "integer",
+        "container_memory_limit_bytes": "integer",
+        "container_cpu_usage_usec": "integer (cumulative)",
+        "container_cpu_user_usec": "integer (cumulative)",
+        "container_cpu_system_usec": "integer (cumulative)",
+        "container_cpu_throttled_usec": "integer",
+        "container_cpu_throttled_periods": "integer",
+        "container_memory_major_faults": "integer",
+        "container_memory_workingset_refaults": "integer",
+        "container_memory_oom_kill_count": "integer",
+        "container_pids_peak": "integer",
+        "container_cpu_stall_some_usec": "integer",
+        "container_cpu_stall_full_usec": "integer",
+        "container_memory_stall_some_usec": "integer",
+        "container_memory_stall_full_usec": "integer",
+        "container_io_stall_some_usec": "integer",
+        "container_io_stall_full_usec": "integer",
+        "container_io_read_bytes": "integer",
+        "container_io_write_bytes": "integer",
+        "container_io_read_ops": "integer",
+        "container_io_write_ops": "integer"
+      }
     }
   ],
   "next_after": "RFC3339 timestamp"
@@ -321,6 +374,14 @@ Get streaming log and metric entries for a task. Both `log_update` and `metric_u
 ```
 
 `next_after` is always present and is the timestamp of the last returned entry (or `now` when the result is empty). Use it as the `after` parameter of the next call to poll for new entries.
+
+**Conventions clients must handle:**
+
+- **`-1` means "unavailable", not zero.** A metric this kernel does not expose is `-1` so it stays distinguishable from a genuine zero. Clients should render it as a gap, **not** as `0` and not as `NaN`. Common causes: a kernel too old for a given cgroup file, a `cpu.pressure` file with no `full` line (widespread), an unlimited memory limit, cgroup v1, or a container whose cgroup had already been torn down.
+- **Stall counters are cumulative microseconds, not rates.** To chart a stall percentage or a CPU rate, difference consecutive samples and divide by the wall time between them; clamp negative deltas (counter reset) to a gap. Cumulative totals are stored deliberately: a decaying average has a ~10-second ramp and so is meaningless for a short task, whereas totals difference exactly over any interval and compose with the final post-exit sample without leaving a gap.
+- **Sample spacing is non-uniform.** Sampling is adaptive — 1s after task start, doubling to a 60s ceiling — so charts need a time-scaled x-axis. A categorical axis would badly distort the early, most detailed part of every task.
+- **Check `metric_schema`.** `TaskLog` entries live for 7 days, so after a worker rollout the collection contains both old and new layouts. A client that decodes an old sample into the current shape sees all zeros — a container that apparently used no CPU — so mismatched schemas must be skipped rather than displayed. The server already skips them; clients holding cached entries should too.
+- **A very short task yields exactly one entry**, with `final: true` and `seq: 0`, since it finished before the first periodic sample. Charts should handle a single-point series.
 
 **Errors**: `400` for malformed `after` timestamp.
 

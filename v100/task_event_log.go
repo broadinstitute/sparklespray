@@ -15,12 +15,26 @@ import (
 
 const taskLogCollection = "TaskLog"
 const taskEventLogTTL = 7 * 24 * time.Hour
-const metricsInterval = 1 * time.Minute
 
-// MetricsInterval is the interval at which OpenTaskEventLog polls resource
-// metrics, exported so callers outside this package (e.g. "sparkles dev
-// test-profile-command") can default to the same cadence used in production.
-const MetricsInterval = metricsInterval
+// Metric sampling is adaptive: the first sample is taken shortly after the
+// task starts and the delay then doubles up to a ceiling. A fixed one-minute
+// interval meant any task shorter than a minute produced no samples at all,
+// while sampling every second for the whole life of a multi-hour task would
+// be wasteful. Doubling gives short tasks real resolution and long tasks a
+// cheap steady state.
+const (
+	MetricsFirstDelay = 1 * time.Second
+	MetricsMaxDelay   = 60 * time.Second
+)
+
+// nextMetricsDelay doubles the sampling delay, up to MetricsMaxDelay.
+func nextMetricsDelay(cur time.Duration) time.Duration {
+	next := cur * 2
+	if next > MetricsMaxDelay {
+		return MetricsMaxDelay
+	}
+	return next
+}
 
 // registeredTask holds the state for a task currently running on this worker.
 type registeredTask struct {
@@ -112,7 +126,18 @@ type TaskEventLog struct {
 	fsClient       *firestore.Client
 	cancelPoll     context.CancelFunc
 	pollDone       chan struct{}
-	prevCPU        *cpuStats
+
+	// cgroup is set by SetContainer once the task's container name is known,
+	// and read by the poll goroutine. Guarded by mu.
+	cgroup *containerCgroup
+
+	// finalize asks the poll goroutine to take one last sample and stop.
+	// finalSample is written by that goroutine before it closes pollDone, so
+	// receiving on pollDone is the happens-before edge that makes it safe to
+	// read without holding mu.
+	finalize     chan struct{}
+	finalizeOnce sync.Once
+	finalSample  *MetricSample
 }
 
 // OpenTaskEventLog creates a TaskEventLog that writes to filename (raw log)
@@ -141,25 +166,47 @@ func OpenTaskEventLog(ctx context.Context, filename string, taskID string, workD
 		fsClient:       fsClient,
 		cancelPoll:     cancelPoll,
 		pollDone:       make(chan struct{}),
+		finalize:       make(chan struct{}),
 	}
-	// Snapshot CPU stats now so the first tick reports usage for the task's
-	// actual first interval rather than being skipped for lack of a baseline.
-	t.prevCPU, _ = getCPUStats()
 
 	go func() {
 		defer close(t.pollDone)
-		ticker := time.NewTicker(metricsInterval)
-		defer ticker.Stop()
+
+		// prevCPU is deliberately goroutine-local. This goroutine is the only
+		// sampler -- including for the final sample, which arrives via the
+		// finalize channel rather than being taken on the caller's goroutine.
+		// That keeps the CPU baseline and the cgroup read off any shared field
+		// and removes the data race by construction rather than by locking.
+		//
+		// Snapshotting now means the first sample covers the task's actual
+		// first interval instead of being skipped for lack of a baseline.
+		prevCPU, _ := getCPUStats()
+		var seq int32
+
+		sample := func(final bool) *MetricSample {
+			s, cur := collectMetricSample(t.taskID, t.workDir, prevCPU, t.container(), seq, final)
+			prevCPU = cur
+			seq++
+			if err := t.WriteMetric(s); err != nil {
+				log.Printf("writing metric for task %s: %v", t.taskID, err)
+			}
+			return s
+		}
+
+		delay := MetricsFirstDelay
+		timer := time.NewTimer(delay)
+		defer timer.Stop()
 		for {
 			select {
 			case <-pollCtx.Done():
 				return
-			case <-ticker.C:
-				var event *ResourceUsageEvent
-				event, t.prevCPU = collectMetrics(t.taskID, t.workDir, t.prevCPU)
-				if err := t.WriteMetric(event); err != nil {
-					log.Printf("writing metric for task %s: %v", t.taskID, err)
-				}
+			case <-t.finalize:
+				t.finalSample = sample(true)
+				return
+			case <-timer.C:
+				sample(false)
+				delay = nextMetricsDelay(delay)
+				timer.Reset(delay)
 			}
 		}
 	}()
@@ -167,10 +214,43 @@ func OpenTaskEventLog(ctx context.Context, filename string, taskID string, workD
 	return t, nil
 }
 
+// SetContainer records the docker container name for this task so the metrics
+// poller can attach to the container's cgroup. It is called before the
+// container exists; resolution is lazy and retried on each sample.
+func (t *TaskEventLog) SetContainer(name string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.cgroup = newContainerCgroup(name)
+}
+
+// container returns the cgroup handle for this task's container, or nil when
+// no container has been registered (as on the non-docker execution path).
+func (t *TaskEventLog) container() *containerCgroup {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.cgroup
+}
+
+// TriggerFinalSample asks the poller to take one last sample, flagged final,
+// and stop. It blocks until that sample has been written and returns it.
+//
+// This is what makes metrics work for very short tasks: a task that finishes
+// before the first periodic sample still gets exactly one sample, and because
+// the cgroup counters it reads are cumulative, the gap between the last
+// periodic sample and exit is captured rather than lost. It must be called
+// while the container still exists, i.e. before "docker rm".
+//
+// Safe to call more than once; only the first call takes a sample.
+func (t *TaskEventLog) TriggerFinalSample() *MetricSample {
+	t.finalizeOnce.Do(func() { close(t.finalize) })
+	<-t.pollDone
+	return t.finalSample
+}
+
 // WriteMetric records a resource usage sample. Before streaming is activated
 // it writes a JSON event to the events file; after activation it writes
 // directly to Firestore.
-func (t *TaskEventLog) WriteMetric(event *ResourceUsageEvent) error {
+func (t *TaskEventLog) WriteMetric(event *MetricSample) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -270,8 +350,8 @@ func (t *TaskEventLog) StartStreaming() error {
 				continue
 			}
 			doc = &event
-		case "metric_update":
-			var event ResourceUsageEvent
+		case MetricUpdateEventType:
+			var event MetricSample
 			if err := json.Unmarshal(line, &event); err != nil {
 				log.Printf("stream_task_updates: skipping malformed metric_update: %v", err)
 				continue

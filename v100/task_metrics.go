@@ -9,76 +9,110 @@ import (
 	"time"
 )
 
-// VolumeUsage holds disk usage for one mount point.
-type VolumeUsage struct {
-	Location string  `firestore:"location" json:"location"`
-	TotalGB  float64 `firestore:"total_gb" json:"total_gb"`
-	UsedGB   float64 `firestore:"used_gb" json:"used_gb"`
+// MetricUpdateEventType is the TaskLog document-kind discriminator for metric
+// samples. It is a Firestore query dependency (the dashboard filters on it),
+// so it is deliberately left unchanged by the metric redesign; the post-exit
+// sample is distinguished by MetricSample.Final rather than a separate type.
+const MetricUpdateEventType = "metric_update"
+
+// MetricSchemaCurrent identifies the metric field layout. Readers must skip
+// samples carrying a different value: an older document decoded into the
+// current struct reads as all zeros -- i.e. as a container that used no CPU --
+// which is considerably worse than a decode error.
+const MetricSchemaCurrent int32 = 2
+
+// HostVolume is disk usage for one mount point, in bytes.
+//
+// Bytes rather than gigabytes because the field then stays an int64: Firestore's
+// DataTo refuses to decode a stored double into an int64 field, so a float unit
+// here would permanently fix the wire type. Unit conversion belongs at display.
+type HostVolume struct {
+	Location   string `firestore:"location" json:"location"`
+	TotalBytes int64  `firestore:"total_bytes" json:"total_bytes"`
+	UsedBytes  int64  `firestore:"used_bytes" json:"used_bytes"`
 }
 
-// ResourceUsageEvent is one metric_update entry in the events file and TaskLog collection.
-type ResourceUsageEvent struct {
-	TaskID               string        `firestore:"task_id" json:"task_id"`
-	Type                 string        `firestore:"type" json:"type"`
-	Timestamp            time.Time     `firestore:"timestamp" json:"timestamp"`
-	Expiry               time.Time     `firestore:"expiry" json:"expiry"`
-	ProcessCount         int32         `firestore:"process_count" json:"process_count"`
-	Volumes              []VolumeUsage `firestore:"volumes" json:"volumes,omitempty"`
-	TotalMemory          int64         `firestore:"total_memory" json:"total_memory"`
-	TotalData            int64         `firestore:"total_data" json:"total_data"`
-	TotalShared          int64         `firestore:"total_shared" json:"total_shared"`
-	TotalResident        int64         `firestore:"total_resident" json:"total_resident"`
-	CpuUser              float64       `firestore:"cpu_user" json:"cpu_user"`
-	CpuSystem            float64       `firestore:"cpu_system" json:"cpu_system"`
-	CpuIdle              float64       `firestore:"cpu_idle" json:"cpu_idle"`
-	CpuIowait            float64       `firestore:"cpu_iowait" json:"cpu_iowait"`
-	MemTotal             int64         `firestore:"mem_total" json:"mem_total"`
-	MemAvailable         int64         `firestore:"mem_available" json:"mem_available"`
-	MemFree              int64         `firestore:"mem_free" json:"mem_free"`
-	MemPressureSomeAvg10 int32         `firestore:"mem_pressure_some_avg10" json:"mem_pressure_some_avg10"`
-	MemPressureFullAvg10 int32         `firestore:"mem_pressure_full_avg10" json:"mem_pressure_full_avg10"`
-}
+// MetricSample is one metric_update entry in the events file, the TaskLog
+// collection, and the dashboard API.
+//
+// Fields are named <scope>_<resource>_<measure>_<unit> with no abbreviations,
+// and the container_* fields carry the same names in ResourceUsage, so a
+// periodic sample and the final post-exit summary are directly comparable.
+//
+// PSI stalls are stored as cumulative total= microseconds rather than the
+// avg10/avg60/avg300 the kernel also offers. An average has a ~10s ramp, which
+// makes it meaningless for a task that runs for three seconds, whereas totals
+// difference exactly over any interval and compose with the post-exit read of
+// the same counter -- so the last sample and the final read leave no gap.
+//
+// Any value that could not be read is metricUnavailable (-1), which is
+// deliberately distinct from a genuine zero.
+type MetricSample struct {
+	TaskID       string    `firestore:"task_id" json:"task_id"`
+	Type         string    `firestore:"type" json:"type"`
+	Timestamp    time.Time `firestore:"timestamp" json:"timestamp"`
+	Expiry       time.Time `firestore:"expiry" json:"expiry"`
+	MetricSchema int32     `firestore:"metric_schema" json:"metric_schema"`
+	Seq          int32     `firestore:"seq" json:"seq"`
+	Final        bool      `firestore:"final" json:"final"`
 
-var pageSize = int64(os.Getpagesize())
+	// Host CPU, as a percentage of total CPU time across all cores over the
+	// interval since the previous sample.
+	HostCPUUserPct   float64 `firestore:"host_cpu_user_pct" json:"host_cpu_user_pct"`
+	HostCPUSystemPct float64 `firestore:"host_cpu_system_pct" json:"host_cpu_system_pct"`
+	HostCPUIdlePct   float64 `firestore:"host_cpu_idle_pct" json:"host_cpu_idle_pct"`
+	HostCPUIowaitPct float64 `firestore:"host_cpu_iowait_pct" json:"host_cpu_iowait_pct"`
 
-type memoryUsage struct {
-	procCount     int
-	totalSize     int64
-	totalData     int64
-	totalShared   int64
-	totalResident int64
-}
+	HostMemoryTotalBytes     int64 `firestore:"host_memory_total_bytes" json:"host_memory_total_bytes"`
+	HostMemoryAvailableBytes int64 `firestore:"host_memory_available_bytes" json:"host_memory_available_bytes"`
 
-func getMemoryUsage() (*memoryUsage, error) {
-	filenames, err := filepath.Glob("/proc/*/statm")
-	if err != nil {
-		return nil, err
-	}
+	HostCPUStallSomeUSec    int64 `firestore:"host_cpu_stall_some_usec" json:"host_cpu_stall_some_usec"`
+	HostCPUStallFullUSec    int64 `firestore:"host_cpu_stall_full_usec" json:"host_cpu_stall_full_usec"`
+	HostMemoryStallSomeUSec int64 `firestore:"host_memory_stall_some_usec" json:"host_memory_stall_some_usec"`
+	HostMemoryStallFullUSec int64 `firestore:"host_memory_stall_full_usec" json:"host_memory_stall_full_usec"`
+	HostIOStallSomeUSec     int64 `firestore:"host_io_stall_some_usec" json:"host_io_stall_some_usec"`
+	HostIOStallFullUSec     int64 `firestore:"host_io_stall_full_usec" json:"host_io_stall_full_usec"`
 
-	m := &memoryUsage{}
-	for _, filename := range filenames {
-		data, err := os.ReadFile(filename)
-		if err != nil {
-			continue
-		}
-		fields := strings.Fields(string(data))
-		if len(fields) < 6 {
-			continue
-		}
-		size, e1 := strconv.ParseInt(fields[0], 10, 64)
-		resident, e2 := strconv.ParseInt(fields[1], 10, 64)
-		shared, e3 := strconv.ParseInt(fields[2], 10, 64)
-		data2, e4 := strconv.ParseInt(fields[5], 10, 64)
-		if e1 != nil || e2 != nil || e3 != nil || e4 != nil {
-			continue
-		}
-		m.procCount++
-		m.totalSize += size
-		m.totalResident += resident
-		m.totalShared += shared
-		m.totalData += data2
-	}
-	return m, nil
+	HostVolumes []HostVolume `firestore:"host_volumes" json:"host_volumes,omitempty"`
+
+	// ContainerPresent is false when the container's cgroup could not be
+	// located: it has not been created yet (normal for the first sample of a
+	// task), it has already been torn down, or this task runs without a
+	// container at all. Every container_* field is unavailable in that case.
+	ContainerPresent bool `firestore:"container_present" json:"container_present"`
+
+	ContainerMemoryCurrentBytes int64 `firestore:"container_memory_current_bytes" json:"container_memory_current_bytes"`
+	ContainerMemoryPeakBytes    int64 `firestore:"container_memory_peak_bytes" json:"container_memory_peak_bytes"`
+	ContainerMemoryLimitBytes   int64 `firestore:"container_memory_limit_bytes" json:"container_memory_limit_bytes"`
+
+	ContainerCPUUsageUSec  int64 `firestore:"container_cpu_usage_usec" json:"container_cpu_usage_usec"`
+	ContainerCPUUserUSec   int64 `firestore:"container_cpu_user_usec" json:"container_cpu_user_usec"`
+	ContainerCPUSystemUSec int64 `firestore:"container_cpu_system_usec" json:"container_cpu_system_usec"`
+
+	// These are cumulative or high-water counters, so they are carried in
+	// every sample rather than only in the final one: knowing *when* a task
+	// started being throttled, or when its children were OOM-killed, is more
+	// useful than only learning that it happened. Reading them here also means
+	// the final summary is a pure projection of the last sample and needs no
+	// second pass over the cgroup.
+	ContainerCPUThrottledUSec         int64 `firestore:"container_cpu_throttled_usec" json:"container_cpu_throttled_usec"`
+	ContainerCPUThrottledPeriods      int64 `firestore:"container_cpu_throttled_periods" json:"container_cpu_throttled_periods"`
+	ContainerMemoryMajorFaults        int64 `firestore:"container_memory_major_faults" json:"container_memory_major_faults"`
+	ContainerMemoryWorkingsetRefaults int64 `firestore:"container_memory_workingset_refaults" json:"container_memory_workingset_refaults"`
+	ContainerMemoryOOMKillCount       int64 `firestore:"container_memory_oom_kill_count" json:"container_memory_oom_kill_count"`
+	ContainerPidsPeak                 int64 `firestore:"container_pids_peak" json:"container_pids_peak"`
+
+	ContainerCPUStallSomeUSec    int64 `firestore:"container_cpu_stall_some_usec" json:"container_cpu_stall_some_usec"`
+	ContainerCPUStallFullUSec    int64 `firestore:"container_cpu_stall_full_usec" json:"container_cpu_stall_full_usec"`
+	ContainerMemoryStallSomeUSec int64 `firestore:"container_memory_stall_some_usec" json:"container_memory_stall_some_usec"`
+	ContainerMemoryStallFullUSec int64 `firestore:"container_memory_stall_full_usec" json:"container_memory_stall_full_usec"`
+	ContainerIOStallSomeUSec     int64 `firestore:"container_io_stall_some_usec" json:"container_io_stall_some_usec"`
+	ContainerIOStallFullUSec     int64 `firestore:"container_io_stall_full_usec" json:"container_io_stall_full_usec"`
+
+	ContainerIOReadBytes  int64 `firestore:"container_io_read_bytes" json:"container_io_read_bytes"`
+	ContainerIOWriteBytes int64 `firestore:"container_io_write_bytes" json:"container_io_write_bytes"`
+	ContainerIOReadOps    int64 `firestore:"container_io_read_ops" json:"container_io_read_ops"`
+	ContainerIOWriteOps   int64 `firestore:"container_io_write_ops" json:"container_io_write_ops"`
 }
 
 type cpuStats struct {
@@ -109,7 +143,7 @@ func cpuPercentages(prev, cur *cpuStats) (user, system, idle, iowait float64) {
 }
 
 func getCPUStats() (*cpuStats, error) {
-	data, err := os.ReadFile("/proc/stat")
+	data, err := os.ReadFile(filepath.Join(procRoot, "stat"))
 	if err != nil {
 		return nil, err
 	}
@@ -138,7 +172,7 @@ type systemMemory struct {
 }
 
 func getSystemMemory() (*systemMemory, error) {
-	data, err := os.ReadFile("/proc/meminfo")
+	data, err := os.ReadFile(filepath.Join(procRoot, "meminfo"))
 	if err != nil {
 		return nil, err
 	}
@@ -162,47 +196,11 @@ func getSystemMemory() (*systemMemory, error) {
 	return m, nil
 }
 
-type memoryPressure struct {
-	SomeAvg10 int32
-	FullAvg10 int32
-}
-
-func getMemoryPressure() *memoryPressure {
-	data, err := os.ReadFile("/proc/pressure/memory")
-	p := &memoryPressure{SomeAvg10: -1, FullAvg10: -1}
-	if err != nil {
-		return p
-	}
-	for _, line := range strings.Split(string(data), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) < 2 {
-			continue
-		}
-		var target *int32
-		switch fields[0] {
-		case "some":
-			target = &p.SomeAvg10
-		case "full":
-			target = &p.FullAvg10
-		default:
-			continue
-		}
-		for _, f := range fields[1:] {
-			if strings.HasPrefix(f, "avg10=") {
-				val, err := strconv.ParseFloat(strings.TrimPrefix(f, "avg10="), 64)
-				if err == nil {
-					*target = int32(val * 100)
-				}
-				break
-			}
-		}
-	}
-	return p
-}
-
-func getVolumeUsage(paths ...string) []VolumeUsage {
+// getHostVolumes reports disk usage in bytes for each distinct path given.
+// Paths that cannot be stat'ed are omitted rather than reported as zero.
+func getHostVolumes(paths ...string) []HostVolume {
 	seen := make(map[string]bool)
-	var volumes []VolumeUsage
+	var volumes []HostVolume
 	for _, p := range paths {
 		if p == "" || seen[p] {
 			continue
@@ -212,67 +210,145 @@ func getVolumeUsage(paths ...string) []VolumeUsage {
 		if err := syscall.Statfs(p, &stat); err != nil {
 			continue
 		}
-		total := float64(stat.Blocks*uint64(stat.Bsize)) / (1024 * 1024 * 1024)
-		free := float64(stat.Bfree*uint64(stat.Bsize)) / (1024 * 1024 * 1024)
-		volumes = append(volumes, VolumeUsage{Location: p, TotalGB: total, UsedGB: total - free})
+		total := int64(stat.Blocks * uint64(stat.Bsize))
+		free := int64(stat.Bfree * uint64(stat.Bsize))
+		volumes = append(volumes, HostVolume{Location: p, TotalBytes: total, UsedBytes: total - free})
 	}
 	return volumes
 }
 
-// CPUStats exposes cpuStats to callers outside this package (e.g. "sparkles
-// dev test-profile-command") that want to drive CollectMetrics themselves
-// outside the normal per-task polling loop in OpenTaskEventLog.
-type CPUStats = cpuStats
-
-// CollectMetrics is an exported wrapper around collectMetrics for such
-// callers.
-func CollectMetrics(taskID, workDir string, prev *CPUStats) (*ResourceUsageEvent, *CPUStats) {
-	return collectMetrics(taskID, workDir, prev)
+// containerMetrics resolves a container's cgroup and reads its counters.
+//
+// present is false when the cgroup could not be located, which is a normal
+// condition rather than an error: the container may not have been created yet
+// (expected for the first sample of every task), it may already have been torn
+// down, or the task may be running without a container at all.
+func containerMetrics(cg *containerCgroup) (counters containerCounters, present bool) {
+	if cg == nil {
+		return unavailableContainerCounters(), false
+	}
+	dir := cg.resolve()
+	if dir == "" {
+		return unavailableContainerCounters(), false
+	}
+	return readContainerCounters(dir), true
 }
 
-// GetCPUStats is an exported wrapper around getCPUStats, for callers that
-// want to seed an initial CPUStats baseline (see OpenTaskEventLog).
-func GetCPUStats() *CPUStats {
-	s, _ := getCPUStats()
-	return s
+// setContainerCounters copies one cgroup read onto the sample.
+func (s *MetricSample) setContainerCounters(c containerCounters, present bool) {
+	s.ContainerPresent = present
+
+	s.ContainerMemoryCurrentBytes = c.MemoryCurrentBytes
+	s.ContainerMemoryPeakBytes = c.MemoryPeakBytes
+	s.ContainerMemoryLimitBytes = c.MemoryLimitBytes
+
+	s.ContainerCPUUsageUSec = c.CPUUsageUSec
+	s.ContainerCPUUserUSec = c.CPUUserUSec
+	s.ContainerCPUSystemUSec = c.CPUSystemUSec
+	s.ContainerCPUThrottledUSec = c.CPUThrottledUSec
+	s.ContainerCPUThrottledPeriods = c.CPUThrottledPeriods
+
+	s.ContainerMemoryMajorFaults = c.MemoryMajorFaults
+	s.ContainerMemoryWorkingsetRefaults = c.MemoryWorkingsetRefaults
+	s.ContainerMemoryOOMKillCount = c.MemoryOOMKillCount
+	s.ContainerPidsPeak = c.PidsPeak
+
+	s.ContainerCPUStallSomeUSec, s.ContainerCPUStallFullUSec = c.CPUStall.SomeUSec, c.CPUStall.FullUSec
+	s.ContainerMemoryStallSomeUSec, s.ContainerMemoryStallFullUSec = c.MemoryStall.SomeUSec, c.MemoryStall.FullUSec
+	s.ContainerIOStallSomeUSec, s.ContainerIOStallFullUSec = c.IOStall.SomeUSec, c.IOStall.FullUSec
+
+	s.ContainerIOReadBytes = c.IOReadBytes
+	s.ContainerIOWriteBytes = c.IOWriteBytes
+	s.ContainerIOReadOps = c.IOReadOps
+	s.ContainerIOWriteOps = c.IOWriteOps
 }
 
-// collectMetrics samples current system and process metrics for the given
-// task. prev is the cpuStats snapshot from the previous call (or nil for the
-// first sample of a task) and is used to turn the cumulative /proc/stat
-// counters into a percentage of CPU time spent in each state since that
-// snapshot. It returns the populated event along with the raw cpuStats
-// snapshot the caller should pass as prev on its next call.
-func collectMetrics(taskID, workDir string, prev *cpuStats) (*ResourceUsageEvent, *cpuStats) {
+// collectMetricSample takes one host-and-container metric sample for a task.
+//
+// prev is the cpuStats snapshot from the previous sample (nil for the first),
+// used to turn the cumulative /proc/stat counters into a percentage of CPU
+// time spent in each state since then. cg may be nil for tasks that run
+// without a container. The returned cpuStats is what the caller should pass as
+// prev next time.
+func collectMetricSample(taskID, workDir string, prev *cpuStats, cg *containerCgroup, seq int32, final bool) (*MetricSample, *cpuStats) {
 	now := time.Now()
-	event := &ResourceUsageEvent{
-		TaskID:    taskID,
-		Type:      "metric_update",
-		Timestamp: now,
-		Expiry:    now.Add(taskEventLogTTL),
-		Volumes:   getVolumeUsage("/", workDir),
+	s := &MetricSample{
+		TaskID:       taskID,
+		Type:         MetricUpdateEventType,
+		Timestamp:    now,
+		Expiry:       now.Add(taskEventLogTTL),
+		MetricSchema: MetricSchemaCurrent,
+		Seq:          seq,
+		Final:        final,
+		HostVolumes:  getHostVolumes("/", workDir),
+
+		HostMemoryTotalBytes:     metricUnavailable,
+		HostMemoryAvailableBytes: metricUnavailable,
 	}
-	if mem, err := getMemoryUsage(); err == nil {
-		event.ProcessCount = int32(mem.procCount)
-		event.TotalMemory = mem.totalSize * pageSize
-		event.TotalData = mem.totalData * pageSize
-		event.TotalShared = mem.totalShared * pageSize
-		event.TotalResident = mem.totalResident * pageSize
-	}
+
 	cur, err := getCPUStats()
 	if err != nil || cur == nil {
 		cur = prev
 	} else if prev != nil {
-		event.CpuUser, event.CpuSystem, event.CpuIdle, event.CpuIowait = cpuPercentages(prev, cur)
+		s.HostCPUUserPct, s.HostCPUSystemPct, s.HostCPUIdlePct, s.HostCPUIowaitPct = cpuPercentages(prev, cur)
 	}
+
 	if sysMem, err := getSystemMemory(); err == nil {
-		event.MemTotal = sysMem.Total
-		event.MemAvailable = sysMem.Available
-		event.MemFree = sysMem.Free
+		s.HostMemoryTotalBytes = sysMem.Total
+		s.HostMemoryAvailableBytes = sysMem.Available
 	}
-	if p := getMemoryPressure(); p != nil {
-		event.MemPressureSomeAvg10 = p.SomeAvg10
-		event.MemPressureFullAvg10 = p.FullAvg10
+
+	cpuStall := readPressureFile(filepath.Join(procRoot, "pressure", "cpu"))
+	memoryStall := readPressureFile(filepath.Join(procRoot, "pressure", "memory"))
+	ioStall := readPressureFile(filepath.Join(procRoot, "pressure", "io"))
+	s.HostCPUStallSomeUSec, s.HostCPUStallFullUSec = cpuStall.SomeUSec, cpuStall.FullUSec
+	s.HostMemoryStallSomeUSec, s.HostMemoryStallFullUSec = memoryStall.SomeUSec, memoryStall.FullUSec
+	s.HostIOStallSomeUSec, s.HostIOStallFullUSec = ioStall.SomeUSec, ioStall.FullUSec
+
+	s.setContainerCounters(containerMetrics(cg))
+
+	return s, cur
+}
+
+// MetricSampler drives metric collection outside the normal per-task polling
+// loop in OpenTaskEventLog, for callers in other packages such as "sparkles
+// dev test-profile-command".
+//
+// It exists as a type rather than a bare function because sampling is
+// stateful: the CPU baseline and sequence number carry across samples, and the
+// container's cgroup handle caches its resolved path so repeated samples do
+// not re-run docker inspect.
+type MetricSampler struct {
+	taskID  string
+	workDir string
+	cgroup  *containerCgroup
+	prevCPU *cpuStats
+	seq     int32
+}
+
+// NewMetricSampler returns a sampler for a task. containerName may be empty
+// for a task with no container, in which case only host metrics are reported.
+func NewMetricSampler(taskID, workDir, containerName string) *MetricSampler {
+	m := &MetricSampler{taskID: taskID, workDir: workDir}
+	if containerName != "" {
+		m.cgroup = newContainerCgroup(containerName)
 	}
-	return event, cur
+	// Seed the CPU baseline so the first sample covers the interval since the
+	// sampler was created rather than being skipped for lack of a baseline.
+	m.prevCPU, _ = getCPUStats()
+	return m
+}
+
+// Sample takes one sample, advancing the sampler's CPU baseline and sequence.
+func (m *MetricSampler) Sample(final bool) *MetricSample {
+	s, cur := collectMetricSample(m.taskID, m.workDir, m.prevCPU, m.cgroup, m.seq, final)
+	m.prevCPU = cur
+	m.seq++
+	return s
+}
+
+// NextMetricsDelay exposes the adaptive sampling schedule so external drivers
+// can match the cadence the worker actually uses.
+func NextMetricsDelay(cur time.Duration) time.Duration {
+	return nextMetricsDelay(cur)
 }

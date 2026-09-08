@@ -31,7 +31,13 @@
    - **stage** — download `files_to_localize` from GCS,
    - **run** — `docker run` the task's command (or direct `exec.Command`
      under `--no-docker`, test-only),
-   - **collect** — resource usage from cgroup files + `docker inspect`,
+   - **sample** — while the task runs, a per-task goroutine samples host and
+     container metrics on an adaptive schedule (1s, doubling to 60s), so even
+     sub-minute tasks produce a time series,
+   - **collect** — one final sample taken after the container exits but
+     before `docker rm`, while its cgroup still exists; being cumulative,
+     its counters close the gap since the last periodic sample and form the
+     task's `ResourceUsage` summary alongside `docker inspect` timing,
    - **report** — upload result/log files to GCS, mark the task
      `success` / `error` (non-zero exit) / `failed` (infra error).
    - Every transition publishes a `task_state_update` event.

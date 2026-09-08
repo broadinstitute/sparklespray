@@ -9,8 +9,9 @@ v100/
 ├── worker.go                worker process: claim/stage/run/report loop
 ├── task_queue.go            Firestore Job/Task/WorkPool structs + FirestoreTaskQueue
 ├── task_event_log.go        per-task log/metric buffering & streaming
-├── task_metrics.go          resource usage sampling types (ResourceUsageEvent, VolumeUsage)
-├── resource_usage.go        cgroup + `docker inspect` post-task resource accounting
+├── task_metrics.go          host+container metric sampling (MetricSample, HostVolume)
+├── cgroup.go                cgroup v2 readers, PSI parsing, container cgroup resolution
+├── resource_usage.go        post-task ResourceUsage from `docker inspect` + final sample
 ├── resources.go             Resources: named float64 capacity map
 ├── transfer_client.go       GCSTransferClient: GCS upload/download
 ├── events.go                EventRecord + EventPublisher (sparkles-events topic + Events collection)

@@ -132,19 +132,59 @@ type FileToLocalize struct {
 	IsExecutable bool   `firestore:"is_executable" json:"is_executable"`
 }
 
-// ResourceUsage holds a summary of resources consumed by a single task execution.
-// Fields are zero when the metric could not be collected (e.g. cgroup unavailable).
+// ResourceUsage summarises the resources consumed by a single task execution.
+//
+// It is built from the metrics poller's final sample, taken after the
+// container exits but before it is removed. Because the cgroup counters it
+// reads are cumulative, this summary captures the whole run including whatever
+// happened between the last periodic sample and exit.
+//
+// The container_* fields carry exactly the same names as in MetricSample, so
+// the final summary and the last periodic sample are directly comparable.
+// Any value that could not be collected is -1 (metricUnavailable), which is
+// deliberately distinct from a genuine zero -- a container whose cgroup had
+// already been torn down reports -1, not "used no CPU".
 type ResourceUsage struct {
-	StartTime       time.Time `firestore:"start_time"`
-	EndTime         time.Time `firestore:"end_time"`
-	ElapsedSeconds  float64   `firestore:"elapsed_seconds"`
-	MaxMemoryBytes  int64     `firestore:"max_memory_bytes"`
-	CPUUserUSec     int64     `firestore:"cpu_user_usec"`
-	CPUSystemUSec   int64     `firestore:"cpu_system_usec"`
-	BlockReadBytes  int64     `firestore:"block_read_bytes"`
-	BlockWriteBytes int64     `firestore:"block_write_bytes"`
-	ExitCode        int       `firestore:"exit_code"`
-	OOMKilled       bool      `firestore:"oom_killed"`
+	StartTime      time.Time `firestore:"start_time" json:"start_time"`
+	EndTime        time.Time `firestore:"end_time" json:"end_time"`
+	ElapsedSeconds float64   `firestore:"elapsed_seconds" json:"elapsed_seconds"`
+	ExitCode       int       `firestore:"exit_code" json:"exit_code"`
+	OOMKilled      bool      `firestore:"oom_killed" json:"oom_killed"`
+
+	// ContainerOOMKillCount counts OOM-killed processes in the cgroup,
+	// including children. OOMKilled above only reflects the main process, so a
+	// task whose worker child was OOM-killed shows up here and nowhere else.
+	ContainerOOMKillCount int64 `firestore:"container_oom_kill_count" json:"container_oom_kill_count"`
+
+	ContainerCPUUsageUSec       int64 `firestore:"container_cpu_usage_usec" json:"container_cpu_usage_usec"`
+	ContainerCPUUserUSec        int64 `firestore:"container_cpu_user_usec" json:"container_cpu_user_usec"`
+	ContainerCPUSystemUSec      int64 `firestore:"container_cpu_system_usec" json:"container_cpu_system_usec"`
+	ContainerCPUThrottledUSec   int64 `firestore:"container_cpu_throttled_usec" json:"container_cpu_throttled_usec"`
+	ContainerCPUThrottledPeriod int64 `firestore:"container_cpu_throttled_periods" json:"container_cpu_throttled_periods"`
+
+	ContainerMemoryPeakBytes          int64 `firestore:"container_memory_peak_bytes" json:"container_memory_peak_bytes"`
+	ContainerMemoryLimitBytes         int64 `firestore:"container_memory_limit_bytes" json:"container_memory_limit_bytes"`
+	ContainerMemoryMajorFaults        int64 `firestore:"container_memory_major_faults" json:"container_memory_major_faults"`
+	ContainerMemoryWorkingsetRefaults int64 `firestore:"container_memory_workingset_refaults" json:"container_memory_workingset_refaults"`
+
+	// Stall totals are cumulative microseconds from the cgroup's PSI files.
+	// container_io_stall_* is the answer to "how long was this task blocked on
+	// I/O"; container_cpu_stall_* catches a task starved by an oversubscribed
+	// host; container_memory_stall_* separates thrashing near the memory limit
+	// from a slow disk.
+	ContainerCPUStallSomeUSec    int64 `firestore:"container_cpu_stall_some_usec" json:"container_cpu_stall_some_usec"`
+	ContainerCPUStallFullUSec    int64 `firestore:"container_cpu_stall_full_usec" json:"container_cpu_stall_full_usec"`
+	ContainerMemoryStallSomeUSec int64 `firestore:"container_memory_stall_some_usec" json:"container_memory_stall_some_usec"`
+	ContainerMemoryStallFullUSec int64 `firestore:"container_memory_stall_full_usec" json:"container_memory_stall_full_usec"`
+	ContainerIOStallSomeUSec     int64 `firestore:"container_io_stall_some_usec" json:"container_io_stall_some_usec"`
+	ContainerIOStallFullUSec     int64 `firestore:"container_io_stall_full_usec" json:"container_io_stall_full_usec"`
+
+	ContainerIOReadBytes  int64 `firestore:"container_io_read_bytes" json:"container_io_read_bytes"`
+	ContainerIOWriteBytes int64 `firestore:"container_io_write_bytes" json:"container_io_write_bytes"`
+	ContainerIOReadOps    int64 `firestore:"container_io_read_ops" json:"container_io_read_ops"`
+	ContainerIOWriteOps   int64 `firestore:"container_io_write_ops" json:"container_io_write_ops"`
+
+	ContainerPidsPeak int64 `firestore:"container_pids_peak" json:"container_pids_peak"`
 }
 
 type Task struct {
