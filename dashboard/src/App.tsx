@@ -1,4 +1,5 @@
 import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BASE_PATH } from "./api/client";
 import { EventProvider } from "./data/EventProvider";
 import NavBar from "./components/NavBar";
 import TaskDetail from "./pages/TaskDetail";
@@ -70,7 +71,7 @@ function AppRoutes() {
 export default function App() {
   return (
     <EventProvider>
-      <BrowserRouter>
+      <BrowserRouter basename={BASE_PATH}>
         <AppRoutes />
       </BrowserRouter>
     </EventProvider>

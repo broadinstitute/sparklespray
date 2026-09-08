@@ -122,19 +122,19 @@ func (c *apiKeyCache) lookup(ctx context.Context, fs *firestore.Client, key stri
 	return rec.User, nil
 }
 
-// apiKeyAuthMiddleware requires every request under /api/ to carry a valid
-// "Authorization: Bearer <key>" header, where <key> is looked up in the
-// APIKeys Firestore collection (cached in memory for apiKeyCacheTTL so
+// apiKeyAuthMiddleware requires every request under prefix+"/api/" to carry
+// a valid "Authorization: Bearer <key>" header, where <key> is looked up in
+// the APIKeys Firestore collection (cached in memory for apiKeyCacheTTL so
 // Firestore isn't hit on every request). On success, the user the key was
 // issued to is stashed in the request context (retrievable via
 // userFromContext) so downstream handlers can attribute the request to a user
 // (e.g. job submission labels). Requests that fail to authenticate get a 403
 // response matching openapi.yaml's Error schema.
-func apiKeyAuthMiddleware(fs *firestore.Client, next http.Handler) http.Handler {
+func apiKeyAuthMiddleware(fs *firestore.Client, prefix string, next http.Handler) http.Handler {
 	cache := newAPIKeyCache()
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.HasPrefix(r.URL.Path, "/api/") {
+		if !strings.HasPrefix(r.URL.Path, prefix+"/api/") {
 			next.ServeHTTP(w, r)
 			return
 		}

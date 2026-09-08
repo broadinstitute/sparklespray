@@ -1,5 +1,15 @@
 const API_KEY_STORAGE_KEY = "sparkles-api-key";
-const INVALID_KEY_PATH = "/invalid-api-key";
+
+// BASE_PATH is the URL path prefix (e.g. "/sparkles", or "" at the root)
+// everything -- API requests and react-router's basename (see App.tsx) -- is
+// served under. The server (see --prefix on "sparkles serve") injects a
+// matching <base href> into index.html at serve time; reading it back here
+// means neither this file nor App.tsx need to know the prefix at build time.
+export const BASE_PATH = (
+  document.querySelector("base")?.getAttribute("href") ?? "/"
+).replace(/\/$/, "");
+
+const INVALID_KEY_PATH = BASE_PATH + "/invalid-api-key";
 
 // unauthorized is set once a request comes back 403, and cleared when the
 // user saves a new key (setApiKey). While set, apiFetch short-circuits
@@ -19,6 +29,7 @@ export function setApiKey(key: string): void {
 }
 
 // apiFetch is a drop-in replacement for fetch() for all /api/* requests: it
+// prefixes url with BASE_PATH so requests land under the configured --prefix,
 // attaches the stored API key as a Bearer token, and redirects to
 // /invalid-api-key on a 403 (Forbidden) response.
 export async function apiFetch(
@@ -33,7 +44,7 @@ export async function apiFetch(
   const headers = new Headers(init.headers);
   if (key) headers.set("Authorization", `Bearer ${key}`);
 
-  const response = await fetch(url, { ...init, headers });
+  const response = await fetch(BASE_PATH + url, { ...init, headers });
 
   if (response.status === 403) {
     unauthorized = true;

@@ -1795,6 +1795,7 @@ func runDevDashboardBackend(c *cli.Context) error {
 	}
 	db := c.String("db")
 	addr := c.String("addr")
+	prefix := normalizePrefix(c.String("prefix"))
 
 	ctx := context.Background()
 
@@ -1810,7 +1811,7 @@ func runDevDashboardBackend(c *cli.Context) error {
 	}
 	defer psClient.Close()
 
-	handler, err := newDashboardHandler(ctx, project, fsClient, psClient)
+	handler, err := newDashboardHandler(ctx, project, fsClient, psClient, prefix)
 	if err != nil {
 		return err
 	}
@@ -1819,15 +1820,30 @@ func runDevDashboardBackend(c *cli.Context) error {
 	return http.ListenAndServe(addr, handler)
 }
 
+// normalizePrefix cleans up a user-supplied --prefix value into the form the
+// rest of this file expects: "" (serve at the root, unchanged behavior) or a
+// leading-slash, no-trailing-slash path segment (e.g. "sparkles" or
+// "/sparkles/" both become "/sparkles").
+func normalizePrefix(p string) string {
+	p = strings.Trim(p, "/")
+	if p == "" {
+		return ""
+	}
+	return "/" + p
+}
+
 // newDashboardHandler builds the dashboard-backend's HTTP handler — the REST
 // API plus the embedded UI — against already-created clients, so it can be
 // served on its own (runDevDashboardBackend) or alongside the monitor in a
-// single process (runServe).
+// single process (runServe). prefix, as returned by normalizePrefix, puts
+// every route (API and UI) under that path, e.g. "/sparkles", so the whole
+// app can be run behind a reverse proxy that isn't mounted at the root.
 func newDashboardHandler(
 	ctx context.Context,
 	project string,
 	fsClient *firestore.Client,
 	psClient *pubsub.Client,
+	prefix string,
 ) (http.Handler, error) {
 	config, err := loadSparklesConfig(ctx, fsClient)
 	if err != nil {
@@ -1842,33 +1858,54 @@ func newDashboardHandler(
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/v1/workpools", srv.handleListWorkpools)
-	mux.HandleFunc("GET /api/v1/workpool/{workpool_id}", srv.handleGetWorkpool)
-	mux.HandleFunc("GET /api/v1/workpool/{workpool_id}/batches", srv.handleListBatches)
-	mux.HandleFunc("GET /api/v1/workpool/{workpool_id}/workers", srv.handleListWorkers)
-	mux.HandleFunc("GET /api/v1/worker/{worker_id}", srv.handleGetWorker)
-	mux.HandleFunc("GET /api/v1/batch/{batch_id}", srv.handleGetBatch)
-	mux.HandleFunc("GET /api/v1/workpool/{workpool_id}/summary", srv.handleGetWorkpoolSummary)
-	mux.HandleFunc("GET /api/v1/workpool/{workpool_id}/summary-history", srv.handleGetWorkpoolSummaryHistory)
-	mux.HandleFunc("POST /api/v1/job", srv.handleSubmitJob)
-	mux.HandleFunc("GET /api/v1/jobs", srv.handleListJobs)
-	mux.HandleFunc("GET /api/v1/job/{job_id}", srv.handleGetJob)
-	mux.HandleFunc("GET /api/v1/job/{job_id}/summary", srv.handleGetJobSummary)
-	mux.HandleFunc("GET /api/v1/job/{job_id}/summary-history", srv.handleGetJobSummaryHistory)
-	mux.HandleFunc("GET /api/v1/job/{job_id}/tasks", srv.handleGetJobTasks)
-	mux.HandleFunc("GET /api/v1/task/{task_id}", srv.handleGetTask)
-	mux.HandleFunc("GET /api/v1/task/{task_id}/log", srv.handleGetTaskLog)
-	mux.HandleFunc("POST /api/v1/task/{task_id}/stream", srv.handleStreamTask)
-	mux.HandleFunc("GET /api/v1/events", srv.handleListEvents)
-	mux.HandleFunc("POST /api/v1/subscriptions", srv.handleCreateSubscription)
-	mux.HandleFunc("POST /api/v1/subscriptions/{subscription_id}/unsubscribe", srv.handleDeleteSubscription)
+	// handle registers an API route under prefix: pattern is a normal
+	// ServeMux pattern ("METHOD /path"); prefix is spliced in before the
+	// path so every API route -- and the /api/ catch-all below -- moves
+	// together under the configured prefix.
+	handle := func(pattern string, h http.HandlerFunc) {
+		method, path, ok := strings.Cut(pattern, " ")
+		if !ok {
+			method, path = "", method
+		}
+		if method != "" {
+			mux.HandleFunc(method+" "+prefix+path, h)
+		} else {
+			mux.HandleFunc(prefix+path, h)
+		}
+	}
+	handle("GET /api/v1/workpools", srv.handleListWorkpools)
+	handle("GET /api/v1/workpool/{workpool_id}", srv.handleGetWorkpool)
+	handle("GET /api/v1/workpool/{workpool_id}/batches", srv.handleListBatches)
+	handle("GET /api/v1/workpool/{workpool_id}/workers", srv.handleListWorkers)
+	handle("GET /api/v1/worker/{worker_id}", srv.handleGetWorker)
+	handle("GET /api/v1/batch/{batch_id}", srv.handleGetBatch)
+	handle("GET /api/v1/workpool/{workpool_id}/summary", srv.handleGetWorkpoolSummary)
+	handle("GET /api/v1/workpool/{workpool_id}/summary-history", srv.handleGetWorkpoolSummaryHistory)
+	handle("POST /api/v1/job", srv.handleSubmitJob)
+	handle("GET /api/v1/jobs", srv.handleListJobs)
+	handle("GET /api/v1/job/{job_id}", srv.handleGetJob)
+	handle("GET /api/v1/job/{job_id}/summary", srv.handleGetJobSummary)
+	handle("GET /api/v1/job/{job_id}/summary-history", srv.handleGetJobSummaryHistory)
+	handle("GET /api/v1/job/{job_id}/tasks", srv.handleGetJobTasks)
+	handle("GET /api/v1/task/{task_id}", srv.handleGetTask)
+	handle("GET /api/v1/task/{task_id}/log", srv.handleGetTaskLog)
+	handle("POST /api/v1/task/{task_id}/stream", srv.handleStreamTask)
+	handle("GET /api/v1/events", srv.handleListEvents)
+	handle("POST /api/v1/subscriptions", srv.handleCreateSubscription)
+	handle("POST /api/v1/subscriptions/{subscription_id}/unsubscribe", srv.handleDeleteSubscription)
 
 	// Unmatched /api/... paths get a JSON 404 rather than falling through to
 	// the "/" catch-all below and being served the dashboard UI's index.html.
-	mux.HandleFunc("/api/", handleAPINotFound)
-	// Serve the embedded dashboard UI (built by build.sh) for
-	// everything else, with an SPA fallback for client-side routes.
-	mux.Handle("/", webui.Handler())
+	mux.HandleFunc(prefix+"/api/", handleAPINotFound)
+	// Serve the embedded dashboard UI (built by build.sh) for everything
+	// else, with an SPA fallback for client-side routes. webui.Handler
+	// operates on paths relative to the app root, so strip prefix before
+	// handing off to it when one is configured.
+	if prefix == "" {
+		mux.Handle("/", webui.Handler(prefix))
+	} else {
+		mux.Handle(prefix+"/", http.StripPrefix(prefix, webui.Handler(prefix)))
+	}
 
-	return corsMiddleware(apiKeyAuthMiddleware(fsClient, mux)), nil
+	return corsMiddleware(apiKeyAuthMiddleware(fsClient, prefix, mux)), nil
 }

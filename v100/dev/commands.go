@@ -90,6 +90,7 @@ func Command() cli.Command {
 					cli.StringFlag{Name: "project"},
 					cli.StringFlag{Name: "db", Value: defaultDB},
 					cli.StringFlag{Name: "addr", Value: ":8080", Usage: "address to listen on"},
+					cli.StringFlag{Name: "prefix", Usage: "URL path prefix under which all routes are served, e.g. \"sparkles\" serves everything under /sparkles/... (default: none, serve at the root)"},
 				},
 				Action: runDevDashboardBackend,
 			},

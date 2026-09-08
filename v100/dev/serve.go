@@ -32,6 +32,7 @@ func ServeCommand() cli.Command {
 			cli.StringFlag{Name: "project", Usage: "GCP project ID (required)"},
 			cli.StringFlag{Name: "db", Value: defaultDB, Usage: "Firestore database"},
 			cli.StringFlag{Name: "addr", Value: ":8080", Usage: "address for the dashboard-backend to listen on"},
+			cli.StringFlag{Name: "prefix", Usage: "URL path prefix under which all routes are served, e.g. \"sparkles\" serves everything under /sparkles/... (default: none, serve at the root)"},
 			cli.BoolFlag{Name: "verbose, v", Usage: "log a message at the start of every monitor poll"},
 		},
 		Action: runServe,
@@ -45,6 +46,7 @@ func runServe(c *cli.Context) error {
 	}
 	db := c.String("db")
 	addr := c.String("addr")
+	prefix := normalizePrefix(c.String("prefix"))
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -70,7 +72,7 @@ func runServe(c *cli.Context) error {
 	}
 	defer stopMonitor()
 
-	handler, err := newDashboardHandler(ctx, project, fsClient, psClient)
+	handler, err := newDashboardHandler(ctx, project, fsClient, psClient, prefix)
 	if err != nil {
 		return err
 	}
