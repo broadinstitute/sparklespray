@@ -98,9 +98,17 @@ export interface BackendJobSummary {
   workpool_id: string;
   created_at: string;
   status: string;
+  /** The job's overall state (pending/in_progress/.../success/error/failed/
+   * killed) -- see monitor.JobStatus on the Go side. Named separately from
+   * the (unused, likely stale) `status` field above since that's what the
+   * backend actually serializes this as. */
+  state: string;
   tasks: { state: string; count: number }[];
   labels: { name: string; value: string }[];
   expiry: string;
+  /** Timestamp of the monitor's most recent write to this job's summary --
+   * for a job in a terminal state, this is effectively when it finished. */
+  last_updated: string;
   // computed client-side from tasks[]
   taskCount: number;
   successCount: number;

@@ -883,13 +883,14 @@ type labelResponse struct {
 }
 
 type jobSummaryResponse struct {
-	JobID      string              `json:"job_id"`
-	WorkpoolID string              `json:"workpool_id"`
-	CreatedAt  time.Time           `json:"created_at"`
-	State      string              `json:"state"`
-	Tasks      []taskCountResponse `json:"tasks"`
-	Labels     []labelResponse     `json:"labels"`
-	Expiry     time.Time           `json:"expiry"`
+	JobID       string              `json:"job_id"`
+	WorkpoolID  string              `json:"workpool_id"`
+	CreatedAt   time.Time           `json:"created_at"`
+	State       string              `json:"state"`
+	Tasks       []taskCountResponse `json:"tasks"`
+	Labels      []labelResponse     `json:"labels"`
+	Expiry      time.Time           `json:"expiry"`
+	LastUpdated time.Time           `json:"last_updated"`
 }
 
 func (s *dashboardServer) handleListJobs(w http.ResponseWriter, r *http.Request) {
@@ -972,13 +973,14 @@ func jobSummaryToResponse(js *monitor.JobSummary) jobSummaryResponse {
 		labels[i] = labelResponse{Name: l.Name, Value: l.Value}
 	}
 	return jobSummaryResponse{
-		JobID:      js.JobID,
-		WorkpoolID: js.WorkpoolID,
-		CreatedAt:  js.CreatedAt,
-		State:      string(js.State),
-		Tasks:      tasks,
-		Labels:     labels,
-		Expiry:     js.Expiry,
+		JobID:       js.JobID,
+		WorkpoolID:  js.WorkpoolID,
+		CreatedAt:   js.CreatedAt,
+		State:       string(js.State),
+		Tasks:       tasks,
+		Labels:      labels,
+		Expiry:      js.Expiry,
+		LastUpdated: js.LastUpdated,
 	}
 }
 

@@ -38,6 +38,9 @@ const HIDDEN_LABEL_KEYS = new Set([
   "job-spec-sha256",
 ]);
 
+// Mirrors monitor.IsTerminalJobStatus on the Go side.
+const TERMINAL_JOB_STATES = new Set(["success", "error", "failed", "killed"]);
+
 const MONO = "'IBM Plex Mono', monospace";
 
 function DetailRow({
@@ -444,6 +447,11 @@ export default function JobDetail() {
       ? new Date(Date.now() + (remaining / ratePerMin) * 60_000)
       : null;
 
+  const isTerminalJob = TERMINAL_JOB_STATES.has(jobSummary?.state ?? "");
+  const jobLastUpdatedMs = jobSummary?.last_updated
+    ? new Date(jobSummary.last_updated).getTime()
+    : null;
+
   return (
     <div
       style={{
@@ -471,8 +479,11 @@ export default function JobDetail() {
           <RangeRefreshBar
             anchorLabel="Job start"
             anchorMs={jobCreatedMs}
+            endAnchorLabel="Job end"
+            endAnchorMs={jobLastUpdatedMs}
             lastUpdatedAt={lastUpdatedAt}
             onChange={setRange}
+            autoSelectAnchorRange={isTerminalJob}
           />
 
           <div

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 const MONO = "'IBM Plex Mono', monospace";
 
@@ -146,6 +146,7 @@ export function RangeRefreshBar({
   onChange,
   live: controlledLive,
   onLiveChange,
+  autoSelectAnchorRange,
 }: {
   /** Label for the "since the beginning" Start preset, e.g. "Pool start", "Job start", "Task start". */
   anchorLabel: string;
@@ -162,6 +163,13 @@ export function RangeRefreshBar({
    * with another control on a different tab). Uncontrolled by default. */
   live?: boolean;
   onLiveChange?: (live: boolean) => void;
+  /** When true, defaults Start to the anchor preset and End to the endAnchor
+   * option (rather than "last 10 minutes" / "now") the first time it becomes
+   * true -- e.g. once the underlying job/task/pool is known to have reached
+   * a terminal state, so the timeline opens already framed on its whole
+   * run instead of a now-empty trailing window. Only applies once, and
+   * never overrides a range the operator has already picked by hand. */
+  autoSelectAnchorRange?: boolean;
 }) {
   const [start, setStart] = useState<StartPresetValue>("10m");
   const [endMode, setEndMode] = useState<EndModeValue>("now");
@@ -172,15 +180,37 @@ export function RangeRefreshBar({
 
   const tick = useNowTick(live);
 
+  const userTouchedRef = useRef(false);
+
   const selectEnd = (mode: EndModeValue) => {
+    userTouchedRef.current = true;
     setEndMode(mode);
     setLive(mode === "now");
   };
 
-  const toggleLive = () => setLive(!live);
+  const toggleLive = () => {
+    userTouchedRef.current = true;
+    setLive(!live);
+  };
 
-  const nudge = (deltaMin: number) =>
+  useEffect(() => {
+    if (!autoSelectAnchorRange || userTouchedRef.current) return;
+    setStart("anchor");
+    setEndMode("endAnchor");
+    // Deliberately leave `live` alone (unlike selectEnd's manual "endAnchor"
+    // click, which does pause it): endAnchorMs is read unconditionally
+    // regardless of `live`, so nothing about the displayed range needs it
+    // off, and callers (e.g. JobDetail) gate their data-fetch polling on
+    // `live` -- turning it off here, before that poll has ever completed,
+    // would strand the view on empty data until the operator manually
+    // toggled Live back on.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoSelectAnchorRange]);
+
+  const nudge = (deltaMin: number) => {
+    userTouchedRef.current = true;
     setCustomOffsetMin((m) => Math.max(5, m + deltaMin));
+  };
 
   const startPresets = useMemo(
     () => [
@@ -282,7 +312,10 @@ export function RangeRefreshBar({
             {startPresets.map((p, i) => (
               <div
                 key={p.value}
-                onClick={() => setStart(p.value)}
+                onClick={() => {
+                  userTouchedRef.current = true;
+                  setStart(p.value);
+                }}
                 style={segStyle(start === p.value, i === 0)}
               >
                 {p.label}
