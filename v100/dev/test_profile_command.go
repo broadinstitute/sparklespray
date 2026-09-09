@@ -33,7 +33,7 @@ func runDevTestProfileCommand(c *cli.Context) error {
 
 	args := []string(c.Args())
 	if len(args) < 2 {
-		return fmt.Errorf("usage: sparkles dev test-profile-command [--interval DURATION] [--container NAME] [--] <docker-image> <command...>")
+		return fmt.Errorf("usage: sparkles dev test-profile-command [--interval DURATION] [--container NAME] [--docker-arg ARG]... [--] <docker-image> <command...>")
 	}
 	image := args[0]
 	command := args[1:]
@@ -46,7 +46,9 @@ func runDevTestProfileCommand(c *cli.Context) error {
 
 	containerName := "sparkles-test-profile-" + uuid.New().String()[:8]
 
-	dockerArgs := append([]string{"run", "--name", containerName, "-w", workDir}, image)
+	dockerArgs := []string{"run", "--name", containerName, "-w", workDir}
+	dockerArgs = append(dockerArgs, splitDockerArgs(c.StringSlice("docker-arg"))...)
+	dockerArgs = append(dockerArgs, image)
 	dockerArgs = append(dockerArgs, command...)
 
 	fmt.Fprintf(os.Stderr, "Running: %s %s\n", v100.DockerExecutable, strings.Join(dockerArgs, " "))
@@ -64,6 +66,7 @@ func runDevTestProfileCommand(c *cli.Context) error {
 
 	sampler := v100.NewMetricSampler(containerName, workDir, containerName)
 	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
 
 	// Mirrors the poll loop in OpenTaskEventLog: one goroutine owns the
 	// sampler, and the final sample is taken by that same goroutine so the
@@ -113,6 +116,19 @@ func runDevTestProfileCommand(c *cli.Context) error {
 	return nil
 }
 
+// splitDockerArgs lets --docker-arg bundle a flag and its value into one
+// shell-quoted string (e.g. --docker-arg='-v /host:/container') instead of
+// requiring a separate --docker-arg per token. It only splits on whitespace
+// and does not understand quoting, so it can't express an argument that
+// itself contains a space.
+func splitDockerArgs(args []string) []string {
+	var out []string
+	for _, arg := range args {
+		out = append(out, strings.Fields(arg)...)
+	}
+	return out
+}
+
 // profileExistingContainer samples an already-running container until
 // interrupted, without starting or removing anything.
 func profileExistingContainer(c *cli.Context, name string) error {
@@ -127,6 +143,7 @@ func profileExistingContainer(c *cli.Context, name string) error {
 
 	sampler := v100.NewMetricSampler(name, workDir, name)
 	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
 
 	delay := firstDelay(c)
 	for {

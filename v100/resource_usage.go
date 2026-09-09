@@ -39,33 +39,42 @@ func buildResourceUsage(containerName string, final *MetricSample) *ResourceUsag
 		return ru
 	}
 
-	ru.ContainerCPUUsageUSec = final.ContainerCPUUsageUSec
-	ru.ContainerCPUUserUSec = final.ContainerCPUUserUSec
-	ru.ContainerCPUSystemUSec = final.ContainerCPUSystemUSec
-	ru.ContainerCPUThrottledUSec = final.ContainerCPUThrottledUSec
-	ru.ContainerCPUThrottledPeriod = final.ContainerCPUThrottledPeriods
+	ru.ContainerCPUUsageUSec = int64OrUnavailable(final.ContainerCPUUsageUSec)
+	ru.ContainerCPUUserUSec = int64OrUnavailable(final.ContainerCPUUserUSec)
+	ru.ContainerCPUSystemUSec = int64OrUnavailable(final.ContainerCPUSystemUSec)
+	ru.ContainerCPUThrottledUSec = int64OrUnavailable(final.ContainerCPUThrottledUSec)
+	ru.ContainerCPUThrottledPeriod = int64OrUnavailable(final.ContainerCPUThrottledPeriods)
 
-	ru.ContainerMemoryPeakBytes = final.ContainerMemoryPeakBytes
-	ru.ContainerMemoryLimitBytes = final.ContainerMemoryLimitBytes
-	ru.ContainerMemoryMajorFaults = final.ContainerMemoryMajorFaults
-	ru.ContainerMemoryWorkingsetRefaults = final.ContainerMemoryWorkingsetRefaults
-	ru.ContainerOOMKillCount = final.ContainerMemoryOOMKillCount
+	ru.ContainerMemoryPeakBytes = int64OrUnavailable(final.ContainerMemoryPeakBytes)
+	ru.ContainerMemoryLimitBytes = int64OrUnavailable(final.ContainerMemoryLimitBytes)
+	ru.ContainerMemoryMajorFaults = int64OrUnavailable(final.ContainerMemoryMajorFaults)
+	ru.ContainerMemoryWorkingsetRefaults = int64OrUnavailable(final.ContainerMemoryWorkingsetRefaults)
+	ru.ContainerOOMKillCount = int64OrUnavailable(final.ContainerMemoryOOMKillCount)
 
-	ru.ContainerCPUStallSomeUSec = final.ContainerCPUStallSomeUSec
-	ru.ContainerCPUStallFullUSec = final.ContainerCPUStallFullUSec
-	ru.ContainerMemoryStallSomeUSec = final.ContainerMemoryStallSomeUSec
-	ru.ContainerMemoryStallFullUSec = final.ContainerMemoryStallFullUSec
-	ru.ContainerIOStallSomeUSec = final.ContainerIOStallSomeUSec
-	ru.ContainerIOStallFullUSec = final.ContainerIOStallFullUSec
+	ru.ContainerCPUStallSomeUSec = int64OrUnavailable(final.ContainerCPUStallSomeUSec)
+	ru.ContainerCPUStallFullUSec = int64OrUnavailable(final.ContainerCPUStallFullUSec)
+	ru.ContainerMemoryStallSomeUSec = int64OrUnavailable(final.ContainerMemoryStallSomeUSec)
+	ru.ContainerMemoryStallFullUSec = int64OrUnavailable(final.ContainerMemoryStallFullUSec)
+	ru.ContainerIOStallSomeUSec = int64OrUnavailable(final.ContainerIOStallSomeUSec)
+	ru.ContainerIOStallFullUSec = int64OrUnavailable(final.ContainerIOStallFullUSec)
 
-	ru.ContainerIOReadBytes = final.ContainerIOReadBytes
-	ru.ContainerIOWriteBytes = final.ContainerIOWriteBytes
-	ru.ContainerIOReadOps = final.ContainerIOReadOps
-	ru.ContainerIOWriteOps = final.ContainerIOWriteOps
+	ru.ContainerIOReadBytes = int64OrUnavailable(final.ContainerIOReadBytes)
+	ru.ContainerIOWriteBytes = int64OrUnavailable(final.ContainerIOWriteBytes)
+	ru.ContainerIOReadOps = int64OrUnavailable(final.ContainerIOReadOps)
+	ru.ContainerIOWriteOps = int64OrUnavailable(final.ContainerIOWriteOps)
 
-	ru.ContainerPidsPeak = final.ContainerPidsPeak
+	ru.ContainerPidsPeak = int64OrUnavailable(final.ContainerPidsPeak)
 
 	return ru
+}
+
+// int64OrUnavailable unwraps a MetricSample counter (nil when the metric
+// could not be read) back into ResourceUsage's -1-sentinel convention.
+func int64OrUnavailable(p *int64) int64 {
+	if p == nil {
+		return metricUnavailable
+	}
+	return *p
 }
 
 // setUnavailableContainerUsage marks every container counter as unavailable,

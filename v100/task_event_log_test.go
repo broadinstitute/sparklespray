@@ -156,7 +156,7 @@ func TestSampleWithoutContainerIsUnavailable(t *testing.T) {
 	if s.ContainerPresent {
 		t.Error("ContainerPresent = true with no container registered")
 	}
-	checks := map[string]int64{
+	checks := map[string]*int64{
 		"ContainerMemoryCurrentBytes":  s.ContainerMemoryCurrentBytes,
 		"ContainerMemoryPeakBytes":     s.ContainerMemoryPeakBytes,
 		"ContainerCPUUsageUSec":        s.ContainerCPUUsageUSec,
@@ -170,8 +170,8 @@ func TestSampleWithoutContainerIsUnavailable(t *testing.T) {
 		"ContainerPidsPeak":            s.ContainerPidsPeak,
 	}
 	for name, got := range checks {
-		if got != metricUnavailable {
-			t.Errorf("%s = %d, want %d (unavailable)", name, got, metricUnavailable)
+		if got != nil {
+			t.Errorf("%s = %d, want nil (unavailable)", name, *got)
 		}
 	}
 }

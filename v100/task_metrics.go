@@ -19,7 +19,12 @@ const MetricUpdateEventType = "metric_update"
 // samples carrying a different value: an older document decoded into the
 // current struct reads as all zeros -- i.e. as a container that used no CPU --
 // which is considerably worse than a decode error.
-const MetricSchemaCurrent int32 = 2
+//
+// Bumped to 3 when the unavailable-metric sentinel changed from a literal -1
+// to an omitted/nil field: a schema-2 document decoded into the current
+// struct would read its -1s as real (very negative) values rather than as
+// "unavailable".
+const MetricSchemaCurrent int32 = 3
 
 // HostVolume is disk usage for one mount point, in bytes.
 //
@@ -45,8 +50,9 @@ type HostVolume struct {
 // difference exactly over any interval and compose with the post-exit read of
 // the same counter -- so the last sample and the final read leave no gap.
 //
-// Any value that could not be read is metricUnavailable (-1), which is
-// deliberately distinct from a genuine zero.
+// Any value that could not be read is a nil pointer, omitted from both the
+// JSON and Firestore encodings, which is deliberately distinct from a
+// genuine zero.
 type MetricSample struct {
 	TaskID       string    `firestore:"task_id" json:"task_id"`
 	Type         string    `firestore:"type" json:"type"`
@@ -57,37 +63,43 @@ type MetricSample struct {
 	Final        bool      `firestore:"final" json:"final"`
 
 	// Host CPU, as a percentage of total CPU time across all cores over the
-	// interval since the previous sample.
-	HostCPUUserPct   float64 `firestore:"host_cpu_user_pct" json:"host_cpu_user_pct"`
-	HostCPUSystemPct float64 `firestore:"host_cpu_system_pct" json:"host_cpu_system_pct"`
-	HostCPUIdlePct   float64 `firestore:"host_cpu_idle_pct" json:"host_cpu_idle_pct"`
-	HostCPUIowaitPct float64 `firestore:"host_cpu_iowait_pct" json:"host_cpu_iowait_pct"`
+	// interval since the previous sample. Nil for the first sample, which has
+	// no previous /proc/stat snapshot to difference against.
+	HostCPUUserPct   *float64 `firestore:"host_cpu_user_pct,omitempty" json:"host_cpu_user_pct,omitempty"`
+	HostCPUSystemPct *float64 `firestore:"host_cpu_system_pct,omitempty" json:"host_cpu_system_pct,omitempty"`
+	HostCPUIdlePct   *float64 `firestore:"host_cpu_idle_pct,omitempty" json:"host_cpu_idle_pct,omitempty"`
+	HostCPUIowaitPct *float64 `firestore:"host_cpu_iowait_pct,omitempty" json:"host_cpu_iowait_pct,omitempty"`
 
-	HostMemoryTotalBytes     int64 `firestore:"host_memory_total_bytes" json:"host_memory_total_bytes"`
-	HostMemoryAvailableBytes int64 `firestore:"host_memory_available_bytes" json:"host_memory_available_bytes"`
+	// HostCPUCount is the number of logical cores backing the percentages
+	// above, so e.g. "25% user" can be read as a fraction of however many
+	// cores the host actually has rather than assumed to be one.
+	HostCPUCount *int64 `firestore:"host_cpu_count,omitempty" json:"host_cpu_count,omitempty"`
 
-	HostCPUStallSomeUSec    int64 `firestore:"host_cpu_stall_some_usec" json:"host_cpu_stall_some_usec"`
-	HostCPUStallFullUSec    int64 `firestore:"host_cpu_stall_full_usec" json:"host_cpu_stall_full_usec"`
-	HostMemoryStallSomeUSec int64 `firestore:"host_memory_stall_some_usec" json:"host_memory_stall_some_usec"`
-	HostMemoryStallFullUSec int64 `firestore:"host_memory_stall_full_usec" json:"host_memory_stall_full_usec"`
-	HostIOStallSomeUSec     int64 `firestore:"host_io_stall_some_usec" json:"host_io_stall_some_usec"`
-	HostIOStallFullUSec     int64 `firestore:"host_io_stall_full_usec" json:"host_io_stall_full_usec"`
+	HostMemoryTotalBytes     *int64 `firestore:"host_memory_total_bytes,omitempty" json:"host_memory_total_bytes,omitempty"`
+	HostMemoryAvailableBytes *int64 `firestore:"host_memory_available_bytes,omitempty" json:"host_memory_available_bytes,omitempty"`
+
+	HostCPUStallSomeUSec    *int64 `firestore:"host_cpu_stall_some_usec,omitempty" json:"host_cpu_stall_some_usec,omitempty"`
+	HostCPUStallFullUSec    *int64 `firestore:"host_cpu_stall_full_usec,omitempty" json:"host_cpu_stall_full_usec,omitempty"`
+	HostMemoryStallSomeUSec *int64 `firestore:"host_memory_stall_some_usec,omitempty" json:"host_memory_stall_some_usec,omitempty"`
+	HostMemoryStallFullUSec *int64 `firestore:"host_memory_stall_full_usec,omitempty" json:"host_memory_stall_full_usec,omitempty"`
+	HostIOStallSomeUSec     *int64 `firestore:"host_io_stall_some_usec,omitempty" json:"host_io_stall_some_usec,omitempty"`
+	HostIOStallFullUSec     *int64 `firestore:"host_io_stall_full_usec,omitempty" json:"host_io_stall_full_usec,omitempty"`
 
 	HostVolumes []HostVolume `firestore:"host_volumes" json:"host_volumes,omitempty"`
 
 	// ContainerPresent is false when the container's cgroup could not be
 	// located: it has not been created yet (normal for the first sample of a
 	// task), it has already been torn down, or this task runs without a
-	// container at all. Every container_* field is unavailable in that case.
+	// container at all. Every container_* field is nil in that case.
 	ContainerPresent bool `firestore:"container_present" json:"container_present"`
 
-	ContainerMemoryCurrentBytes int64 `firestore:"container_memory_current_bytes" json:"container_memory_current_bytes"`
-	ContainerMemoryPeakBytes    int64 `firestore:"container_memory_peak_bytes" json:"container_memory_peak_bytes"`
-	ContainerMemoryLimitBytes   int64 `firestore:"container_memory_limit_bytes" json:"container_memory_limit_bytes"`
+	ContainerMemoryCurrentBytes *int64 `firestore:"container_memory_current_bytes,omitempty" json:"container_memory_current_bytes,omitempty"`
+	ContainerMemoryPeakBytes    *int64 `firestore:"container_memory_peak_bytes,omitempty" json:"container_memory_peak_bytes,omitempty"`
+	ContainerMemoryLimitBytes   *int64 `firestore:"container_memory_limit_bytes,omitempty" json:"container_memory_limit_bytes,omitempty"`
 
-	ContainerCPUUsageUSec  int64 `firestore:"container_cpu_usage_usec" json:"container_cpu_usage_usec"`
-	ContainerCPUUserUSec   int64 `firestore:"container_cpu_user_usec" json:"container_cpu_user_usec"`
-	ContainerCPUSystemUSec int64 `firestore:"container_cpu_system_usec" json:"container_cpu_system_usec"`
+	ContainerCPUUsageUSec  *int64 `firestore:"container_cpu_usage_usec,omitempty" json:"container_cpu_usage_usec,omitempty"`
+	ContainerCPUUserUSec   *int64 `firestore:"container_cpu_user_usec,omitempty" json:"container_cpu_user_usec,omitempty"`
+	ContainerCPUSystemUSec *int64 `firestore:"container_cpu_system_usec,omitempty" json:"container_cpu_system_usec,omitempty"`
 
 	// These are cumulative or high-water counters, so they are carried in
 	// every sample rather than only in the final one: knowing *when* a task
@@ -95,24 +107,34 @@ type MetricSample struct {
 	// useful than only learning that it happened. Reading them here also means
 	// the final summary is a pure projection of the last sample and needs no
 	// second pass over the cgroup.
-	ContainerCPUThrottledUSec         int64 `firestore:"container_cpu_throttled_usec" json:"container_cpu_throttled_usec"`
-	ContainerCPUThrottledPeriods      int64 `firestore:"container_cpu_throttled_periods" json:"container_cpu_throttled_periods"`
-	ContainerMemoryMajorFaults        int64 `firestore:"container_memory_major_faults" json:"container_memory_major_faults"`
-	ContainerMemoryWorkingsetRefaults int64 `firestore:"container_memory_workingset_refaults" json:"container_memory_workingset_refaults"`
-	ContainerMemoryOOMKillCount       int64 `firestore:"container_memory_oom_kill_count" json:"container_memory_oom_kill_count"`
-	ContainerPidsPeak                 int64 `firestore:"container_pids_peak" json:"container_pids_peak"`
+	ContainerCPUThrottledUSec         *int64 `firestore:"container_cpu_throttled_usec,omitempty" json:"container_cpu_throttled_usec,omitempty"`
+	ContainerCPUThrottledPeriods      *int64 `firestore:"container_cpu_throttled_periods,omitempty" json:"container_cpu_throttled_periods,omitempty"`
+	ContainerMemoryMajorFaults        *int64 `firestore:"container_memory_major_faults,omitempty" json:"container_memory_major_faults,omitempty"`
+	ContainerMemoryWorkingsetRefaults *int64 `firestore:"container_memory_workingset_refaults,omitempty" json:"container_memory_workingset_refaults,omitempty"`
+	ContainerMemoryOOMKillCount       *int64 `firestore:"container_memory_oom_kill_count,omitempty" json:"container_memory_oom_kill_count,omitempty"`
+	ContainerPidsPeak                 *int64 `firestore:"container_pids_peak,omitempty" json:"container_pids_peak,omitempty"`
 
-	ContainerCPUStallSomeUSec    int64 `firestore:"container_cpu_stall_some_usec" json:"container_cpu_stall_some_usec"`
-	ContainerCPUStallFullUSec    int64 `firestore:"container_cpu_stall_full_usec" json:"container_cpu_stall_full_usec"`
-	ContainerMemoryStallSomeUSec int64 `firestore:"container_memory_stall_some_usec" json:"container_memory_stall_some_usec"`
-	ContainerMemoryStallFullUSec int64 `firestore:"container_memory_stall_full_usec" json:"container_memory_stall_full_usec"`
-	ContainerIOStallSomeUSec     int64 `firestore:"container_io_stall_some_usec" json:"container_io_stall_some_usec"`
-	ContainerIOStallFullUSec     int64 `firestore:"container_io_stall_full_usec" json:"container_io_stall_full_usec"`
+	ContainerCPUStallSomeUSec    *int64 `firestore:"container_cpu_stall_some_usec,omitempty" json:"container_cpu_stall_some_usec,omitempty"`
+	ContainerCPUStallFullUSec    *int64 `firestore:"container_cpu_stall_full_usec,omitempty" json:"container_cpu_stall_full_usec,omitempty"`
+	ContainerMemoryStallSomeUSec *int64 `firestore:"container_memory_stall_some_usec,omitempty" json:"container_memory_stall_some_usec,omitempty"`
+	ContainerMemoryStallFullUSec *int64 `firestore:"container_memory_stall_full_usec,omitempty" json:"container_memory_stall_full_usec,omitempty"`
+	ContainerIOStallSomeUSec     *int64 `firestore:"container_io_stall_some_usec,omitempty" json:"container_io_stall_some_usec,omitempty"`
+	ContainerIOStallFullUSec     *int64 `firestore:"container_io_stall_full_usec,omitempty" json:"container_io_stall_full_usec,omitempty"`
 
-	ContainerIOReadBytes  int64 `firestore:"container_io_read_bytes" json:"container_io_read_bytes"`
-	ContainerIOWriteBytes int64 `firestore:"container_io_write_bytes" json:"container_io_write_bytes"`
-	ContainerIOReadOps    int64 `firestore:"container_io_read_ops" json:"container_io_read_ops"`
-	ContainerIOWriteOps   int64 `firestore:"container_io_write_ops" json:"container_io_write_ops"`
+	ContainerIOReadBytes  *int64 `firestore:"container_io_read_bytes,omitempty" json:"container_io_read_bytes,omitempty"`
+	ContainerIOWriteBytes *int64 `firestore:"container_io_write_bytes,omitempty" json:"container_io_write_bytes,omitempty"`
+	ContainerIOReadOps    *int64 `firestore:"container_io_read_ops,omitempty" json:"container_io_read_ops,omitempty"`
+	ContainerIOWriteOps   *int64 `firestore:"container_io_write_ops,omitempty" json:"container_io_write_ops,omitempty"`
+}
+
+// int64OrNA converts a metricUnavailable-sentineled int64 read from the
+// cgroup/proc layer into the pointer form MetricSample exposes: nil when the
+// value could not be read, a pointer to it otherwise.
+func int64OrNA(v int64) *int64 {
+	if v == metricUnavailable {
+		return nil
+	}
+	return &v
 }
 
 type cpuStats struct {
@@ -163,6 +185,32 @@ func getCPUStats() (*cpuStats, error) {
 		return &cpuStats{User: user + nice, System: system, Idle: idle, Iowait: iowait}, nil
 	}
 	return nil, nil
+}
+
+// getCPUCount returns the number of logical cores, counted from /proc/stat's
+// per-core "cpuN" lines rather than a separate syscall -- distinct from the
+// aggregate "cpu " line cpuPercentages derives its totals from -- so it
+// reads from the same source those percentages do, host or test fixture
+// alike.
+func getCPUCount() (int64, error) {
+	data, err := os.ReadFile(filepath.Join(procRoot, "stat"))
+	if err != nil {
+		return 0, err
+	}
+	var count int64
+	for _, line := range strings.Split(string(data), "\n") {
+		if !strings.HasPrefix(line, "cpu") || strings.HasPrefix(line, "cpu ") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		if _, err := strconv.Atoi(strings.TrimPrefix(fields[0], "cpu")); err == nil {
+			count++
+		}
+	}
+	return count, nil
 }
 
 type systemMemory struct {
@@ -238,29 +286,29 @@ func containerMetrics(cg *containerCgroup) (counters containerCounters, present 
 func (s *MetricSample) setContainerCounters(c containerCounters, present bool) {
 	s.ContainerPresent = present
 
-	s.ContainerMemoryCurrentBytes = c.MemoryCurrentBytes
-	s.ContainerMemoryPeakBytes = c.MemoryPeakBytes
-	s.ContainerMemoryLimitBytes = c.MemoryLimitBytes
+	s.ContainerMemoryCurrentBytes = int64OrNA(c.MemoryCurrentBytes)
+	s.ContainerMemoryPeakBytes = int64OrNA(c.MemoryPeakBytes)
+	s.ContainerMemoryLimitBytes = int64OrNA(c.MemoryLimitBytes)
 
-	s.ContainerCPUUsageUSec = c.CPUUsageUSec
-	s.ContainerCPUUserUSec = c.CPUUserUSec
-	s.ContainerCPUSystemUSec = c.CPUSystemUSec
-	s.ContainerCPUThrottledUSec = c.CPUThrottledUSec
-	s.ContainerCPUThrottledPeriods = c.CPUThrottledPeriods
+	s.ContainerCPUUsageUSec = int64OrNA(c.CPUUsageUSec)
+	s.ContainerCPUUserUSec = int64OrNA(c.CPUUserUSec)
+	s.ContainerCPUSystemUSec = int64OrNA(c.CPUSystemUSec)
+	s.ContainerCPUThrottledUSec = int64OrNA(c.CPUThrottledUSec)
+	s.ContainerCPUThrottledPeriods = int64OrNA(c.CPUThrottledPeriods)
 
-	s.ContainerMemoryMajorFaults = c.MemoryMajorFaults
-	s.ContainerMemoryWorkingsetRefaults = c.MemoryWorkingsetRefaults
-	s.ContainerMemoryOOMKillCount = c.MemoryOOMKillCount
-	s.ContainerPidsPeak = c.PidsPeak
+	s.ContainerMemoryMajorFaults = int64OrNA(c.MemoryMajorFaults)
+	s.ContainerMemoryWorkingsetRefaults = int64OrNA(c.MemoryWorkingsetRefaults)
+	s.ContainerMemoryOOMKillCount = int64OrNA(c.MemoryOOMKillCount)
+	s.ContainerPidsPeak = int64OrNA(c.PidsPeak)
 
-	s.ContainerCPUStallSomeUSec, s.ContainerCPUStallFullUSec = c.CPUStall.SomeUSec, c.CPUStall.FullUSec
-	s.ContainerMemoryStallSomeUSec, s.ContainerMemoryStallFullUSec = c.MemoryStall.SomeUSec, c.MemoryStall.FullUSec
-	s.ContainerIOStallSomeUSec, s.ContainerIOStallFullUSec = c.IOStall.SomeUSec, c.IOStall.FullUSec
+	s.ContainerCPUStallSomeUSec, s.ContainerCPUStallFullUSec = int64OrNA(c.CPUStall.SomeUSec), int64OrNA(c.CPUStall.FullUSec)
+	s.ContainerMemoryStallSomeUSec, s.ContainerMemoryStallFullUSec = int64OrNA(c.MemoryStall.SomeUSec), int64OrNA(c.MemoryStall.FullUSec)
+	s.ContainerIOStallSomeUSec, s.ContainerIOStallFullUSec = int64OrNA(c.IOStall.SomeUSec), int64OrNA(c.IOStall.FullUSec)
 
-	s.ContainerIOReadBytes = c.IOReadBytes
-	s.ContainerIOWriteBytes = c.IOWriteBytes
-	s.ContainerIOReadOps = c.IOReadOps
-	s.ContainerIOWriteOps = c.IOWriteOps
+	s.ContainerIOReadBytes = int64OrNA(c.IOReadBytes)
+	s.ContainerIOWriteBytes = int64OrNA(c.IOWriteBytes)
+	s.ContainerIOReadOps = int64OrNA(c.IOReadOps)
+	s.ContainerIOWriteOps = int64OrNA(c.IOWriteOps)
 }
 
 // collectMetricSample takes one host-and-container metric sample for a task.
@@ -281,29 +329,31 @@ func collectMetricSample(taskID, workDir string, prev *cpuStats, cg *containerCg
 		Seq:          seq,
 		Final:        final,
 		HostVolumes:  getHostVolumes("/", workDir),
-
-		HostMemoryTotalBytes:     metricUnavailable,
-		HostMemoryAvailableBytes: metricUnavailable,
 	}
 
 	cur, err := getCPUStats()
 	if err != nil || cur == nil {
 		cur = prev
 	} else if prev != nil {
-		s.HostCPUUserPct, s.HostCPUSystemPct, s.HostCPUIdlePct, s.HostCPUIowaitPct = cpuPercentages(prev, cur)
+		userPct, systemPct, idlePct, iowaitPct := cpuPercentages(prev, cur)
+		s.HostCPUUserPct, s.HostCPUSystemPct, s.HostCPUIdlePct, s.HostCPUIowaitPct = &userPct, &systemPct, &idlePct, &iowaitPct
 	}
 
 	if sysMem, err := getSystemMemory(); err == nil {
-		s.HostMemoryTotalBytes = sysMem.Total
-		s.HostMemoryAvailableBytes = sysMem.Available
+		s.HostMemoryTotalBytes = &sysMem.Total
+		s.HostMemoryAvailableBytes = &sysMem.Available
+	}
+
+	if count, err := getCPUCount(); err == nil {
+		s.HostCPUCount = &count
 	}
 
 	cpuStall := readPressureFile(filepath.Join(procRoot, "pressure", "cpu"))
 	memoryStall := readPressureFile(filepath.Join(procRoot, "pressure", "memory"))
 	ioStall := readPressureFile(filepath.Join(procRoot, "pressure", "io"))
-	s.HostCPUStallSomeUSec, s.HostCPUStallFullUSec = cpuStall.SomeUSec, cpuStall.FullUSec
-	s.HostMemoryStallSomeUSec, s.HostMemoryStallFullUSec = memoryStall.SomeUSec, memoryStall.FullUSec
-	s.HostIOStallSomeUSec, s.HostIOStallFullUSec = ioStall.SomeUSec, ioStall.FullUSec
+	s.HostCPUStallSomeUSec, s.HostCPUStallFullUSec = int64OrNA(cpuStall.SomeUSec), int64OrNA(cpuStall.FullUSec)
+	s.HostMemoryStallSomeUSec, s.HostMemoryStallFullUSec = int64OrNA(memoryStall.SomeUSec), int64OrNA(memoryStall.FullUSec)
+	s.HostIOStallSomeUSec, s.HostIOStallFullUSec = int64OrNA(ioStall.SomeUSec), int64OrNA(ioStall.FullUSec)
 
 	s.setContainerCounters(containerMetrics(cg))
 

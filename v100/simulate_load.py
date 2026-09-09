@@ -17,37 +17,60 @@ def parse_size(value):
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument(
-        "--cpu_fraction",
+        "--min_cpu",
         type=float,
-        required=True,
-        help="average %% of a cpu core to use per second (0-100)",
+        default=10.0,
+        help="low end of the cpu wave, %% of a cpu core (0-100), default 10",
+    )
+    p.add_argument(
+        "--max_cpu",
+        type=float,
+        default=90.0,
+        help="high end of the cpu wave, %% of a cpu core (0-100), default 50",
     )
     p.add_argument(
         "--min_mem",
         type=parse_size,
-        required=True,
-        help="minimum memory to allocate, in bytes (accepts K/M/G suffix)",
+        default="64M",
+        help="minimum memory to allocate, in bytes (accepts K/M/G suffix), default 64M",
     )
     p.add_argument(
         "--max_mem",
         type=parse_size,
-        required=True,
-        help="peak memory to allocate, in bytes (accepts K/M/G suffix)",
+        default="256M",
+        help="peak memory to allocate, in bytes (accepts K/M/G suffix), default 256M",
     )
     p.add_argument(
-        "--run_time", type=float, required=True, help="how long to run, in seconds"
+        "--run_time",
+        type=float,
+        default=60.0,
+        help="how long to run, in seconds, default 60",
     )
     p.add_argument(
         "--output_size",
         type=parse_size,
-        required=True,
-        help="bytes to write to output.blob (accepts K/M/G suffix)",
+        default="1M",
+        help="bytes to write to output.blob (accepts K/M/G suffix), default 1M",
     )
     p.add_argument(
         "--period",
         type=float,
-        required=True,
-        help="seconds between simulated load changes",
+        default=10.0,
+        help="seconds between simulated load changes, default 10",
+    )
+    p.add_argument(
+        "--shape",
+        choices=["triangle", "square"],
+        default="triangle",
+        help="waveform for the transition between low and high load each period "
+        "(triangle: ramps linearly; square: steps instantly), default triangle",
+    )
+    p.add_argument(
+        "--start",
+        choices=["min", "max"],
+        default="min",
+        help="whether the first period starts at the min or the max cpu/memory, "
+        "default min",
     )
     return p.parse_args()
 
@@ -82,14 +105,27 @@ def write_output_file(path, size):
             remaining -= n
 
 
-def triangle_wave(elapsed, period, low, high):
+def _rising_phase(elapsed, period, start_high):
+    """True during the low-to-high half of the wave. With start_high, the
+    very first phase (elapsed < period) is high-to-low instead."""
     period_index = int(elapsed // period)
+    return (period_index % 2 == 0) != start_high
+
+
+def triangle_wave(elapsed, period, low, high, start_high=False):
     frac = (elapsed % period) / period
-    if period_index % 2 == 0:
+    if _rising_phase(elapsed, period, start_high):
         start, end = low, high
     else:
         start, end = high, low
     return start + (end - start) * frac
+
+
+def square_wave(elapsed, period, low, high, start_high=False):
+    return low if _rising_phase(elapsed, period, start_high) else high
+
+
+WAVES = {"triangle": triangle_wave, "square": square_wave}
 
 
 def burn_cpu_slice(duration):
@@ -107,11 +143,13 @@ def main():
     print(f"Writing {args.output_size} bytes to output.blob")
     write_output_file("output.blob", args.output_size)
 
-    low_cpu = min(max(args.cpu_fraction * 0.5, 0.0), 100.0) / 100.0
-    high_cpu = min(max(args.cpu_fraction * 2.0, 0.0), 100.0) / 100.0
+    low_cpu = min(max(args.min_cpu, 0.0), 100.0) / 100.0
+    high_cpu = min(max(args.max_cpu, 0.0), 100.0) / 100.0
+    wave = WAVES[args.shape]
+    start_high = args.start == "max"
 
     buf = bytearray()
-    resize_buffer(buf, args.min_mem)
+    resize_buffer(buf, args.max_mem if start_high else args.min_mem)
 
     start_time = time.perf_counter()
     last_status = 0.0
@@ -121,9 +159,9 @@ def main():
         if elapsed >= args.run_time:
             break
 
-        cpu_target = triangle_wave(elapsed, args.period, low_cpu, high_cpu)
+        cpu_target = wave(elapsed, args.period, low_cpu, high_cpu, start_high)
         mem_target = int(
-            triangle_wave(elapsed, args.period, args.min_mem, args.max_mem)
+            wave(elapsed, args.period, args.min_mem, args.max_mem, start_high)
         )
         resize_buffer(buf, mem_target)
 

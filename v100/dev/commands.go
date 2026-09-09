@@ -130,6 +130,7 @@ func Command() cli.Command {
 				Flags: []cli.Flag{
 					cli.DurationFlag{Name: "interval", Usage: "use a fixed sampling interval instead of the adaptive schedule (1s, doubling to 60s)"},
 					cli.StringFlag{Name: "container", Usage: "sample an already-running container by name instead of starting one"},
+					cli.StringSliceFlag{Name: "docker-arg", Usage: "additional argument(s) to pass to `docker run` (may be repeated; each value is whitespace-split, e.g. --docker-arg='-v /host:/container')"},
 				},
 				Action: runDevTestProfileCommand,
 			},

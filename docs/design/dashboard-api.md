@@ -323,18 +323,19 @@ Entries are a discriminated union: `content` is populated for `log_update`, and 
         "seq": "integer (0-based sample index within the task)",
         "final": "boolean (true for the single post-exit sample)",
 
-        "host_cpu_user_pct": "float64 (% of total CPU across all cores)",
-        "host_cpu_system_pct": "float64",
-        "host_cpu_idle_pct": "float64",
-        "host_cpu_iowait_pct": "float64",
-        "host_memory_total_bytes": "integer",
-        "host_memory_available_bytes": "integer",
-        "host_cpu_stall_some_usec": "integer (cumulative microseconds)",
-        "host_cpu_stall_full_usec": "integer",
-        "host_memory_stall_some_usec": "integer",
-        "host_memory_stall_full_usec": "integer",
-        "host_io_stall_some_usec": "integer",
-        "host_io_stall_full_usec": "integer",
+        "host_cpu_user_pct": "float64, omitted if unavailable (% of total CPU across all cores)",
+        "host_cpu_system_pct": "float64, omitted if unavailable",
+        "host_cpu_idle_pct": "float64, omitted if unavailable",
+        "host_cpu_iowait_pct": "float64, omitted if unavailable",
+        "host_cpu_count": "integer, omitted if unavailable (number of logical cores backing the host_cpu_*_pct fields above)",
+        "host_memory_total_bytes": "integer, omitted if unavailable",
+        "host_memory_available_bytes": "integer, omitted if unavailable",
+        "host_cpu_stall_some_usec": "integer, omitted if unavailable (cumulative microseconds)",
+        "host_cpu_stall_full_usec": "integer, omitted if unavailable",
+        "host_memory_stall_some_usec": "integer, omitted if unavailable",
+        "host_memory_stall_full_usec": "integer, omitted if unavailable",
+        "host_io_stall_some_usec": "integer, omitted if unavailable",
+        "host_io_stall_full_usec": "integer, omitted if unavailable",
         "host_volumes": [
           {
             "location": "string",
@@ -343,29 +344,29 @@ Entries are a discriminated union: `content` is populated for `log_update`, and 
           }
         ],
 
-        "container_present": "boolean (false => every container_* field is -1)",
-        "container_memory_current_bytes": "integer",
-        "container_memory_peak_bytes": "integer",
-        "container_memory_limit_bytes": "integer",
-        "container_cpu_usage_usec": "integer (cumulative)",
-        "container_cpu_user_usec": "integer (cumulative)",
-        "container_cpu_system_usec": "integer (cumulative)",
-        "container_cpu_throttled_usec": "integer",
-        "container_cpu_throttled_periods": "integer",
-        "container_memory_major_faults": "integer",
-        "container_memory_workingset_refaults": "integer",
-        "container_memory_oom_kill_count": "integer",
-        "container_pids_peak": "integer",
-        "container_cpu_stall_some_usec": "integer",
-        "container_cpu_stall_full_usec": "integer",
-        "container_memory_stall_some_usec": "integer",
-        "container_memory_stall_full_usec": "integer",
-        "container_io_stall_some_usec": "integer",
-        "container_io_stall_full_usec": "integer",
-        "container_io_read_bytes": "integer",
-        "container_io_write_bytes": "integer",
-        "container_io_read_ops": "integer",
-        "container_io_write_ops": "integer"
+        "container_present": "boolean (false => every container_* field is omitted)",
+        "container_memory_current_bytes": "integer, omitted if unavailable",
+        "container_memory_peak_bytes": "integer, omitted if unavailable",
+        "container_memory_limit_bytes": "integer, omitted if unavailable",
+        "container_cpu_usage_usec": "integer, omitted if unavailable (cumulative)",
+        "container_cpu_user_usec": "integer, omitted if unavailable (cumulative)",
+        "container_cpu_system_usec": "integer, omitted if unavailable (cumulative)",
+        "container_cpu_throttled_usec": "integer, omitted if unavailable",
+        "container_cpu_throttled_periods": "integer, omitted if unavailable",
+        "container_memory_major_faults": "integer, omitted if unavailable",
+        "container_memory_workingset_refaults": "integer, omitted if unavailable",
+        "container_memory_oom_kill_count": "integer, omitted if unavailable",
+        "container_pids_peak": "integer, omitted if unavailable",
+        "container_cpu_stall_some_usec": "integer, omitted if unavailable",
+        "container_cpu_stall_full_usec": "integer, omitted if unavailable",
+        "container_memory_stall_some_usec": "integer, omitted if unavailable",
+        "container_memory_stall_full_usec": "integer, omitted if unavailable",
+        "container_io_stall_some_usec": "integer, omitted if unavailable",
+        "container_io_stall_full_usec": "integer, omitted if unavailable",
+        "container_io_read_bytes": "integer, omitted if unavailable",
+        "container_io_write_bytes": "integer, omitted if unavailable",
+        "container_io_read_ops": "integer, omitted if unavailable",
+        "container_io_write_ops": "integer, omitted if unavailable"
       }
     }
   ],
@@ -377,7 +378,7 @@ Entries are a discriminated union: `content` is populated for `log_update`, and 
 
 **Conventions clients must handle:**
 
-- **`-1` means "unavailable", not zero.** A metric this kernel does not expose is `-1` so it stays distinguishable from a genuine zero. Clients should render it as a gap, **not** as `0` and not as `NaN`. Common causes: a kernel too old for a given cgroup file, a `cpu.pressure` file with no `full` line (widespread), an unlimited memory limit, cgroup v1, or a container whose cgroup had already been torn down.
+- **A missing field means "unavailable", not zero.** A metric this kernel does not expose is omitted from the JSON entirely (Go's `*int64`/`*float64` fields encode as absent, not `null`, when nil), so it stays distinguishable from a genuine zero. Clients should render a missing field as a gap, **not** as `0` and not as `NaN`. Common causes: a kernel too old for a given cgroup file, a `cpu.pressure` file with no `full` line (widespread), an unlimited memory limit, cgroup v1, a container whose cgroup had already been torn down, or (for the `host_cpu_*_pct` fields specifically) the first sample of a task, which has no previous `/proc/stat` snapshot to difference against.
 - **Stall counters are cumulative microseconds, not rates.** To chart a stall percentage or a CPU rate, difference consecutive samples and divide by the wall time between them; clamp negative deltas (counter reset) to a gap. Cumulative totals are stored deliberately: a decaying average has a ~10-second ramp and so is meaningless for a short task, whereas totals difference exactly over any interval and compose with the final post-exit sample without leaving a gap.
 - **Sample spacing is non-uniform.** Sampling is adaptive — 1s after task start, doubling to a 60s ceiling — so charts need a time-scaled x-axis. A categorical axis would badly distort the early, most detailed part of every task.
 - **Check `metric_schema`.** `TaskLog` entries live for 7 days, so after a worker rollout the collection contains both old and new layouts. A client that decodes an old sample into the current shape sees all zeros — a container that apparently used no CPU — so mismatched schemas must be skipped rather than displayed. The server already skips them; clients holding cached entries should too.
