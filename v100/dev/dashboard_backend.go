@@ -699,8 +699,10 @@ func (s *dashboardServer) handleSubmitJob(w http.ResponseWriter, r *http.Request
 	ctx := r.Context()
 
 	var req submitJobRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "invalid JSON body")
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "BAD_REQUEST", fmt.Sprintf("invalid JSON body: %v", err))
 		return
 	}
 	if req.Name == "" {
