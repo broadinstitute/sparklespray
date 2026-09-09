@@ -215,7 +215,9 @@ Do the same for `sparkles-init`:
   `container_*` fields, nil under the same "genuinely unavailable" rule (e.g.
   a controller not delegated) — just sourced differently. No
   `MetricSchemaCurrent` bump needed.
-- `ResourceUsage`'s `-1` sentinel convention: unaffected.
+- `ResourceUsage` no longer uses a `-1` sentinel either (as of the dashboard
+  perf-distributions work) -- it now uses the same nil/omitempty convention
+  as `MetricSample`, so this note is stale relative to when it was written.
 
 ### 7. Testing
 

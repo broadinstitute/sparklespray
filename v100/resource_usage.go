@@ -15,10 +15,9 @@ import (
 // container started and how it exited, while the cgroup counters in the final
 // sample cover what it consumed. Splitting them means a container whose cgroup
 // has already been torn down still yields correct timing and exit information
-// with -1 for the counters, rather than nothing at all.
+// with the counters left nil, rather than nothing at all.
 func buildResourceUsage(containerName string, final *MetricSample) *ResourceUsage {
 	ru := &ResourceUsage{}
-	setUnavailableContainerUsage(ru)
 
 	if state, err := dockerInspectState(containerName); err != nil {
 		// Without docker inspect there is no timing at all, but a final sample
@@ -37,69 +36,35 @@ func buildResourceUsage(containerName string, final *MetricSample) *ResourceUsag
 		return ru
 	}
 
-	ru.ContainerCPUUsageUSec = int64OrUnavailable(final.ContainerCPUUsageUSec)
-	ru.ContainerCPUUserUSec = int64OrUnavailable(final.ContainerCPUUserUSec)
-	ru.ContainerCPUSystemUSec = int64OrUnavailable(final.ContainerCPUSystemUSec)
-	ru.ContainerCPUThrottledUSec = int64OrUnavailable(final.ContainerCPUThrottledUSec)
-	ru.ContainerCPUThrottledPeriod = int64OrUnavailable(final.ContainerCPUThrottledPeriods)
+	// Both structs use *int64/nil for "unavailable" and share the same field
+	// names, so this is a direct copy -- no sentinel conversion needed.
+	ru.ContainerCPUUsageUSec = final.ContainerCPUUsageUSec
+	ru.ContainerCPUUserUSec = final.ContainerCPUUserUSec
+	ru.ContainerCPUSystemUSec = final.ContainerCPUSystemUSec
+	ru.ContainerCPUThrottledUSec = final.ContainerCPUThrottledUSec
+	ru.ContainerCPUThrottledPeriods = final.ContainerCPUThrottledPeriods
 
-	ru.ContainerMemoryPeakBytes = int64OrUnavailable(final.ContainerMemoryPeakBytes)
-	ru.ContainerMemoryLimitBytes = int64OrUnavailable(final.ContainerMemoryLimitBytes)
-	ru.ContainerMemoryMajorFaults = int64OrUnavailable(final.ContainerMemoryMajorFaults)
-	ru.ContainerMemoryWorkingsetRefaults = int64OrUnavailable(final.ContainerMemoryWorkingsetRefaults)
-	ru.ContainerOOMKillCount = int64OrUnavailable(final.ContainerMemoryOOMKillCount)
+	ru.ContainerMemoryPeakBytes = final.ContainerMemoryPeakBytes
+	ru.ContainerMemoryLimitBytes = final.ContainerMemoryLimitBytes
+	ru.ContainerMemoryMajorFaults = final.ContainerMemoryMajorFaults
+	ru.ContainerMemoryWorkingsetRefaults = final.ContainerMemoryWorkingsetRefaults
+	ru.ContainerMemoryOOMKillCount = final.ContainerMemoryOOMKillCount
 
-	ru.ContainerCPUStallSomeUSec = int64OrUnavailable(final.ContainerCPUStallSomeUSec)
-	ru.ContainerCPUStallFullUSec = int64OrUnavailable(final.ContainerCPUStallFullUSec)
-	ru.ContainerMemoryStallSomeUSec = int64OrUnavailable(final.ContainerMemoryStallSomeUSec)
-	ru.ContainerMemoryStallFullUSec = int64OrUnavailable(final.ContainerMemoryStallFullUSec)
-	ru.ContainerIOStallSomeUSec = int64OrUnavailable(final.ContainerIOStallSomeUSec)
-	ru.ContainerIOStallFullUSec = int64OrUnavailable(final.ContainerIOStallFullUSec)
+	ru.ContainerCPUStallSomeUSec = final.ContainerCPUStallSomeUSec
+	ru.ContainerCPUStallFullUSec = final.ContainerCPUStallFullUSec
+	ru.ContainerMemoryStallSomeUSec = final.ContainerMemoryStallSomeUSec
+	ru.ContainerMemoryStallFullUSec = final.ContainerMemoryStallFullUSec
+	ru.ContainerIOStallSomeUSec = final.ContainerIOStallSomeUSec
+	ru.ContainerIOStallFullUSec = final.ContainerIOStallFullUSec
 
-	ru.ContainerIOReadBytes = int64OrUnavailable(final.ContainerIOReadBytes)
-	ru.ContainerIOWriteBytes = int64OrUnavailable(final.ContainerIOWriteBytes)
-	ru.ContainerIOReadOps = int64OrUnavailable(final.ContainerIOReadOps)
-	ru.ContainerIOWriteOps = int64OrUnavailable(final.ContainerIOWriteOps)
+	ru.ContainerIOReadBytes = final.ContainerIOReadBytes
+	ru.ContainerIOWriteBytes = final.ContainerIOWriteBytes
+	ru.ContainerIOReadOps = final.ContainerIOReadOps
+	ru.ContainerIOWriteOps = final.ContainerIOWriteOps
 
-	ru.ContainerPidsPeak = int64OrUnavailable(final.ContainerPidsPeak)
+	ru.ContainerPidsPeak = final.ContainerPidsPeak
 
 	return ru
-}
-
-// int64OrUnavailable unwraps a MetricSample counter (nil when the metric
-// could not be read) back into ResourceUsage's -1-sentinel convention.
-func int64OrUnavailable(p *int64) int64 {
-	if p == nil {
-		return metricUnavailable
-	}
-	return *p
-}
-
-// setUnavailableContainerUsage marks every container counter as unavailable,
-// so a summary we could not populate reports -1 rather than reading as a task
-// that consumed nothing.
-func setUnavailableContainerUsage(ru *ResourceUsage) {
-	ru.ContainerOOMKillCount = metricUnavailable
-	ru.ContainerCPUUsageUSec = metricUnavailable
-	ru.ContainerCPUUserUSec = metricUnavailable
-	ru.ContainerCPUSystemUSec = metricUnavailable
-	ru.ContainerCPUThrottledUSec = metricUnavailable
-	ru.ContainerCPUThrottledPeriod = metricUnavailable
-	ru.ContainerMemoryPeakBytes = metricUnavailable
-	ru.ContainerMemoryLimitBytes = metricUnavailable
-	ru.ContainerMemoryMajorFaults = metricUnavailable
-	ru.ContainerMemoryWorkingsetRefaults = metricUnavailable
-	ru.ContainerCPUStallSomeUSec = metricUnavailable
-	ru.ContainerCPUStallFullUSec = metricUnavailable
-	ru.ContainerMemoryStallSomeUSec = metricUnavailable
-	ru.ContainerMemoryStallFullUSec = metricUnavailable
-	ru.ContainerIOStallSomeUSec = metricUnavailable
-	ru.ContainerIOStallFullUSec = metricUnavailable
-	ru.ContainerIOReadBytes = metricUnavailable
-	ru.ContainerIOWriteBytes = metricUnavailable
-	ru.ContainerIOReadOps = metricUnavailable
-	ru.ContainerIOWriteOps = metricUnavailable
-	ru.ContainerPidsPeak = metricUnavailable
 }
 
 // dockerState is the subset of `docker inspect .State` we care about.

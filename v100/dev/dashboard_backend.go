@@ -1281,6 +1281,16 @@ func (s *dashboardServer) handleGetJobTasks(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusOK, result)
 }
 
+// ----- GET /api/v1/metrics -----
+
+// handleGetMetrics serves the static metric metadata table, so the dashboard
+// can build its metric picker and chart labels without hardcoding the
+// MetricSample field list. No Firestore/request-dependent logic -- the table
+// is the same for every request.
+func (s *dashboardServer) handleGetMetrics(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"metrics": v100.MetricMetadataTable})
+}
+
 // ----- GET /api/v1/task/{task_id}/log -----
 
 // taskLogEntry is the unified JSON shape for both log_update and
@@ -1807,6 +1817,7 @@ func newDashboardHandler(
 	handle("GET /api/v1/job/{job_id}/tasks", srv.handleGetJobTasks)
 	handle("GET /api/v1/task/{task_id}", srv.handleGetTask)
 	handle("GET /api/v1/task/{task_id}/log", srv.handleGetTaskLog)
+	handle("GET /api/v1/metrics", srv.handleGetMetrics)
 	handle("POST /api/v1/task/{task_id}/stream", srv.handleStreamTask)
 	handle("GET /api/v1/events", srv.handleListEvents)
 	handle("POST /api/v1/subscriptions", srv.handleCreateSubscription)

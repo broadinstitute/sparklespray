@@ -1,42 +1,70 @@
 import { useState, useEffect, useRef } from "react";
-import type { ResourceDataPoint, VolumeDataPoint } from "../types";
+import type { MetricMetadata, MetricValue, ResourceDataPoint } from "../types";
 import { apiFetch } from "../api/client";
+import { useMetricMetadata } from "./useMetricMetadata";
 
-interface ResourceUsageUpdate {
-  type: "metric_update";
-  task_id: string;
-  timestamp: string;
-  process_count: number;
-  total_memory: number;
-  total_data: number;
-  total_shared: number;
-  total_resident: number;
-  cpu_user: number;
-  cpu_system: number;
-  cpu_idle: number;
-  cpu_iowait: number;
-  mem_total: number;
-  mem_available: number;
-  mem_free: number;
-  mem_pressure_some_avg10: number;
-  mem_pressure_full_avg10: number;
-  volumes?: { location: string; total_gb: number; used_gb: number }[];
+// MetricSampleDTO mirrors v100.MetricSample's JSON shape: one optional field
+// per metric (nil server-side is simply absent, not a sentinel), nested
+// under a metric_update entry's "metric" key. host_volumes is the one
+// exception -- an array, expanded into per-volume MetricValues below rather
+// than being a metadata key itself.
+interface MetricSampleDTO {
+  host_volumes?: {
+    location: string;
+    total_bytes: number;
+    used_bytes: number;
+  }[];
+  [key: string]: unknown;
 }
 
-interface LogStreamUpdate {
-  type: "log_update";
+interface TaskLogEntry {
+  type: "metric_update" | "log_update";
   task_id: string;
   timestamp: string;
-  content: string;
+  content?: string;
+  metric?: MetricSampleDTO;
 }
 
-const GB = 1_073_741_824;
+// toResourceDataPoint builds one point generically from the fetched metric
+// metadata list: any metadata key present and non-null on entry.metric
+// becomes one MetricValue; a key that's nil server-side is simply omitted
+// (which is what later lets a chart render it as a gap, rather than a dip to
+// zero, with no special-casing needed here). host_volumes expands into two
+// MetricValues per volume, tagged with a location prop so multiple volumes
+// can share the same metric key and still render as distinct series.
+function toResourceDataPoint(
+  entry: TaskLogEntry,
+  metadata: MetricMetadata[]
+): ResourceDataPoint {
+  const t = new Date(entry.timestamp).getTime();
+  const raw = entry.metric ?? {};
+  const metrics: MetricValue[] = [];
 
-// The server now reports cpu_user/cpu_system/cpu_idle/cpu_iowait as
-// percentages of total CPU time across all cores (computed server-side from
-// consecutive /proc/stat snapshots), so no client-side delta math is needed.
-function toResourceDataPoint(msg: ResourceUsageUpdate): ResourceDataPoint {
-  const t = new Date(msg.timestamp).getTime();
+  for (const m of metadata) {
+    if (!m.in_metric_sample) continue; // e.g. elapsed_seconds -- ResourceUsage-only
+    if (
+      m.key === "host_volume_total_bytes" ||
+      m.key === "host_volume_used_bytes"
+    ) {
+      continue; // synthesized from host_volumes below, not a top-level field
+    }
+    const value = raw[m.key];
+    if (typeof value === "number") {
+      metrics.push({ key: m.key, value });
+    }
+  }
+  for (const v of raw.host_volumes ?? []) {
+    metrics.push({
+      key: "host_volume_total_bytes",
+      value: v.total_bytes,
+      props: { location: v.location },
+    });
+    metrics.push({
+      key: "host_volume_used_bytes",
+      value: v.used_bytes,
+      props: { location: v.location },
+    });
+  }
 
   return {
     time: t,
@@ -45,27 +73,7 @@ function toResourceDataPoint(msg: ResourceUsageUpdate): ResourceDataPoint {
       minute: "2-digit",
       second: "2-digit",
     }),
-    processCount: msg.process_count,
-    totalMemoryGb: Math.round((msg.total_memory / GB) * 100) / 100,
-    totalDataGb: Math.round((msg.total_data / GB) * 100) / 100,
-    totalSharedGb: Math.round((msg.total_shared / GB) * 100) / 100,
-    totalResidentGb: Math.round((msg.total_resident / GB) * 100) / 100,
-    cpuUser: Math.round(msg.cpu_user * 10) / 10,
-    cpuSystem: Math.round(msg.cpu_system * 10) / 10,
-    cpuIdle: Math.round(msg.cpu_idle * 10) / 10,
-    cpuIowait: Math.round(msg.cpu_iowait * 10) / 10,
-    memTotalGb: Math.round((msg.mem_total / GB) * 100) / 100,
-    memAvailableGb: Math.round((msg.mem_available / GB) * 100) / 100,
-    memFreeGb: Math.round((msg.mem_free / GB) * 100) / 100,
-    memPressureSomeAvg10: msg.mem_pressure_some_avg10,
-    memPressureFullAvg10: msg.mem_pressure_full_avg10,
-    volumes: (msg.volumes ?? []).map(
-      (v): VolumeDataPoint => ({
-        location: v.location,
-        totalGb: v.total_gb,
-        usedGb: v.used_gb,
-      })
-    ),
+    metrics,
   };
 }
 
@@ -91,6 +99,7 @@ export function useTaskLog(
   error: string | null;
   lastUpdatedAt: number | null;
 } {
+  const { metadata } = useMetricMetadata();
   const [resourceData, setResourceData] = useState<ResourceDataPoint[]>([]);
   const [logContent, setLogContent] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -102,6 +111,10 @@ export function useTaskLog(
   pausedRef.current = paused;
 
   useEffect(() => {
+    // Metadata is needed to know which keys on entry.metric to read; wait
+    // for it rather than starting a poll loop that would parse nothing.
+    if (metadata.length === 0) return;
+
     cancelledRef.current = false;
     setError(null);
 
@@ -133,7 +146,7 @@ export function useTaskLog(
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
           const data: {
-            entries: (ResourceUsageUpdate | LogStreamUpdate)[];
+            entries: TaskLogEntry[];
             next_after?: string;
           } = await res.json();
 
@@ -143,18 +156,15 @@ export function useTaskLog(
 
           for (const entry of data.entries) {
             if (entry.type === "metric_update") {
-              newMetrics.push(
-                toResourceDataPoint(entry as ResourceUsageUpdate)
-              );
+              newMetrics.push(toResourceDataPoint(entry, metadata));
             } else if (entry.type === "log_update") {
-              const lu = entry as LogStreamUpdate;
-              if (!lu.content) continue;
-              const ts = new Date(lu.timestamp).toLocaleTimeString("en-US", {
+              if (!entry.content) continue;
+              const ts = new Date(entry.timestamp).toLocaleTimeString("en-US", {
                 hour: "2-digit",
                 minute: "2-digit",
                 second: "2-digit",
               });
-              newLog += `[${ts}] ${lu.content}`;
+              newLog += `[${ts}] ${entry.content}`;
             }
           }
 
@@ -191,7 +201,7 @@ export function useTaskLog(
     return () => {
       cancelledRef.current = true;
     };
-  }, [taskId, isActive]);
+  }, [taskId, isActive, metadata]);
 
   useEffect(() => {
     setResourceData([]);

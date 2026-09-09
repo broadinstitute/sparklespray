@@ -4,82 +4,53 @@ Known, deliberately-deferred consequences of the worker metric collection
 revamp (adaptive sampling + container-scoped metrics + post-exit final
 sample). The Go side is complete; the items below are not.
 
-## 1. The dashboard frontend is broken (deliberate)
+## 1. The dashboard frontend is broken (deliberate) — partially resolved
 
-That pass was scoped to Go only, so nothing under `dashboard/src/` was
-touched. The API now serves a different shape, so the metrics UI is broken
-until the frontend is rewritten. Specifically:
+**Resolved**: the periodic-metrics tab (`GET /api/v1/task/{id}/log`'s
+`metric_update` entries). `useTaskLog.ts` now decodes the real nested
+`entry.metric` shape via a new metadata-driven pipeline: `GET /api/v1/metrics`
+(`v100/metric_metadata.go`, `MetricMetadataTable`) describes every metric
+(`name`/`description`/`units`/`type`/`default_position`); `useMetricMetadata.ts`
+fetches it; `metricSeries.ts` turns a metric's raw samples into a display
+series (a `"counter"`-typed metric becomes a rate, a `"gauge"` is plotted
+as-is); `MetricsPanel.tsx` replaces `TaskDetail.tsx`'s old hardcoded
+`MultiLineChart` block with one chart per metric the user has checked
+(seeded from `default_position`: `host_cpu_user_pct`, then
+`container_memory_current_bytes`). `useTaskPubsub.ts` (dead code, no
+importers) was deleted rather than migrated, as this doc already suggested.
+`connectNulls` is still left at its default `false` on `MultiLineChart`, so
+a metric absent from a sample (server-side nil) still renders as an honest
+gap, not a dip to zero — the guidance below about not mapping missing values
+to `0`/`NaN` was already satisfied by that default, just needed the data
+layer to stop reading fields that don't exist so gaps are the only way a
+missing value shows up.
 
-### Wire format changes the frontend has not caught up with
+**Still unresolved** — a different data path (`ResourceUsage`, the one-shot
+post-exit summary on `Task`, not the periodic `MetricSample` stream above)
+was out of scope for that pass:
 
-- **`GET /api/v1/task/{id}/log` entries are now a discriminated union.** The
-  metric payload moved from ~15 flat fields on the entry into a nested
-  `metric` object (`taskLogEntry.Metric`, `dev/dashboard_backend.go`). Every
-  field was also renamed and re-scoped, e.g. `cpu_user` →
-  `host_cpu_user_pct`, `mem_total` → `host_memory_total_bytes`,
-  `volumes[].total_gb` → `host_volumes[].total_bytes`.
-- **`resource_usage` field names all changed**: `max_memory_bytes` →
-  `container_memory_peak_bytes`, `cpu_user_usec` →
-  `container_cpu_user_usec`, `block_read_bytes` →
-  `container_io_read_bytes`, and so on.
-- **Removed with no replacement**: `process_count`, `total_memory`,
-  `total_data`, `total_shared`, `total_resident` (these summed
-  `/proc/*/statm` across the whole VM, so they never attributed to a task —
-  container metrics replace them), `mem_free`, and the
-  `mem_pressure_*_avg10` fields (superseded by cumulative `*_stall_*_usec`
-  totals).
-
-### Files that need updating
-
-- `dashboard/src/data/useTaskLog.ts` — decodes fields that no longer exist.
 - `dashboard/src/types.ts:203-211` — `TaskSummaryRecord.resource_usage`,
   plus **two inline duplicates** of the same type in
-  `pages/TaskDetail.tsx:44-51` and `components/TaskProperties.tsx:7-14`.
-  Consolidate into one exported `ResourceUsageSummary` while rebuilding.
-- `dashboard/src/pages/TaskDetail.tsx:321-405` — five `MultiLineChart`s
-  whose `series[].key` string literals no longer resolve.
+  `pages/TaskDetail.tsx:44-51` and `components/TaskProperties.tsx:7-14`, all
+  three still using the old `resource_usage` field names (`max_memory_bytes`,
+  `cpu_user_usec`, `block_read_bytes`, ...) instead of the current
+  `container_memory_peak_bytes`/`container_cpu_user_usec`/
+  `container_io_read_bytes`/etc. Consolidate into one exported
+  `ResourceUsageSummary` while fixing.
 - `dashboard/src/components/TaskProperties.tsx:718-748` — reads the removed
   summary fields. **Line 742 (`resourceUsage.elapsed_seconds.toFixed(1)`)
   has no error boundary and will crash the task-detail React subtree** if
-  that field is ever absent; guard it.
+  that field is ever absent; guard it. This is a real crash risk, not just a
+  stale-data issue — worth prioritizing over the rest of this section.
 - `dashboard/src/data/jobPerf.ts:54-70` — percentiles over removed field
   names, which yields silently wrong percentiles rather than an error.
   Consumers: `pages/PerfOverview.tsx:249,264,280`,
   `pages/JobDetail.tsx:267-277`.
-- `dashboard/src/data/useTaskPubsub.ts` — **dead code** (no importers) and a
-  fourth copy of the schema. Delete rather than migrate.
 
-### Guidance for the rebuild
-
-- **Hold raw `MetricSample[]` in state and derive display points in a
-  `useMemo`**, rather than converting per-message on arrival the way
-  `toResourceDataPoint` does today. Stall and CPU rates require differencing
-  against the previous sample, so a late-arriving or backfilled sample
-  otherwise produces wrong rates. Put the differencing in a new
-  `dashboard/src/data/metricRates.ts` and clamp negative deltas (counter
-  reset / container replaced) to `null`.
-- **Map `undefined | null | -1` to `null`, never to `NaN` or `0`.** `-1`
-  means "unavailable on this kernel", which is different from zero. Render
-  with `connectNulls={false}` so it shows as an honest gap. The current code
-  silently produces `NaN` and draws blank charts with no indication why.
-- **`MultiLineChart` types `data` as `any[]`** (`MultiLineChart.tsx:22`), so
-  TypeScript does _not_ catch a stale `series[].key`. Tighten
-  `SeriesConfig.key` to `keyof ResourceDataPoint` so future renames become
-  compile errors instead of blank charts.
-- **Keep the time-scaled `xDomain`** (`MultiLineChart.tsx:28-32`). It is now
-  essential: adaptive sampling spaces points 1s apart early and 60s apart
-  later, so a categorical axis would badly distort the early part of every
-  task — which is the most interesting part.
-- Suggested chart set: container CPU (stacked user+system as "% of one
-  core", with a `ReferenceLine` at `100 x requested cores`); container stall
-  %; host CPU (stacked, keeping iowait so it sums to 100%); host stall %
-  — placed beside container stall, the pair distinguishes "my task is
-  starved" from "the whole VM is saturated"; memory (container current and
-  peak against host total and available); container I/O bytes/s; volumes.
-- `build.sh` skips the frontend build when `dashboard/` is unchanged (commit
-  7f26b41), and `dashboard/dist` is `//go:embed`ed by
-  `v100/dev/webui/webui.go:16-17`, so the stale bundle keeps shipping until
-  the frontend is actually rebuilt.
+`build.sh` skips the frontend build when `dashboard/` is unchanged (commit
+7f26b41), and `dashboard/dist` is `//go:embed`ed by
+`v100/dev/webui/webui.go:16-17` — remember to rebuild before deploying so
+this fix (and any future one covering the items above) actually ships.
 
 ## 2. Firestore single-field index exemptions (ops)
 

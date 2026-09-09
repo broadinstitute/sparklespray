@@ -1,11 +1,11 @@
-import { useState, useEffect, useMemo, useRef, Fragment } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useParams, useLocation } from "react-router-dom";
 import { getTaskEvents, deriveStatus, extractTimings } from "../data/events";
 import { useEvents, mergeEvents } from "../data/EventProvider";
 import { useTaskLog } from "../data/useTaskLog";
-import type { AnyEvent } from "../types";
+import type { AnyEvent, ResourceUsageSummary } from "../types";
 import TaskProperties from "../components/TaskProperties";
-import MultiLineChart from "../components/MultiLineChart";
+import MetricsPanel from "../components/MetricsPanel";
 import EventLog from "../components/EventLog";
 import TabBar from "../components/TabBar";
 import { RangeRefreshBar, RefreshToggle } from "../components/RefreshControls";
@@ -41,15 +41,7 @@ export default function TaskDetail() {
     failureReason: string;
     labels: { name: string; value: string }[];
     workpoolId: string;
-    resourceUsage: {
-      elapsed_seconds: number;
-      max_memory_bytes: number;
-      cpu_user_usec: number;
-      cpu_system_usec: number;
-      block_read_bytes: number;
-      block_write_bytes: number;
-      oom_killed: boolean;
-    } | null;
+    resourceUsage: ResourceUsageSummary | null;
   } | null>(null);
   const logBottomRef = useRef<HTMLDivElement>(null);
   const isNearBottomRef = useRef(true);
@@ -140,24 +132,6 @@ export default function TaskDetail() {
   const xDomain: [number, number] | undefined = range
     ? [range.startMs, range.endMs]
     : undefined;
-
-  const volumeSeries = useMemo(() => {
-    const locations = Array.from(
-      new Set(resourceData.flatMap((p) => p.volumes.map((v) => v.location)))
-    );
-    return locations.map((loc) => ({
-      location: loc,
-      data: resourceData.map((p) => {
-        const v = p.volumes.find((v) => v.location === loc);
-        return {
-          time: p.time,
-          label: p.label,
-          usedGb: v ? Math.round(v.usedGb * 100) / 100 : 0,
-          totalGb: v ? Math.round(v.totalGb * 100) / 100 : 0,
-        };
-      }),
-    }));
-  }, [resourceData]);
 
   useEffect(() => {
     if (activeTab === "log" && isNearBottomRef.current)
@@ -319,91 +293,7 @@ export default function TaskDetail() {
         </div>
       )}
       {activeTab === "metrics" && resourceData.length > 0 && (
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: "2rem",
-            marginBottom: "2rem",
-          }}
-        >
-          <MultiLineChart
-            data={resourceData}
-            title="CPU Breakdown (% of one core)"
-            yLabel="%/core"
-            stacked
-            xDomain={xDomain}
-            series={[
-              { key: "cpuUser", label: "user", color: "#1976d2" },
-              { key: "cpuSystem", label: "system", color: "#e53935" },
-              { key: "cpuIowait", label: "iowait", color: "#fb8c00" },
-              { key: "cpuIdle", label: "idle", color: "#cfd8dc" },
-            ]}
-          />
-          <MultiLineChart
-            data={resourceData}
-            title="Process Memory"
-            yLabel="GB"
-            xDomain={xDomain}
-            series={[
-              { key: "totalResidentGb", label: "resident", color: "#ab47bc" },
-              { key: "totalDataGb", label: "data", color: "#42a5f5" },
-              { key: "totalSharedGb", label: "shared", color: "#80cbc4" },
-            ]}
-          />
-          <MultiLineChart
-            data={resourceData}
-            title="System Memory"
-            yLabel="GB"
-            xDomain={xDomain}
-            series={[
-              { key: "memTotalGb", label: "total", color: "#bdbdbd" },
-              { key: "memAvailableGb", label: "available", color: "#43a047" },
-              { key: "memFreeGb", label: "free", color: "#00acc1" },
-            ]}
-          />
-          <MultiLineChart
-            data={resourceData}
-            title="Memory Pressure"
-            yLabel="%"
-            xDomain={xDomain}
-            series={[
-              {
-                key: "memPressureSomeAvg10",
-                label: "some avg10",
-                color: "#fb8c00",
-              },
-              {
-                key: "memPressureFullAvg10",
-                label: "full avg10",
-                color: "#e53935",
-              },
-            ]}
-          />
-          <MultiLineChart
-            data={resourceData}
-            title="Process Count"
-            yLabel="procs"
-            xDomain={xDomain}
-            series={[
-              { key: "processCount", label: "processes", color: "#5c6bc0" },
-            ]}
-          />
-          {volumeSeries.map((vs) => (
-            <Fragment key={vs.location}>
-              <MultiLineChart
-                data={vs.data}
-                title={`Disk: ${vs.location}`}
-                yLabel="GB"
-                xDomain={xDomain}
-                series={[
-                  { key: "totalGb", label: "total", color: "#bdbdbd" },
-                  { key: "usedGb", label: "used", color: "#f4511e" },
-                ]}
-              />
-            </Fragment>
-          ))}
-        </div>
+        <MetricsPanel resourceData={resourceData} xDomain={xDomain} />
       )}
       {activeTab === "metrics" && resourceData.length === 0 && (
         <p

@@ -255,32 +255,32 @@ Get a single task's current state and metadata.
     "elapsed_seconds": "float64",
     "exit_code": "integer",
     "oom_killed": "boolean",
-    "container_oom_kill_count": "integer (includes OOM-killed children)",
-    "container_cpu_usage_usec": "integer",
-    "container_cpu_user_usec": "integer",
-    "container_cpu_system_usec": "integer",
-    "container_cpu_throttled_usec": "integer",
-    "container_cpu_throttled_periods": "integer",
-    "container_memory_peak_bytes": "integer",
-    "container_memory_limit_bytes": "integer",
-    "container_memory_major_faults": "integer",
-    "container_memory_workingset_refaults": "integer",
-    "container_cpu_stall_some_usec": "integer",
-    "container_cpu_stall_full_usec": "integer",
-    "container_memory_stall_some_usec": "integer",
-    "container_memory_stall_full_usec": "integer",
-    "container_io_stall_some_usec": "integer",
-    "container_io_stall_full_usec": "integer",
-    "container_io_read_bytes": "integer",
-    "container_io_write_bytes": "integer",
-    "container_io_read_ops": "integer",
-    "container_io_write_ops": "integer",
-    "container_pids_peak": "integer"
+    "container_memory_oom_kill_count": "integer, omitted if unavailable (includes OOM-killed children)",
+    "container_cpu_usage_usec": "integer, omitted if unavailable",
+    "container_cpu_user_usec": "integer, omitted if unavailable",
+    "container_cpu_system_usec": "integer, omitted if unavailable",
+    "container_cpu_throttled_usec": "integer, omitted if unavailable",
+    "container_cpu_throttled_periods": "integer, omitted if unavailable",
+    "container_memory_peak_bytes": "integer, omitted if unavailable",
+    "container_memory_limit_bytes": "integer, omitted if unavailable",
+    "container_memory_major_faults": "integer, omitted if unavailable",
+    "container_memory_workingset_refaults": "integer, omitted if unavailable",
+    "container_cpu_stall_some_usec": "integer, omitted if unavailable",
+    "container_cpu_stall_full_usec": "integer, omitted if unavailable",
+    "container_memory_stall_some_usec": "integer, omitted if unavailable",
+    "container_memory_stall_full_usec": "integer, omitted if unavailable",
+    "container_io_stall_some_usec": "integer, omitted if unavailable",
+    "container_io_stall_full_usec": "integer, omitted if unavailable",
+    "container_io_read_bytes": "integer, omitted if unavailable",
+    "container_io_write_bytes": "integer, omitted if unavailable",
+    "container_io_read_ops": "integer, omitted if unavailable",
+    "container_io_write_ops": "integer, omitted if unavailable",
+    "container_pids_peak": "integer, omitted if unavailable"
   }
 }
 ```
 
-`resource_usage` is omitted when absent (task has not yet completed). Any individual field is `-1` when that metric could not be collected — see the conventions under [`GET /api/v1/task/{task_id}/log`](#get-apiv1tasktask_idlog). Field semantics and cgroup sources are documented in [datamodel.md](datamodel.md).
+`resource_usage` is omitted when absent (task has not yet completed). Any individual field within it is omitted when that metric could not be collected — the same nil-is-absent convention as `MetricSample`, see the conventions under [`GET /api/v1/task/{task_id}/log`](#get-apiv1tasktask_idlog). Field semantics and cgroup sources are documented in [datamodel.md](datamodel.md).
 
 **Errors**: `404` if not found.
 
@@ -388,6 +388,82 @@ Entries are a discriminated union: `content` is populated for `log_update`, and 
 **Firestore**: `TaskLog` — query `task_id == {task_id}` and optionally `type in {types}`, with `timestamp > after`, ordered by `timestamp` asc.
 
 > **Change from old API**: The old API had two separate endpoints: `/task/{id}/log` (returning `content` entries) and `/task/{id}/metrics` (returning metric samples). In v100 both are stored in the same `TaskLog` collection with a `type` discriminator, so they are unified here. Clients that need only one type should pass `types=log_update` or `types=metric_update`.
+
+---
+
+### `GET /api/v1/metrics`
+
+Metadata describing every metric a `metric_update` entry's `metric` object (the periodic per-task time series, `MetricSample`) and/or a task's `resource_usage` (the one-shot final summary, `ResourceUsage`) may carry, independent of any particular task's samples. A client uses this to build a metric picker (which metrics exist, human-readable names/descriptions, which units to label an axis with, whether to plot a value as-is, as a rate, or as a count-per-category) instead of hardcoding either struct's field list.
+
+**Response** `200 OK`:
+
+```json
+{
+  "metrics": [
+    {
+      "key": "host_cpu_user_pct",
+      "name": "User CPU",
+      "description": "Percentage of total CPU time across all host cores spent in user mode since the previous sample.",
+      "units": "percent",
+      "type": "gauge",
+      "default_position": 1,
+      "in_metric_sample": true,
+      "in_resource_usage": false
+    },
+    {
+      "key": "container_memory_peak_bytes",
+      "name": "Container Memory (peak)",
+      "description": "High-water mark of the container's memory usage over its lifetime so far.",
+      "units": "bytes",
+      "type": "gauge",
+      "resource_usage_default_position": 2,
+      "in_metric_sample": true,
+      "in_resource_usage": true
+    },
+    {
+      "key": "container_cpu_usage_usec",
+      "name": "Container CPU",
+      "description": "Cumulative CPU time consumed by the container.",
+      "units": "usec",
+      "type": "counter",
+      "in_metric_sample": true,
+      "in_resource_usage": true
+    },
+    {
+      "key": "elapsed_seconds",
+      "name": "Execution Time",
+      "description": "Wall-clock duration of the task's container, end minus start.",
+      "units": "seconds",
+      "type": "gauge",
+      "resource_usage_default_position": 1,
+      "in_metric_sample": false,
+      "in_resource_usage": true
+    },
+    {
+      "key": "exit_code",
+      "name": "Exit Code",
+      "description": "The container's process exit code.",
+      "units": "none",
+      "type": "categorical",
+      "in_metric_sample": false,
+      "in_resource_usage": true
+    }
+  ]
+}
+```
+
+Fields on each metric:
+
+- `key` — matches the field's JSON name on `MetricSample` and/or `ResourceUsage` (see `in_metric_sample`/`in_resource_usage`), with one exception: `host_volumes` is an array, and each element yields two per-volume metric values at the sample level (`host_volume_total_bytes`, `host_volume_used_bytes`, each tagged with which volume by a `location` the client associates with that reading), rather than a single scalar field.
+- `units` — `"percent" | "bytes" | "usec" | "count" | "seconds" | "none"`, the unit the _raw_ stored value is in. `"none"` is for `"categorical"` metrics, whose value is a label rather than a quantity.
+- `type` —
+  - `"gauge"`: the raw value is meaningful on its own at a single point in time — a percentage, a current byte count, a high-water mark like `container_pids_peak` or `container_memory_peak_bytes`.
+  - `"counter"`: in a `MetricSample` time series, the raw value only ever grows, so a single reading says little on its own; clients should plot `Δvalue / Δtime` instead of the raw cumulative value, and label the rate `<units>/s`. In a `ResourceUsage` one-shot summary there's no second reading to difference against — it's just the cumulative total for that task's whole run, plotted as-is.
+  - `"categorical"`: the value is one of a small set of discrete values (an exit code, a boolean) — plot a count of tasks per distinct value, not percentiles.
+- `default_position` / `resource_usage_default_position` — each omitted entirely when this metric shouldn't be shown by default on that view (most metrics, most views). When present, a lower number means higher priority among the metrics a client shows without the user asking for more. This is a recommendation, not a requirement — clients may override it (e.g. an explicit user selection). Two separate fields, not one shared number space, because a metric can be `in_metric_sample` **and** `in_resource_usage` at once (most `container_*` counters are) with a different default-visibility answer on each view — e.g. `container_memory_peak_bytes` above is a default on the per-job distributions view (`resource_usage_default_position: 2`) but not on the per-task time series view (no `default_position` at all, which instead defaults to `container_memory_current_bytes`). `default_position` is the per-task time series (`MetricSample`) view's answer; `resource_usage_default_position` is the per-job distributions (`ResourceUsage`) view's.
+- `in_metric_sample` / `in_resource_usage` — which of the two structs this key can appear on. A client filters this table by whichever one it's rendering: the per-task time series tab uses `in_metric_sample`, the per-job distributions tab uses `in_resource_usage`. Most `container_*` counters are true for both (both structs use the same field names for the ones they share).
+
+**Firestore**: none — this is a static, hand-maintained table (`v100.MetricMetadataTable`), not read from a collection.
 
 ---
 

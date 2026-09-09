@@ -164,30 +164,47 @@ export interface TimeSeriesPoint {
   value: number;
 }
 
-export interface VolumeDataPoint {
-  location: string;
-  totalGb: number;
-  usedGb: number;
+// MetricMetadata mirrors v100.MetricMetadata (GET /api/v1/metrics): one
+// record per metric a metric_update entry (MetricSample) and/or a task's
+// resource_usage (ResourceUsage) may carry, described independently of any
+// particular task's samples so the UI can build a metric picker and chart
+// labels without hardcoding either struct's field list.
+export interface MetricMetadata {
+  key: string;
+  name: string;
+  description: string;
+  units: "percent" | "bytes" | "usec" | "count" | "seconds" | "none";
+  type: "gauge" | "counter" | "categorical";
+  /** Default visibility for the per-task time series view (MetricsPanel).
+   * Absent/undefined means "don't show this metric by default". Lower is
+   * higher priority among the metrics that are shown. A metric can be
+   * in_metric_sample AND in_resource_usage at once (most container_*
+   * counters are) with a different default answer on each view -- see
+   * resource_usage_default_position. */
+  default_position?: number;
+  /** Default visibility for the per-job distributions view (PerfOverview),
+   * same semantics as default_position but for that view. */
+  resource_usage_default_position?: number;
+  /** Which of MetricSample/ResourceUsage this key can appear on -- filter by
+   * whichever one a given view is rendering against. */
+  in_metric_sample: boolean;
+  in_resource_usage: boolean;
+}
+
+// MetricValue is one metric's raw reading within a single ResourceDataPoint.
+// props distinguishes multiple instances of the same metric key sharing one
+// sample -- currently only used for per-volume disk metrics, where props is
+// e.g. { location: "/tmp" }.
+export interface MetricValue {
+  key: string;
+  value: number;
+  props?: Record<string, string>;
 }
 
 export interface ResourceDataPoint {
   time: number;
   label: string;
-  processCount: number;
-  totalMemoryGb: number;
-  totalDataGb: number;
-  totalSharedGb: number;
-  totalResidentGb: number;
-  cpuUser: number;
-  cpuSystem: number;
-  cpuIdle: number;
-  cpuIowait: number;
-  memTotalGb: number;
-  memAvailableGb: number;
-  memFreeGb: number;
-  memPressureSomeAvg10: number;
-  memPressureFullAvg10: number;
-  volumes: VolumeDataPoint[];
+  metrics: MetricValue[];
 }
 
 export interface StdoutLine {
@@ -195,18 +212,44 @@ export interface StdoutLine {
   text: string;
 }
 
+// ResourceUsageSummary mirrors v100.ResourceUsage's current field names.
+// elapsed_seconds/exit_code/oom_killed come from `docker inspect` and are
+// always present when resource_usage is present at all; the container_*
+// cgroup counters are optional/nullable (server-side nil, e.g. because the
+// container's cgroup was torn down before the final read) rather than the
+// old `-1` sentinel.
+export interface ResourceUsageSummary {
+  elapsed_seconds: number;
+  exit_code: number;
+  oom_killed: boolean;
+  container_memory_peak_bytes?: number;
+  container_memory_limit_bytes?: number;
+  container_memory_major_faults?: number;
+  container_memory_workingset_refaults?: number;
+  container_memory_oom_kill_count?: number;
+  container_cpu_usage_usec?: number;
+  container_cpu_user_usec?: number;
+  container_cpu_system_usec?: number;
+  container_cpu_throttled_usec?: number;
+  container_cpu_throttled_periods?: number;
+  container_cpu_stall_some_usec?: number;
+  container_cpu_stall_full_usec?: number;
+  container_memory_stall_some_usec?: number;
+  container_memory_stall_full_usec?: number;
+  container_io_stall_some_usec?: number;
+  container_io_stall_full_usec?: number;
+  container_io_read_bytes?: number;
+  container_io_write_bytes?: number;
+  container_io_read_ops?: number;
+  container_io_write_ops?: number;
+  container_pids_peak?: number;
+  [key: string]: unknown;
+}
+
 export interface TaskSummaryRecord {
   task_id: string;
   task_index: number;
   status: string;
   exit_code: number | null;
-  resource_usage?: {
-    elapsed_seconds: number;
-    max_memory_bytes: number;
-    cpu_user_usec: number;
-    cpu_system_usec: number;
-    block_read_bytes: number;
-    block_write_bytes: number;
-    oom_killed: boolean;
-  };
+  resource_usage?: ResourceUsageSummary;
 }

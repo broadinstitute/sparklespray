@@ -1,18 +1,9 @@
 import { useState } from "react";
 import type { TimingWindows } from "../data/events";
+import type { ResourceUsageSummary } from "../types";
 
 const MONO = "'IBM Plex Mono', monospace";
 const SANS = "'IBM Plex Sans', sans-serif";
-
-interface ResourceUsage {
-  elapsed_seconds: number;
-  max_memory_bytes: number;
-  cpu_user_usec: number;
-  cpu_system_usec: number;
-  block_read_bytes: number;
-  block_write_bytes: number;
-  oom_killed: boolean;
-}
 
 interface Props {
   command: string;
@@ -24,7 +15,7 @@ interface Props {
   failureReason: string;
   labels: { name: string; value: string }[];
   workpoolId: string;
-  resourceUsage: ResourceUsage | null;
+  resourceUsage: ResourceUsageSummary | null;
   timings: TimingWindows;
   status: string;
 }
@@ -715,28 +706,40 @@ export default function TaskProperties({
               overflow: "hidden",
             }}
           >
-            <ResourceTile
-              label="peak mem"
-              value={formatBytes(resourceUsage.max_memory_bytes)}
-            />
-            <ResourceTile
-              label="cpu user"
-              value={`${(resourceUsage.cpu_user_usec / 1_000_000).toFixed(2)}s`}
-            />
-            <ResourceTile
-              label="cpu sys"
-              value={`${(resourceUsage.cpu_system_usec / 1_000_000).toFixed(
-                2
-              )}s`}
-            />
-            <ResourceTile
-              label="block read"
-              value={formatBytes(resourceUsage.block_read_bytes)}
-            />
-            <ResourceTile
-              label="block write"
-              value={formatBytes(resourceUsage.block_write_bytes)}
-            />
+            {resourceUsage.container_memory_peak_bytes !== undefined && (
+              <ResourceTile
+                label="peak mem"
+                value={formatBytes(resourceUsage.container_memory_peak_bytes)}
+              />
+            )}
+            {resourceUsage.container_cpu_user_usec !== undefined && (
+              <ResourceTile
+                label="cpu user"
+                value={`${(
+                  resourceUsage.container_cpu_user_usec / 1_000_000
+                ).toFixed(2)}s`}
+              />
+            )}
+            {resourceUsage.container_cpu_system_usec !== undefined && (
+              <ResourceTile
+                label="cpu sys"
+                value={`${(
+                  resourceUsage.container_cpu_system_usec / 1_000_000
+                ).toFixed(2)}s`}
+              />
+            )}
+            {resourceUsage.container_io_read_bytes !== undefined && (
+              <ResourceTile
+                label="block read"
+                value={formatBytes(resourceUsage.container_io_read_bytes)}
+              />
+            )}
+            {resourceUsage.container_io_write_bytes !== undefined && (
+              <ResourceTile
+                label="block write"
+                value={formatBytes(resourceUsage.container_io_write_bytes)}
+              />
+            )}
             <ResourceTile
               label="elapsed"
               value={`${resourceUsage.elapsed_seconds.toFixed(1)}s`}

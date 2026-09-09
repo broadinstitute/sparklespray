@@ -189,11 +189,28 @@ pull URL. The new approach:
 2. Poll `GET /api/v1/task/{id}/log?after={cursor}&types=log_update,metric_update` every 2 s.
 3. Advance `cursor` from the returned `next_after` field.
 4. Parse `entries[]` — each entry has `type`, `timestamp`, and either `content` (log) or
-   metric fields. The metric field names are identical to the old PubSub payload so
-   `toResourceDataPoint` in `useTaskPubsub.ts` can be reused with minor argument changes.
+   a nested `metric` object (metric_update). **Not** the old PubSub payload's shape:
+   the metric fields are nested under `entry.metric` rather than flattened onto the
+   entry, and use the current `MetricSample` field names (`host_cpu_user_pct`,
+   `container_memory_current_bytes`, ...), not the old `cpu_user`/`total_memory`/
+   `process_count` names. `useTaskPubsub.ts` predates this and was deleted rather than
+   reused — its `toResourceDataPoint` assumed the old flat shape and several of its
+   fields (`total_memory`, `total_data`, `total_shared`, `total_resident`,
+   `process_count`) have no current server-side equivalent at all.
 
-Rename the hook to `useTaskLog.ts`. The PubSub subscription/unsubscribe calls are removed
+Implemented as `useTaskLog.ts`. The PubSub subscription/unsubscribe calls are removed
 entirely (no cleanup needed on unmount beyond cancelling the poll loop).
+
+**Metric display is metadata-driven, not a hardcoded chart list.** `GET /api/v1/metrics`
+(see `dashboard-api.md`) returns one record per metric (`key`, `name`, `description`,
+`units`, `type`, optional `default_position`). `MetricsPanel.tsx` fetches this once
+(`useMetricMetadata.ts`), shows a chart only for metrics the user has checked (seeded
+from whichever metrics have a `default_position` — today `host_cpu_user_pct` and
+`container_memory_current_bytes`), and renders a checkbox per remaining metric to add
+more. A `"counter"`-typed metric is plotted as a rate (`Δvalue/Δtime`, see
+`metricSeries.ts`); a `"gauge"` is plotted as its raw value. This means adding, removing,
+or reprioritizing a metric server-side (editing `v100.MetricMetadataTable`) needs no
+frontend code change.
 
 ### 10. ClusterDetail page
 

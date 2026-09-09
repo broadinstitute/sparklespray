@@ -85,7 +85,7 @@ Requires **cgroup v2**; see the note on unavailable values below the `metric_upd
 | `elapsed_seconds`                      | float64   | Wall-clock duration in seconds (`end_time - start_time`); the denominator that makes the counters below interpretable                   |
 | `exit_code`                            | int       | Container exit code (`docker inspect .State.ExitCode`)                                                                                  |
 | `oom_killed`                           | bool      | True if the container's **main process** was OOM-killed (`docker inspect .State.OOMKilled`)                                             |
-| `container_oom_kill_count`             | int64     | Count of OOM-killed processes in the cgroup, **including children** (`memory.events oom_kill`) — catches kills that `oom_killed` misses |
+| `container_memory_oom_kill_count`      | int64     | Count of OOM-killed processes in the cgroup, **including children** (`memory.events oom_kill`) — catches kills that `oom_killed` misses |
 | `container_cpu_usage_usec`             | int64     | Total CPU time, user + system (`cpu.stat usage_usec`)                                                                                   |
 | `container_cpu_user_usec`              | int64     | User-mode CPU time (`cpu.stat user_usec`)                                                                                               |
 | `container_cpu_system_usec`            | int64     | Kernel-mode CPU time (`cpu.stat system_usec`)                                                                                           |
@@ -411,6 +411,7 @@ Each sample carries both **host** metrics (the environment the task ran in — r
 | `host_cpu_system_pct`                              | float64      | Host kernel-mode CPU %                                                                          |
 | `host_cpu_idle_pct`                                | float64      | Host idle %                                                                                     |
 | `host_cpu_iowait_pct`                              | float64      | Host I/O-wait %; retained so the four CPU percentages sum to 100                                |
+| `host_cpu_count`                                   | int64        | Number of logical cores on the host, for interpreting the CPU percentages above                 |
 | `host_memory_total_bytes`                          | int64        | Host `MemTotal` (`/proc/meminfo`)                                                               |
 | `host_memory_available_bytes`                      | int64        | Host `MemAvailable`                                                                             |
 | `host_cpu_stall_{some,full}_usec`                  | int64        | Cumulative host CPU stall µs (`/proc/pressure/cpu`)                                             |
