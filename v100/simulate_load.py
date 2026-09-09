@@ -43,7 +43,7 @@ def parse_args():
     p.add_argument(
         "--run_time",
         type=float,
-        default=60.0,
+        default=60.0 * 10,
         help="how long to run, in seconds, default 60",
     )
     p.add_argument(
@@ -55,13 +55,13 @@ def parse_args():
     p.add_argument(
         "--period",
         type=float,
-        default=10.0,
+        default=90.0,
         help="seconds between simulated load changes, default 10",
     )
     p.add_argument(
         "--shape",
         choices=["triangle", "square"],
-        default="triangle",
+        default="square",
         help="waveform for the transition between low and high load each period "
         "(triangle: ramps linearly; square: steps instantly), default triangle",
     )
