@@ -1,6 +1,7 @@
 package v100
 
 import (
+	"bytes"
 	"fmt"
 	"log"
 	"os"
@@ -393,9 +394,12 @@ func (c *containerCgroup) resolve() string {
 // paths, the PID for the authoritative /proc fallback. It is a variable so
 // tests can stub out the shell-out.
 var dockerInspectIDAndPid = func(name string) (string, int, error) {
-	out, err := exec.Command(dockerExecutable, "inspect", "--format", "{{.Id}} {{.State.Pid}}", name).Output()
+	cmd := exec.Command(dockerExecutable, "inspect", "--format", "{{.Id}} {{.State.Pid}}", name)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
 	if err != nil {
-		return "", 0, fmt.Errorf("docker inspect: %w", err)
+		return "", 0, fmt.Errorf("docker inspect: %w: %s", err, strings.TrimSpace(stderr.String()))
 	}
 	fields := strings.Fields(string(out))
 	if len(fields) != 2 {
