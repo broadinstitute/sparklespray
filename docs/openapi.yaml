@@ -288,7 +288,7 @@ components:
         destination:
           type: string
           description: Path on the worker VM the file is copied to.
-        isExecutable:
+        is_executable:
           type: boolean
           description: |-
             Whether the executable bit should be set on the localized file. Corresponds
