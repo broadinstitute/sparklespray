@@ -341,7 +341,7 @@ func readContainerCounters(dir string) containerCounters {
 // inspect for a container whose cgroup we have never managed to locate. A
 // sub-second container can exit before the first sample, and there is no point
 // retrying forever for a cgroup that no longer exists.
-const maxCgroupResolveAttempts = 5
+const maxCgroupResolveAttempts = 50
 
 // containerCgroup resolves and caches the cgroup directory for one container.
 // Resolution has to be lazy: the metrics poller starts before docker has
@@ -378,6 +378,7 @@ func (c *containerCgroup) resolve() string {
 	if err != nil {
 		c.attempts++
 		if c.attempts >= maxCgroupResolveAttempts {
+			// it can take a while for the container to appear because we start polling before we've finished pulling the docker image
 			c.gaveUp = true
 			log.Printf("metrics: giving up locating cgroup for container %s: %v", c.name, err)
 		}
