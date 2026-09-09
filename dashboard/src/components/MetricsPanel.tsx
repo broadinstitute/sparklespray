@@ -52,13 +52,14 @@ export default function MetricsPanel({ resourceData, xDomain }: Props) {
   }
 
   return (
-    <div>
+    <div style={{ display: "flex", gap: "1.5rem", alignItems: "flex-start" }}>
       <div
         style={{
           display: "flex",
-          flexWrap: "wrap",
-          gap: "0.75rem",
-          marginBottom: "1.5rem",
+          flexDirection: "column",
+          gap: "0.6rem",
+          flex: "0 0 auto",
+          minWidth: "12rem",
           fontFamily: "monospace",
           fontSize: "0.8rem",
           color: "#666",
@@ -90,6 +91,8 @@ export default function MetricsPanel({ resourceData, xDomain }: Props) {
           flexDirection: "column",
           gap: "2rem",
           marginBottom: "2rem",
+          flex: "1 1 auto",
+          minWidth: 0,
         }}
       >
         {sortedMetadata
@@ -97,16 +100,46 @@ export default function MetricsPanel({ resourceData, xDomain }: Props) {
           .map((m) => {
             const result = buildSeries(resourceData, m);
             const { data, series } = forChart(result);
-            if (data.length === 0) return null;
             return (
-              <MultiLineChart
-                key={m.key}
-                data={data}
-                title={m.name}
-                yLabel={result.yLabel}
-                xDomain={xDomain}
-                series={series}
-              />
+              <div key={m.key}>
+                {data.length === 0 ? (
+                  <div>
+                    <h3
+                      style={{
+                        margin: "0 0 0.5rem",
+                        fontFamily: "monospace",
+                        fontSize: "0.9rem",
+                        color: "#666",
+                      }}
+                    >
+                      {m.description}
+                    </h3>
+                    <div
+                      style={{
+                        height: 200,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontFamily: "monospace",
+                        fontSize: "0.85rem",
+                        color: "#999",
+                        border: "1px dashed #ddd",
+                        borderRadius: "4px",
+                      }}
+                    >
+                      no data for {m.name}
+                    </div>
+                  </div>
+                ) : (
+                  <MultiLineChart
+                    data={data}
+                    title={m.description}
+                    yLabel={result.yLabel}
+                    xDomain={xDomain}
+                    series={series}
+                  />
+                )}
+              </div>
             );
           })}
       </div>

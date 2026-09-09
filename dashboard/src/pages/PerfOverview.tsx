@@ -288,13 +288,16 @@ export default function PerfOverview({ jobId }: { jobId: string }) {
       {completed.length === 0 ? (
         <p style={{ color: "#888" }}>No completed tasks yet.</p>
       ) : (
-        <>
+        <div
+          style={{ display: "flex", gap: "1.5rem", alignItems: "flex-start" }}
+        >
           <div
             style={{
               display: "flex",
-              flexWrap: "wrap",
-              gap: "0.75rem",
-              marginBottom: "1.5rem",
+              flexDirection: "column",
+              gap: "0.6rem",
+              flex: "0 0 auto",
+              minWidth: "12rem",
               fontSize: "0.8rem",
               color: "#666",
             }}
@@ -320,7 +323,7 @@ export default function PerfOverview({ jobId }: { jobId: string }) {
             ))}
           </div>
 
-          <div style={{ maxWidth: 640 }}>
+          <div style={{ flex: "1 1 auto", minWidth: 0, maxWidth: 640 }}>
             {sortedMetadata
               .filter((m) => visible.has(m.key))
               .map((m, i) => (
@@ -332,7 +335,7 @@ export default function PerfOverview({ jobId }: { jobId: string }) {
                 />
               ))}
           </div>
-        </>
+        </div>
       )}
     </div>
   );

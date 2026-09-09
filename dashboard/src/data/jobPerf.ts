@@ -1,5 +1,5 @@
 import type { MetricMetadata, TaskSummaryRecord } from "../types";
-import { unitScale } from "./units";
+import { adaptiveDistributionScale } from "./units";
 
 export interface PerfStats {
   count: number;
@@ -83,11 +83,9 @@ export function computeDistribution(
   histData: { label: string; count: number }[];
   unit: string;
 } {
-  const { scale, label: unit } = unitScale(metadata.units, false);
-  const values = extractResourceUsageValues(tasks, metadata).map(
-    (v) => v / scale
-  );
-  if (values.length === 0) {
+  const raw = extractResourceUsageValues(tasks, metadata);
+  const { scale, label: unit } = adaptiveDistributionScale(metadata.units, raw);
+  if (raw.length === 0) {
     const empty: PerfStats = {
       count: 0,
       min: 0,
@@ -99,6 +97,7 @@ export function computeDistribution(
     };
     return { stats: empty, histData: [], unit };
   }
+  const values = raw.map((v) => v / scale);
   return {
     stats: computeStats(values),
     histData: makeHistogram(values, numBins),
