@@ -77,6 +77,10 @@ function parseBreadcrumbs(
 
 interface PaletteEntry {
   label: string;
+  /** Secondary text shown alongside label and included in the search match --
+   * e.g. a job's ID when label is showing its (usually more memorable) name,
+   * so searching by either still finds it. */
+  subLabel?: string;
   href: string;
   kind: "job" | "cluster";
 }
@@ -107,7 +111,11 @@ function CommandPalette({
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return entries;
-    return entries.filter((e) => e.label.toLowerCase().includes(q));
+    return entries.filter(
+      (e) =>
+        e.label.toLowerCase().includes(q) ||
+        e.subLabel?.toLowerCase().includes(q)
+    );
   }, [query, entries]);
 
   function selectEntry(entry: PaletteEntry) {
@@ -145,7 +153,7 @@ function CommandPalette({
           ref={inputRef}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="jump to job or cluster…"
+          placeholder="jump to job (by name or ID) or cluster…"
           style={{
             display: "block",
             width: "100%",
@@ -211,13 +219,35 @@ function CommandPalette({
                 </span>
                 <span
                   style={{
-                    color: "#222",
+                    display: "flex",
+                    alignItems: "baseline",
+                    gap: "0.5rem",
                     overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
                   }}
                 >
-                  {entry.label}
+                  <span
+                    style={{
+                      color: "#222",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {entry.label}
+                  </span>
+                  {entry.subLabel && (
+                    <span
+                      style={{
+                        color: "#bbb",
+                        fontSize: "0.72rem",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {entry.subLabel}
+                    </span>
+                  )}
                 </span>
               </button>
             ))
@@ -234,18 +264,27 @@ export default function NavBar() {
   const [paletteOpen, setPaletteOpen] = useState(false);
 
   const entries = useMemo<PaletteEntry[]>(() => {
-    const jobEntries = getJobs(jobs).map((j) => ({
-      label: j.jobId,
-      href: `/jobs/${j.jobId}`,
-      kind: "job" as const,
-    }));
+    // jobCache (populated lazily per job, see EventProvider) is the only
+    // source of a job's name -- BackendJobSummary itself doesn't carry one.
+    // Prefer the name as the visible label (what an operator actually
+    // remembers) once it's loaded, showing the ID alongside it so both
+    // remain searchable and visible; fall back to the ID alone until then.
+    const jobEntries = getJobs(jobs).map((j) => {
+      const name = jobCache[j.jobId]?.name;
+      return {
+        label: name || j.jobId,
+        subLabel: name ? j.jobId : undefined,
+        href: `/jobs/${j.jobId}`,
+        kind: "job" as const,
+      };
+    });
     const clusterEntries = getClusters(jobs).map((c) => ({
       label: c.clusterId,
       href: `/clusters/${c.clusterId}`,
       kind: "cluster" as const,
     }));
     return [...jobEntries, ...clusterEntries];
-  }, [jobs]);
+  }, [jobs, jobCache]);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
