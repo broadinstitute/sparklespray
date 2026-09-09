@@ -36,6 +36,7 @@ const HIDDEN_LABEL_KEYS = new Set([
   "UUID",
   "job-env-sha256",
   "job-spec-sha256",
+  "hidden",
 ]);
 
 // Mirrors monitor.IsTerminalJobStatus on the Go side.

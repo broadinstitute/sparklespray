@@ -1030,6 +1030,108 @@ func (s *dashboardServer) handleGetJob(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// ----- POST /api/v1/job/{job_id}/labels -----
+
+type updateJobLabelsRequest struct {
+	// Set adds each label, overwriting any existing label with the same name.
+	Set []v100.Label `json:"set,omitempty"`
+	// Remove deletes any existing label whose name matches, by name only.
+	Remove []string `json:"remove,omitempty"`
+}
+
+type updateJobLabelsResponse struct {
+	Labels []labelResponse `json:"labels"`
+}
+
+// applyLabelOps returns a copy of existing with each name in remove dropped,
+// then each label in set applied (overwriting any existing label of the same
+// name, otherwise appended).
+func applyLabelOps(existing []v100.Label, set []v100.Label, remove []string) []v100.Label {
+	drop := make(map[string]bool, len(remove)+len(set))
+	for _, name := range remove {
+		drop[name] = true
+	}
+	for _, l := range set {
+		drop[l.Name] = true
+	}
+	out := make([]v100.Label, 0, len(existing)+len(set))
+	for _, l := range existing {
+		if !drop[l.Name] {
+			out = append(out, l)
+		}
+	}
+	out = append(out, set...)
+	return out
+}
+
+func (s *dashboardServer) handleUpdateJobLabels(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	jobID := r.PathValue("job_id")
+
+	var req updateJobLabelsRequest
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "BAD_REQUEST", fmt.Sprintf("invalid JSON body: %v", err))
+		return
+	}
+	for _, l := range req.Set {
+		if l.Name == "" {
+			writeError(w, http.StatusBadRequest, "BAD_REQUEST", "'set' entries must have a non-empty 'name'")
+			return
+		}
+	}
+
+	jobDoc := s.fs.Collection(v100.JobCollection).Doc(jobID)
+	summaryDoc := s.fs.Collection("JobSummary").Doc(jobID)
+
+	var newLabels []v100.Label
+	err := s.fs.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
+		jobSnap, err := tx.Get(jobDoc)
+		if err != nil {
+			return err
+		}
+		var job v100.Job
+		if err := jobSnap.DataTo(&job); err != nil {
+			return err
+		}
+
+		// JobSummary mirrors Job.Labels for the job-list view (see
+		// jobSummaryToResponse) but may be missing in edge cases -- read it
+		// (before any writes, as Firestore transactions require) so we can
+		// update it too, without failing the whole request if it's absent.
+		summarySnap, summaryErr := tx.Get(summaryDoc)
+
+		newLabels = applyLabelOps(job.Labels, req.Set, req.Remove)
+		if err := tx.Update(jobDoc, []firestore.Update{{Path: "labels", Value: newLabels}}); err != nil {
+			return err
+		}
+		if summaryErr == nil && summarySnap.Exists() {
+			if err := tx.Update(summaryDoc, []firestore.Update{
+				{Path: "labels", Value: toMonitorLabels(newLabels)},
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		if grpcstatus.Code(err) == codes.NotFound {
+			writeError(w, http.StatusNotFound, "NOT_FOUND", "job not found")
+			return
+		}
+		log.Printf("dashboard: UpdateJobLabels %s: %v", jobID, err)
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to update job labels")
+		return
+	}
+
+	labels := make([]labelResponse, len(newLabels))
+	for i, l := range newLabels {
+		labels[i] = labelResponse{Name: l.Name, Value: l.Value}
+	}
+	writeJSON(w, http.StatusOK, updateJobLabelsResponse{Labels: labels})
+}
+
 // ----- GET /api/v1/job/{job_id}/summary -----
 
 func (s *dashboardServer) handleGetJobSummary(w http.ResponseWriter, r *http.Request) {
@@ -1816,6 +1918,7 @@ func newDashboardHandler(
 	handle("POST /api/v1/job", srv.handleSubmitJob)
 	handle("GET /api/v1/jobs", srv.handleListJobs)
 	handle("GET /api/v1/job/{job_id}", srv.handleGetJob)
+	handle("POST /api/v1/job/{job_id}/labels", srv.handleUpdateJobLabels)
 	handle("GET /api/v1/job/{job_id}/summary", srv.handleGetJobSummary)
 	handle("GET /api/v1/job/{job_id}/summary-history", srv.handleGetJobSummaryHistory)
 	handle("GET /api/v1/job/{job_id}/tasks", srv.handleGetJobTasks)

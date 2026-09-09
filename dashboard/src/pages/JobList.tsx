@@ -21,6 +21,7 @@ const SYSTEM_LABEL_KEYS = new Set([
   "UUID",
   "job-env-sha256",
   "job-spec-sha256",
+  "hidden",
 ]);
 
 // ── Colors ───────────────────────────────────────────────────────────────────
@@ -655,13 +656,73 @@ function FacetKeyButton({
   );
 }
 
+// ── Hide/unhide jobs ─────────────────────────────────────────────────────────
+
+type JobLabel = { name: string; value: string };
+
+// Toggling "hidden" is just a label mutation -- add or remove hidden=true via
+// the generic labels endpoint, leaving every other label on the job alone.
+// Returns the job's resulting label list, as persisted server-side.
+async function setJobHidden(
+  jobId: string,
+  hidden: boolean
+): Promise<JobLabel[]> {
+  const res = await apiFetch(`/api/v1/job/${jobId}/labels`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(
+      hidden
+        ? { set: [{ name: "hidden", value: "true" }] }
+        : { remove: ["hidden"] }
+    ),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const data: { labels: JobLabel[] } = await res.json();
+  return data.labels;
+}
+
+// Client-side mirror of the backend's set/remove label op, used to compute an
+// optimistic label list before the request round-trips.
+function withHiddenLabel(labels: JobLabel[], hidden: boolean): JobLabel[] {
+  const withoutHidden = labels.filter((l) => l.name !== "hidden");
+  return hidden
+    ? [...withoutHidden, { name: "hidden", value: "true" }]
+    : withoutHidden;
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function JobList() {
-  const { jobs, jobCache, paused, setPaused, lastUpdatedAt } = useEvents();
+  const {
+    jobs,
+    jobCache,
+    paused,
+    setPaused,
+    lastUpdatedAt,
+    updateJobLabels,
+  } = useEvents();
   const [search, setSearch] = useState("");
   const [timePreset, setTimePreset] = useState(0);
   const [facets, setFacets] = useState<Record<string, Set<string>>>({});
+  const [showHidden, setShowHidden] = useState(false);
+
+  const toggleHidden = useCallback(
+    (jobId: string, currentlyHidden: boolean) => {
+      const nextHidden = !currentlyHidden;
+      const priorLabels = jobCache[jobId]?.labels ?? [];
+      // Reflect the toggle immediately (before the request resolves) so
+      // there's no perceptible delay; reconcile with the server's actual
+      // result once it lands, or roll back if the write failed.
+      updateJobLabels(jobId, withHiddenLabel(priorLabels, nextHidden));
+      setJobHidden(jobId, nextHidden)
+        .then((labels) => updateJobLabels(jobId, labels))
+        .catch((err) => {
+          console.error("[JobList] toggle hidden failed:", err);
+          updateJobLabels(jobId, priorLabels);
+        });
+    },
+    [jobCache, updateJobLabels]
+  );
 
   const workerPools = useWorkerPools(jobs, !paused);
 
@@ -713,11 +774,18 @@ export default function JobList() {
     return jobsWithMeta.filter((j) => j.submitDate.getTime() >= cutoffMs);
   }, [jobsWithMeta, timePreset]);
 
-  // Stage 2: search filter
+  // Stage 2: visibility filter -- hides jobs tagged hidden=true unless the
+  // operator has checked "Show hidden jobs", regardless of search/facets.
+  const visibilityFiltered = useMemo(() => {
+    if (showHidden) return timeFiltered;
+    return timeFiltered.filter((j) => j.metadata?.hidden !== "true");
+  }, [timeFiltered, showHidden]);
+
+  // Stage 3: search filter
   const searchFiltered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return timeFiltered;
-    return timeFiltered.filter((j) => {
+    if (!q) return visibilityFiltered;
+    return visibilityFiltered.filter((j) => {
       if (j.job_id.toLowerCase().includes(q)) return true;
       if (!j.metadata) return false;
       return Object.entries(j.metadata).some(
@@ -727,7 +795,7 @@ export default function JobList() {
           `${k}=${v}`.toLowerCase().includes(q)
       );
     });
-  }, [timeFiltered, search]);
+  }, [visibilityFiltered, search]);
 
   // Helper: does a job match all facets except one key?
   function matchesFacetsExcept(
@@ -740,7 +808,7 @@ export default function JobList() {
     });
   }
 
-  // Stage 3: facet filter
+  // Stage 4: facet filter
   const filteredJobs = useMemo(
     () =>
       searchFiltered
@@ -836,31 +904,37 @@ export default function JobList() {
             </div>
 
             {/* Facet bar */}
-            {facetKeys.length > 0 && (
-              <div className="jl-facet-bar">
-                <span className="jl-filter-label" style={{ flexShrink: 0 }}>
-                  Filter by
-                </span>
-                {facetKeys.map((k) => (
-                  <FacetKeyButton
-                    key={k}
-                    k={k}
-                    values={Object.entries(
-                      facetIndex[k]
-                    ).map(([value, count]) => ({ value, count }))}
-                    selected={facets[k] ?? new Set()}
-                    onToggle={(v) => toggleFacet(k, v)}
-                    onClear={() => clearFacet(k)}
-                  />
-                ))}
-                {activeFacetCount > 0 && (
-                  <button onClick={clearAllFacets} className="jl-facet-clear">
-                    clear {activeFacetCount} filter
-                    {activeFacetCount !== 1 ? "s" : ""}
-                  </button>
-                )}
-              </div>
-            )}
+            <div className="jl-facet-bar">
+              <span className="jl-filter-label" style={{ flexShrink: 0 }}>
+                Filter by
+              </span>
+              {facetKeys.map((k) => (
+                <FacetKeyButton
+                  key={k}
+                  k={k}
+                  values={Object.entries(
+                    facetIndex[k]
+                  ).map(([value, count]) => ({ value, count }))}
+                  selected={facets[k] ?? new Set()}
+                  onToggle={(v) => toggleFacet(k, v)}
+                  onClear={() => clearFacet(k)}
+                />
+              ))}
+              {activeFacetCount > 0 && (
+                <button onClick={clearAllFacets} className="jl-facet-clear">
+                  clear {activeFacetCount} filter
+                  {activeFacetCount !== 1 ? "s" : ""}
+                </button>
+              )}
+              <label className="jl-show-hidden">
+                <input
+                  type="checkbox"
+                  checked={showHidden}
+                  onChange={(e) => setShowHidden(e.target.checked)}
+                />
+                Show hidden jobs
+              </label>
+            </div>
 
             {/* Jobs section */}
             <section className="jl-section">
@@ -875,6 +949,7 @@ export default function JobList() {
                 search={search}
                 facets={facets}
                 onToggleFacet={toggleFacet}
+                onToggleHidden={toggleHidden}
               />
             </section>
 
@@ -1009,6 +1084,19 @@ const styles = `
     border: 1.5px solid #ccc;
     border-radius: 3px;
     overflow: hidden;
+  }
+
+  .jl-show-hidden {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex-shrink: 0;
+    margin-left: auto;
+    font-size: 0.72rem;
+    color: #666;
+    font-family: 'IBM Plex Mono', monospace;
+    cursor: pointer;
+    white-space: nowrap;
   }
 
   .jl-time-preset {

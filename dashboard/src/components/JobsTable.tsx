@@ -6,6 +6,7 @@ const SYSTEM_LABEL_KEYS = new Set([
   "UUID",
   "job-env-sha256",
   "job-spec-sha256",
+  "hidden",
 ]);
 
 const ACTIVE_TASK_STATES = new Set([
@@ -36,6 +37,10 @@ export interface JobsTableProps {
   facets?: Record<string, Set<string>>;
   onToggleFacet?: (k: string, v: string) => void;
   emptyMessage?: string;
+  /** Called with a row's job_id and its current hidden state (before the
+   * toggle) when its trash icon is clicked. Omit to hide the column
+   * entirely. */
+  onToggleHidden?: (jobId: string, currentlyHidden: boolean) => void;
 }
 
 // ── Colors ───────────────────────────────────────────────────────────────────
@@ -191,6 +196,61 @@ function LabelChips({
   );
 }
 
+// ── Hide/unhide action ────────────────────────────────────────────────────
+
+function TrashIcon({ color }: { color: string }) {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke={color}
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <polyline points="3 6 5 6 21 6" />
+      <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+      <path d="M10 11v6" />
+      <path d="M14 11v6" />
+      <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+    </svg>
+  );
+}
+
+function HideJobButton({
+  jobId,
+  hidden,
+  onToggleHidden,
+}: {
+  jobId: string;
+  hidden: boolean;
+  onToggleHidden: (jobId: string, currentlyHidden: boolean) => void;
+}) {
+  return (
+    <button
+      onClick={(e) => {
+        e.stopPropagation();
+        onToggleHidden(jobId, hidden);
+      }}
+      title={hidden ? "Unhide job" : "Hide job"}
+      style={{
+        all: "unset",
+        cursor: "pointer",
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        width: 22,
+        height: 22,
+        borderRadius: 4,
+      }}
+    >
+      <TrashIcon color={hidden ? "#c62828" : "#bbb"} />
+    </button>
+  );
+}
+
 // ── Stats chip ─────────────────────────────────────────────────────────────
 
 function JobStatsChip({ tasks }: { tasks: JobsTableTask[] }) {
@@ -218,6 +278,7 @@ export default function JobsTable({
   facets = {},
   onToggleFacet,
   emptyMessage = "no jobs found",
+  onToggleHidden,
 }: JobsTableProps) {
   const navigate = useNavigate();
 
@@ -246,6 +307,7 @@ export default function JobsTable({
               active / ok / fail
             </th>
             <th className="jt-th jt-th-time">Start Time (local)</th>
+            {onToggleHidden && <th className="jt-th jt-th-action" />}
           </tr>
         </thead>
         <tbody>
@@ -253,6 +315,7 @@ export default function JobsTable({
             ({ job_id, name, workpool_id, metadata, created_at, tasks }, i) => {
               const submitDate = new Date(created_at);
               const cc = workpool_id ? workerPoolColor(workpool_id) : null;
+              const hidden = metadata?.hidden === "true";
               return (
                 <tr
                   key={job_id}
@@ -302,6 +365,15 @@ export default function JobsTable({
                   <td className="jt-td jt-td-time">
                     {formatTimestamp(submitDate)}
                   </td>
+                  {onToggleHidden && (
+                    <td className="jt-td jt-td-action">
+                      <HideJobButton
+                        jobId={job_id}
+                        hidden={hidden}
+                        onToggleHidden={onToggleHidden}
+                      />
+                    </td>
+                  )}
                 </tr>
               );
             }
@@ -335,8 +407,9 @@ const styles = `
 
   .jt-th-stats { text-align: right; width: 8rem; }
   .jt-th-time  { text-align: right; width: 14rem; }
-  .jt-th-index { width: 2.2rem; }
-  .jt-th-pool  { width: 9rem; }
+  .jt-th-index  { width: 2.2rem; }
+  .jt-th-pool   { width: 9rem; }
+  .jt-th-action { width: 2rem; }
 
   .jt-tr { cursor: pointer; }
 
@@ -388,6 +461,11 @@ const styles = `
   .jt-td-pool {
     padding-top: 0.68rem;
     overflow: hidden;
+  }
+
+  .jt-td-action {
+    text-align: center;
+    padding-top: 0.6rem;
   }
 
   .jt-pool-cell {

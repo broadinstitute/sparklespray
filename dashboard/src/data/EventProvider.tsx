@@ -30,6 +30,17 @@ export interface EventContextValue {
   paused: boolean;
   setPaused: (paused: boolean) => void;
   lastUpdatedAt: number | null;
+  /** Writes a job's label list straight into jobCache (deriving `metadata`
+   * from it) without a round-trip -- the poll loop below only ever fetches
+   * each job's details once (pendingJobFetchesRef dedup), so callers that
+   * mutate a job's labels out-of-band (e.g. toggling "hidden") already know
+   * the resulting label list (either optimistically, or from the mutation
+   * endpoint's response) and can push it straight in for an immediate,
+   * flicker-free update instead of waiting on a fresh GET. Creates a stub
+   * cache entry (blank name/created_at/etc., filled in later by a real
+   * fetch) if the job's details haven't been fetched yet, so this always
+   * takes effect even if e.g. polling is paused. */
+  updateJobLabels: (jobId: string, labels: JobDetail["labels"]) => void;
 }
 
 const EventContext = createContext<EventContextValue>({
@@ -39,7 +50,17 @@ const EventContext = createContext<EventContextValue>({
   paused: false,
   setPaused: () => {},
   lastUpdatedAt: null,
+  updateJobLabels: () => {},
 });
+
+interface RawJobDetail {
+  job_id: string;
+  name: string;
+  workpool_id: string;
+  created_at: string;
+  task_count: number;
+  labels: { name: string; value: string }[];
+}
 
 function computeJobSummary(
   raw: Omit<BackendJobSummary, "taskCount" | "successCount" | "failureCount">
@@ -77,6 +98,54 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   const pausedRef = useRef(paused);
   pausedRef.current = paused;
 
+  const fetchJobDetail = useMemo(
+    () => async (jobId: string) => {
+      try {
+        const r = await apiFetch(`/api/v1/job/${jobId}`);
+        if (!r.ok) return;
+        const raw: RawJobDetail = await r.json();
+        const metadata = Object.fromEntries(
+          raw.labels.map((l) => [l.name, l.value])
+        );
+        const detail: JobDetail = { ...raw, metadata };
+        setJobCache((prev) => ({ ...prev, [jobId]: detail }));
+      } catch {
+        /* transient; caller can retry */
+      }
+    },
+    []
+  );
+
+  const updateJobLabels = useMemo(
+    () => (jobId: string, labels: JobDetail["labels"]) => {
+      setJobCache((prev) => {
+        const existing = prev[jobId];
+        const metadata = Object.fromEntries(
+          labels.map((l) => [l.name, l.value])
+        );
+        // If this job's details haven't been fetched yet (e.g. polling is
+        // paused, so the poll loop's one-time per-job fetch never ran),
+        // stub in the fields we don't know rather than silently dropping
+        // the update -- name/created_at/etc. get filled in for real the
+        // next time fetchJobDetail runs; callers (JobsTable) only read
+        // `metadata` and tolerate a blank `name` by falling back to the ID.
+        const detail: JobDetail = existing
+          ? { ...existing, labels, metadata }
+          : {
+              job_id: jobId,
+              name: "",
+              workpool_id: "",
+              created_at: "",
+              task_count: 0,
+              labels,
+              metadata,
+            };
+        return { ...prev, [jobId]: detail };
+      });
+    },
+    []
+  );
+
   useEffect(() => {
     let cancelled = false;
 
@@ -100,32 +169,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
             for (const j of data) {
               if (!pendingJobFetchesRef.current.has(j.job_id)) {
                 pendingJobFetchesRef.current.add(j.job_id);
-                apiFetch(`/api/v1/job/${j.job_id}`)
-                  .then((r) => (r.ok ? r.json() : null))
-                  .then(
-                    (
-                      raw: {
-                        job_id: string;
-                        name: string;
-                        workpool_id: string;
-                        created_at: string;
-                        task_count: number;
-                        labels: { name: string; value: string }[];
-                      } | null
-                    ) => {
-                      if (raw) {
-                        const metadata = Object.fromEntries(
-                          raw.labels.map((l) => [l.name, l.value])
-                        );
-                        const detail: JobDetail = { ...raw, metadata };
-                        setJobCache((prev) => ({
-                          ...prev,
-                          [j.job_id]: detail,
-                        }));
-                      }
-                    }
-                  )
-                  .catch(() => {});
+                fetchJobDetail(j.job_id);
               }
             }
           }
@@ -242,8 +286,16 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
       paused,
       setPaused,
       lastUpdatedAt,
+      updateJobLabels,
     }),
-    [jobs, addJobEventListener, jobCache, paused, lastUpdatedAt]
+    [
+      jobs,
+      addJobEventListener,
+      jobCache,
+      paused,
+      lastUpdatedAt,
+      updateJobLabels,
+    ]
   );
 
   return (
