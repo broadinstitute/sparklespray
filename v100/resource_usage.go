@@ -32,10 +32,8 @@ func buildResourceUsage(containerName string, final *MetricSample) *ResourceUsag
 		ru.OOMKilled = state.OOMKilled
 	}
 
-	if final == nil || !final.ContainerPresent {
-		if final == nil {
-			log.Printf("resource_usage: no final metric sample for container %s; container counters unavailable", containerName)
-		}
+	if final == nil {
+		log.Printf("resource_usage: no final metric sample for container %s; container counters unavailable", containerName)
 		return ru
 	}
 

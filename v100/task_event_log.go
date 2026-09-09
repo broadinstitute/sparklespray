@@ -182,11 +182,21 @@ func OpenTaskEventLog(ctx context.Context, filename string, taskID string, workD
 		// first interval instead of being skipped for lack of a baseline.
 		prevCPU, _ := getCPUStats()
 		var seq int32
+		var lastGoodAccumulator *MetricSample
 
 		sample := func(final bool) *MetricSample {
 			s, cur := collectMetricSample(t.taskID, t.workDir, prevCPU, t.container(), seq, final)
 			prevCPU = cur
 			seq++
+			if final {
+				// Backfill in place, before this sample is ever written or
+				// returned: there is no document to patch afterward, and this
+				// is what closes the gap when the container's cgroup was torn
+				// down (e.g. by systemd) between the final read and now.
+				mergeMetricFields(s, lastGoodAccumulator)
+			} else {
+				lastGoodAccumulator = updateLastGoodAccumulator(lastGoodAccumulator, s)
+			}
 			if err := t.WriteMetric(s); err != nil {
 				log.Printf("writing metric for task %s: %v", t.taskID, err)
 			}

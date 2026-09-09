@@ -52,7 +52,11 @@ type HostVolume struct {
 //
 // Any value that could not be read is a nil pointer, omitted from both the
 // JSON and Firestore encodings, which is deliberately distinct from a
-// genuine zero.
+// genuine zero. There is no separate "container present" flag: a task that
+// never had a container, or whose container's cgroup could not be located,
+// simply has every container_* field nil -- the same convention as any other
+// unavailable metric, rather than a second signal that can (and, in a known
+// bug this replaced, did) disagree with it.
 type MetricSample struct {
 	TaskID       string    `firestore:"task_id" json:"task_id"`
 	Type         string    `firestore:"type" json:"type"`
@@ -86,12 +90,6 @@ type MetricSample struct {
 	HostIOStallFullUSec     *int64 `firestore:"host_io_stall_full_usec,omitempty" json:"host_io_stall_full_usec,omitempty"`
 
 	HostVolumes []HostVolume `firestore:"host_volumes" json:"host_volumes,omitempty"`
-
-	// ContainerPresent is false when the container's cgroup could not be
-	// located: it has not been created yet (normal for the first sample of a
-	// task), it has already been torn down, or this task runs without a
-	// container at all. Every container_* field is nil in that case.
-	ContainerPresent bool `firestore:"container_present" json:"container_present"`
 
 	ContainerMemoryCurrentBytes *int64 `firestore:"container_memory_current_bytes,omitempty" json:"container_memory_current_bytes,omitempty"`
 	ContainerMemoryPeakBytes    *int64 `firestore:"container_memory_peak_bytes,omitempty" json:"container_memory_peak_bytes,omitempty"`
@@ -267,25 +265,25 @@ func getHostVolumes(paths ...string) []HostVolume {
 
 // containerMetrics resolves a container's cgroup and reads its counters.
 //
-// present is false when the cgroup could not be located, which is a normal
-// condition rather than an error: the container may not have been created yet
-// (expected for the first sample of every task), it may already have been torn
-// down, or the task may be running without a container at all.
-func containerMetrics(cg *containerCgroup) (counters containerCounters, present bool) {
+// A cgroup that could not be located is not an error: the container may not
+// have been created yet (expected for the first sample of every task), it may
+// already have been torn down, or the task may be running without a
+// container at all. unavailableContainerCounters() already reports every
+// counter as unavailable in that case, so callers don't need a separate
+// "present" flag to know -- the fields themselves say so.
+func containerMetrics(cg *containerCgroup) containerCounters {
 	if cg == nil {
-		return unavailableContainerCounters(), false
+		return unavailableContainerCounters()
 	}
 	dir := cg.resolve()
 	if dir == "" {
-		return unavailableContainerCounters(), false
+		return unavailableContainerCounters()
 	}
-	return readContainerCounters(dir), true
+	return readContainerCounters(dir)
 }
 
 // setContainerCounters copies one cgroup read onto the sample.
-func (s *MetricSample) setContainerCounters(c containerCounters, present bool) {
-	s.ContainerPresent = present
-
+func (s *MetricSample) setContainerCounters(c containerCounters) {
 	s.ContainerMemoryCurrentBytes = int64OrNA(c.MemoryCurrentBytes)
 	s.ContainerMemoryPeakBytes = int64OrNA(c.MemoryPeakBytes)
 	s.ContainerMemoryLimitBytes = int64OrNA(c.MemoryLimitBytes)
@@ -309,6 +307,136 @@ func (s *MetricSample) setContainerCounters(c containerCounters, present bool) {
 	s.ContainerIOWriteBytes = int64OrNA(c.IOWriteBytes)
 	s.ContainerIOReadOps = int64OrNA(c.IOReadOps)
 	s.ContainerIOWriteOps = int64OrNA(c.IOWriteOps)
+}
+
+// mergeMetricFields fills every nil pointer-typed metric field on dst from
+// the corresponding field on fallback, when fallback has a non-nil value
+// there. Fields already non-nil on dst are left untouched; fallback == nil
+// is a no-op.
+//
+// HostVolumes and the identity/bookkeeping fields (TaskID, Type, Timestamp,
+// Expiry, MetricSchema, Seq, Final) are excluded: they aren't "a metric that
+// may be unavailable," so a merge doesn't apply to them.
+func mergeMetricFields(dst, fallback *MetricSample) {
+	if fallback == nil {
+		return
+	}
+	if dst.HostCPUUserPct == nil {
+		dst.HostCPUUserPct = fallback.HostCPUUserPct
+	}
+	if dst.HostCPUSystemPct == nil {
+		dst.HostCPUSystemPct = fallback.HostCPUSystemPct
+	}
+	if dst.HostCPUIdlePct == nil {
+		dst.HostCPUIdlePct = fallback.HostCPUIdlePct
+	}
+	if dst.HostCPUIowaitPct == nil {
+		dst.HostCPUIowaitPct = fallback.HostCPUIowaitPct
+	}
+	if dst.HostCPUCount == nil {
+		dst.HostCPUCount = fallback.HostCPUCount
+	}
+	if dst.HostMemoryTotalBytes == nil {
+		dst.HostMemoryTotalBytes = fallback.HostMemoryTotalBytes
+	}
+	if dst.HostMemoryAvailableBytes == nil {
+		dst.HostMemoryAvailableBytes = fallback.HostMemoryAvailableBytes
+	}
+	if dst.HostCPUStallSomeUSec == nil {
+		dst.HostCPUStallSomeUSec = fallback.HostCPUStallSomeUSec
+	}
+	if dst.HostCPUStallFullUSec == nil {
+		dst.HostCPUStallFullUSec = fallback.HostCPUStallFullUSec
+	}
+	if dst.HostMemoryStallSomeUSec == nil {
+		dst.HostMemoryStallSomeUSec = fallback.HostMemoryStallSomeUSec
+	}
+	if dst.HostMemoryStallFullUSec == nil {
+		dst.HostMemoryStallFullUSec = fallback.HostMemoryStallFullUSec
+	}
+	if dst.HostIOStallSomeUSec == nil {
+		dst.HostIOStallSomeUSec = fallback.HostIOStallSomeUSec
+	}
+	if dst.HostIOStallFullUSec == nil {
+		dst.HostIOStallFullUSec = fallback.HostIOStallFullUSec
+	}
+	if dst.ContainerMemoryCurrentBytes == nil {
+		dst.ContainerMemoryCurrentBytes = fallback.ContainerMemoryCurrentBytes
+	}
+	if dst.ContainerMemoryPeakBytes == nil {
+		dst.ContainerMemoryPeakBytes = fallback.ContainerMemoryPeakBytes
+	}
+	if dst.ContainerMemoryLimitBytes == nil {
+		dst.ContainerMemoryLimitBytes = fallback.ContainerMemoryLimitBytes
+	}
+	if dst.ContainerCPUUsageUSec == nil {
+		dst.ContainerCPUUsageUSec = fallback.ContainerCPUUsageUSec
+	}
+	if dst.ContainerCPUUserUSec == nil {
+		dst.ContainerCPUUserUSec = fallback.ContainerCPUUserUSec
+	}
+	if dst.ContainerCPUSystemUSec == nil {
+		dst.ContainerCPUSystemUSec = fallback.ContainerCPUSystemUSec
+	}
+	if dst.ContainerCPUThrottledUSec == nil {
+		dst.ContainerCPUThrottledUSec = fallback.ContainerCPUThrottledUSec
+	}
+	if dst.ContainerCPUThrottledPeriods == nil {
+		dst.ContainerCPUThrottledPeriods = fallback.ContainerCPUThrottledPeriods
+	}
+	if dst.ContainerMemoryMajorFaults == nil {
+		dst.ContainerMemoryMajorFaults = fallback.ContainerMemoryMajorFaults
+	}
+	if dst.ContainerMemoryWorkingsetRefaults == nil {
+		dst.ContainerMemoryWorkingsetRefaults = fallback.ContainerMemoryWorkingsetRefaults
+	}
+	if dst.ContainerMemoryOOMKillCount == nil {
+		dst.ContainerMemoryOOMKillCount = fallback.ContainerMemoryOOMKillCount
+	}
+	if dst.ContainerPidsPeak == nil {
+		dst.ContainerPidsPeak = fallback.ContainerPidsPeak
+	}
+	if dst.ContainerCPUStallSomeUSec == nil {
+		dst.ContainerCPUStallSomeUSec = fallback.ContainerCPUStallSomeUSec
+	}
+	if dst.ContainerCPUStallFullUSec == nil {
+		dst.ContainerCPUStallFullUSec = fallback.ContainerCPUStallFullUSec
+	}
+	if dst.ContainerMemoryStallSomeUSec == nil {
+		dst.ContainerMemoryStallSomeUSec = fallback.ContainerMemoryStallSomeUSec
+	}
+	if dst.ContainerMemoryStallFullUSec == nil {
+		dst.ContainerMemoryStallFullUSec = fallback.ContainerMemoryStallFullUSec
+	}
+	if dst.ContainerIOStallSomeUSec == nil {
+		dst.ContainerIOStallSomeUSec = fallback.ContainerIOStallSomeUSec
+	}
+	if dst.ContainerIOStallFullUSec == nil {
+		dst.ContainerIOStallFullUSec = fallback.ContainerIOStallFullUSec
+	}
+	if dst.ContainerIOReadBytes == nil {
+		dst.ContainerIOReadBytes = fallback.ContainerIOReadBytes
+	}
+	if dst.ContainerIOWriteBytes == nil {
+		dst.ContainerIOWriteBytes = fallback.ContainerIOWriteBytes
+	}
+	if dst.ContainerIOReadOps == nil {
+		dst.ContainerIOReadOps = fallback.ContainerIOReadOps
+	}
+	if dst.ContainerIOWriteOps == nil {
+		dst.ContainerIOWriteOps = fallback.ContainerIOWriteOps
+	}
+}
+
+// updateLastGoodAccumulator folds a freshly measured, non-final sample into a
+// running accumulator: the fresh sample's own values are kept exactly as
+// measured, and only fields it left nil are filled in from the previous
+// accumulator -- so the newest measurement of any given field always wins,
+// while gaps get carried forward. sample itself is never mutated.
+func updateLastGoodAccumulator(lastGoodAccumulator, sample *MetricSample) *MetricSample {
+	acc := *sample // shallow copy; sample's own fields are left untouched
+	mergeMetricFields(&acc, lastGoodAccumulator)
+	return &acc
 }
 
 // collectMetricSample takes one host-and-container metric sample for a task.
@@ -369,11 +497,12 @@ func collectMetricSample(taskID, workDir string, prev *cpuStats, cg *containerCg
 // container's cgroup handle caches its resolved path so repeated samples do
 // not re-run docker inspect.
 type MetricSampler struct {
-	taskID  string
-	workDir string
-	cgroup  *containerCgroup
-	prevCPU *cpuStats
-	seq     int32
+	taskID              string
+	workDir             string
+	cgroup              *containerCgroup
+	prevCPU             *cpuStats
+	seq                 int32
+	lastGoodAccumulator *MetricSample
 }
 
 // NewMetricSampler returns a sampler for a task. containerName may be empty
@@ -390,10 +519,17 @@ func NewMetricSampler(taskID, workDir, containerName string) *MetricSampler {
 }
 
 // Sample takes one sample, advancing the sampler's CPU baseline and sequence.
+// The final sample has any field it couldn't read itself backfilled from the
+// last sample that did -- see mergeMetricFields.
 func (m *MetricSampler) Sample(final bool) *MetricSample {
 	s, cur := collectMetricSample(m.taskID, m.workDir, m.prevCPU, m.cgroup, m.seq, final)
 	m.prevCPU = cur
 	m.seq++
+	if final {
+		mergeMetricFields(s, m.lastGoodAccumulator)
+	} else {
+		m.lastGoodAccumulator = updateLastGoodAccumulator(m.lastGoodAccumulator, s)
+	}
 	return s
 }
 

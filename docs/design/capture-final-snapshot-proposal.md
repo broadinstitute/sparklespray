@@ -1,5 +1,16 @@
 # Plan: capture the final metric snapshot from inside the container
 
+**Status:** an interim mitigation for the bug below has since shipped: the
+final sample now backfills any field it couldn't read itself from the last
+periodic sample that did (`mergeMetricFields`/`updateLastGoodAccumulator` in
+`v100/task_metrics.go`), and `ContainerPresent` was removed as redundant with
+the per-field nil convention (it could disagree with the real per-field
+availability in exactly this race). That closes the practical impact for any
+task that got at least one periodic sample first. It does **not** help a task
+whose _first_ sample is also its _final_ one (too short to be sampled
+periodically at all) — this proposal's in-container approach remains the
+complete fix for that case and is still open.
+
 ## Problem
 
 `executeDockerCommand` (`v100/worker.go:156-220`) runs a task's container, and

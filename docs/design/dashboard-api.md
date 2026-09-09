@@ -344,7 +344,6 @@ Entries are a discriminated union: `content` is populated for `log_update`, and 
           }
         ],
 
-        "container_present": "boolean (false => every container_* field is omitted)",
         "container_memory_current_bytes": "integer, omitted if unavailable",
         "container_memory_peak_bytes": "integer, omitted if unavailable",
         "container_memory_limit_bytes": "integer, omitted if unavailable",

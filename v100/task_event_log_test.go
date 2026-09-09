@@ -153,9 +153,6 @@ func TestSampleWithoutContainerIsUnavailable(t *testing.T) {
 		t.Fatalf("Close: %v", err)
 	}
 
-	if s.ContainerPresent {
-		t.Error("ContainerPresent = true with no container registered")
-	}
 	checks := map[string]*int64{
 		"ContainerMemoryCurrentBytes":  s.ContainerMemoryCurrentBytes,
 		"ContainerMemoryPeakBytes":     s.ContainerMemoryPeakBytes,
