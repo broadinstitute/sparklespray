@@ -1,6 +1,8 @@
 package v100
 
 import (
+	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -109,4 +111,130 @@ func TestSetJobNameIfMissing(t *testing.T) {
 	doc2 := map[string]any{"name": "explicit"}
 	setJobNameIfMissing(doc2, "/some/path/my-job.json")
 	assert.Equal(t, "explicit", doc2["name"])
+}
+
+// fakeStage returns a stageFunc that rewrites source into
+// "gs://staged/<prefix>/<source>" and records every call it receives.
+func fakeStage(calls *[]string) stageFunc {
+	return func(ctx context.Context, prefix, localPath string) (string, error) {
+		*calls = append(*calls, fmt.Sprintf("%s|%s", prefix, localPath))
+		return fmt.Sprintf("gs://staged/%s/%s", prefix, localPath), nil
+	}
+}
+
+func TestStageLocalFiles_JobLevelOnly(t *testing.T) {
+	doc := map[string]any{
+		"gcs_staging_prefix": "gs://bucket/staging",
+		"filesToLocalize": []any{
+			map[string]any{"source": "local.py", "destination": "local.py"},
+			map[string]any{"source": "gs://already/there", "destination": "there"},
+		},
+	}
+
+	var calls []string
+	err := stageLocalFiles(context.Background(), doc, fakeStage(&calls))
+	require.NoError(t, err)
+
+	files := doc["filesToLocalize"].([]any)
+	assert.Equal(t, "gs://staged/gs://bucket/staging/local.py", files[0].(map[string]any)["source"])
+	assert.Equal(t, "gs://already/there", files[1].(map[string]any)["source"])
+	assert.Equal(t, []string{"gs://bucket/staging|local.py"}, calls)
+
+	_, hasPrefix := doc["gcs_staging_prefix"]
+	assert.False(t, hasPrefix, "gcs_staging_prefix must be stripped from doc")
+}
+
+func TestStageLocalFiles_TaskLevelOnly(t *testing.T) {
+	doc := map[string]any{
+		"gcs_staging_prefix": "gs://bucket/staging",
+		"tasks": []any{
+			map[string]any{
+				"filesToLocalize": []any{
+					map[string]any{"source": "task0.py", "destination": "task0.py"},
+				},
+			},
+			map[string]any{
+				"filesToLocalize": []any{
+					map[string]any{"source": "task1.py", "destination": "task1.py"},
+				},
+			},
+		},
+	}
+
+	var calls []string
+	err := stageLocalFiles(context.Background(), doc, fakeStage(&calls))
+	require.NoError(t, err)
+
+	tasks := doc["tasks"].([]any)
+	f0 := tasks[0].(map[string]any)["filesToLocalize"].([]any)[0].(map[string]any)
+	f1 := tasks[1].(map[string]any)["filesToLocalize"].([]any)[0].(map[string]any)
+	assert.Equal(t, "gs://staged/gs://bucket/staging/task0.py", f0["source"])
+	assert.Equal(t, "gs://staged/gs://bucket/staging/task1.py", f1["source"])
+}
+
+func TestStageLocalFiles_JobAndTaskLevel(t *testing.T) {
+	doc := map[string]any{
+		"gcs_staging_prefix": "gs://bucket/staging",
+		"filesToLocalize": []any{
+			map[string]any{"source": "job.py", "destination": "job.py"},
+		},
+		"tasks": []any{
+			map[string]any{
+				"filesToLocalize": []any{
+					map[string]any{"source": "task0.py", "destination": "task0.py"},
+				},
+			},
+		},
+	}
+
+	var calls []string
+	err := stageLocalFiles(context.Background(), doc, fakeStage(&calls))
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{
+		"gs://bucket/staging|job.py",
+		"gs://bucket/staging|task0.py",
+	}, calls)
+}
+
+func TestStageLocalFiles_MissingPrefixWithLocalSource_Errors(t *testing.T) {
+	doc := map[string]any{
+		"filesToLocalize": []any{
+			map[string]any{"source": "local.py", "destination": "local.py"},
+		},
+	}
+
+	var calls []string
+	err := stageLocalFiles(context.Background(), doc, fakeStage(&calls))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "gcs_staging_prefix")
+	assert.Empty(t, calls)
+}
+
+func TestStageLocalFiles_GCSSourcesUntouched_NoPrefixNeeded(t *testing.T) {
+	doc := map[string]any{
+		"filesToLocalize": []any{
+			map[string]any{"source": "gs://already/there", "destination": "there"},
+		},
+	}
+
+	var calls []string
+	err := stageLocalFiles(context.Background(), doc, fakeStage(&calls))
+	require.NoError(t, err)
+	assert.Empty(t, calls)
+}
+
+func TestStageLocalFiles_PrefixAlwaysStrippedEvenIfUnused(t *testing.T) {
+	doc := map[string]any{
+		"gcs_staging_prefix": "gs://bucket/staging",
+		"filesToLocalize": []any{
+			map[string]any{"source": "gs://already/there", "destination": "there"},
+		},
+	}
+
+	var calls []string
+	err := stageLocalFiles(context.Background(), doc, fakeStage(&calls))
+	require.NoError(t, err)
+
+	_, hasPrefix := doc["gcs_staging_prefix"]
+	assert.False(t, hasPrefix)
 }

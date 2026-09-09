@@ -2,6 +2,7 @@ package v100
 
 import (
 	"bytes"
+	"context"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
@@ -11,8 +12,11 @@ import (
 	"path/filepath"
 	"strings"
 
+	"cloud.google.com/go/storage"
+	"github.com/broadinstitute/sparklespray/v100/tempspace"
 	"github.com/cbroglie/mustache"
 	"github.com/urfave/cli"
+	"google.golang.org/api/option"
 )
 
 // submitJobResponse mirrors openapi.yaml's SubmitJobResponse schema.
@@ -160,6 +164,73 @@ func applyTaskTemplate(doc map[string]any, templateParams []map[string]string, p
 	return nil
 }
 
+// stageFunc uploads localPath to a scratch location under prefix and
+// returns the resulting "gs://..." path.
+type stageFunc func(ctx context.Context, prefix, localPath string) (string, error)
+
+// stageLocalFiles rewrites every filesToLocalize entry (job-level, in
+// doc["filesToLocalize"], and per-task, in doc["tasks"][i]["filesToLocalize"])
+// whose "source" is a local path (i.e. doesn't start with "gs://") into a
+// "gs://..." path, by staging the local file via stage. The prefix to stage
+// into is read from doc["gcs_staging_prefix"], which is always removed from
+// doc before returning (it is a client-only field; the server rejects
+// unknown fields).
+func stageLocalFiles(ctx context.Context, doc map[string]any, stage stageFunc) error {
+	prefix, havePrefix := doc["gcs_staging_prefix"].(string)
+	havePrefix = havePrefix && prefix != ""
+	delete(doc, "gcs_staging_prefix")
+
+	if files, ok := doc["filesToLocalize"].([]any); ok {
+		if err := stageFileList(ctx, files, prefix, havePrefix, stage); err != nil {
+			return err
+		}
+	}
+
+	tasks, _ := doc["tasks"].([]any)
+	for i, t := range tasks {
+		task, ok := t.(map[string]any)
+		if !ok {
+			continue
+		}
+		files, ok := task["filesToLocalize"].([]any)
+		if !ok {
+			continue
+		}
+		if err := stageFileList(ctx, files, prefix, havePrefix, stage); err != nil {
+			return fmt.Errorf("task %d: %w", i, err)
+		}
+	}
+	return nil
+}
+
+// stageFileList walks a filesToLocalize array (a []any of map[string]any,
+// as produced by generic JSON decoding), staging any entry whose "source" is
+// a local path.
+func stageFileList(ctx context.Context, files []any, stagingPrefix string, havePrefix bool, stage stageFunc) error {
+	for _, f := range files {
+		entry, ok := f.(map[string]any)
+		if !ok {
+			return fmt.Errorf("filesToLocalize entry is not an object: %v", f)
+		}
+		source, ok := entry["source"].(string)
+		if !ok {
+			return fmt.Errorf("filesToLocalize entry missing string \"source\": %v", f)
+		}
+		if strings.HasPrefix(source, "gs://") {
+			continue
+		}
+		if !havePrefix {
+			return fmt.Errorf("filesToLocalize source %q is a local path but no \"gcs_staging_prefix\" is set in the job JSON", source)
+		}
+		gcsPath, err := stage(ctx, stagingPrefix, source)
+		if err != nil {
+			return fmt.Errorf("staging %s: %w", source, err)
+		}
+		entry["source"] = gcsPath
+	}
+	return nil
+}
+
 func runSubmit(c *cli.Context) error {
 	url := c.String("url")
 	if url == "" {
@@ -197,6 +268,22 @@ func runSubmit(c *cli.Context) error {
 	}
 
 	if err := applyTaskTemplate(doc, templateParams, paramsFile != ""); err != nil {
+		return err
+	}
+
+	ctx := context.Background()
+	var gcsOpts []option.ClientOption
+	if endpoint := os.Getenv("GCS_EMULATOR_ENDPOINT"); endpoint != "" {
+		gcsOpts = append(gcsOpts, option.WithEndpoint(endpoint), option.WithoutAuthentication())
+	}
+	gcsClient, err := storage.NewClient(ctx, gcsOpts...)
+	if err != nil {
+		return fmt.Errorf("creating GCS client: %w", err)
+	}
+	defer gcsClient.Close()
+
+	stager := tempspace.NewStager(gcsClient)
+	if err := stageLocalFiles(ctx, doc, stager.Stage); err != nil {
 		return err
 	}
 
