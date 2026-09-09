@@ -1,19 +1,31 @@
 {
+  "gcs_staging_prefix": "gs://sparkles-test-0625/staging",
+  "filesToLocalize": [
+    { "source": "simulate_load.py", "destination": "simulate_load.py" }
+  ],
   "tasks": [
     {
-      "image": "alpine:3.19",
-      "command": ["sh", "-c", "echo task 1 && sleep 5"]
+      "image": "python",
+      "command": ["python", "simulate_load.py", "--max_mem", "400M"]
     },
     {
-      "image": "alpine:3.19",
-      "command": ["sh", "-c", "echo task 2 && sleep 5"]
+      "image": "python",
+      "command": [
+        "python",
+        "simulate_load.py",
+        "--max_mem",
+        "128M",
+        "--max_cpu",
+        "30"
+      ]
     },
     {
-      "image": "alpine:3.19",
-      "command": ["sh", "-c", "echo task 3 && sleep 5"]
+      "image": "python",
+      "command": ["python", "simulate_load.py", "--run_time", "90"]
     }
   ],
   "workpool": {
-    "machineType": "n2-standard-2"
+    "machineType": "n2-standard-2",
+    "sparklesWorkerGCSPath": "gs://sparkles-test-0625/bin/sparkles-linux-amd64-v100.0.0-9-ge20f658-dirty"
   }
 }
