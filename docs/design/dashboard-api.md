@@ -9,7 +9,9 @@ This document specifies the REST API for the Sparklespray v100 dashboard backend
 - **Base URL prefix**: `/api/v1`
 - **Default port**: `8080`
 - **CORS**: All origins permitted for `GET`, `POST`, and `OPTIONS`
-- **Auth**: Backend uses a GCP service account. The subscription endpoints issue short-lived tokens scoped to Pub/Sub for client-side event streaming.
+- **Auth**: Every request under `/api/v1/*` requires `Authorization: Bearer <api-key>`, validated by `apiKeyAuthMiddleware` against the `APIKeys` Firestore collection (see [`APIKeys`](datamodel.md#apikeys) in `datamodel.md`), with a 10-minute in-memory cache so Firestore isn't hit on every request. A missing or invalid key gets `403 FORBIDDEN`. Keys are issued out-of-band via the `sparkles add-api-key` CLI command, not through this API. The authenticated user is recorded and auto-attached as a `user=<name>` label on jobs submitted via `POST /api/v1/job`.
+
+  This is unrelated to the separate GCP-service-account mechanism used only by `POST /api/v1/subscriptions`, which impersonates a configured service account to mint a short-lived token scoped to Pub/Sub for client-side event streaming.
 
 ### Error response format
 
@@ -18,7 +20,7 @@ All error responses use the same envelope:
 ```json
 {
   "error": "human-readable message",
-  "code": "NOT_FOUND | BAD_REQUEST | INTERNAL_ERROR"
+  "code": "NOT_FOUND | BAD_REQUEST | INTERNAL_ERROR | FORBIDDEN"
 }
 ```
 
@@ -27,7 +29,8 @@ HTTP status codes:
 |------|---------|
 | 200 | Success with body |
 | 204 | Success, no body |
-| 400 | Invalid query parameter |
+| 400 | Invalid request body or query parameter |
+| 403 | Missing or invalid API key |
 | 404 | Entity not found |
 | 500 | Backend or GCP API failure |
 
@@ -49,16 +52,17 @@ List all workpools.
     "workpool_id": "string",
     "machine_type": "string",
     "region": "string",
-    "status": "string (idle | ok | unhealthy | halted)",
-    "status_message": "string",
+    "state": "string (idle | ok | unhealthy | halted)",
+    "state_message": "string",
     "last_incident_at": "RFC3339 timestamp | null",
     "incident_count": "integer",
+    "labels": [{ "name": "string", "value": "string" }],
     "expiry": "RFC3339 timestamp"
   }
 ]
 ```
 
-**Firestore**: `WorkPools` — full collection scan, no filter.
+**Firestore**: full scan of `WorkPools` (config) joined in-memory with a full scan of `WorkPoolSummary` (mutable state — `state`/`state_message`/`last_incident_at`/`incident_count`), keyed by `workpool_id`. A workpool with no `WorkPoolSummary` doc yet gets zero-valued state fields rather than being omitted.
 
 ---
 
@@ -75,6 +79,7 @@ Get a single workpool's configuration and current status.
 ```json
 {
   "workpool_id": "string",
+  "project_id": "string",
   "machine_type": "string",
   "region": "string",
   "zones": ["string"],
@@ -84,9 +89,11 @@ Get a single workpool's configuration and current status.
   "empty_volumes": [
     { "mount_point": "string", "type": "string", "size_in_gb": "integer" }
   ],
+  "labels": [{ "name": "string", "value": "string" }],
   "max_worker_count": "integer",
-  "status": "string (idle | ok | unhealthy | halted)",
-  "status_message": "string",
+  "max_preemptible_worker_attempts": "integer",
+  "state": "string (idle | ok | unhealthy | halted)",
+  "state_message": "string",
   "last_incident_at": "RFC3339 timestamp | null",
   "incident_count": "integer",
   "expiry": "RFC3339 timestamp"
@@ -95,7 +102,7 @@ Get a single workpool's configuration and current status.
 
 **Errors**: `404` if not found.
 
-**Firestore**: `WorkPools/{workpool_id}` — key lookup.
+**Firestore**: `WorkPools/{workpool_id}` — key lookup, plus a second best-effort key lookup on `WorkPoolSummary/{workpool_id}` for the mutable `state`/`state_message`/`last_incident_at`/`incident_count` fields. If the summary doc doesn't exist (or fails to parse), those fields are silently left zero-valued rather than the request failing.
 
 ---
 
@@ -114,21 +121,102 @@ List all GCP Batch submissions associated with this workpool.
   {
     "batch_id": "string",
     "job_id": "string (GCP Batch job resource name)",
+    "project_id": "string",
     "workpool_id": "string",
     "expected_vm_count": "integer",
     "preemptible": "boolean",
     "submitted_at": "RFC3339 timestamp",
     "running_since": "RFC3339 timestamp | null",
     "registered_worker_count": "integer",
-    "status": "string (pending | started | completed | failed)",
-    "unhealthy": "boolean"
+    "status": "string (pending | started | completed | failed | terminated)",
+    "unhealthy": "boolean",
+    "termination_reason": "string, omitted if empty",
+    "labels": [{ "name": "string", "value": "string" }]
   }
 ]
 ```
 
-**Firestore**: `BatchAPIRequests` — query `workpool_id == {workpool_id}`, ordered by `submitted_at` descending.
+**Firestore**: `BatchAPIRequests` — query `workpool_id == {workpool_id}` filtered to `status in [pending, started, completed, failed, terminated]` (`deleted` batches are excluded), ordered by `submitted_at` descending.
 
 > **Note**: The old API exposed a `log-summary` endpoint that fetched GCP Cloud Logging entries filtered by a `sparkles-cluster` label on the Batch job. The v100 data model does not attach that label. Re-enabling log aggregation requires labelling batch jobs with `workpool_id` at creation time and updating this endpoint to query Cloud Logging accordingly.
+
+---
+
+### `GET /api/v1/batch/{batch_id}`
+
+Get a single batch request by its internal ID.
+
+**Path parameters**:
+
+- `batch_id` — required
+
+**Response** `200 OK` — same shape as one element of `/workpool/{workpool_id}/batches` above.
+
+**Errors**: `404` if not found.
+
+**Firestore**: `BatchAPIRequests/{batch_id}` — key lookup.
+
+---
+
+### `GET /api/v1/workpool/{workpool_id}/summary`
+
+Get the current mutable counters for a workpool — the same data joined into `GET /api/v1/workpool/{workpool_id}` above, but as its own resource and including the full breakdown of per-state counts.
+
+**Path parameters**:
+
+- `workpool_id` — required
+
+**Response** `200 OK`:
+
+```json
+{
+  "workpool_id": "string",
+  "last_updated": "RFC3339 timestamp",
+  "expected_preemptible_workers": "integer",
+  "expected_nonpreemptible_workers": "integer",
+  "unhealthy_batch_count": "integer",
+  "batch_api_request_counts": [{ "state": "string", "count": "integer" }],
+  "preemptible_workers": [{ "state": "string", "count": "integer" }],
+  "nonpreemptible_workers": [{ "state": "string", "count": "integer" }],
+  "tasks": [{ "state": "string", "count": "integer" }]
+}
+```
+
+**Errors**: `404` if no `WorkPoolSummary` document exists yet for this workpool.
+
+**Firestore**: `WorkPoolSummary/{workpool_id}` — key lookup.
+
+---
+
+### `GET /api/v1/workpool/{workpool_id}/summary-history`
+
+Get the time-series of `WorkPoolSummary` snapshots for a workpool, for plotting workpool health/capacity over time.
+
+**Path parameters**:
+
+- `workpool_id` — required
+
+**Response** `200 OK` — array ordered by `timestamp` ascending:
+
+```json
+[
+  {
+    "workpool_id": "string",
+    "timestamp": "RFC3339 timestamp",
+    "expected_preemptible_workers": "integer",
+    "expected_nonpreemptible_workers": "integer",
+    "unhealthy_batch_count": "integer",
+    "batch_api_request_counts": [{ "state": "string", "count": "integer" }],
+    "preemptible_workers": [{ "state": "string", "count": "integer" }],
+    "nonpreemptible_workers": [{ "state": "string", "count": "integer" }],
+    "tasks": [{ "state": "string", "count": "integer" }]
+  }
+]
+```
+
+An empty history (no snapshots yet) is a `200` with an empty array, not a `404`.
+
+**Firestore**: `WorkPoolSummaryHistory` — query `workpool_id == {workpool_id}`, ordered by `timestamp` ascending.
 
 ---
 
@@ -136,14 +224,84 @@ List all GCP Batch submissions associated with this workpool.
 
 Jobs correspond to the `Jobs` Firestore collection.
 
+### `POST /api/v1/job`
+
+Submit a new job. Creates the `WorkPool` (if it doesn't already exist), the `Jobs` document, one `Tasks` document per task, and the initial `JobSummary`, then publishes a `job_created` event.
+
+**Request body**:
+
+```json
+{
+  "name": "string (required)",
+  "resources": [{ "name": "string", "value": "float64" }],
+  "filesToLocalize": [
+    /* FileToLocalize, prepended to every task's own filesToLocalize */
+  ],
+  "labels": [{ "name": "string", "value": "string" }],
+  "tasks": [
+    {
+      "filesToLocalize": [
+        /* FileToLocalize */
+      ],
+      "image": "string (required)",
+      "command": ["string", "... (required, non-empty)"]
+    }
+  ],
+  "workpool": {
+    "id": "string (optional; see below)",
+    "projectID": "string (optional; must match ^[a-z][a-z0-9-]{4,28}[a-z0-9]$ if set)",
+    "machineType": "string (required)",
+    "rootDir": "string (default: /mnt/sparkles)",
+    "sparklesWorkerGCSPath": "string (default: SparklesConfig.sparkles_worker_gcs_path)",
+    "resources": [{ "name": "string", "value": "float64" }],
+    "emptyVolumes": [
+      { "mountPoint": "string", "type": "string", "sizeInGB": "integer" }
+    ],
+    "region": "string (default: SparklesConfig.region)",
+    "zones": ["string"],
+    "serviceAccount": "string (default: SparklesConfig.service_account)",
+    "labels": [{ "name": "string", "value": "string" }],
+    "maxWorkerCount": "integer (default: 1)",
+    "maxPreemptibleWorkerAttempts": "integer (default: 1)",
+    "maxWorkersPerRequest": "integer (default: 25)",
+    "vmShutdownGracePeriodSec": "integer (default: 600)",
+    "maxZombiesBeforeAbort": "integer (default: 5)",
+    "maxConsecutiveFailedBatches": "integer (default: 5)",
+    "lingerTimeSec": "integer (default: 600)"
+  }
+}
+```
+
+The decoder rejects unknown fields (`400`), at any nesting level.
+
+If `workpool.id` is omitted, it's derived deterministically as `"wp-" + sha256(canonical JSON of the resolved workpool spec)[:20]` — submitting the same workpool spec twice (without an explicit `id`) reuses the same workpool. Either way the resolved ID must match `^[a-z][a-z0-9-]{0,34}$` or the request is rejected. `workpool_spec_hash` (see `datamodel.md`) is computed and stored on the `WorkPools` document at this point too.
+
+The authenticated caller's user (from the API-key auth middleware) is auto-appended as a `user=<name>` label — not something the client sends explicitly.
+
+Task `result_path`/`log_path` are derived as `{SparklesConfig.gcs_prefix}/{name}/{task_index}` and `.../{task_index}/stdout.txt`.
+
+**Response** `200 OK`:
+
+```json
+{ "id": "string (the new job_id, a UUID)" }
+```
+
+**Errors**: `400 BAD_REQUEST` for any validation failure (missing `name`/`machineType`/`image`/`command`, malformed `projectID`, empty `tasks`, unknown JSON fields, invalid resolved workpool ID). `500 INTERNAL_ERROR` for a Firestore write failure at any of the four writes described above. A failure to publish the `job_created` event is logged but does **not** fail the request — the monitor's periodic poll picks up the job regardless.
+
+**Firestore**: `Set` on `WorkPools/{workpool_id}`; then, in one transaction, `Set` on `Jobs/{job_id}` and one `Set` per task on `Tasks/{task_id}`; then `Create` on `JobSummary/{job_id}`.
+
+**Pub/Sub**: publishes `job_created` to `sparkles-events`.
+
+---
+
 ### `GET /api/v1/jobs`
 
 List job summaries with optional time range filtering. Summaries are read from the `JobSummary` collection (not `Jobs`) because the summarised task counts live there.
 
 **Query parameters**:
 
-- `after` — optional RFC3339 timestamp; return only jobs where `submit_time > after` (based on `JobSummary.expiry` proxy, or a separate indexed field — see note)
-- `before` — optional RFC3339 timestamp; return only jobs where `submit_time <= before`
+- `after` — optional RFC3339 timestamp; return only jobs where `created_at > after`
+- `before` — optional RFC3339 timestamp; return only jobs where `created_at <= before`
 - `workpool_id` — optional; filter to a specific workpool
 
 **Response** `200 OK` — array of JobSummaryResponse:
@@ -154,15 +312,18 @@ List job summaries with optional time range filtering. Summaries are read from t
     "job_id": "string",
     "workpool_id": "string",
     "created_at": "RFC3339 timestamp",
-    "status": "string (pending | in_progress | in_progress_with_error | in_progress_with_failure | success | error | failed | killed)",
+    "state": "string (pending | in_progress | in_progress_with_error | in_progress_with_failure | success | error | failed | killed)",
     "tasks": [{ "state": "string", "count": "integer" }],
     "labels": [{ "name": "string", "value": "string" }],
-    "expiry": "RFC3339 timestamp"
+    "expiry": "RFC3339 timestamp",
+    "last_updated": "RFC3339 timestamp"
   }
 ]
 ```
 
-**Firestore**: `JobSummary` — filter by `workpool_id` if provided; filter by `created_at` range when `after`/`before` are supplied.
+**Errors**: `400 BAD_REQUEST` for a malformed `after`/`before` timestamp.
+
+**Firestore**: `JobSummary` — filter by `workpool_id` if provided; filter by `created_at` range when `after`/`before` are supplied. When `workpool_id` is provided, the server-side `ORDER BY created_at` is skipped (to avoid requiring a composite index) and results are instead sorted client-side, on the assumption that a single workpool's job list is small.
 
 ---
 
@@ -194,6 +355,53 @@ Get a single job's definition.
 
 ---
 
+### `POST /api/v1/job/{job_id}/labels`
+
+Add, overwrite, or remove labels on an existing job. See the label-mutation note under `Jobs` in `datamodel.md` — this is the one exception to `Jobs`/`JobSummary` otherwise being write-once-then-monitor-owned.
+
+**Path parameters**:
+
+- `job_id` — required
+
+**Request body**:
+
+```json
+{
+  "set": [{ "name": "string (required, non-empty)", "value": "string" }],
+  "remove": ["string (label name)"]
+}
+```
+
+Semantics: starting from the job's existing labels, any label whose name is in `remove` **or** in `set` is dropped, then every label in `set` is appended — so `set` always overwrites an existing label of the same name rather than duplicating it. The decoder rejects unknown fields (`400`).
+
+**Response** `200 OK` — the resulting label set after the operation:
+
+```json
+{ "labels": [{ "name": "string", "value": "string" }] }
+```
+
+**Errors**: `400 BAD_REQUEST` for malformed JSON or a `set` entry with an empty `name`. `404 NOT_FOUND` if the job doesn't exist.
+
+**Firestore**: one transaction that updates the `labels` field on `Jobs/{job_id}`, and — best-effort, only if the document exists — the `labels` field on `JobSummary/{job_id}`. If the `JobSummary` doc is missing, the job's labels are still updated and the summary is simply left out of sync. Not mirrored into `JobSummaryHistory`.
+
+---
+
+### `GET /api/v1/job/{job_id}/summary`
+
+Get a single job's current rolled-up state — the same shape as one element of `GET /api/v1/jobs`.
+
+**Path parameters**:
+
+- `job_id` — required
+
+**Response** `200 OK`: see the `JobSummaryResponse` shape under `GET /api/v1/jobs` above.
+
+**Errors**: `404 NOT_FOUND` if no `JobSummary` document exists for this job.
+
+**Firestore**: `JobSummary/{job_id}` — key lookup.
+
+---
+
 ### `GET /api/v1/job/{job_id}/summary-history`
 
 Get the time-series of task-count snapshots for a job, useful for plotting a progress chart.
@@ -210,13 +418,48 @@ Get the time-series of task-count snapshots for a job, useful for plotting a pro
     "job_id": "string",
     "workpool_id": "string",
     "timestamp": "RFC3339 timestamp",
-    "status": "string",
+    "state": "string",
     "tasks": [{ "state": "string", "count": "integer" }]
   }
 ]
 ```
 
 **Firestore**: `JobSummaryHistory` — query `job_id == {job_id}`, order by `timestamp` asc.
+
+---
+
+### `GET /api/v1/job/{job_id}/tasks`
+
+List the tasks belonging to a job, in a thin shape suited to progress/status views (for full task detail, see `GET /api/v1/task/{task_id}`).
+
+**Path parameters**:
+
+- `job_id` — required
+
+**Query parameters**:
+
+- `status` — optional, comma-separated list of task statuses. A single status is pushed into the Firestore query; multiple statuses are filtered client-side.
+- `updated_after` — optional RFC3339 timestamp, filters to tasks whose `last_updated` is after it. Only pushed into the Firestore query when `status` selects at most one value; otherwise applied client-side (a task with a zero `last_updated` is never excluded by this filter).
+
+**Response** `200 OK` — array:
+
+```json
+[
+  {
+    "task_id": "string",
+    "task_index": "integer",
+    "status": "string",
+    "exit_code": "integer, omitted for pending/active tasks",
+    "resource_usage": {
+      "...": "see GET /api/v1/task/{task_id}; omitted if the task hasn't finished"
+    }
+  }
+]
+```
+
+**Errors**: `400 BAD_REQUEST` for a malformed `updated_after` timestamp.
+
+**Firestore**: `Tasks` — query `job_id == {job_id}`, optionally `status == {status}` and/or `last_updated > {updated_after}` per the rules above; no explicit ordering.
 
 ---
 
@@ -247,8 +490,9 @@ Get a single task's current state and metadata.
   "log_path": "string (GCS path) | null",
   "owning_worker_id": "string | null",
   "failure_reason": "string | null",
-  "parameters": [{ "name": "string", "value": "string" }],
-  "exit_code": "integer | null",
+  "labels": [{ "name": "string", "value": "string" }],
+  "vm_console_url": "string | omitted (GCP console link for the owning worker's VM; see below)",
+  "exit_code": "integer, omitted for pending/active tasks",
   "resource_usage": {
     "start_time": "RFC3339 timestamp",
     "end_time": "RFC3339 timestamp",
@@ -282,9 +526,11 @@ Get a single task's current state and metadata.
 
 `resource_usage` is omitted when absent (task has not yet completed). Any individual field within it is omitted when that metric could not be collected — the same nil-is-absent convention as `MetricSample`, see the conventions under [`GET /api/v1/task/{task_id}/log`](#get-apiv1tasktask_idlog). Field semantics and cgroup sources are documented in [datamodel.md](datamodel.md).
 
+`vm_console_url` is populated by a second Firestore read of `Workers/{owning_worker_id}` to fetch its `instance_name`, parsed as `project/{project}/zone/{zone}/instance/{instance}` and rendered as `https://console.cloud.google.com/compute/instancesDetail/zones/{zone}/instances/{instance}?project={project}`. It's omitted whenever `owning_worker_id` is empty or the worker record can't be found/parsed.
+
 **Errors**: `404` if not found.
 
-**Firestore**: `Tasks/{task_id}` — key lookup.
+**Firestore**: `Tasks/{task_id}` — key lookup, plus (when `owning_worker_id` is set) a key lookup on `Workers/{owning_worker_id}` for `vm_console_url`.
 
 ---
 
@@ -385,7 +631,7 @@ Entries are a discriminated union: `content` is populated for `log_update`, and 
 
 **Errors**: `400` for malformed `after` timestamp.
 
-**Firestore**: `TaskLog` — query `task_id == {task_id}` and optionally `type in {types}`, with `timestamp > after`, ordered by `timestamp` asc.
+**Firestore**: `TaskLog` — query `task_id == {task_id}` with `timestamp > after`, ordered by `timestamp` asc; `type == {type}` is pushed into the Firestore query only when `types` selects exactly one value, otherwise multiple types are filtered client-side (Firestore has no `in` query used here).
 
 > **Change from old API**: The old API had two separate endpoints: `/task/{id}/log` (returning `content` entries) and `/task/{id}/metrics` (returning metric samples). In v100 both are stored in the same `TaskLog` collection with a `type` discriminator, so they are unified here. Clients that need only one type should pass `types=log_update` or `types=metric_update`.
 
@@ -477,7 +723,11 @@ Request that the worker running this task begin streaming its log and metric ent
 
 **Response** `204 No Content`
 
-**Pub/Sub**: Publishes a `stream_task_updates` control message to the topic `sparkles-worker-in`. The message targets the specific worker identified by the task's `owning_worker_id`. The worker creates a per-worker subscription named `sparkles-worker-in-{worker_id}` at startup.
+**Errors**: `404 NOT_FOUND` if the task doesn't exist. `400 BAD_REQUEST "task has no owning worker"` if the task's `owning_worker_id` is empty (nothing to route the message to). `500 INTERNAL_ERROR` if the publish fails.
+
+**Firestore**: `Tasks/{task_id}` — key lookup, to read `owning_worker_id`.
+
+**Pub/Sub**: Publishes a `stream_task_updates` control message. The backend publishes directly to a topic/publisher ID literally named `sparkles-worker-in-{owning_worker_id}` (not a shared `sparkles-worker-in` topic with a subscription filter) — i.e. the routing target is the per-worker string itself, resolved from the task's `owning_worker_id`.
 
 Message payload:
 
@@ -485,7 +735,7 @@ Message payload:
 { "type": "stream_task_updates", "task_id": "string" }
 ```
 
-> **Change from old API**: The old endpoint published to `sparkles-v6-task-in` with type `start_publishing`. The v100 equivalent topic is `sparkles-worker-in` with message type `stream_task_updates`. The routing changed: messages must be published to the per-worker subscription's topic, not a global task topic. The backend must look up `owning_worker_id` from the Task document before publishing, so it can route to the right worker's subscription.
+> **Change from old API**: The old endpoint published to `sparkles-v6-task-in` with type `start_publishing`. The v100 equivalent is this endpoint, publishing message type `stream_task_updates` to the per-worker-named destination above. The routing changed: messages go to a destination keyed by the specific worker, not a global task topic. The backend must look up `owning_worker_id` from the Task document before publishing, so it can route to the right worker.
 
 ---
 
@@ -504,7 +754,8 @@ Query the event log.
 - `job_id` — optional; filter to events related to a specific job
 - `workpool_id` — optional; filter to events related to a specific workpool
 - `task_id` — optional; filter to events related to a specific task
-- `types` — optional comma-separated list of event types: `worker_started`, `worker_stopped`, `task_state_update`, `job_created`, `job_terminated`
+- `types` — optional comma-separated list of event types: `worker_started`, `worker_stopped`, `task_state_update`, `job_created`, `job_terminated`, `workpool_state_change`, `batch_failed`, `batch_succeeded`, `workpool_incident`
+- `order` — optional, `asc` (default) or `desc`
 - `limit` — optional integer, default 1000, max 10000
 
 **Response** `200 OK`:
@@ -517,21 +768,27 @@ Query the event log.
       "type": "string",
       "timestamp": "RFC3339 timestamp",
       "expiry": "RFC3339 timestamp",
-      "worker_id": "string | null",
-      "workpool_id": "string | null",
-      "task_id": "string | null",
-      "job_id": "string | null",
-      "old_state": "string | null",
-      "new_state": "string | null"
+      "worker_id": "string, omitted if not applicable",
+      "workpool_id": "string, omitted if not applicable",
+      "task_id": "string, omitted if not applicable",
+      "job_id": "string, omitted if not applicable",
+      "old_state": "string, omitted if not applicable",
+      "new_state": "string, omitted if not applicable",
+      "state_message": "string, omitted if not applicable (carries the workpool_state_change message or the batch_failed reason)",
+      "cleanly_terminated": "boolean, omitted if not applicable (worker_stopped only)"
     }
   ],
-  "next_after": "RFC3339 timestamp (timestamp of last entry; omitted when result is empty)"
+  "next_after": "RFC3339 timestamp (timestamp of last entry)"
 }
 ```
 
-Fields not applicable to an event's `type` are omitted or null.
+Fields not applicable to an event's `type` are omitted, not `null`.
 
-**Firestore**: `Events` — filter by provided parameters, order by `timestamp` asc, apply limit.
+**Errors**: `400 BAD_REQUEST` for a malformed `after`/`before` timestamp or an invalid `limit`.
+
+**Firestore**: `Events` — only one of `job_id`/`workpool_id`/`task_id` (in that priority order) is pushed into the Firestore query as an equality filter, to avoid needing a composite index for every combination; any remaining ID filter is applied client-side, but only for the `workpool_id`+`job_id` and `task_id`+`job_id` combinations — passing `workpool_id` and `task_id` together **without** `job_id` silently ignores the `task_id` filter. `types` is always filtered client-side, never pushed into the Firestore query. Ordered by `timestamp` (direction per `order`), limited per `limit`.
+
+`next_after` is omitted when `order=desc` was requested, or when the result set is empty; otherwise it is always present.
 
 > **Change from old API**: The old event documents were untyped property maps and included a `cluster_id` field. The v100 `EventRecord` struct uses `workpool_id` instead of `cluster_id`. The `task_id` filter is new — the old model did not index events by task.
 
@@ -616,15 +873,31 @@ List active worker records for a workpool.
 
 ---
 
+### `GET /api/v1/worker/{worker_id}`
+
+Get a single worker record.
+
+**Path parameters**:
+
+- `worker_id` — required
+
+**Response** `200 OK` — same shape as one element of `/workpool/{workpool_id}/workers` above.
+
+**Errors**: `404` if not found.
+
+**Firestore**: `Workers/{worker_id}` — key lookup.
+
+---
+
 ## Data Model Inconsistencies and Gaps
 
 This section summarises capabilities present in the old dashboard that cannot be directly implemented from the v100 data model without additions.
 
 ### Missing: WorkPool-level VM status detail
 
-The old `ClusterStatus` document tracked per-pool VM-level detail: `instanceInUseCount`, `idleInstanceCount`, `orphanedTaskCount`, `preemptableInstanceCount`, `nonPreemptableInstanceCount`, along with a classification of failed batch submissions. The v100 `WorkPools` document has only a string `status` and `status_message` (plus `last_incident_at` / `incident_count`).
+The old `ClusterStatus` document tracked per-pool VM-level detail: `instanceInUseCount`, `idleInstanceCount`, `orphanedTaskCount`, `preemptableInstanceCount`, `nonPreemptableInstanceCount`, along with a classification of failed batch submissions. This is now implemented: the `WorkPoolSummary` collection (not `WorkPools`, which only carries the immutable `state`/`state_message`/`last_incident_at`/`incident_count` roll-up via the join in `GET /api/v1/workpool/{workpool_id}`) carries per-state VM/batch/task counts, exposed via `GET /api/v1/workpool/{workpool_id}/summary` and its history via `GET /api/v1/workpool/{workpool_id}/summary-history`.
 
-**Workaround**: The `/workpool/{workpool_id}/batches` endpoint exposes `BatchAPIRequests` data, from which a client can compute submitted/started/failed batch counts. VM-level counts require querying the GCP Compute or Batch API at request time, as in the original backend. A `WorkpoolSummary` collection is defined in `datamodel.md` for when this is implemented.
+**Workaround, if finer detail than `WorkPoolSummary` provides is ever needed**: the `/workpool/{workpool_id}/batches` endpoint exposes raw `BatchAPIRequests` data. VM-level counts beyond what `WorkPoolSummary` tracks would still require querying the GCP Compute or Batch API at request time, as in the original backend.
 
 ### Missing: arbitrary Job metadata
 
@@ -636,11 +909,11 @@ The old `Task.log_url` was a full HTTP URL. The v100 `Task.log_path` is a GCS pa
 
 ### Changed: task metrics collection
 
-The old backend had a separate `/task/{id}/metrics` endpoint backed by a `SparklesV6TaskMetric` collection with periodic samples. In v100, periodic metric samples are stored as `metric_update` entries inside the `TaskLog` collection, and a final summary is stored as `Task.resource_usage`. The new `/task/{id}/log-entries` endpoint unifies both. Clients that previously polled `/metrics` should now poll `/log-entries?types=metric_update`.
+The old backend had a separate `/task/{id}/metrics` endpoint backed by a `SparklesV6TaskMetric` collection with periodic samples. In v100, periodic metric samples are stored as `metric_update` entries inside the `TaskLog` collection, and a final summary is stored as `Task.resource_usage`. `GET /api/v1/task/{task_id}/log` unifies both. Clients that previously polled `/metrics` should now poll `/task/{task_id}/log?types=metric_update`.
 
 ### Changed: stream task updates routing
 
-The old `POST /task/{id}/subscription` published to a global `sparkles-v6-task-in` topic. In v100, the equivalent is a `stream_task_updates` message published to `sparkles-worker-in`, which is routed to the specific worker via per-worker subscriptions. The backend must look up the task's `owning_worker_id` to find the correct worker.
+The old `POST /task/{id}/subscription` published to a global `sparkles-v6-task-in` topic. The v100 equivalent, `POST /api/v1/task/{task_id}/stream`, publishes a `stream_task_updates` message to a destination keyed by the specific worker (see that endpoint above for the exact routing). The backend must look up the task's `owning_worker_id` to find the correct worker.
 
 ### New: BatchAPIRequests
 

@@ -21,7 +21,14 @@ One document per submitted job. The document ID is the `job_id`.
 | `expiry`      | timestamp       | When this document may be garbage-collected (set 7 days out at submission time)                                        |
 | `task_count`  | int             | Number of tasks in this job (denormalized at submission time)                                                          |
 | `resources`   | []ResourceEntry | Per-task resource requirements (e.g. `slots=1,mem=8`). Workers verify they can satisfy these before claiming any task. |
-| `labels`      | []Label         | User-defined key/value tags attached at submission time (e.g. `experiment=v3`, `owner=alice`)                          |
+| `labels`      | []Label         | User-defined key/value tags. Set at submission time, but mutable afterward — see below.                                |
+
+**Labels are mutable after submission.** `POST /api/v1/job/{job_id}/labels` (`handleUpdateJobLabels` in `v100/dev/dashboard_backend.go`) lets a caller add/overwrite (`set`) or delete (`remove`) labels on an existing job, inside a single Firestore transaction that updates both `Jobs.labels` and, if it exists, `JobSummary.labels` (see below) to match. This is the one exception to `Jobs` being otherwise write-once at submission, and to `JobSummary` being written only by submit-at-creation and the monitor thereafter. A label edit does **not** produce a `JobSummaryHistory` snapshot.
+
+Two label names are reserved by convention (not first-class fields):
+
+- `hidden=true` — interpreted by the dashboard UI to exclude the job from the default job list ("hide/show jobs").
+- `user=<name>` — auto-attached at submission time from the caller's `APIKeys` record (see [`APIKeys`](#apikeys) below), identifying who submitted the job.
 
 **ResourceEntry** (embedded object):
 
@@ -71,6 +78,8 @@ One document per task. The document ID is the `task_id`.
 | `source`        | string | GCS path of the file to download (e.g. `gs://bucket/path/file.txt`)                          |
 | `destination`   | string | Relative path under the working directory where the file is written (e.g. `inputs/file.txt`) |
 | `is_executable` | bool   | If true, the file is made executable after download. Defaults to false if omitted.           |
+
+Files staged into `files_to_localize`/`files_to_localize_manifest` at submission time are deduplicated and uploaded to GCS via the `tempspace` package (`v100/tempspace/`), a self-expiring content-addressed store built on top of an `ObjStore`; see [`self-expiring-CAS.md`](../../self-expiring-CAS.md) for the mechanism. This is a GCS-side concern only — it introduces no Firestore collection or Pub/Sub topic.
 
 **ResourceUsage** (embedded object) — written by the worker once per task. It is assembled from `docker inspect` (timing and exit) plus the metrics poller's **final sample**, taken after the container exits but before `docker rm` is called, while its cgroup still exists.
 
@@ -139,26 +148,30 @@ Terminal states — no further transitions except an administrative kill:
 
 One document per workpool. The document ID is the `workpool_id`. `WorkPool` is written once at creation and never updated; all evolving state lives in `WorkPoolSummary`. A workpool defines the VM configuration used to create workers that process tasks associated with that workpool.
 
-| Field                             | Type            | Description                                                                                                    |
-| --------------------------------- | --------------- | -------------------------------------------------------------------------------------------------------------- |
-| `workpool_id`                     | string          | Unique identifier for the workpool                                                                             |
-| `project_id`                      | string          | GCP project to create this workpool's Batch jobs/VMs in; empty means the monitor's own project                 |
-| `machine_type`                    | string          | GCP machine type for worker VMs (e.g. `n2-standard-4`)                                                         |
-| `region`                          | string          | GCP region for Batch jobs (e.g. `us-central1`)                                                                 |
-| `zones`                           | []string        | GCP zones to query for running VMs (e.g. `["us-central1-a"]`)                                                  |
-| `root_dir`                        | string          | Directory on the VM that the worker uses as its working root; also where the `sparkles` binary is staged       |
-| `sparkles_worker_gcs_path`        | string          | GCS path (e.g. `gs://bucket/sparkles`) of the worker binary; downloaded to `{root_dir}/sparkles` at VM startup |
-| `service_account`                 | string          | GCP service account email assigned to worker VMs; governs what GCP resources each worker can access            |
-| `resources`                       | []ResourceEntry | Resource capacity advertised by workers created from this workpool                                             |
-| `empty_volumes`                   | []EmptyVolume   | Ephemeral volumes to attach to each VM                                                                         |
-| `labels`                          | []Label         | User-defined key/value tags attached at creation time (e.g. `team=ml`, `env=prod`)                             |
-| `expiry`                          | timestamp       | When this document may be garbage-collected                                                                    |
-| `max_worker_count`                | int             | Maximum number of VMs the monitor may have running concurrently for this workpool                              |
-| `max_preemptible_worker_attempts` | int             | How many times the monitor may submit a preemptible batch before falling back to on-demand                     |
-| `max_workers_per_request`         | int             | Maximum number of VMs in a single GCP Batch job submission                                                     |
-| `vm_shutdown_grace_period_sec`    | int             | Seconds the monitor waits after asking a VM to shut down before treating it as gone                            |
-| `max_zombies_before_abort`        | int             | Number of zombie VMs tolerated in one batch before the monitor marks the batch failed                          |
-| `max_consecutive_failed_batches`  | int             | Number of consecutive failed batches before the monitor halts the workpool                                     |
+| Field                             | Type            | Description                                                                                                                                                    |
+| --------------------------------- | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `workpool_id`                     | string          | Unique identifier for the workpool                                                                                                                             |
+| `project_id`                      | string          | GCP project to create this workpool's Batch jobs/VMs in; empty means the monitor's own project                                                                 |
+| `machine_type`                    | string          | GCP machine type for worker VMs (e.g. `n2-standard-4`)                                                                                                         |
+| `region`                          | string          | GCP region for Batch jobs (e.g. `us-central1`)                                                                                                                 |
+| `zones`                           | []string        | GCP zones to query for running VMs (e.g. `["us-central1-a"]`)                                                                                                  |
+| `root_dir`                        | string          | Directory on the VM that the worker uses as its working root; also where the `sparkles` binary is staged                                                       |
+| `sparkles_worker_gcs_path`        | string          | GCS path (e.g. `gs://bucket/sparkles`) of the worker binary; downloaded to `{root_dir}/sparkles` at VM startup                                                 |
+| `service_account`                 | string          | GCP service account email assigned to worker VMs; governs what GCP resources each worker can access                                                            |
+| `resources`                       | []ResourceEntry | Resource capacity advertised by workers created from this workpool                                                                                             |
+| `empty_volumes`                   | []EmptyVolume   | Ephemeral volumes to attach to each VM                                                                                                                         |
+| `labels`                          | []Label         | User-defined key/value tags attached at creation time (e.g. `team=ml`, `env=prod`)                                                                             |
+| `expiry`                          | timestamp       | When this document may be garbage-collected                                                                                                                    |
+| `max_worker_count`                | int             | Maximum number of VMs the monitor may have running concurrently for this workpool                                                                              |
+| `max_preemptible_worker_attempts` | int             | How many times the monitor may submit a preemptible batch before falling back to on-demand                                                                     |
+| `max_workers_per_request`         | int             | Maximum number of VMs in a single GCP Batch job submission                                                                                                     |
+| `vm_shutdown_grace_period_sec`    | int             | Seconds the monitor waits after asking a VM to shut down before treating it as gone                                                                            |
+| `max_zombies_before_abort`        | int             | Number of zombie VMs tolerated in one batch before the monitor marks the batch failed                                                                          |
+| `max_consecutive_failed_batches`  | int             | Number of consecutive failed batches before the monitor halts the workpool                                                                                     |
+| `workpool_spec_hash`              | string          | Hash of the workpool's provisioning-relevant fields (`computeWorkpoolSpecHash` in `v100/dev/workpool_spec.go`), recomputed and written on every job submission |
+| `linger_time_sec`                 | int             | Seconds an idle worker VM waits before shutting down, hoping for another task; defaults to 600                                                                 |
+
+**Known inconsistency:** the Go struct backing this collection (`v100.WorkPool` in `v100/task_queue.go`) also declares `state`, `state_message`, `last_incident_at`, and `incident_count` fields with real Firestore tags, and a comment claiming they're "stored in `WorkPoolSummary`." In practice `handleSubmitJob` never sets them before writing the `WorkPools` document, so every such document actually carries these four fields zero-valued, redundant with (and out of sync with) the real values in `WorkPoolSummary`. Despite this, no code reads `state`/`state_message`/`last_incident_at`/`incident_count` off the `WorkPools` document — `WorkPoolSummary` remains the sole source of truth in practice; treat the fields on `WorkPools` as dead weight rather than a second copy to keep in sync.
 
 **ResourceEntry** (embedded object) — same type as `ResourceEntry` on `Jobs`; workers created from this workpool will advertise this capacity:
 
@@ -205,11 +218,12 @@ Any question about workpool health — "how many VMs are expected?", "are there 
 
 The following fields are copied from `WorkPool` at first write and not updated thereafter:
 
-| Field                             | Type   | Description                                                                                 |
-| --------------------------------- | ------ | ------------------------------------------------------------------------------------------- |
-| `workpool_id`                     | string | Workpool this summary describes (copied from `WorkPool`)                                    |
-| `machine_type`                    | string | GCP machine type for worker VMs (copied from `WorkPool`)                                    |
-| `max_preemptible_worker_attempts` | int    | Max preemptible batch submissions before falling back to on-demand (copied from `WorkPool`) |
+| Field                             | Type    | Description                                                                                                                                                                                                                             |
+| --------------------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `workpool_id`                     | string  | Workpool this summary describes (copied from `WorkPool`)                                                                                                                                                                                |
+| `machine_type`                    | string  | GCP machine type for worker VMs (copied from `WorkPool`)                                                                                                                                                                                |
+| `max_preemptible_worker_attempts` | int     | Max preemptible batch submissions before falling back to on-demand (copied from `WorkPool`)                                                                                                                                             |
+| `labels`                          | []Label | Declared on the struct for `WorkPool.Labels` parity, but never populated by `updateWorkPoolSummary` — always the zero value in practice. The dashboard reads labels for a workpool from the `WorkPools` document itself, not from here. |
 
 The following fields are written exclusively by the monitor process:
 
@@ -452,16 +466,16 @@ One document per job, keyed by `job_id`. This is the **mutable** counterpart to 
 
 Any question about job progress — "is this job still running?", "how many tasks failed?" — should be answered by reading `JobSummary`, not by scanning `Tasks` or adding derived fields to `Jobs`.
 
-| Field          | Type         | Description                                                                              |
-| -------------- | ------------ | ---------------------------------------------------------------------------------------- |
-| `job_id`       | string       | ID of the job this summary describes                                                     |
-| `workpool_id`  | string       | Workpool the job is running in                                                           |
-| `created_at`   | timestamp    | When the job was submitted (copied from `Jobs.created_at` at submission time)            |
-| `expiry`       | timestamp    | When this document may be garbage-collected                                              |
-| `last_updated` | timestamp    | When these fields were last recomputed by the monitor                                    |
-| `state`        | string       | Rolled-up job state — see table below                                                    |
-| `tasks`        | []StateCount | Task counts grouped by state; one entry per non-zero state                               |
-| `labels`       | []Label      | User-defined tags (copied from `Jobs.labels` at submission time; not updated thereafter) |
+| Field          | Type         | Description                                                                                                                                    |
+| -------------- | ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `job_id`       | string       | ID of the job this summary describes                                                                                                           |
+| `workpool_id`  | string       | Workpool the job is running in                                                                                                                 |
+| `created_at`   | timestamp    | When the job was submitted (copied from `Jobs.created_at` at submission time)                                                                  |
+| `expiry`       | timestamp    | When this document may be garbage-collected                                                                                                    |
+| `last_updated` | timestamp    | When these fields were last recomputed by the monitor                                                                                          |
+| `state`        | string       | Rolled-up job state — see table below                                                                                                          |
+| `tasks`        | []StateCount | Task counts grouped by state; one entry per non-zero state                                                                                     |
+| `labels`       | []Label      | User-defined tags (copied from `Jobs.labels` at submission time and kept in sync with it — see the label mutation endpoint under `Jobs` above) |
 
 **StateCount** (embedded object):
 
@@ -523,6 +537,32 @@ One document per GCP Batch job submitted by the monitor. The document ID is the 
 | `status`                  | string    | Monitor's classification of this batch — `pending`, `started`, `completed`, `failed` (GCP itself reported the job as failed), `terminated` (the monitor's own bookkeeping — VM counts, worker registrations, heartbeats — found a problem and killed an otherwise-live job), or `deleted` (set when the GCP Batch job no longer exists, i.e. a 404 from the API) |
 | `unhealthy`               | bool      | Sticky flag set when the monitor detects a problem with this batch; never cleared                                                                                                                                                                                                                                                                                |
 | `termination_reason`      | string    | Populated when `status` is `terminated`; human-readable explanation of why the monitor killed the job (e.g. over-provisioning, no worker registered within the startup grace period, too many zombie workers)                                                                                                                                                    |
+| `labels`                  | []Label   | Copied from `WorkPool.labels` at submission time                                                                                                                                                                                                                                                                                                                 |
+
+---
+
+### `SparklesConfig`
+
+A single document, `SparklesConfig/default`, holding dashboard-backend operational defaults that aren't part of the public API surface (`openapi.yaml`) and so can't be supplied by a caller. Read once at dashboard-backend startup (`loadSparklesConfig` in `v100/dev/dashboard_backend.go`); startup fails if the document doesn't exist.
+
+| Field                      | Type     | Description                                                                                                                           |
+| -------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `gcs_prefix`               | string   | GCS prefix under which task result and log paths are written, e.g. `gs://my-bucket/results`                                           |
+| `subscriber_sa`            | string   | Service account email used to mint short-lived Pub/Sub tokens for the subscription endpoint; if empty, that endpoint returns an error |
+| `sparkles_worker_gcs_path` | string   | Default GCS path to the worker binary, used when a submitted workpool omits `sparklesWorkerGcsPath`                                   |
+| `service_account`          | string   | Default GCP service account email for worker VMs, used when a submitted workpool omits `serviceAccount`                               |
+| `region`                   | string   | Default GCP region for worker VMs, used when a submitted workpool omits `region`                                                      |
+| `zones`                    | []string | Default GCP zones eligible for worker VM placement, used when a submitted workpool omits `zones`                                      |
+
+---
+
+### `APIKeys`
+
+One document per issued API key. The document ID is the API key itself (a UUID); the body holds only the user it was issued to. Used by the dashboard's `apiKeyAuthMiddleware` to authenticate every `/api/*` request, and to auto-attach a `user=<name>` label to jobs at submission time (see the `Jobs` label-mutation note above). Managed out-of-band via the `sparkles add-api-key` CLI command, not through the dashboard API.
+
+| Field  | Type   | Description                             |
+| ------ | ------ | --------------------------------------- |
+| `user` | string | Name of the user this key was issued to |
 
 ---
 
