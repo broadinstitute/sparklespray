@@ -311,6 +311,7 @@ List job summaries with optional time range filtering. Summaries are read from t
   {
     "job_id": "string",
     "workpool_id": "string",
+    "name": "string",
     "created_at": "RFC3339 timestamp",
     "state": "string (pending | in_progress | in_progress_with_error | in_progress_with_failure | success | error | failed | killed)",
     "tasks": [{ "state": "string", "count": "integer" }],

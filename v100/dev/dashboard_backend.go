@@ -847,6 +847,7 @@ func (s *dashboardServer) handleSubmitJob(w http.ResponseWriter, r *http.Request
 	if err := summaryStore.Create(ctx, &monitor.JobSummary{
 		JobID:       jobID,
 		WorkpoolID:  workpoolID,
+		Name:        req.Name,
 		CreatedAt:   now,
 		Expiry:      now.Add(7 * 24 * time.Hour),
 		LastUpdated: now,
@@ -885,6 +886,7 @@ type labelResponse struct {
 type jobSummaryResponse struct {
 	JobID       string              `json:"job_id"`
 	WorkpoolID  string              `json:"workpool_id"`
+	Name        string              `json:"name"`
 	CreatedAt   time.Time           `json:"created_at"`
 	State       string              `json:"state"`
 	Tasks       []taskCountResponse `json:"tasks"`
@@ -975,6 +977,7 @@ func jobSummaryToResponse(js *monitor.JobSummary) jobSummaryResponse {
 	return jobSummaryResponse{
 		JobID:       js.JobID,
 		WorkpoolID:  js.WorkpoolID,
+		Name:        js.Name,
 		CreatedAt:   js.CreatedAt,
 		State:       string(js.State),
 		Tasks:       tasks,

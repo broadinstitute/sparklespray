@@ -470,6 +470,7 @@ Any question about job progress — "is this job still running?", "how many task
 | -------------- | ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
 | `job_id`       | string       | ID of the job this summary describes                                                                                                           |
 | `workpool_id`  | string       | Workpool the job is running in                                                                                                                 |
+| `name`         | string       | Human-readable label for the job (copied from `Jobs.name` at submission time; not updated thereafter)                                          |
 | `created_at`   | timestamp    | When the job was submitted (copied from `Jobs.created_at` at submission time)                                                                  |
 | `expiry`       | timestamp    | When this document may be garbage-collected                                                                                                    |
 | `last_updated` | timestamp    | When these fields were last recomputed by the monitor                                                                                          |

@@ -21,8 +21,8 @@ const (
 type BatchStatus string
 
 const (
-	BatchStatusPending   BatchStatus = "pending"
-	BatchStatusStarted   BatchStatus = "started"
+	BatchStatusPending BatchStatus = "pending"
+	BatchStatusStarted BatchStatus = "started"
 	// BatchStatusFailed marks a batch that GCP itself reported as failed.
 	BatchStatusFailed    BatchStatus = "failed"
 	BatchStatusCompleted BatchStatus = "completed"
@@ -295,10 +295,10 @@ type StateCount struct {
 // mutable state written by the monitor.
 type WorkPoolSummary struct {
 	// Fields copied from WorkPool
-	WorkpoolID                    string  `firestore:"workpool_id"`
-	MachineType                   string  `firestore:"machine_type"`
-	Labels                        []Label `firestore:"labels"`
-	MaxPreemptibleWorkerAttempts  int     `firestore:"max_preemptible_worker_attempts"`
+	WorkpoolID                   string  `firestore:"workpool_id"`
+	MachineType                  string  `firestore:"machine_type"`
+	Labels                       []Label `firestore:"labels"`
+	MaxPreemptibleWorkerAttempts int     `firestore:"max_preemptible_worker_attempts"`
 
 	// Monitor-maintained fields
 	Expiry                        time.Time      `firestore:"expiry"`
@@ -319,9 +319,9 @@ type WorkPoolSummary struct {
 // WorkPoolSummaryHistory is an append-only snapshot written each time the monitor
 // updates a WorkPoolSummary.
 type WorkPoolSummaryHistory struct {
-	WorkpoolID                    string        `firestore:"workpool_id"`
-	Timestamp                     time.Time     `firestore:"timestamp"`
-	Expiry                        time.Time     `firestore:"expiry"`
+	WorkpoolID                    string         `firestore:"workpool_id"`
+	Timestamp                     time.Time      `firestore:"timestamp"`
+	Expiry                        time.Time      `firestore:"expiry"`
 	State                         WorkPoolStatus `firestore:"state"`
 	StateMessage                  string         `firestore:"state_message"`
 	LastIncidentAt                time.Time      `firestore:"last_incident_at"`
@@ -381,6 +381,7 @@ type Label struct {
 type JobSummary struct {
 	JobID       string       `firestore:"job_id"`
 	WorkpoolID  string       `firestore:"workpool_id"`
+	Name        string       `firestore:"name"`
 	CreatedAt   time.Time    `firestore:"created_at"`
 	Expiry      time.Time    `firestore:"expiry"`
 	LastUpdated time.Time    `firestore:"last_updated"`
