@@ -1530,7 +1530,7 @@ func (s *dashboardServer) handleGetTaskLog(w http.ResponseWriter, r *http.Reques
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"entries":    entries,
-		"next_after": nextAfter.Format(time.RFC3339),
+		"next_after": nextAfter.Format(time.RFC3339Nano),
 	})
 }
 
@@ -1719,7 +1719,7 @@ func (s *dashboardServer) handleListEvents(w http.ResponseWriter, r *http.Reques
 	// EventProvider on the frontend); it only makes sense in ascending
 	// order, where the last-iterated event is also the most recent one.
 	if !descending && !lastTimestamp.IsZero() {
-		resp["next_after"] = lastTimestamp.Format(time.RFC3339)
+		resp["next_after"] = lastTimestamp.Format(time.RFC3339Nano)
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
