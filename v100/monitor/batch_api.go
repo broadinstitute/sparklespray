@@ -231,6 +231,7 @@ func (c *GCPBatchAPIClient) CreateJob(ctx context.Context, spec *WorkerJobSpec) 
 			Instances: []*batch.InstancePolicyOrTemplate{
 				{
 					Policy: &batch.InstancePolicy{
+						BootDisk:          &batch.Disk{SizeGb: int64(spec.BootDiskSizeGb), Type: spec.BootDiskType},
 						MachineType:       spec.MachineType,
 						ProvisioningModel: provisioningModel,
 						Disks:             disks,

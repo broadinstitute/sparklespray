@@ -77,6 +77,8 @@ type WorkPool struct {
 	RootDir               string
 	SparklesWorkerGCSPath string
 	EmptyVolumes          []EmptyVolume
+	BootDiskSizeGb        int
+	BootDiskType          string
 	Resources             []ResourceEntry
 	ServiceAccount        string
 	Labels                []Label
@@ -201,6 +203,8 @@ type WorkerJobSpec struct {
 	Resources             []ResourceEntry
 	Labels                []Label
 	LingerTime            time.Duration
+	BootDiskSizeGb        int
+	BootDiskType          string
 }
 
 // ----- External service interfaces -----

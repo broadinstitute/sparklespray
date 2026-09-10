@@ -251,6 +251,8 @@ Submit a new job. Creates the `WorkPool` (if it doesn't already exist), the `Job
     "id": "string (optional; see below)",
     "projectID": "string (optional; must match ^[a-z][a-z0-9-]{4,28}[a-z0-9]$ if set)",
     "machineType": "string (required)",
+    "bootDiskSizeGb": "integer (default: 50)",
+    "bootDiskType": "string (default: pd-balanced)",
     "rootDir": "string (default: /mnt/sparkles)",
     "sparklesWorkerGCSPath": "string (default: SparklesConfig.sparkles_worker_gcs_path)",
     "resources": [{ "name": "string", "value": "float64" }],

@@ -27,6 +27,8 @@ type WorkpoolSpec struct {
 	Zones                 []string             `json:"zones"`
 	ServiceAccount        string               `json:"serviceAccount"`
 	Labels                []v100.Label         `json:"labels"`
+	BootDiskSizeGb        int                  `json:"bootDiskSizeGb"`
+	BootDiskType          string               `json:"bootDiskType"`
 
 	MaxWorkerCount               int `json:"maxWorkerCount"`
 	MaxPreemptibleWorkerAttempts int `json:"maxPreemptibleWorkerAttempts"`

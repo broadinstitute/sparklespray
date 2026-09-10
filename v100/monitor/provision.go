@@ -136,7 +136,8 @@ func (a *Monitor) submitBatch(ctx context.Context, pool *WorkPool, vmCount int, 
 		Labels:                pool.Labels,
 		DBName:                a.dbName,
 		LingerTime:            pool.LingerTime,
-	})
+		BootDiskSizeGb:        pool.BootDiskSizeGb,
+		BootDiskType:          pool.BootDiskType})
 	if err != nil {
 		if a.batchOutcomes != nil {
 			if pubErr := a.batchOutcomes.PublishBatchFailed(ctx, pool.WorkpoolID, err.Error()); pubErr != nil {

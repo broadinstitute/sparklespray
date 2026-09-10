@@ -152,6 +152,21 @@ components:
           type: string
           description: GCE machine type to use for worker VMs.
           example: n2-standard-2
+        bootDiskSizeGb:
+          type: integer
+          description: |-
+            Boot disk size, in gigabytes, for worker VMs. Defaults to 50 if omitted
+            (see `applyWorkpoolDefaults`). Stored as `WorkPool.BootDiskSizeGb`
+            (firestore field `boot_disk_size_gb`).
+          example: 50
+        bootDiskType:
+          type: string
+          description: |-
+            GCE boot disk type for worker VMs (e.g. `pd-standard`, `pd-balanced`,
+            `pd-ssd`). Defaults to `pd-balanced` if omitted (see
+            `applyWorkpoolDefaults`). Stored as `WorkPool.BootDiskType` (firestore
+            field `boot_disk_type`).
+          example: pd-balanced
         rootDir:
           type: string
           description: Root directory on the worker VM under which tasks execute and files are localized.

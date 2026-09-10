@@ -683,6 +683,12 @@ func applyWorkpoolDefaults(spec *WorkpoolSpec, config *SparklesConfig) {
 	if spec.LingerTimeSec == 0 {
 		spec.LingerTimeSec = 600
 	}
+	if spec.BootDiskSizeGb == 0 {
+		spec.BootDiskSizeGb = 50
+	}
+	if spec.BootDiskType == "" {
+		spec.BootDiskType = "pd-balanced"
+	}
 }
 
 // workpoolIDRe matches valid workpool IDs: at most 35 characters, starting
@@ -762,6 +768,8 @@ func (s *dashboardServer) handleSubmitJob(w http.ResponseWriter, r *http.Request
 		WorkpoolID:            workpoolID,
 		ProjectID:             req.Workpool.ProjectID,
 		MachineType:           req.Workpool.MachineType,
+		BootDiskSizeGb:        req.Workpool.BootDiskSizeGb,
+		BootDiskType:          req.Workpool.BootDiskType,
 		RootDir:               req.Workpool.RootDir,
 		SparklesWorkerGCSPath: req.Workpool.SparklesWorkerGCSPath,
 		ServiceAccount:        req.Workpool.ServiceAccount,

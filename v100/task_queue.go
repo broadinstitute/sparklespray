@@ -76,6 +76,9 @@ type WorkPool struct {
 	// always stays in the monitor's own project.
 	ProjectID   string `firestore:"project_id"`
 	MachineType string `firestore:"machine_type"`
+	// BootDiskSizeGb/BootDiskType configure the boot disk of worker VMs.
+	BootDiskSizeGb        int             `firestore:"boot_disk_size_gb"`
+	BootDiskType          string          `firestore:"boot_disk_type"`
 	RootDir               string          `firestore:"root_dir"`
 	SparklesWorkerGCSPath string          `firestore:"sparkles_worker_gcs_path"`
 	ServiceAccount        string          `firestore:"service_account"`

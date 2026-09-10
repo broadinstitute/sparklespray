@@ -38,6 +38,8 @@ type firestoreWorkPool struct {
 	WorkpoolID            string          `firestore:"workpool_id"`
 	ProjectID             string          `firestore:"project_id"`
 	MachineType           string          `firestore:"machine_type"`
+	BootDiskSizeGb        int             `firestore:"boot_disk_size_gb"`
+	BootDiskType          string          `firestore:"boot_disk_type"`
 	Region                string          `firestore:"region"`
 	Zones                 []string        `firestore:"zones"`
 	Expiry                time.Time       `firestore:"expiry"`
@@ -73,6 +75,8 @@ func toWorkPool(f *firestoreWorkPool) *WorkPool {
 		Region:                       f.Region,
 		Zones:                        f.Zones,
 		MachineType:                  f.MachineType,
+		BootDiskSizeGb:               f.BootDiskSizeGb,
+		BootDiskType:                 f.BootDiskType,
 		RootDir:                      f.RootDir,
 		SparklesWorkerGCSPath:        f.SparklesWorkerGCSPath,
 		EmptyVolumes:                 f.EmptyVolumes,

@@ -56,6 +56,8 @@ func runDevAddWorker(c *cli.Context) error {
 		ServiceAccount:        workpoolSpec.ServiceAccount,
 		DBName:                db,
 		LingerTime:            time.Duration(workpoolSpec.LingerTimeSec) * time.Second,
+		BootDiskSizeGb:        workpoolSpec.BootDiskSizeGb,
+		BootDiskType:          workpoolSpec.BootDiskType,
 	})
 	if err != nil {
 		return fmt.Errorf("creating batch job: %w", err)
