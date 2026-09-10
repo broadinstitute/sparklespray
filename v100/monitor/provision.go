@@ -91,12 +91,19 @@ func (a *Monitor) runProvisioningPollForWorkpool(ctx context.Context, ws *WorkPo
 	maxPerRequest := param(pool.MaxWorkersPerRequest, defaultMaxWorkersPerRequest)
 	toRequest := min(needed, maxPerRequest)
 
-	preemptibleAttempted, err := a.batches.SumPreemptibleVMCount(ctx, pool.WorkpoolID)
+	// MaxPreemptibleWorkerAttempts is enforced as a rolling budget, not a
+	// lifetime total: it's the number of zombie incidents (our proxy for
+	// preemption — see IncidentTypeZombie) tolerated within
+	// defaultPreemptionLookbackWindow before falling back to on-demand.
+	// This lets each new job get its own full preemptible allowance rather
+	// than being starved by an earlier job's usage of the same workpool.
+	since := now.Add(-defaultPreemptionLookbackWindow)
+	recentZombies, err := a.events.ListRecentWorkpoolIncidentsByType(ctx, pool.WorkpoolID, IncidentTypeZombie, since)
 	if err != nil {
-		return fmt.Errorf("sum preemptible VM count: %w", err)
+		return fmt.Errorf("list recent zombie incidents for workpool %s: %w", pool.WorkpoolID, err)
 	}
 
-	remainingPreemptible := max(0, pool.MaxPreemptibleWorkerAttempts-preemptibleAttempted)
+	remainingPreemptible := max(0, pool.MaxPreemptibleWorkerAttempts-len(recentZombies))
 	preemptibleCount := min(toRequest, remainingPreemptible)
 	nonPreemptibleCount := toRequest - preemptibleCount
 

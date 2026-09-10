@@ -37,6 +37,9 @@ type EventRecord struct {
 	NewState string `firestore:"new_state"`
 	// Workpool state change fields (populated for workpool_state_change)
 	StateMessage string `firestore:"state_message"`
+	// IncidentType is populated for workpool_incident: the kind of watchdog
+	// anomaly detected (see monitor.IncidentType* constants, e.g. "zombie").
+	IncidentType string `firestore:"incident_type"`
 }
 
 // WorkerEvent is published to sparkles-events and recorded in Events on worker
@@ -108,9 +111,10 @@ type BatchSucceededEvent struct {
 // fields are derived by querying recent workpool_incident events rather than
 // from persisted mutable state.
 type WorkpoolIncidentEvent struct {
-	Type       string `json:"type"`
-	WorkpoolID string `json:"workpool_id"`
-	Reason     string `json:"reason"`
+	Type         string `json:"type"`
+	WorkpoolID   string `json:"workpool_id"`
+	Reason       string `json:"reason"`
+	IncidentType string `json:"incident_type"`
 }
 
 // EventPublisher writes events to the sparkles-events Pub/Sub topic and
@@ -270,8 +274,8 @@ func (ep *EventPublisher) PublishBatchSucceeded(ctx context.Context, workpoolID 
 
 // PublishWorkpoolIncident records and publishes a workpool_incident event.
 // Satisfies the monitor.WorkpoolIncidentPublisher interface.
-func (ep *EventPublisher) PublishWorkpoolIncident(ctx context.Context, workpoolID, reason string) error {
-	event := WorkpoolIncidentEvent{Type: "workpool_incident", WorkpoolID: workpoolID, Reason: reason}
+func (ep *EventPublisher) PublishWorkpoolIncident(ctx context.Context, workpoolID, incidentType, reason string) error {
+	event := WorkpoolIncidentEvent{Type: "workpool_incident", WorkpoolID: workpoolID, Reason: reason, IncidentType: incidentType}
 	now := time.Now()
 	record := EventRecord{
 		EventID:      uuid.New().String(),
@@ -280,6 +284,7 @@ func (ep *EventPublisher) PublishWorkpoolIncident(ctx context.Context, workpoolI
 		Expiry:       now.Add(eventTTL),
 		WorkpoolID:   workpoolID,
 		StateMessage: reason,
+		IncidentType: incidentType,
 	}
 	return ep.recordAndPublish(ctx, record, event)
 }

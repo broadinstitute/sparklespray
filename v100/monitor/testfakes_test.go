@@ -421,19 +421,6 @@ func (s *FakeBatchRequestStore) ListAllByWorkpool(ctx context.Context, workpoolI
 	return result, nil
 }
 
-func (s *FakeBatchRequestStore) SumPreemptibleVMCount(ctx context.Context, workpoolID string) (int, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	total := 0
-	for _, b := range s.batches {
-		if b.WorkpoolID == workpoolID && b.Preemptible {
-			total += b.ExpectedVMCount
-		}
-	}
-	return total, nil
-}
-
 func copyBatch(b *BatchAPIRequest) *BatchAPIRequest {
 	cp := *b
 	if b.RunningSince != nil {
@@ -803,8 +790,8 @@ func (f *FakeEventStore) AddBatchOutcome(workpoolID string, failed bool, ts time
 }
 
 // PublishWorkpoolIncident implements WorkpoolIncidentPublisher.
-func (f *FakeEventStore) PublishWorkpoolIncident(_ context.Context, workpoolID, reason string) error {
-	f.AddWorkpoolIncident(workpoolID, reason, f.now())
+func (f *FakeEventStore) PublishWorkpoolIncident(_ context.Context, workpoolID, incidentType, reason string) error {
+	f.AddWorkpoolIncident(workpoolID, incidentType, reason, f.now())
 	return nil
 }
 
@@ -822,11 +809,25 @@ func (f *FakeEventStore) ListRecentWorkpoolIncidents(_ context.Context, workpool
 	return out, nil
 }
 
+// ListRecentWorkpoolIncidentsByType returns incidents for workpoolID matching
+// incidentType with timestamp > since, ordered most-recent-first, matching
+// FirestoreEventStore's contract.
+func (f *FakeEventStore) ListRecentWorkpoolIncidentsByType(_ context.Context, workpoolID, incidentType string, since time.Time) ([]WorkpoolIncident, error) {
+	var out []WorkpoolIncident
+	for _, i := range f.WorkpoolIncidents {
+		if i.WorkpoolID == workpoolID && i.IncidentType == incidentType && i.Timestamp.After(since) {
+			out = append(out, i.WorkpoolIncident)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Timestamp.After(out[j].Timestamp) })
+	return out, nil
+}
+
 // AddWorkpoolIncident records a workpool_incident event for workpoolID at ts.
-func (f *FakeEventStore) AddWorkpoolIncident(workpoolID, message string, ts time.Time) {
+func (f *FakeEventStore) AddWorkpoolIncident(workpoolID, incidentType, message string, ts time.Time) {
 	f.WorkpoolIncidents = append(f.WorkpoolIncidents, fakeWorkpoolIncident{
 		WorkpoolID:       workpoolID,
-		WorkpoolIncident: WorkpoolIncident{Message: message, Timestamp: ts},
+		WorkpoolIncident: WorkpoolIncident{IncidentType: incidentType, Message: message, Timestamp: ts},
 	})
 }
 

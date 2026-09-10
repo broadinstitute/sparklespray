@@ -366,30 +366,6 @@ func (s *FirestoreBatchRequestStore) ListAllByWorkpool(ctx context.Context, work
 	return batches, nil
 }
 
-func (s *FirestoreBatchRequestStore) SumPreemptibleVMCount(ctx context.Context, workpoolID string) (int, error) {
-	iter := s.fs.Collection(batchRequestCollection).
-		Where("workpool_id", "==", workpoolID).
-		Where("preemptible", "==", true).
-		Documents(ctx)
-
-	total := 0
-	for {
-		snap, err := iter.Next()
-		if err == iterator.Done {
-			break
-		}
-		if err != nil {
-			return 0, err
-		}
-		var f firestoreBatchRequest
-		if err := snap.DataTo(&f); err != nil {
-			return 0, err
-		}
-		total += f.ExpectedVMCount
-	}
-	return total, nil
-}
-
 // ----- FirestoreWorkerStore -----
 
 type firestoreWorker struct {
@@ -775,6 +751,7 @@ type firestoreEventRecord struct {
 	Timestamp    time.Time `firestore:"timestamp"`
 	WorkpoolID   string    `firestore:"workpool_id"`
 	StateMessage string    `firestore:"state_message"`
+	IncidentType string    `firestore:"incident_type"`
 }
 
 func (s *FirestoreEventStore) ListJobCreatedSince(ctx context.Context, since time.Time) ([]JobCreatedRecord, error) {
@@ -842,6 +819,24 @@ func (s *FirestoreEventStore) ListRecentWorkpoolIncidents(ctx context.Context, w
 		Where("type", "==", "workpool_incident").
 		Where("timestamp", ">", since).
 		OrderBy("timestamp", firestore.Desc)
+	return s.queryWorkpoolIncidents(ctx, q)
+}
+
+// ListRecentWorkpoolIncidentsByType returns workpool_incident events for
+// workpoolID matching incidentType with timestamp > since, ordered
+// most-recent-first. Used by provisioning to count recent zombie incidents
+// (a proxy for preemption) against MaxPreemptibleWorkerAttempts.
+func (s *FirestoreEventStore) ListRecentWorkpoolIncidentsByType(ctx context.Context, workpoolID, incidentType string, since time.Time) ([]WorkpoolIncident, error) {
+	q := s.fs.Collection(eventsCollection).
+		Where("workpool_id", "==", workpoolID).
+		Where("type", "==", "workpool_incident").
+		Where("incident_type", "==", incidentType).
+		Where("timestamp", ">", since).
+		OrderBy("timestamp", firestore.Desc)
+	return s.queryWorkpoolIncidents(ctx, q)
+}
+
+func (s *FirestoreEventStore) queryWorkpoolIncidents(ctx context.Context, q firestore.Query) ([]WorkpoolIncident, error) {
 	iter := q.Documents(ctx)
 	defer iter.Stop()
 
@@ -859,8 +854,9 @@ func (s *FirestoreEventStore) ListRecentWorkpoolIncidents(ctx context.Context, w
 			continue
 		}
 		results = append(results, WorkpoolIncident{
-			Message:   rec.StateMessage,
-			Timestamp: rec.Timestamp,
+			IncidentType: rec.IncidentType,
+			Message:      rec.StateMessage,
+			Timestamp:    rec.Timestamp,
 		})
 	}
 	return results, nil

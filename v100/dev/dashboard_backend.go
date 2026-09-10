@@ -1595,6 +1595,9 @@ type eventResponse struct {
 	StateMessage string `json:"state_message,omitempty"`
 	// CleanlyTerminated is populated for worker_stopped events.
 	CleanlyTerminated bool `json:"cleanly_terminated,omitempty"`
+	// IncidentType is populated for workpool_incident events (see
+	// monitor.IncidentType* constants, e.g. "zombie").
+	IncidentType string `json:"incident_type,omitempty"`
 }
 
 func (s *dashboardServer) handleListEvents(w http.ResponseWriter, r *http.Request) {
@@ -1711,6 +1714,7 @@ func (s *dashboardServer) handleListEvents(w http.ResponseWriter, r *http.Reques
 			NewState:          ev.NewState,
 			StateMessage:      ev.StateMessage,
 			CleanlyTerminated: ev.CleanlyTerminated,
+			IncidentType:      ev.IncidentType,
 		})
 	}
 

@@ -28,6 +28,43 @@ const (
 	// is "things never start" — a burst of failures right now — not a slow
 	// drift over hours.
 	defaultHaltCheckWindow = 1 * time.Hour
+
+	// defaultPreemptionLookbackWindow bounds how far back
+	// runProvisioningPollForWorkpool looks for zombie incidents (our proxy
+	// for preemption) when enforcing MaxPreemptibleWorkerAttempts. A rolling
+	// window (rather than a lifetime total) means the preemptible budget
+	// recovers over time instead of being permanently consumed by one job.
+	defaultPreemptionLookbackWindow = 1 * time.Hour
+)
+
+// Incident types recorded on workpool_incident events, distinguishing the
+// kind of anomaly recordIncident was called for. IncidentTypeZombie is used
+// as a (deliberately imprecise) proxy for "this worker was preempted" when
+// enforcing MaxPreemptibleWorkerAttempts — see runProvisioningPollForWorkpool.
+const (
+	// IncidentTypeZombie: a worker's heartbeat expired without a clean
+	// shutdown (runRequeueOrphanedTasks) — crashed, preempted, or otherwise
+	// stopped responding.
+	IncidentTypeZombie = "zombie"
+	// IncidentTypeZombieTerminated: the cluster reconciler found a worker
+	// whose heartbeat expired while its VM was still running (per GCP), and
+	// terminated the VM.
+	IncidentTypeZombieTerminated = "zombie_terminated"
+	// IncidentTypeVMStartupFailure: a VM never registered a worker within
+	// the startup grace period, while other VMs in the same batch did.
+	IncidentTypeVMStartupFailure = "vm_startup_failure"
+	// IncidentTypeOverProvisioned: more VMs were found running than the
+	// batch expected; the batch was aborted.
+	IncidentTypeOverProvisioned = "over_provisioned"
+	// IncidentTypeNoWorkersRegistered: no worker ever registered for a
+	// batch within the startup grace period; the batch was aborted.
+	IncidentTypeNoWorkersRegistered = "no_workers_registered"
+	// IncidentTypeTooManyZombies: the number of zombie workers in a batch
+	// exceeded MaxZombiesBeforeAbort; the batch was aborted.
+	IncidentTypeTooManyZombies = "too_many_zombies"
+	// IncidentTypeBatchAPIFailure: GCP's Batch API itself reported the job
+	// as failed.
+	IncidentTypeBatchAPIFailure = "batch_api_failure"
 )
 
 // activeTasks is the set of task statuses that are orphaned back to pending when a worker dies.
@@ -346,9 +383,9 @@ func (a *Monitor) saveState(ctx context.Context, state *WorkPoolState, message s
 // (updateWorkPoolSummary), which derives it (along with the
 // StateMessage/LastIncidentAt/IncidentCount shown on WorkPoolSummary) from
 // recent workpool_incident events — see EventStore.ListRecentWorkpoolIncidents.
-func (a *Monitor) recordIncident(ctx context.Context, workpoolID, message string) {
+func (a *Monitor) recordIncident(ctx context.Context, workpoolID, incidentType, message string) {
 	if a.workpoolIncidents != nil {
-		if err := a.workpoolIncidents.PublishWorkpoolIncident(ctx, workpoolID, message); err != nil {
+		if err := a.workpoolIncidents.PublishWorkpoolIncident(ctx, workpoolID, incidentType, message); err != nil {
 			log.Printf("recordIncident: publish workpool_incident for %s: %v", workpoolID, err)
 		}
 	}
@@ -359,7 +396,7 @@ func (a *Monitor) recordIncident(ctx context.Context, workpoolID, message string
 // halt threshold. Use markBatchTerminated instead when the monitor is the
 // one deciding to kill an otherwise-live job.
 func (a *Monitor) markBatchFailed(ctx context.Context, ws *WorkPoolWithState, batch *BatchAPIRequest, reason string, now time.Time) error {
-	return a.markBatchDone(ctx, ws, batch, BatchStatusFailed, reason, now)
+	return a.markBatchDone(ctx, ws, batch, BatchStatusFailed, IncidentTypeBatchAPIFailure, reason, now)
 }
 
 // markBatchTerminated records batch as terminated (the monitor's own
@@ -368,19 +405,19 @@ func (a *Monitor) markBatchFailed(ctx context.Context, ws *WorkPoolWithState, ba
 // TerminationReason, logs an incident, publishes a batch_failed event (the
 // same outcome event type as markBatchFailed — both mean "this batch didn't
 // work out" for halt-counting purposes), and checks the halt threshold.
-func (a *Monitor) markBatchTerminated(ctx context.Context, ws *WorkPoolWithState, batch *BatchAPIRequest, reason string, now time.Time) error {
+func (a *Monitor) markBatchTerminated(ctx context.Context, ws *WorkPoolWithState, batch *BatchAPIRequest, incidentType, reason string, now time.Time) error {
 	batch.TerminationReason = reason
-	return a.markBatchDone(ctx, ws, batch, BatchStatusTerminated, reason, now)
+	return a.markBatchDone(ctx, ws, batch, BatchStatusTerminated, incidentType, reason, now)
 }
 
 // markBatchDone centralizes the pattern repeated across
 // cluster_reconciler.go and batch_startup_monitor.go's failure-detection
 // call sites: set batch.Status/Unhealthy, save it, log an incident, publish
 // a batch_failed event, and check the halt threshold.
-func (a *Monitor) markBatchDone(ctx context.Context, ws *WorkPoolWithState, batch *BatchAPIRequest, status BatchStatus, reason string, now time.Time) error {
+func (a *Monitor) markBatchDone(ctx context.Context, ws *WorkPoolWithState, batch *BatchAPIRequest, status BatchStatus, incidentType, reason string, now time.Time) error {
 	batch.Status = status
 	batch.Unhealthy = true
-	a.recordIncident(ctx, ws.Pool.WorkpoolID, reason)
+	a.recordIncident(ctx, ws.Pool.WorkpoolID, incidentType, reason)
 	if err := a.batches.Save(ctx, batch); err != nil {
 		return fmt.Errorf("save batch: %w", err)
 	}

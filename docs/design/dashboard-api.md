@@ -104,6 +104,8 @@ Get a single workpool's configuration and current status.
 
 **Firestore**: `WorkPools/{workpool_id}` — key lookup, plus a second best-effort key lookup on `WorkPoolSummary/{workpool_id}` for the mutable `state`/`state_message`/`last_incident_at`/`incident_count` fields. If the summary doc doesn't exist (or fails to parse), those fields are silently left zero-valued rather than the request failing.
 
+`max_preemptible_worker_attempts` is enforced by the monitor as a **rolling 1-hour budget** of `zombie`-type `workpool_incident` events (its proxy for preemption) for the workpool, not a lifetime total — see the `Events`/`workpool_incident` discussion in `datamodel.md`.
+
 ---
 
 ### `GET /api/v1/workpool/{workpool_id}/batches`
@@ -778,7 +780,8 @@ Query the event log.
       "old_state": "string, omitted if not applicable",
       "new_state": "string, omitted if not applicable",
       "state_message": "string, omitted if not applicable (carries the workpool_state_change message or the batch_failed reason)",
-      "cleanly_terminated": "boolean, omitted if not applicable (worker_stopped only)"
+      "cleanly_terminated": "boolean, omitted if not applicable (worker_stopped only)",
+      "incident_type": "string, omitted if not applicable (workpool_incident only) -- e.g. \"zombie\", \"over_provisioned\"; see the Events collection docs in datamodel.md for the full list"
     }
   ],
   "next_after": "RFC3339 timestamp (timestamp of last entry)"

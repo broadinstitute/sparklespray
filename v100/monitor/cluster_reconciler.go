@@ -116,7 +116,7 @@ func (a *Monitor) reconcileVMs(ctx context.Context, ws *WorkPoolWithState, batch
 		if err := a.batchAPI.TerminateJob(ctx, batch.JobID); err != nil {
 			log.Printf("cluster reconciler: terminate job %s (over-provisioning): %v", batch.JobID, err)
 		}
-		return a.markBatchTerminated(ctx, ws, batch,
+		return a.markBatchTerminated(ctx, ws, batch, IncidentTypeOverProvisioned,
 			fmt.Sprintf("Over-provisioning: %d VMs running, expected %d", len(gcpVMs), batch.ExpectedVMCount),
 			now)
 	}
@@ -130,7 +130,7 @@ func (a *Monitor) reconcileVMs(ctx context.Context, ws *WorkPoolWithState, batch
 			if err := a.batchAPI.TerminateJob(ctx, batch.JobID); err != nil {
 				log.Printf("cluster reconciler: terminate job %s (no workers): %v", batch.JobID, err)
 			}
-			return a.markBatchTerminated(ctx, ws, batch,
+			return a.markBatchTerminated(ctx, ws, batch, IncidentTypeNoWorkersRegistered,
 				fmt.Sprintf("Batch %s: no worker registered within grace period", batch.BatchID),
 				now)
 		}
@@ -144,7 +144,7 @@ func (a *Monitor) reconcileVMs(ctx context.Context, ws *WorkPoolWithState, batch
 				}
 				batch.Unhealthy = true
 				batchDirty = true
-				a.recordIncident(ctx, ws.Pool.WorkpoolID, fmt.Sprintf("VM %s failed to start a worker", instanceName))
+				a.recordIncident(ctx, ws.Pool.WorkpoolID, IncidentTypeVMStartupFailure, fmt.Sprintf("VM %s failed to start a worker", instanceName))
 			}
 		}
 		if batchDirty {
@@ -175,7 +175,7 @@ func (a *Monitor) reconcileVMs(ctx context.Context, ws *WorkPoolWithState, batch
 		if err := a.batchAPI.TerminateJob(ctx, batch.JobID); err != nil {
 			log.Printf("cluster reconciler: terminate job %s (too many zombies): %v", batch.JobID, err)
 		}
-		return a.markBatchTerminated(ctx, ws, batch,
+		return a.markBatchTerminated(ctx, ws, batch, IncidentTypeTooManyZombies,
 			fmt.Sprintf("Too many zombie workers (%d), aborting batch", len(zombies)),
 			now)
 	}
@@ -187,7 +187,7 @@ func (a *Monitor) reconcileVMs(ctx context.Context, ws *WorkPoolWithState, batch
 		}
 		batch.Unhealthy = true
 		batchDirty = true
-		a.recordIncident(ctx, ws.Pool.WorkpoolID, fmt.Sprintf("Terminated zombie worker %s on %s", z.WorkerID, z.InstanceName))
+		a.recordIncident(ctx, ws.Pool.WorkpoolID, IncidentTypeZombieTerminated, fmt.Sprintf("Terminated zombie worker %s on %s", z.WorkerID, z.InstanceName))
 	}
 	if batchDirty {
 		if err := a.batches.Save(ctx, batch); err != nil {

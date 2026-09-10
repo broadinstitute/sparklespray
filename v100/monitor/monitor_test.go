@@ -177,11 +177,12 @@ func TestHaltThreshold_AlreadyHaltedStaysHalted(t *testing.T) {
 func TestRecordIncident_PublishesIncident(t *testing.T) {
 	w := newWorld()
 
-	w.A.recordIncident(context.Background(), "pool-1", "something went wrong")
+	w.A.recordIncident(context.Background(), "pool-1", IncidentTypeZombie, "something went wrong")
 
 	require.Len(t, w.Events.WorkpoolIncidents, 1)
 	incident := w.Events.WorkpoolIncidents[0]
 	assert.Equal(t, "pool-1", incident.WorkpoolID)
+	assert.Equal(t, IncidentTypeZombie, incident.IncidentType)
 	assert.Equal(t, "something went wrong", incident.Message)
 	assert.Equal(t, epoch, incident.Timestamp)
 }

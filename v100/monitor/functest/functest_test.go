@@ -133,14 +133,6 @@ func TestAdapterRoundTrips(t *testing.T) {
 			t.Errorf("ListByWorkpool order: want %s first, got %s", batch2.BatchID, list[0].BatchID)
 		}
 
-		sum, err := batches.SumPreemptibleVMCount(ctx, poolID)
-		if err != nil {
-			t.Fatalf("SumPreemptibleVMCount: %v", err)
-		}
-		if sum != 2 {
-			t.Errorf("SumPreemptibleVMCount: want 2, got %d", sum)
-		}
-
 		// Save: update status.
 		got.Status = monitor.BatchStatusStarted
 		if err := batches.Save(ctx, got); err != nil {
@@ -149,6 +141,48 @@ func TestAdapterRoundTrips(t *testing.T) {
 		reread, _ := batches.Get(ctx, batchID)
 		if reread.Status != monitor.BatchStatusStarted {
 			t.Errorf("Status after Save: want started, got %s", reread.Status)
+		}
+	})
+
+	t.Run("EventStore", func(t *testing.T) {
+		events := monitor.NewFirestoreEventStore(fs)
+		poolID := "pool-" + randomID()
+		now := time.Now().UTC()
+		since := now.Add(-time.Hour)
+
+		writeWorkpoolIncident(t, ctx, fs, &fsWorkpoolIncidentDoc{
+			Timestamp:    now,
+			WorkpoolID:   poolID,
+			StateMessage: "worker w1 stopped responding",
+			IncidentType: monitor.IncidentTypeZombie,
+		})
+		writeWorkpoolIncident(t, ctx, fs, &fsWorkpoolIncidentDoc{
+			Timestamp:    now,
+			WorkpoolID:   poolID,
+			StateMessage: "too many VMs running",
+			IncidentType: monitor.IncidentTypeOverProvisioned,
+		})
+
+		all, err := events.ListRecentWorkpoolIncidents(ctx, poolID, since)
+		if err != nil {
+			t.Fatalf("ListRecentWorkpoolIncidents: %v", err)
+		}
+		if len(all) != 2 {
+			t.Errorf("ListRecentWorkpoolIncidents: want 2, got %d", len(all))
+		}
+
+		// This query needs a composite Firestore index on
+		// (workpool_id ==, type ==, incident_type ==, timestamp >, ORDER BY
+		// timestamp) — this test exists to catch a missing index.
+		zombies, err := events.ListRecentWorkpoolIncidentsByType(ctx, poolID, monitor.IncidentTypeZombie, since)
+		if err != nil {
+			t.Fatalf("ListRecentWorkpoolIncidentsByType: %v", err)
+		}
+		if len(zombies) != 1 {
+			t.Errorf("ListRecentWorkpoolIncidentsByType: want 1, got %d", len(zombies))
+		}
+		if len(zombies) > 0 && zombies[0].IncidentType != monitor.IncidentTypeZombie {
+			t.Errorf("ListRecentWorkpoolIncidentsByType: want incident_type %s, got %s", monitor.IncidentTypeZombie, zombies[0].IncidentType)
 		}
 	})
 

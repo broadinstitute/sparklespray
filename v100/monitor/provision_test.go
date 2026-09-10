@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -174,14 +175,11 @@ func TestProvision_ExhaustedPreemptibleBudget_AllNonPreemptible(t *testing.T) {
 	pool := defaultPool("pool-1")
 	pool.MaxPreemptibleWorkerAttempts = 10
 	w.Pools.Add(pool)
-	// Simulate 10 preemptible VMs already submitted in a previous batch.
-	w.Batches.Add(&BatchAPIRequest{
-		BatchID:         "prior-batch",
-		WorkpoolID:      "pool-1",
-		Preemptible:     true,
-		ExpectedVMCount: 10,
-		Status:          BatchStatusStarted,
-	})
+	// Simulate 10 zombie incidents (our proxy for preemption) recorded
+	// within the last hour.
+	for i := 0; i < 10; i++ {
+		w.Events.AddWorkpoolIncident("pool-1", IncidentTypeZombie, "worker stopped responding", w.Clock.Now())
+	}
 	for i := 0; i < 20; i++ {
 		w.Tasks.Add(&Task{TaskID: taskID(i), WorkpoolID: "pool-1", Status: TaskStatusPending})
 	}
@@ -190,6 +188,83 @@ func TestProvision_ExhaustedPreemptibleBudget_AllNonPreemptible(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, w.BatchAPI.CreatedJobs, 1)
 	assert.False(t, w.BatchAPI.CreatedJobs[0].Preemptible)
+}
+
+func TestProvision_NoRecentZombies_TwoJobsBothGetFullPreemptibleBudget(t *testing.T) {
+	// Regression test: max_preemptible_worker_attempts used to be enforced
+	// as a lifetime total of preemptible VMs ever requested for the
+	// workpool, so a second job submitted to a workpool that had already
+	// used up its "budget" via a first job would be forced entirely
+	// on-demand — even with no worker ever actually preempted. It's now a
+	// rolling count of recent zombie incidents, so each job independently
+	// gets its full preemptible allowance when nothing has gone zombie.
+	w := newWorld()
+	pool := defaultPool("pool-1")
+	pool.MaxPreemptibleWorkerAttempts = 5
+	w.Pools.Add(pool)
+
+	// Job 1: 5 tasks.
+	for i := 0; i < 5; i++ {
+		w.Tasks.Add(&Task{TaskID: "job1-" + taskID(i), WorkpoolID: "pool-1", Status: TaskStatusPending})
+	}
+	err := w.A.runProvisioningPoll(context.Background())
+	require.NoError(t, err)
+	require.Len(t, w.BatchAPI.CreatedJobs, 1)
+	assert.True(t, w.BatchAPI.CreatedJobs[0].Preemptible)
+	assert.Equal(t, 5, w.BatchAPI.CreatedJobs[0].VMCount)
+
+	// Job 2: another 5 tasks submitted to the same workpool, no zombies
+	// recorded in between — should still get a full preemptible batch.
+	for i := 0; i < 5; i++ {
+		w.Tasks.Add(&Task{TaskID: "job2-" + taskID(i), WorkpoolID: "pool-1", Status: TaskStatusPending})
+	}
+	err = w.A.runProvisioningPoll(context.Background())
+	require.NoError(t, err)
+	require.Len(t, w.BatchAPI.CreatedJobs, 2)
+	assert.True(t, w.BatchAPI.CreatedJobs[1].Preemptible)
+	assert.Equal(t, 5, w.BatchAPI.CreatedJobs[1].VMCount)
+}
+
+func TestProvision_ZombiesOutsideWindow_FullBudgetAvailable(t *testing.T) {
+	w := newWorld()
+	pool := defaultPool("pool-1")
+	pool.MaxPreemptibleWorkerAttempts = 5
+	w.Pools.Add(pool)
+	// 5 zombies recorded more than an hour ago should not count against
+	// the budget.
+	for i := 0; i < 5; i++ {
+		w.Events.AddWorkpoolIncident("pool-1", IncidentTypeZombie, "worker stopped responding", w.Clock.Now().Add(-2*time.Hour))
+	}
+	for i := 0; i < 5; i++ {
+		w.Tasks.Add(&Task{TaskID: taskID(i), WorkpoolID: "pool-1", Status: TaskStatusPending})
+	}
+
+	err := w.A.runProvisioningPoll(context.Background())
+	require.NoError(t, err)
+	require.Len(t, w.BatchAPI.CreatedJobs, 1)
+	assert.True(t, w.BatchAPI.CreatedJobs[0].Preemptible)
+	assert.Equal(t, 5, w.BatchAPI.CreatedJobs[0].VMCount)
+}
+
+func TestProvision_NonZombieIncidents_DoNotConsumePreemptibleBudget(t *testing.T) {
+	w := newWorld()
+	pool := defaultPool("pool-1")
+	pool.MaxPreemptibleWorkerAttempts = 5
+	w.Pools.Add(pool)
+	// Unrelated incidents (not zombies) recorded recently should not count
+	// against the preemptible budget.
+	for i := 0; i < 5; i++ {
+		w.Events.AddWorkpoolIncident("pool-1", IncidentTypeOverProvisioned, "too many VMs running", w.Clock.Now())
+	}
+	for i := 0; i < 5; i++ {
+		w.Tasks.Add(&Task{TaskID: taskID(i), WorkpoolID: "pool-1", Status: TaskStatusPending})
+	}
+
+	err := w.A.runProvisioningPoll(context.Background())
+	require.NoError(t, err)
+	require.Len(t, w.BatchAPI.CreatedJobs, 1)
+	assert.True(t, w.BatchAPI.CreatedJobs[0].Preemptible)
+	assert.Equal(t, 5, w.BatchAPI.CreatedJobs[0].VMCount)
 }
 
 func TestProvision_PartialPreemptibleBudget_SplitBatches(t *testing.T) {

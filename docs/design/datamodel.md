@@ -148,30 +148,30 @@ Terminal states — no further transitions except an administrative kill:
 
 One document per workpool. The document ID is the `workpool_id`. `WorkPool` is written once at creation and never updated; all evolving state lives in `WorkPoolSummary`. A workpool defines the VM configuration used to create workers that process tasks associated with that workpool.
 
-| Field                             | Type            | Description                                                                                                                                                    |
-| --------------------------------- | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `workpool_id`                     | string          | Unique identifier for the workpool                                                                                                                             |
-| `project_id`                      | string          | GCP project to create this workpool's Batch jobs/VMs in; empty means the monitor's own project                                                                 |
-| `machine_type`                    | string          | GCP machine type for worker VMs (e.g. `n2-standard-4`)                                                                                                         |
-| `boot_disk_size_gb`               | int             | Boot disk size in GB for worker VMs; defaults to 50 if omitted at submission                                                                                   |
-| `boot_disk_type`                  | string          | GCE boot disk type for worker VMs (e.g. `pd-balanced`, `pd-ssd`); defaults to `pd-balanced` if omitted at submission                                           |
-| `region`                          | string          | GCP region for Batch jobs (e.g. `us-central1`)                                                                                                                 |
-| `zones`                           | []string        | GCP zones to query for running VMs (e.g. `["us-central1-a"]`)                                                                                                  |
-| `root_dir`                        | string          | Directory on the VM that the worker uses as its working root; also where the `sparkles` binary is staged                                                       |
-| `sparkles_worker_gcs_path`        | string          | GCS path (e.g. `gs://bucket/sparkles`) of the worker binary; downloaded to `{root_dir}/sparkles` at VM startup                                                 |
-| `service_account`                 | string          | GCP service account email assigned to worker VMs; governs what GCP resources each worker can access                                                            |
-| `resources`                       | []ResourceEntry | Resource capacity advertised by workers created from this workpool                                                                                             |
-| `empty_volumes`                   | []EmptyVolume   | Ephemeral volumes to attach to each VM                                                                                                                         |
-| `labels`                          | []Label         | User-defined key/value tags attached at creation time (e.g. `team=ml`, `env=prod`)                                                                             |
-| `expiry`                          | timestamp       | When this document may be garbage-collected                                                                                                                    |
-| `max_worker_count`                | int             | Maximum number of VMs the monitor may have running concurrently for this workpool                                                                              |
-| `max_preemptible_worker_attempts` | int             | How many times the monitor may submit a preemptible batch before falling back to on-demand                                                                     |
-| `max_workers_per_request`         | int             | Maximum number of VMs in a single GCP Batch job submission                                                                                                     |
-| `vm_shutdown_grace_period_sec`    | int             | Seconds the monitor waits after asking a VM to shut down before treating it as gone                                                                            |
-| `max_zombies_before_abort`        | int             | Number of zombie VMs tolerated in one batch before the monitor marks the batch failed                                                                          |
-| `max_consecutive_failed_batches`  | int             | Number of consecutive failed batches before the monitor halts the workpool                                                                                     |
-| `workpool_spec_hash`              | string          | Hash of the workpool's provisioning-relevant fields (`computeWorkpoolSpecHash` in `v100/dev/workpool_spec.go`), recomputed and written on every job submission |
-| `linger_time_sec`                 | int             | Seconds an idle worker VM waits before shutting down, hoping for another task; defaults to 600                                                                 |
+| Field                             | Type            | Description                                                                                                                                                                                                                                                                                                   |
+| --------------------------------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `workpool_id`                     | string          | Unique identifier for the workpool                                                                                                                                                                                                                                                                            |
+| `project_id`                      | string          | GCP project to create this workpool's Batch jobs/VMs in; empty means the monitor's own project                                                                                                                                                                                                                |
+| `machine_type`                    | string          | GCP machine type for worker VMs (e.g. `n2-standard-4`)                                                                                                                                                                                                                                                        |
+| `boot_disk_size_gb`               | int             | Boot disk size in GB for worker VMs; defaults to 50 if omitted at submission                                                                                                                                                                                                                                  |
+| `boot_disk_type`                  | string          | GCE boot disk type for worker VMs (e.g. `pd-balanced`, `pd-ssd`); defaults to `pd-balanced` if omitted at submission                                                                                                                                                                                          |
+| `region`                          | string          | GCP region for Batch jobs (e.g. `us-central1`)                                                                                                                                                                                                                                                                |
+| `zones`                           | []string        | GCP zones to query for running VMs (e.g. `["us-central1-a"]`)                                                                                                                                                                                                                                                 |
+| `root_dir`                        | string          | Directory on the VM that the worker uses as its working root; also where the `sparkles` binary is staged                                                                                                                                                                                                      |
+| `sparkles_worker_gcs_path`        | string          | GCS path (e.g. `gs://bucket/sparkles`) of the worker binary; downloaded to `{root_dir}/sparkles` at VM startup                                                                                                                                                                                                |
+| `service_account`                 | string          | GCP service account email assigned to worker VMs; governs what GCP resources each worker can access                                                                                                                                                                                                           |
+| `resources`                       | []ResourceEntry | Resource capacity advertised by workers created from this workpool                                                                                                                                                                                                                                            |
+| `empty_volumes`                   | []EmptyVolume   | Ephemeral volumes to attach to each VM                                                                                                                                                                                                                                                                        |
+| `labels`                          | []Label         | User-defined key/value tags attached at creation time (e.g. `team=ml`, `env=prod`)                                                                                                                                                                                                                            |
+| `expiry`                          | timestamp       | When this document may be garbage-collected                                                                                                                                                                                                                                                                   |
+| `max_worker_count`                | int             | Maximum number of VMs the monitor may have running concurrently for this workpool                                                                                                                                                                                                                             |
+| `max_preemptible_worker_attempts` | int             | How many `zombie`-type `workpool_incident` events (the monitor's proxy for a worker being preempted) may occur for this workpool within a trailing 1-hour window before the monitor falls back to on-demand VMs — a rolling budget, not a lifetime total; see the `workpool_incident` events discussion below |
+| `max_workers_per_request`         | int             | Maximum number of VMs in a single GCP Batch job submission                                                                                                                                                                                                                                                    |
+| `vm_shutdown_grace_period_sec`    | int             | Seconds the monitor waits after asking a VM to shut down before treating it as gone                                                                                                                                                                                                                           |
+| `max_zombies_before_abort`        | int             | Number of zombie VMs tolerated in one batch before the monitor marks the batch failed                                                                                                                                                                                                                         |
+| `max_consecutive_failed_batches`  | int             | Number of consecutive failed batches before the monitor halts the workpool                                                                                                                                                                                                                                    |
+| `workpool_spec_hash`              | string          | Hash of the workpool's provisioning-relevant fields (`computeWorkpoolSpecHash` in `v100/dev/workpool_spec.go`), recomputed and written on every job submission                                                                                                                                                |
+| `linger_time_sec`                 | int             | Seconds an idle worker VM waits before shutting down, hoping for another task; defaults to 600                                                                                                                                                                                                                |
 
 **Known inconsistency:** the Go struct backing this collection (`v100.WorkPool` in `v100/task_queue.go`) also declares `state`, `state_message`, `last_incident_at`, and `incident_count` fields with real Firestore tags, and a comment claiming they're "stored in `WorkPoolSummary`." In practice `handleSubmitJob` never sets them before writing the `WorkPools` document, so every such document actually carries these four fields zero-valued, redundant with (and out of sync with) the real values in `WorkPoolSummary`. Despite this, no code reads `state`/`state_message`/`last_incident_at`/`incident_count` off the `WorkPools` document — `WorkPoolSummary` remains the sole source of truth in practice; treat the fields on `WorkPools` as dead weight rather than a second copy to keep in sync.
 
@@ -224,7 +224,7 @@ The following fields are copied from `WorkPool` at first write and not updated t
 | --------------------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `workpool_id`                     | string  | Workpool this summary describes (copied from `WorkPool`)                                                                                                                                                                                |
 | `machine_type`                    | string  | GCP machine type for worker VMs (copied from `WorkPool`)                                                                                                                                                                                |
-| `max_preemptible_worker_attempts` | int     | Max preemptible batch submissions before falling back to on-demand (copied from `WorkPool`)                                                                                                                                             |
+| `max_preemptible_worker_attempts` | int     | Trailing-1-hour budget of `zombie`-type `workpool_incident` events tolerated before falling back to on-demand (copied from `WorkPool`)                                                                                                  |
 | `labels`                          | []Label | Declared on the struct for `WorkPool.Labels` parity, but never populated by `updateWorkPoolSummary` — always the zero value in practice. The dashboard reads labels for a workpool from the `WorkPools` document itself, not from here. |
 
 The following fields are written exclusively by the monitor process:
@@ -357,10 +357,24 @@ could never see synchronous `CreateJob` failures since those never produce a
 
 Additional fields present on **workpool incident events** (`workpool_incident`):
 
-| Field           | Type   | Description                                    |
-| --------------- | ------ | ---------------------------------------------- |
-| `workpool_id`   | string | ID of the workpool the anomaly was detected on |
-| `state_message` | string | Human-readable description of the anomaly      |
+| Field           | Type   | Description                                          |
+| --------------- | ------ | ---------------------------------------------------- |
+| `workpool_id`   | string | ID of the workpool the anomaly was detected on       |
+| `state_message` | string | Human-readable description of the anomaly            |
+| `incident_type` | string | Machine-readable category of the anomaly (see below) |
+
+`incident_type` is one of the `IncidentType*` constants defined in
+`v100/monitor/monitor.go`:
+
+| `incident_type`         | Recorded when...                                                                                                                                                                                                                                             |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `zombie`                | A worker's heartbeat expired without a clean shutdown (`runRequeueOrphanedTasks`) — crashed, preempted, or otherwise stopped responding. This is the type the monitor counts (within the last hour) to enforce `max_preemptible_worker_attempts`; see below. |
+| `zombie_terminated`     | The cluster reconciler found a worker whose heartbeat expired while its VM was still running (per GCP), and terminated the VM.                                                                                                                               |
+| `vm_startup_failure`    | A VM never registered a worker within the startup grace period, while other VMs in the same batch did.                                                                                                                                                       |
+| `over_provisioned`      | More VMs were found running than the batch expected; the batch was aborted.                                                                                                                                                                                  |
+| `no_workers_registered` | No worker ever registered for a batch within the startup grace period; the batch was aborted.                                                                                                                                                                |
+| `too_many_zombies`      | The number of zombie workers in a batch exceeded `max_zombies_before_abort`; the batch was aborted.                                                                                                                                                          |
+| `batch_api_failure`     | GCP's Batch API itself reported the job as failed.                                                                                                                                                                                                           |
 
 `workpool_incident` is published by `recordIncident` (`v100/monitor/monitor.go`)
 every time the watchdog (task recovery/cluster reconciler/batch startup
@@ -374,6 +388,20 @@ reconciler's VM-level zombie check). `recordIncident` is purely a
 log-to-Events operation; it does not mutate `WorkPoolState` itself. Unlike
 `batch_failed`/`batch_succeeded`, halting itself is **not** published as a
 `workpool_incident` — it's reported only via `workpool_state_change`.
+
+The monitor's `runProvisioningPollForWorkpool` (`v100/monitor/provision.go`)
+queries this collection — filtered to `incident_type == "zombie"` for a
+workpool, within the last hour (`defaultPreemptionLookbackWindow`) — to
+enforce `max_preemptible_worker_attempts`: the remaining preemptible budget
+is `max_preemptible_worker_attempts` minus however many `zombie` incidents
+were recorded for that workpool in that window. This is a **rolling**
+budget, not a lifetime total — with no recent zombie incidents, a workpool
+gets its full preemptible allowance again even if an earlier batch or job
+previously used some of it up. (Every zombie incident is treated as a
+stand-in for "this worker was preempted," without checking whether the
+worker's batch was actually submitted as preemptible or otherwise
+distinguishing a real GCE preemption from a crash — the system has no more
+precise signal for this today.)
 
 `WorkPoolSummary`'s `state_message`/`last_incident_at`/`incident_count`
 fields, _and_ the `ok`↔`unhealthy` portion of `WorkPoolState.State` itself,
@@ -653,7 +681,8 @@ synchronous `CreateJob` failures that never produced a `BatchAPIRequest`:
 {
   "type": "workpool_incident",
   "workpool_id": "...",
-  "reason": "..."
+  "reason": "...",
+  "incident_type": "zombie"
 }
 ```
 

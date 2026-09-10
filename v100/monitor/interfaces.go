@@ -248,8 +248,6 @@ type BatchRequestStore interface {
 	ListByWorkpool(ctx context.Context, workpoolID string, statuses []BatchStatus) ([]*BatchAPIRequest, error)
 	// ListAllByWorkpool returns all BatchAPIRequests for a workpool regardless of status.
 	ListAllByWorkpool(ctx context.Context, workpoolID string) ([]*BatchAPIRequest, error)
-	// SumPreemptibleVMCount returns total ExpectedVMCount across all preemptible batches for the workpool.
-	SumPreemptibleVMCount(ctx context.Context, workpoolID string) (int, error)
 }
 
 // WorkerStore reads Worker documents.
@@ -454,7 +452,10 @@ type BatchOutcomePublisher interface {
 // updateWorkPoolSummary's event-log query for StateMessage/LastIncidentAt/
 // IncidentCount. Defined here (not in v100) to avoid an import cycle.
 type WorkpoolIncidentPublisher interface {
-	PublishWorkpoolIncident(ctx context.Context, workpoolID, reason string) error
+	// PublishWorkpoolIncident records that a watchdog anomaly of the given
+	// incidentType occurred for workpoolID. See the IncidentType* constants
+	// for the set of recognized types.
+	PublishWorkpoolIncident(ctx context.Context, workpoolID, incidentType, reason string) error
 }
 
 // WorkerEventPublisher emits a worker_stopped event when a worker's active
@@ -501,8 +502,9 @@ type BatchOutcome struct {
 
 // WorkpoolIncident is a minimal view of an Events document for workpool_incident events.
 type WorkpoolIncident struct {
-	Message   string
-	Timestamp time.Time
+	IncidentType string
+	Message      string
+	Timestamp    time.Time
 }
 
 // EventStore queries the Events collection for job_created, batch outcome,
@@ -517,6 +519,11 @@ type EventStore interface {
 	// ListRecentWorkpoolIncidents returns workpool_incident events for
 	// workpoolID with timestamp > since, ordered most-recent-first.
 	ListRecentWorkpoolIncidents(ctx context.Context, workpoolID string, since time.Time) ([]WorkpoolIncident, error)
+	// ListRecentWorkpoolIncidentsByType returns workpool_incident events for
+	// workpoolID matching incidentType with timestamp > since, ordered
+	// most-recent-first. Used by provisioning to count recent zombie
+	// incidents (a proxy for preemption) against MaxPreemptibleWorkerAttempts.
+	ListRecentWorkpoolIncidentsByType(ctx context.Context, workpoolID, incidentType string, since time.Time) ([]WorkpoolIncident, error)
 }
 
 // PubSubReceiver delivers Batch API status-change notifications.

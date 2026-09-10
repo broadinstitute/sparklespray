@@ -30,7 +30,7 @@ func (a *Monitor) runRequeueOrphanedTasks(ctx context.Context) error {
 				log.Printf("task recovery: publish worker_stopped for zombie worker %s: %v", w.WorkerID, err)
 			}
 		}
-		a.recordIncident(ctx, w.WorkpoolID, fmt.Sprintf("Worker %s stopped responding (heartbeat expired)", w.WorkerID))
+		a.recordIncident(ctx, w.WorkpoolID, IncidentTypeZombie, fmt.Sprintf("Worker %s stopped responding (heartbeat expired)", w.WorkerID))
 
 		tasks, err := a.tasks.ListByWorker(ctx, w.WorkerID, activeTasks)
 		if err != nil {

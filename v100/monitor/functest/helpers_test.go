@@ -195,4 +195,22 @@ func writeTask(t *testing.T, ctx context.Context, fs *firestore.Client, doc *fsT
 	}
 }
 
+// fsWorkpoolIncidentDoc mirrors the subset of firestoreEventRecord relevant to
+// workpool_incident events.
+type fsWorkpoolIncidentDoc struct {
+	Type         string    `firestore:"type"`
+	Timestamp    time.Time `firestore:"timestamp"`
+	WorkpoolID   string    `firestore:"workpool_id"`
+	StateMessage string    `firestore:"state_message"`
+	IncidentType string    `firestore:"incident_type"`
+}
+
+func writeWorkpoolIncident(t *testing.T, ctx context.Context, fs *firestore.Client, doc *fsWorkpoolIncidentDoc) {
+	t.Helper()
+	doc.Type = "workpool_incident"
+	if _, err := fs.Collection(monitor.CollectionEvents).Doc(randomID()).Set(ctx, doc); err != nil {
+		t.Fatalf("writing workpool_incident event for %s: %v", doc.WorkpoolID, err)
+	}
+}
+
 func randomID() string { return uuid.New().String()[:8] }

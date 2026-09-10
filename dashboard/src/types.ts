@@ -63,6 +63,8 @@ export interface WorkpoolIncidentEvent extends BaseEvent {
   type: "workpool_incident";
   workpool_id: string;
   state_message: string;
+  /** Machine-readable category of the anomaly, e.g. "zombie". */
+  incident_type?: string;
 }
 
 export type AnyTaskEvent = TaskStateUpdateEvent;
@@ -91,6 +93,7 @@ export interface RawEvent extends BaseEvent {
   new_state?: string;
   state_message?: string;
   cleanly_terminated?: boolean;
+  incident_type?: string;
 }
 
 export interface BackendJobSummary {
