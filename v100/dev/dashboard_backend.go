@@ -1143,6 +1143,40 @@ func (s *dashboardServer) handleUpdateJobLabels(w http.ResponseWriter, r *http.R
 	writeJSON(w, http.StatusOK, updateJobLabelsResponse{Labels: labels})
 }
 
+// ----- POST /api/v1/job/{job_id}/cancel -----
+
+// handleCancelJob cancels a job: pending tasks are killed immediately in
+// Firestore, and a kill_job broadcast is sent so workers cancel any
+// claimed/running/writing tasks best-effort (see v100.KillJobWithClients,
+// the same mechanism the "sparkles kill" CLI command uses). Convergence to a
+// terminal state happens asynchronously via the usual JobSummary poll.
+func (s *dashboardServer) handleCancelJob(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	jobID := r.PathValue("job_id")
+
+	if _, err := s.fs.Collection(v100.JobCollection).Doc(jobID).Get(ctx); err != nil {
+		if grpcstatus.Code(err) == codes.NotFound {
+			writeError(w, http.StatusNotFound, "NOT_FOUND", "job not found")
+			return
+		}
+		log.Printf("dashboard: CancelJob get %s: %v", jobID, err)
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to get job")
+		return
+	}
+
+	killedPending, err := v100.KillJobWithClients(ctx, s.fs, s.ps, jobID)
+	if err != nil {
+		log.Printf("dashboard: CancelJob %s: %v", jobID, err)
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to cancel job")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"job_id":               jobID,
+		"killed_pending_tasks": killedPending,
+	})
+}
+
 // ----- GET /api/v1/job/{job_id}/summary -----
 
 func (s *dashboardServer) handleGetJobSummary(w http.ResponseWriter, r *http.Request) {
@@ -1860,7 +1894,7 @@ func runDevDashboardBackend(c *cli.Context) error {
 	}
 	defer psClient.Close()
 
-	handler, err := newDashboardHandler(ctx, project, fsClient, psClient, prefix)
+	handler, err := NewDashboardHandler(ctx, project, fsClient, psClient, prefix)
 	if err != nil {
 		return err
 	}
@@ -1881,13 +1915,13 @@ func normalizePrefix(p string) string {
 	return "/" + p
 }
 
-// newDashboardHandler builds the dashboard-backend's HTTP handler — the REST
+// NewDashboardHandler builds the dashboard-backend's HTTP handler — the REST
 // API plus the embedded UI — against already-created clients, so it can be
 // served on its own (runDevDashboardBackend) or alongside the monitor in a
 // single process (runServe). prefix, as returned by normalizePrefix, puts
 // every route (API and UI) under that path, e.g. "/sparkles", so the whole
 // app can be run behind a reverse proxy that isn't mounted at the root.
-func newDashboardHandler(
+func NewDashboardHandler(
 	ctx context.Context,
 	project string,
 	fsClient *firestore.Client,
@@ -1934,6 +1968,7 @@ func newDashboardHandler(
 	handle("GET /api/v1/jobs", srv.handleListJobs)
 	handle("GET /api/v1/job/{job_id}", srv.handleGetJob)
 	handle("POST /api/v1/job/{job_id}/labels", srv.handleUpdateJobLabels)
+	handle("POST /api/v1/job/{job_id}/cancel", srv.handleCancelJob)
 	handle("GET /api/v1/job/{job_id}/summary", srv.handleGetJobSummary)
 	handle("GET /api/v1/job/{job_id}/summary-history", srv.handleGetJobSummaryHistory)
 	handle("GET /api/v1/job/{job_id}/tasks", srv.handleGetJobTasks)

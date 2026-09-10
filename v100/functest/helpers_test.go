@@ -17,6 +17,7 @@ import (
 	pubsubpb "cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
 	"cloud.google.com/go/storage"
 	v100 "github.com/broadinstitute/sparklespray/v100"
+	"github.com/broadinstitute/sparklespray/v100/dev"
 	"github.com/google/uuid"
 	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
@@ -33,6 +34,18 @@ const (
 // randomSuffix returns an 8-character hex string suitable for unique test IDs.
 func randomSuffix() string {
 	return uuid.New().String()[:8]
+}
+
+// writeAPIKey writes an APIKeys/<key> doc for user directly to Firestore and
+// returns the generated key, for use as a dashboard API bearer token in
+// tests (mirrors dev.addAPIKey, which is unexported).
+func writeAPIKey(t *testing.T, ctx context.Context, fsClient *firestore.Client, user string) string {
+	t.Helper()
+	key := uuid.New().String()
+	if _, err := fsClient.Collection(dev.APIKeyCollection).Doc(key).Set(ctx, dev.APIKeyRecord{User: user}); err != nil {
+		t.Fatalf("writing API key: %v", err)
+	}
+	return key
 }
 
 // freePort returns an available TCP port on localhost.

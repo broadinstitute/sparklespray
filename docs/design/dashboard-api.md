@@ -391,6 +391,37 @@ Semantics: starting from the job's existing labels, any label whose name is in `
 
 ---
 
+### `POST /api/v1/job/{job_id}/cancel`
+
+Cancel a job. Uses the same mechanism as the `sparkles kill` CLI command (`v100.KillJobWithClients`): tasks still `pending` are killed immediately and synchronously; tasks already `claimed`/`running`/`writing` are killed best-effort via a `kill_job` broadcast to workers, and converge to `killed` asynchronously as the owning worker observes the broadcast, cancels the task, and records it. This endpoint does not block waiting for that convergence — poll `GET /api/v1/job/{job_id}/summary` or watch `GET /api/v1/events`/subscriptions for the eventual `job_terminated` event to observe the job reach a terminal state.
+
+Calling this on a job with no pending tasks (e.g. already fully running, or already terminal) is safe and idempotent.
+
+**Path parameters**:
+
+- `job_id` — required
+
+**Request body**: none.
+
+**Response** `200 OK`:
+
+```json
+{
+  "job_id": "string",
+  "killed_pending_tasks": "integer"
+}
+```
+
+`killed_pending_tasks` is the number of tasks that were `pending` (no owning worker) and so were killed synchronously as part of this request; it does not count tasks killed later via the `kill_job` broadcast.
+
+**Errors**: `404 NOT_FOUND` if the job doesn't exist. `500 INTERNAL_ERROR` if the Firestore update or Pub/Sub publish fails.
+
+**Firestore**: `Jobs/{job_id}` — key lookup, to check existence. `Tasks` — queried for `job_id == {job_id} && status == pending`; each matching task is transitioned to `killed` (guarded against a concurrent claim).
+
+**Pub/Sub**: publishes `{"type": "kill_job", "job_id": "string"}` to the shared `sparkles-worker-in` topic (not a per-worker destination, since a job's tasks may be spread across many workers) — every worker with a task belonging to this job cancels it.
+
+---
+
 ### `GET /api/v1/job/{job_id}/summary`
 
 Get a single job's current rolled-up state — the same shape as one element of `GET /api/v1/jobs`.

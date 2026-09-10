@@ -4,10 +4,13 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
 	v100 "github.com/broadinstitute/sparklespray/v100"
+	"github.com/broadinstitute/sparklespray/v100/dev"
 	"github.com/google/uuid"
 )
 
@@ -171,5 +174,114 @@ func TestKillJob(t *testing.T) {
 		if status != v100.StatusKilled {
 			t.Errorf("task %s: want status=%s, got %s", taskID, v100.StatusKilled, status)
 		}
+	}
+}
+
+// TestCancelJobViaAPI is TestKillJob's scenario driven through the dashboard
+// API's POST /api/v1/job/{job_id}/cancel endpoint instead of calling
+// v100.KillJob directly, to verify the HTTP route itself (registration,
+// existence check, response shape) on top of the already-covered kill
+// mechanism.
+func TestCancelJobViaAPI(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	startFirestoreEmulator(t)
+	startPubSubEmulator(t)
+	startGCSEmulator(t)
+
+	fsClient := newFirestoreClient(t, ctx)
+	psClient := newPubSubClient(t, ctx)
+	ensureTopics(t, ctx, psClient)
+
+	// NewDashboardHandler requires a SparklesConfig/default doc to exist; an
+	// all-zero config is fine since cancelling a job doesn't touch any of
+	// its fields.
+	if _, err := fsClient.Collection("SparklesConfig").Doc("default").Set(ctx, dev.SparklesConfig{}); err != nil {
+		t.Fatalf("writing SparklesConfig/default: %v", err)
+	}
+	apiKey := writeAPIKey(t, ctx, fsClient, "test-user")
+
+	handler, err := dev.NewDashboardHandler(ctx, testProject, fsClient, psClient, "")
+	if err != nil {
+		t.Fatalf("NewDashboardHandler: %v", err)
+	}
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	workpoolID := "pool-cancel-" + randomSuffix()
+
+	// one worker, so one task should get marked as killed and one task should get interrupted
+	startWorker(t, ctx, workpoolID)
+
+	jobID := submitJob(t, ctx, fsClient, workpoolID, [][]string{
+		{"sleep", "100000"},
+		{"sleep", "100000"},
+	})
+
+	// Wait until at least one task is claimed or running before issuing the cancel.
+	waitForAnyTaskInStates(t, ctx, fsClient, jobID,
+		[]string{v100.StatusClaimed, v100.StatusRunning}, 30*time.Second)
+
+	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("%s/api/v1/job/%s/cancel", server.URL, jobID), nil)
+	if err != nil {
+		t.Fatalf("building cancel request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST cancel: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("POST cancel: want status 200, got %d", resp.StatusCode)
+	}
+
+	statuses := waitForAllTasksTerminal(t, ctx, fsClient, jobID, 30*time.Second)
+
+	for taskID, status := range statuses {
+		if status != v100.StatusKilled {
+			t.Errorf("task %s: want status=%s, got %s", taskID, v100.StatusKilled, status)
+		}
+	}
+}
+
+// TestCancelJob_NotFound verifies the cancel endpoint returns 404 for a job
+// that doesn't exist.
+func TestCancelJob_NotFound(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	startFirestoreEmulator(t)
+	startPubSubEmulator(t)
+
+	fsClient := newFirestoreClient(t, ctx)
+	psClient := newPubSubClient(t, ctx)
+	ensureTopics(t, ctx, psClient)
+
+	if _, err := fsClient.Collection("SparklesConfig").Doc("default").Set(ctx, dev.SparklesConfig{}); err != nil {
+		t.Fatalf("writing SparklesConfig/default: %v", err)
+	}
+	apiKey := writeAPIKey(t, ctx, fsClient, "test-user")
+
+	handler, err := dev.NewDashboardHandler(ctx, testProject, fsClient, psClient, "")
+	if err != nil {
+		t.Fatalf("NewDashboardHandler: %v", err)
+	}
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("%s/api/v1/job/%s/cancel", server.URL, "no-such-job"), nil)
+	if err != nil {
+		t.Fatalf("building cancel request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST cancel: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("POST cancel for nonexistent job: want status 404, got %d", resp.StatusCode)
 	}
 }

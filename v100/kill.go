@@ -76,10 +76,19 @@ func KillJob(ctx context.Context, project, db, jobID string) error {
 	}
 	defer psClient.Close()
 
-	return killJobWithClients(ctx, fsClient, psClient, jobID)
+	_, err = KillJobWithClients(ctx, fsClient, psClient, jobID)
+	return err
 }
 
-func killJobWithClients(ctx context.Context, fsClient *firestore.Client, psClient *pubsub.Client, jobID string) error {
+// KillJobWithClients marks all pending tasks for jobID as killed and sends a
+// kill_job signal to workers so they cancel any in-flight tasks, using the
+// given (already-created) Firestore/PubSub clients rather than opening new
+// ones. Returns the number of pending tasks that were killed synchronously;
+// claimed/running/writing tasks are killed best-effort via the kill_job
+// broadcast and converge to killed asynchronously as workers observe it.
+// Exported so both the CLI (KillJob) and the dashboard API's cancel-job
+// endpoint can reuse this without duplicating the logic.
+func KillJobWithClients(ctx context.Context, fsClient *firestore.Client, psClient *pubsub.Client, jobID string) (int, error) {
 	queue := NewFirestoreTaskQueue(fsClient, newNoopEventPublisher())
 
 	// Step 1: mark all pending tasks for this job as killed.
@@ -96,11 +105,11 @@ func killJobWithClients(ctx context.Context, fsClient *firestore.Client, psClien
 			break
 		}
 		if err != nil {
-			return fmt.Errorf("querying pending tasks: %w", err)
+			return killedCount, fmt.Errorf("querying pending tasks: %w", err)
 		}
 		var t Task
 		if err := doc.DataTo(&t); err != nil {
-			return fmt.Errorf("reading task: %w", err)
+			return killedCount, fmt.Errorf("reading task: %w", err)
 		}
 		if err := queue.RecordKilled(ctx, t.TaskID, true); err != nil {
 			log.Printf("skipping task %s: %v", t.TaskID, err)
@@ -114,13 +123,13 @@ func killJobWithClients(ctx context.Context, fsClient *firestore.Client, psClien
 	msg := workerControlMessage{Type: "kill_job", JobID: jobID}
 	data, err := json.Marshal(msg)
 	if err != nil {
-		return fmt.Errorf("marshalling kill_job message: %w", err)
+		return killedCount, fmt.Errorf("marshalling kill_job message: %w", err)
 	}
 	if _, err := psClient.Publisher(workerInTopic).Publish(ctx, &pubsub.Message{Data: data}).Get(ctx); err != nil {
-		return fmt.Errorf("publishing kill_job message: %w", err)
+		return killedCount, fmt.Errorf("publishing kill_job message: %w", err)
 	}
 	log.Printf("Sent kill_job signal to workers")
-	return nil
+	return killedCount, nil
 }
 
 // waitForJobTerminal polls Firestore every 2 s until all tasks for jobID reach

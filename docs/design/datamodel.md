@@ -868,7 +868,7 @@ Every state transition publishes a `task_state_update` event to `sparkles-events
    The monitor's task recovery loop runs periodically and scans for worker records whose `heartbeat_expiry` has passed. For each crashed or preempted worker, the worker's `status` is flipped to `zombie` (recording a `workpool_incident` event), and any task in an active state (`claimed`, `running`, or `writing`) is reset to `pending` so it can be picked up by a healthy worker.
 
 8. **Any state → `killed`**  
-   An external administrative action via the `sparkles kill` command. `owning_worker_id` is cleared. A best-effort `kill_job` control message is sent to all workers via `sparkles-worker-in` so any in-flight task for that job is aborted promptly.
+   An external administrative action via the `sparkles kill` command, or the dashboard API's `POST /api/v1/job/{job_id}/cancel` — both go through the same `v100.KillJobWithClients`. `owning_worker_id` is cleared. A best-effort `kill_job` control message is sent to all workers via `sparkles-worker-in` so any in-flight task for that job is aborted promptly.
 
 ### Worker perspective
 
