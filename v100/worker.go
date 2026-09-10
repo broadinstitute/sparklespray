@@ -149,6 +149,7 @@ func executeTask(task *Task, resources Resources, completions chan<- taskComplet
 	log.Printf("Stub: executing: %v", task)
 	go func() {
 		err := executeTaskCallback(task)
+		log.Printf("%s: executeTaskCompleted with err=%v, queueing result for downstream", task.TaskID, err)
 		completions <- taskCompletion{taskID: task.TaskID, resources: resources, err: err}
 	}()
 }
@@ -303,9 +304,11 @@ func isWorkerWithLowestID(ctx context.Context, fsClient *firestore.Client, worke
 	}
 	for _, doc := range docs {
 		if doc.Ref.ID < workerID {
+			log.Printf("IsWorkerWithLowestID(workpoolID=%s, workerID=%s) -> false (found worker with lower ID: %s)", workpoolID, workerID, doc.Ref.ID)
 			return false
 		}
 	}
+	log.Printf("IsWorkerWithLowestID(workpoolID=%s, workerID=%s) -> true", workpoolID, workerID)
 	return true
 }
 
@@ -316,11 +319,14 @@ type loopState struct {
 }
 
 func (ls *loopState) waitForCompletion(ctx context.Context, queue TaskQueue) error {
+	log.Printf("waitForCompletion...")
 	select {
 	case c := <-ls.completions:
+		log.Printf("%s: Received completion in looper", c.taskID)
 		ls.curResources = ls.curResources.Add(c.resources)
 		ls.runningCount--
 		if errors.Is(c.err, ErrTaskKilled) {
+			log.Printf("%s: task killed", c.taskID)
 			if err := queue.RecordKilled(ctx, c.taskID, false); err != nil {
 				log.Printf("recording task %s as killed: %v", c.taskID, err)
 				return err
@@ -338,6 +344,7 @@ func (ls *loopState) waitForCompletion(ctx context.Context, queue TaskQueue) err
 				return err
 			}
 		} else {
+			log.Printf("%s: task was successful", c.taskID)
 			if err := queue.UpdateState(ctx, c.taskID, StatusWriting, StatusSuccess); err != nil {
 				log.Printf("recording task %s as success: %v", c.taskID, err)
 				return err
@@ -350,11 +357,13 @@ func (ls *loopState) waitForCompletion(ctx context.Context, queue TaskQueue) err
 }
 
 func (ls *loopState) drainCompletions(ctx context.Context, queue TaskQueue) error {
+	log.Printf("Draining completions...")
 	for len(ls.completions) > 0 {
 		if err := ls.waitForCompletion(ctx, queue); err != nil {
 			return err
 		}
 	}
+	log.Printf("Completion channel empty")
 	return nil
 }
 
@@ -468,10 +477,12 @@ func processJob(ctx context.Context, cfg *WorkerLoopConfig, ls *loopState, job *
 	jobResources := loadJobResources(job)
 
 	for {
+		// process any completions which have arrived, which will release resources
 		if err := ls.drainCompletions(ctx, cfg.Queue); err != nil {
 			return err
 		}
 
+		// figure out if we can run another task or whether we need to wait for an existing task to complete to free resources
 		remaining := ls.curResources.Sub(jobResources)
 		if !remaining.IsValid() {
 			log.Printf("Insufficent resources to start a new task from job %s, waiting for a running task to complete", job.JobID)
@@ -494,9 +505,20 @@ func processJob(ctx context.Context, cfg *WorkerLoopConfig, ls *loopState, job *
 		ls.curResources = remaining
 		ls.runningCount++
 		executeTask(task, jobResources, ls.completions, func(t *Task) error {
-			return executeTaskBody(ctx, cfg, t)
+			err := executeTaskBody(ctx, cfg, t)
+			log.Printf("executeTaskBody(%s) completed", t.TaskID)
+			return err
 		})
 	}
+
+	// make sure all of our tasks in flight are completed before we exit this (and potentially move onto a new job)
+	log.Printf("No more tasks for job %s. Waiting for running tasks to complete...", job.JobID)
+	for ls.runningCount > 0 {
+		if err := ls.waitForCompletion(ctx, cfg.Queue); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -511,6 +533,7 @@ func workerMainLoop(ctx context.Context, cfg *WorkerLoopConfig) error {
 
 	log.Printf("Starting workerMainLoop, querying for tasks...")
 	for {
+		log.Printf("Looking for job with at least one pending task")
 		job, err := getJobWithPendingTask(ctx, cfg, isLeader)
 		if err != nil {
 			return err
@@ -522,22 +545,18 @@ func workerMainLoop(ctx context.Context, cfg *WorkerLoopConfig) error {
 		if !cfg.Resources.Sub(loadJobResources(job)).IsValid() {
 			log.Printf("Job %s requires more resources than this worker can provide; failing all pending tasks", job.JobID)
 			if err := failAllTasksForJob(ctx, cfg.Queue, job, cfg.WorkerID); err != nil {
+				log.Printf("failAllTasksForJob returned error: %s. Aborting -- this will mean that any tasks in flight will never be marked complete!", err)
 				return err
 			}
 			continue
 		}
 
 		if err := processJob(ctx, cfg, ls, job); err != nil {
+			log.Printf("processJob returned error: %s. Aborting -- this will mean that any tasks in flight will never be marked complete!", err)
 			return err
 		}
 	}
 
-	log.Printf("No more tasks in queue. Waiting for running tasks to complete...")
-	for ls.runningCount > 0 {
-		if err := ls.waitForCompletion(ctx, cfg.Queue); err != nil {
-			return err
-		}
-	}
 	log.Printf("Worker main loop complete")
 	return nil
 }
@@ -829,6 +848,7 @@ func (ws *workerState) cleanup() {
 }
 
 func startWorker(ctx context.Context, project, db, workerID, workpoolID, batchID string, noGCP, noDocker, streamLogs bool, bindMounts []string, workDirParent string, lingerTime time.Duration) (*workerState, error) {
+	log.Printf("startWorker 1256")
 	var fsClient *firestore.Client
 	var err error
 	if db != "" {

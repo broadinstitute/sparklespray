@@ -1,8 +1,8 @@
 {
   "gcsPrefix": "gs://sparkles-test-0625/results",
   "subscriberSA": "sparkles-dashboard-user@depmap-portal-pipeline.iam.gserviceaccount.com",
-  "sparklesWorkerGCSPath": "gs://sparkles-test-0625/bin/sparkles-linux-amd64-dev",
+  "sparklesWorkerGCSPath": "gs://sparkles-test-0625/bin/sparkles-dev",
   "serviceAccount": "sparkles-lnibyae4xk@sparkles-test-0625.iam.gserviceaccount.com",
   "region": "us-central1",
-  "zones": ["us-central1-a", "us-central1-b", "us-central1-c", "us-central1-f"]
+  "zones": ["us-central1-a", "us-central1-b", "us-central1-f", "us-central1-c"]
 }
