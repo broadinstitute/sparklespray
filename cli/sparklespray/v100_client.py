@@ -12,6 +12,9 @@ from .model import (
     GCSBucketMount,
 )
 import json
+from .io_helper import IO
+from .hasher import CachingHashFunction
+from .errors import UserError
 
 @dataclass
 class V100Job:
@@ -22,8 +25,6 @@ class V100Job:
     @property
     def is_terminal_state(self) -> bool:
         return self.status in ["success", "error", "failed", "killed"]
-from .io_helper import IO
-from .hasher import CachingHashFunction
 
 class V100Client:
     def __init__(self, base_url, api_key, io:IO, cache_db_path: str, cas_url_prefix:str, target_node_count:int):
@@ -93,6 +94,29 @@ class V100Client:
 
         return dest_url
 
+    def _get_files_in_dir(self, dir_path: str) -> List[str]:
+        import os
+        result = []
+        for root, dirs, files in os.walk(dir_path):
+            rel_root = os.path.relpath(root, dir_path)
+            for filename in files:
+                if rel_root == ".":
+                    result.append(filename)
+                else:
+                    result.append(os.path.join(rel_root, filename))
+        return result
+
+    def _expand_directories(self, uploads):
+        import os
+        result = []
+        for source, destination in uploads:
+            if os.path.isdir(source):
+                for filename in self._get_files_in_dir(source):
+                    result.append((os.path.join(source, filename), os.path.join(destination, filename)))
+            else:
+                result.append((source, destination))
+        return result
+
     def submit(self, name: str, command: List[str],
         params: List[Dict[str, str]],
         image: str,
@@ -106,10 +130,19 @@ class V100Client:
         provision_mode: str,
         worker_linger: int,
         ) -> V100Job:
+
+        # first check to see if this job already exists
+        job = self.get_job_by_name(name)
+        if job is not None:
+            print("Skipping submission of new job: Found existing job with that name.")
+            return job
+
         assert provision_mode == "preemptible"
         assert len(boot_volume.mount_options) == 0
 
         list_of_commands = rewrite_argv_with_parameters(command, params)
+
+        uploads = self._expand_directories(uploads)
 
         files_to_localize = [
             dict(source=self._stage_file(source), destination=destination)

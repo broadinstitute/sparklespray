@@ -5,6 +5,9 @@ import subprocess
 from .errors import UserError
 from typing import Dict, Any, List, Optional, Tuple
 from pydantic import BaseModel, Field, validator, root_validator
+from .v100_client import V100Client
+import time
+
 from .job_queue import JobQueue
 from .io_helper import IO
 from .cluster_service import Cluster
@@ -30,6 +33,7 @@ class WorkflowRunArgs:
     uploads: List[Tuple[str, str]] = field(default_factory=list)
     machine_type: Optional[str] = None
     image: Optional[str] = None
+
 
 
 class SparklesInterface:
@@ -62,6 +66,76 @@ class SparklesInterface:
 
     def read_as_bytes(self, path) -> bytes:
         raise NotImplementedError()
+
+# ignored config settings:
+    # local_work_dir: str
+    # work_root_dir: str
+    # when_sub_job_exists: str
+
+
+class SparklesV100Impl(SparklesInterface):
+    def __init__(self, io: IO, config: Config, client: V100Client):
+        self.io = io
+        self.config = config
+        self.client = client
+
+    def job_exists(self, name: str) -> bool:
+        job = self.client.get_job_by_name(name)
+        return job is not None
+
+    def clear_failed(self, name: str):
+        log.warning("clear_failed is unimplemented")
+
+    def wait_for_completion(self, name: str):
+        job = self.client.get_job_by_name(name)
+        assert job is not None
+        job_id = job.id
+        while True:
+            job = self.client.get_job_by_id(job_id)
+            if job.is_terminal_state:
+                if job.status != "success":
+                    raise UserError("Job did not complete successfully")
+                break
+            time.sleep(5)
+
+
+    def start(
+        self,
+        name: str,
+        command: List[str],
+        params: List[Dict[str, str]],
+        image: Optional[str],
+        uploads: List[Tuple[str, str]],
+        machine_type: Optional[str],
+        skip_if_complete: bool = False,
+    ):
+        assert not skip_if_complete
+        if machine_type is None:
+            machine_type = self.config.machine_type
+        if image is None:
+            image = self.config.default_image
+
+        self.client.submit(name, 
+                           command,
+            params,
+            image,
+            uploads,
+            machine_type,
+            self.config.project,
+            self.config.region,
+            self.config.boot_volume,
+            self.config.max_preemptable_attempts_scale,
+            self.config.mounts,
+            self.config.provision_mode,
+            self.config.worker_linger)
+
+    def get_job_path_prefix(self) -> str:
+        # Return the base path for jobs
+        return self.config.default_url_prefix
+
+    def read_as_bytes(self, path) -> bytes:
+        # this isn't technically right -- clean this up later
+        return self.io.get_as_str_must(path).encode("utf8")
 
 
 @dataclass
@@ -572,8 +646,17 @@ def workflow_run_cmd(
         ]
         job_name = f"{job_name}-{job_hash}"
 
+    if config.sparkles_v100_url is not None:
+        api_key = os.environ.get("SPARKLES_V100_KEY")
+        if api_key is None:
+            raise Exception("If using sparkles v100 url, you must set environment variable SPARKLES_V100_KEY")
+        client = V100Client(config.sparkles_v100_url, api_key, io, config.cache_db_path, config.cas_url_prefix, args.nodes)
+        sparkles_iface = SparklesV100Impl(io, config, client)
+    else:
+        sparkles_iface = SparklesImpl(args.nodes)
+
     try:
-        return run_workflow(SparklesImpl(args.nodes), job_name, workflow, workflow_args)
+        return run_workflow(sparkles_iface, job_name, workflow, workflow_args)
 
     except UserError as e:
         txtui.user_print(f"Error: {str(e)}")

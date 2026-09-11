@@ -75,6 +75,7 @@ class PrepConfig:
     provision_mode: Optional[str] = None
     when_sub_job_exists: Optional[str] = None
     worker_linger: Optional[int] = None
+    sparkles_v100_url: Optional[str] = None
 
 
 @dataclass
@@ -100,6 +101,7 @@ class Config:
     provision_mode: str
     when_sub_job_exists: str
     worker_linger: int
+    sparkles_v100_url: Optional[str]
     credentials: Credentials = dataclasses.field(repr=False)
 
     @property
@@ -295,6 +297,7 @@ def load_config(
     config.when_sub_job_exists = when_sub_job_exists
 
     config.worker_linger = consume("worker_linger", 600, int)
+    config.sparkles_v100_url = consume("sparkles_v100_url", None)
 
     machine_type = config.machine_type
     assert machine_type is not None

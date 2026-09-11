@@ -1,3 +1,5 @@
+date
+echo running...
 cat > params.csv <<EOF
 index,fruit
 0,apple
@@ -6,3 +8,6 @@ index,fruit
 3,kiwi
 4,orange
 EOF
+echo done
+date
+echo "ok"
