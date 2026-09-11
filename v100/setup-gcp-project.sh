@@ -151,6 +151,18 @@ retry gcloud iam service-accounts add-iam-policy-binding "${SA_EMAIL}" \
   --role="roles/iam.serviceAccountTokenCreator" \
   >/dev/null
 
+# Self-grant: creating a GCP Batch job with AllocationPolicy.ServiceAccount
+# set (the worker VM's runtime service account -- WorkPool.ServiceAccount)
+# requires the caller to have "act as" permission on that service account,
+# even when the caller and the target are the same SA, as they are in this
+# single-SA setup.
+echo "==> Granting roles/iam.serviceAccountUser on ${SA_EMAIL} to itself..."
+retry gcloud iam service-accounts add-iam-policy-binding "${SA_EMAIL}" \
+  --project="${PROJECT}" \
+  --member="serviceAccount:${SA_EMAIL}" \
+  --role="roles/iam.serviceAccountUser" \
+  >/dev/null
+
 echo "==> Creating key for ${SA_EMAIL} at ${KEY_FILE}..."
 gcloud iam service-accounts keys create "${KEY_FILE}" \
   --iam-account="${SA_EMAIL}" \
