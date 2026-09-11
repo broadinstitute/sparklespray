@@ -92,6 +92,9 @@ Get a single workpool's configuration and current status.
   "labels": [{ "name": "string", "value": "string" }],
   "max_worker_count": "integer",
   "max_preemptible_worker_attempts": "integer",
+  "max_workers_per_request": "integer",
+  "max_zombies_before_abort": "integer",
+  "max_consecutive_failed_batches": "integer",
   "state": "string (idle | ok | unhealthy | halted)",
   "state_message": "string",
   "last_incident_at": "RFC3339 timestamp | null",
@@ -105,6 +108,54 @@ Get a single workpool's configuration and current status.
 **Firestore**: `WorkPools/{workpool_id}` — key lookup, plus a second best-effort key lookup on `WorkPoolSummary/{workpool_id}` for the mutable `state`/`state_message`/`last_incident_at`/`incident_count` fields. If the summary doc doesn't exist (or fails to parse), those fields are silently left zero-valued rather than the request failing.
 
 `max_preemptible_worker_attempts` is enforced by the monitor as a **rolling 1-hour budget** of `zombie`-type `workpool_incident` events (its proxy for preemption) for the workpool, not a lifetime total — see the `Events`/`workpool_incident` discussion in `datamodel.md`.
+
+---
+
+### `PATCH /api/v1/workpool/{workpool_id}`
+
+Update one or more of a workpool's provisioning/watchdog parameters on an existing workpool, without resubmitting a job (which would mint a new workpool ID, since these fields are part of `computeWorkpoolSpecHash`). Every field in the request body is optional; only fields present in the JSON are changed — an omitted field is left untouched. An empty body is accepted as a no-op.
+
+Because the monitor reads `WorkPools` fresh from Firestore on every provisioning/watchdog poll (no in-memory cache, unlike `SparklesConfig`), a change here takes effect on the monitor's very next poll — no dashboard-backend or monitor restart required.
+
+**Path parameters**:
+
+- `workpool_id` — required
+
+**Request body** (all fields optional):
+
+```json
+{
+  "max_worker_count": "integer",
+  "max_preemptible_worker_attempts": "integer",
+  "max_workers_per_request": "integer",
+  "max_zombies_before_abort": "integer",
+  "max_consecutive_failed_batches": "integer"
+}
+```
+
+A negative value for any field is rejected with `400`. Note `0` is meaningful and means different things per field:
+
+- `max_worker_count` / `max_preemptible_worker_attempts`: `0` is read literally by the monitor — `0` pauses provisioning entirely / disables preemptible VMs entirely for this workpool.
+- `max_workers_per_request` / `max_zombies_before_abort` / `max_consecutive_failed_batches`: `0` falls back to the monitor's built-in default for that parameter (see `monitor.param`), rather than being used literally.
+
+**Response** `200 OK` — the resulting values for all 5 fields after the update:
+
+```json
+{
+  "workpool_id": "string",
+  "max_worker_count": "integer",
+  "max_preemptible_worker_attempts": "integer",
+  "max_workers_per_request": "integer",
+  "max_zombies_before_abort": "integer",
+  "max_consecutive_failed_batches": "integer"
+}
+```
+
+**Errors**: `400 BAD_REQUEST` for malformed JSON, an unknown field, or a negative value. `404 NOT_FOUND` if the workpool doesn't exist.
+
+**Firestore**: one transaction on `WorkPools/{workpool_id}` — reads the doc (404 if missing), then updates only the fields present in the request body.
+
+Note: `WorkPoolSummary`'s own copy of `max_preemptible_worker_attempts` is a snapshot taken once at first write and intentionally never updated thereafter (see the `WorkPoolSummary` section above) — this endpoint does not touch it, since provisioning always reads the live value from `WorkPools` directly.
 
 ---
 

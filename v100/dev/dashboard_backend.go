@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"regexp"
@@ -231,6 +232,9 @@ type workpoolDetailResponse struct {
 	Labels                       []labelResponse      `json:"labels"`
 	MaxWorkerCount               int                  `json:"max_worker_count"`
 	MaxPreemptibleWorkerAttempts int                  `json:"max_preemptible_worker_attempts"`
+	MaxWorkersPerRequest         int                  `json:"max_workers_per_request"`
+	MaxZombiesBeforeAbort        int                  `json:"max_zombies_before_abort"`
+	MaxConsecutiveFailedBatches  int                  `json:"max_consecutive_failed_batches"`
 	State                        string               `json:"state"`
 	StateMessage                 string               `json:"state_message"`
 	LastIncidentAt               *string              `json:"last_incident_at"`
@@ -281,6 +285,9 @@ func (s *dashboardServer) handleGetWorkpool(w http.ResponseWriter, r *http.Reque
 		Labels:                       detailLabels,
 		MaxWorkerCount:               wp.MaxWorkerCount,
 		MaxPreemptibleWorkerAttempts: wp.MaxPreemptibleWorkerAttempts,
+		MaxWorkersPerRequest:         wp.MaxWorkersPerRequest,
+		MaxZombiesBeforeAbort:        wp.MaxZombiesBeforeAbort,
+		MaxConsecutiveFailedBatches:  wp.MaxConsecutiveFailedBatches,
 		State:                        string(ws.State),
 		StateMessage:                 ws.StateMessage,
 		IncidentCount:                ws.IncidentCount,
@@ -291,6 +298,118 @@ func (s *dashboardServer) handleGetWorkpool(w http.ResponseWriter, r *http.Reque
 		resp.LastIncidentAt = &t
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// ----- PATCH /api/v1/workpool/{workpool_id} -----
+
+// updateWorkpoolRequest carries a partial update to a workpool's provisioning/
+// watchdog parameters. Every field is optional (pointer); an omitted field is
+// left unchanged. Note that a 0 value is meaningful and different per field:
+// MaxWorkerCount/MaxPreemptibleWorkerAttempts=0 is read literally by the
+// monitor (pausing provisioning / disabling preemptible VMs entirely), while
+// MaxWorkersPerRequest/MaxZombiesBeforeAbort/MaxConsecutiveFailedBatches=0
+// falls back to the monitor's built-in default (see monitor.param).
+type updateWorkpoolRequest struct {
+	MaxWorkerCount               *int `json:"max_worker_count,omitempty"`
+	MaxPreemptibleWorkerAttempts *int `json:"max_preemptible_worker_attempts,omitempty"`
+	MaxWorkersPerRequest         *int `json:"max_workers_per_request,omitempty"`
+	MaxZombiesBeforeAbort        *int `json:"max_zombies_before_abort,omitempty"`
+	MaxConsecutiveFailedBatches  *int `json:"max_consecutive_failed_batches,omitempty"`
+}
+
+type updateWorkpoolResponse struct {
+	WorkpoolID                   string `json:"workpool_id"`
+	MaxWorkerCount               int    `json:"max_worker_count"`
+	MaxPreemptibleWorkerAttempts int    `json:"max_preemptible_worker_attempts"`
+	MaxWorkersPerRequest         int    `json:"max_workers_per_request"`
+	MaxZombiesBeforeAbort        int    `json:"max_zombies_before_abort"`
+	MaxConsecutiveFailedBatches  int    `json:"max_consecutive_failed_batches"`
+}
+
+// handleUpdateWorkpool applies a partial update to a workpool's provisioning/
+// watchdog parameters. Since monitor.WorkPoolStore reads WorkPools fresh from
+// Firestore on every poll (no in-memory cache), the change takes effect on
+// the monitor's next poll -- no restart required.
+func (s *dashboardServer) handleUpdateWorkpool(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	workpoolID := r.PathValue("workpool_id")
+
+	var req updateWorkpoolRequest
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil && err != io.EOF {
+		writeError(w, http.StatusBadRequest, "BAD_REQUEST", fmt.Sprintf("invalid JSON body: %v", err))
+		return
+	}
+	for name, v := range map[string]*int{
+		"max_worker_count":                req.MaxWorkerCount,
+		"max_preemptible_worker_attempts": req.MaxPreemptibleWorkerAttempts,
+		"max_workers_per_request":         req.MaxWorkersPerRequest,
+		"max_zombies_before_abort":        req.MaxZombiesBeforeAbort,
+		"max_consecutive_failed_batches":  req.MaxConsecutiveFailedBatches,
+	} {
+		if v != nil && *v < 0 {
+			writeError(w, http.StatusBadRequest, "BAD_REQUEST", fmt.Sprintf("'%s' must not be negative", name))
+			return
+		}
+	}
+
+	workpoolDoc := s.fs.Collection(v100.WorkpoolCollection).Doc(workpoolID)
+
+	var wp v100.WorkPool
+	err := s.fs.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
+		snap, err := tx.Get(workpoolDoc)
+		if err != nil {
+			return err
+		}
+		if err := snap.DataTo(&wp); err != nil {
+			return err
+		}
+
+		var updates []firestore.Update
+		if req.MaxWorkerCount != nil {
+			wp.MaxWorkerCount = *req.MaxWorkerCount
+			updates = append(updates, firestore.Update{Path: "max_worker_count", Value: wp.MaxWorkerCount})
+		}
+		if req.MaxPreemptibleWorkerAttempts != nil {
+			wp.MaxPreemptibleWorkerAttempts = *req.MaxPreemptibleWorkerAttempts
+			updates = append(updates, firestore.Update{Path: "max_preemptible_worker_attempts", Value: wp.MaxPreemptibleWorkerAttempts})
+		}
+		if req.MaxWorkersPerRequest != nil {
+			wp.MaxWorkersPerRequest = *req.MaxWorkersPerRequest
+			updates = append(updates, firestore.Update{Path: "max_workers_per_request", Value: wp.MaxWorkersPerRequest})
+		}
+		if req.MaxZombiesBeforeAbort != nil {
+			wp.MaxZombiesBeforeAbort = *req.MaxZombiesBeforeAbort
+			updates = append(updates, firestore.Update{Path: "max_zombies_before_abort", Value: wp.MaxZombiesBeforeAbort})
+		}
+		if req.MaxConsecutiveFailedBatches != nil {
+			wp.MaxConsecutiveFailedBatches = *req.MaxConsecutiveFailedBatches
+			updates = append(updates, firestore.Update{Path: "max_consecutive_failed_batches", Value: wp.MaxConsecutiveFailedBatches})
+		}
+		if len(updates) == 0 {
+			return nil
+		}
+		return tx.Update(workpoolDoc, updates)
+	})
+	if err != nil {
+		if grpcstatus.Code(err) == codes.NotFound {
+			writeError(w, http.StatusNotFound, "NOT_FOUND", "workpool not found")
+			return
+		}
+		log.Printf("dashboard: UpdateWorkpool %s: %v", workpoolID, err)
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to update workpool")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, updateWorkpoolResponse{
+		WorkpoolID:                   workpoolID,
+		MaxWorkerCount:               wp.MaxWorkerCount,
+		MaxPreemptibleWorkerAttempts: wp.MaxPreemptibleWorkerAttempts,
+		MaxWorkersPerRequest:         wp.MaxWorkersPerRequest,
+		MaxZombiesBeforeAbort:        wp.MaxZombiesBeforeAbort,
+		MaxConsecutiveFailedBatches:  wp.MaxConsecutiveFailedBatches,
+	})
 }
 
 // ----- GET /api/v1/workpool/{workpool_id}/summary -----
@@ -1958,6 +2077,7 @@ func NewDashboardHandler(
 	}
 	handle("GET /api/v1/workpools", srv.handleListWorkpools)
 	handle("GET /api/v1/workpool/{workpool_id}", srv.handleGetWorkpool)
+	handle("PATCH /api/v1/workpool/{workpool_id}", srv.handleUpdateWorkpool)
 	handle("GET /api/v1/workpool/{workpool_id}/batches", srv.handleListBatches)
 	handle("GET /api/v1/workpool/{workpool_id}/workers", srv.handleListWorkers)
 	handle("GET /api/v1/worker/{worker_id}", srv.handleGetWorker)

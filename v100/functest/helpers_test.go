@@ -36,6 +36,14 @@ func randomSuffix() string {
 	return uuid.New().String()[:8]
 }
 
+// writeWorkPool writes a v100.WorkPool doc directly to Firestore.
+func writeWorkPool(t *testing.T, ctx context.Context, fs *firestore.Client, wp *v100.WorkPool) {
+	t.Helper()
+	if _, err := fs.Collection(v100.WorkpoolCollection).Doc(wp.WorkpoolID).Set(ctx, wp); err != nil {
+		t.Fatalf("writing workpool %s: %v", wp.WorkpoolID, err)
+	}
+}
+
 // writeAPIKey writes an APIKeys/<key> doc for user directly to Firestore and
 // returns the generated key, for use as a dashboard API bearer token in
 // tests (mirrors dev.addAPIKey, which is unexported).
