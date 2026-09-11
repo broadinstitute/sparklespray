@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 const MONO = "'IBM Plex Mono', monospace";
@@ -17,6 +18,11 @@ const ACTIVE_TASK_STATES = new Set([
 ]);
 const FAILURE_TASK_STATES = new Set(["error", "failed", "killed"]);
 
+// Job-level state values (monitor.JobStatus on the Go side) that are
+// terminal -- distinct from the per-task states above. A job not yet in one
+// of these states is cancellable.
+const TERMINAL_JOB_STATES = new Set(["success", "error", "failed", "killed"]);
+
 export interface JobsTableTask {
   state: string;
   count: number;
@@ -29,6 +35,9 @@ export interface JobsTableRow {
   created_at: string;
   tasks: JobsTableTask[];
   metadata?: Record<string, string>;
+  /** Job-level state (pending/in_progress/.../success/error/failed/killed).
+   * Used to decide whether the cancel action should be shown. */
+  state?: string;
 }
 
 export interface JobsTableProps {
@@ -41,6 +50,10 @@ export interface JobsTableProps {
    * toggle) when its trash icon is clicked. Omit to hide the column
    * entirely. */
   onToggleHidden?: (jobId: string, currentlyHidden: boolean) => void;
+  /** Called with a row's job_id when its cancel ("X") icon is clicked (after
+   * the user confirms). Only shown for jobs whose state is non-terminal.
+   * Omit to hide the action. Rejecting re-enables the button. */
+  onCancelJob?: (jobId: string) => Promise<void>;
 }
 
 // ── Colors ───────────────────────────────────────────────────────────────────
@@ -251,6 +264,72 @@ function HideJobButton({
   );
 }
 
+// ── Cancel action ────────────────────────────────────────────────────────
+
+function XIcon({ color }: { color: string }) {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke={color}
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <line x1="18" y1="6" x2="6" y2="18" />
+      <line x1="6" y1="6" x2="18" y2="18" />
+    </svg>
+  );
+}
+
+function CancelJobButton({
+  jobId,
+  onCancelJob,
+}: {
+  jobId: string;
+  onCancelJob: (jobId: string) => Promise<void>;
+}) {
+  const [cancelling, setCancelling] = useState(false);
+  return (
+    <button
+      onClick={(e) => {
+        e.stopPropagation();
+        if (cancelling) return;
+        if (
+          !window.confirm(
+            `Cancel job ${jobId}? Pending tasks are killed immediately; running tasks are stopped best-effort. This cannot be undone.`
+          )
+        ) {
+          return;
+        }
+        setCancelling(true);
+        // On success, leave the button disabled -- the job's state will
+        // converge to terminal via the next poll, at which point the row
+        // stops rendering this button at all. On failure, re-enable it so
+        // the user can retry.
+        onCancelJob(jobId).catch(() => setCancelling(false));
+      }}
+      disabled={cancelling}
+      title="cancel job"
+      style={{
+        all: "unset",
+        cursor: cancelling ? "default" : "pointer",
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        width: 22,
+        height: 22,
+        borderRadius: 4,
+        opacity: cancelling ? 0.4 : 1,
+      }}
+    >
+      <XIcon color="#c62828" />
+    </button>
+  );
+}
+
 // ── Stats chip ─────────────────────────────────────────────────────────────
 
 function JobStatsChip({ tasks }: { tasks: JobsTableTask[] }) {
@@ -279,8 +358,10 @@ export default function JobsTable({
   onToggleFacet,
   emptyMessage = "no jobs found",
   onToggleHidden,
+  onCancelJob,
 }: JobsTableProps) {
   const navigate = useNavigate();
+  const showActionColumn = Boolean(onToggleHidden || onCancelJob);
 
   if (jobs.length === 0) {
     return (
@@ -307,15 +388,21 @@ export default function JobsTable({
               active / ok / fail
             </th>
             <th className="jt-th jt-th-time">Start Time (local)</th>
-            {onToggleHidden && <th className="jt-th jt-th-action" />}
+            {showActionColumn && <th className="jt-th jt-th-action" />}
           </tr>
         </thead>
         <tbody>
           {jobs.map(
-            ({ job_id, name, workpool_id, metadata, created_at, tasks }, i) => {
+            (
+              { job_id, name, workpool_id, metadata, created_at, tasks, state },
+              i
+            ) => {
               const submitDate = new Date(created_at);
               const cc = workpool_id ? workerPoolColor(workpool_id) : null;
               const hidden = metadata?.hidden === "true";
+              const cancellable = Boolean(
+                state && !TERMINAL_JOB_STATES.has(state)
+              );
               return (
                 <tr
                   key={job_id}
@@ -365,13 +452,29 @@ export default function JobsTable({
                   <td className="jt-td jt-td-time">
                     {formatTimestamp(submitDate)}
                   </td>
-                  {onToggleHidden && (
+                  {showActionColumn && (
                     <td className="jt-td jt-td-action">
-                      <HideJobButton
-                        jobId={job_id}
-                        hidden={hidden}
-                        onToggleHidden={onToggleHidden}
-                      />
+                      <div
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 4,
+                        }}
+                      >
+                        {onCancelJob && cancellable && (
+                          <CancelJobButton
+                            jobId={job_id}
+                            onCancelJob={onCancelJob}
+                          />
+                        )}
+                        {onToggleHidden && (
+                          <HideJobButton
+                            jobId={job_id}
+                            hidden={hidden}
+                            onToggleHidden={onToggleHidden}
+                          />
+                        )}
+                      </div>
                     </td>
                   )}
                 </tr>
@@ -409,7 +512,7 @@ const styles = `
   .jt-th-time  { text-align: right; width: 14rem; }
   .jt-th-index  { width: 2.2rem; }
   .jt-th-pool   { width: 9rem; }
-  .jt-th-action { width: 2rem; }
+  .jt-th-action { width: 3.5rem; }
 
   .jt-tr { cursor: pointer; }
 

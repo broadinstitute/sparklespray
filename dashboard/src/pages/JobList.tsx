@@ -690,6 +690,15 @@ function withHiddenLabel(labels: JobLabel[], hidden: boolean): JobLabel[] {
     : withoutHidden;
 }
 
+// ── Cancel job ───────────────────────────────────────────────────────────────
+
+async function cancelJobRequest(jobId: string): Promise<void> {
+  const res = await apiFetch(`/api/v1/job/${jobId}/cancel`, {
+    method: "POST",
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function JobList() {
@@ -723,6 +732,19 @@ export default function JobList() {
     },
     [jobCache, updateJobLabels]
   );
+
+  // Cancellation is best-effort/asynchronous server-side (see
+  // POST /api/v1/job/{job_id}/cancel), so there's no local state to
+  // optimistically flip here -- the job's state naturally converges to
+  // "killed" (or another terminal state) via the next poll of GET
+  // /api/v1/jobs, which drops the cancel button once that happens.
+  const handleCancelJob = useCallback((jobId: string) => {
+    return cancelJobRequest(jobId).catch((err) => {
+      console.error("[JobList] cancel job failed:", err);
+      window.alert(`Failed to cancel job ${jobId}: ${err}`);
+      throw err;
+    });
+  }, []);
 
   const workerPools = useWorkerPools(jobs, !paused);
 
@@ -950,6 +972,7 @@ export default function JobList() {
                 facets={facets}
                 onToggleFacet={toggleFacet}
                 onToggleHidden={toggleHidden}
+                onCancelJob={handleCancelJob}
               />
             </section>
 
