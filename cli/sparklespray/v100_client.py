@@ -149,13 +149,30 @@ class V100Client:
             for source, destination in uploads
         ]
 
-        def _convert_mount(mount : DiskMountT):
+        def _convert_empty_volume(mount: PersistentDiskMount) -> dict:
             assert len(mount.mount_options) == 0
             return dict(mountPoint=mount.path, type=mount.type, sizeInGB=mount.size_in_gb)
-        
-        mounts_as_dicts = [
-            _convert_mount(x) for x in mounts
-        ]
+
+        def _convert_gcs_mount(mount: GCSBucketMount) -> dict:
+            return dict(
+                mountPath=mount.path,
+                gcsPath=f"gs://{mount.remote_path}",
+                mountOptions=mount.mount_options,
+            )
+
+        empty_volumes = []
+        gcs_mounts = []
+        for mount in mounts:
+            if isinstance(mount, PersistentDiskMount):
+                empty_volumes.append(_convert_empty_volume(mount))
+            elif isinstance(mount, GCSBucketMount):
+                gcs_mounts.append(_convert_gcs_mount(mount))
+            else:
+                raise UserError(
+                    f"sparkles v100 does not support mounts of type {type(mount).__name__} "
+                    f"(path={mount.path!r}); only persistent-disk (empty volume) and GCS bucket "
+                    f"mounts are supported"
+                )
 
         body = dict(
             name=name,
@@ -166,7 +183,8 @@ class V100Client:
             workpool=dict(machineType=machine_type, projectID=project, region=region,
                           bootDiskSizeGb=boot_volume.size_in_gb,
                           bootDiskType=boot_volume.type,
-                          emptyVolumes=mounts_as_dicts,
+                          emptyVolumes=empty_volumes,
+                          gcsMounts=gcs_mounts,
                           lingerTimeSec=worker_linger,
                           maxPreemptibleWorkerAttempts=max_preemptable_attempts_scale*self.target_node_count),
             filesToLocalize=files_to_localize,
@@ -194,7 +212,9 @@ def wait_for_v100_job(client: "V100Client", job_id: str) -> None:
             return
         time.sleep(5)
 
-# mounts: List[DiskMountT] — the API only supports workpool.emptyVolumes: [{mountPoint, type, sizeInGB}], 
-# which corresponds to brand-new empty disks. That's a partial match for PersistentDiskMount only 
-# (path→mountPoint, type→type, size_in_gb→sizeInGB), but even then mount_options has no equivalent field. ExistingDiskMount (attach a named pre-existing disk) and GCSBucketMount (fuse-mount a GCS path) have no equivalent at all — emptyVolumes can only create new empty disks, not attach existing disks or mount GCS buckets.
+# mounts: List[DiskMountT] — PersistentDiskMount maps to workpool.emptyVolumes:
+# [{mountPoint, type, sizeInGB}] (brand-new empty disks; mount_options has no equivalent field,
+# so it must be empty) and GCSBucketMount maps to workpool.gcsMounts:
+# [{mountPath, gcsPath, mountOptions}] (fuse-mounted GCS bucket). ExistingDiskMount (attach a
+# named pre-existing disk) has no equivalent at all and is rejected with a UserError.
 
