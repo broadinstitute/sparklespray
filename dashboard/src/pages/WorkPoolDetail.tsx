@@ -81,8 +81,11 @@ function formatTime(ms: number): string {
 function useWorkPoolDetail(
   workpoolId: string | undefined,
   active: boolean
-): WorkPoolDetail | undefined {
+): [WorkPoolDetail | undefined, () => void] {
   const [detail, setDetail] = useState<WorkPoolDetail | undefined>();
+  // refreshNonce lets callers (e.g. after a successful edit) force an
+  // immediate re-fetch instead of waiting for the next 10s poll tick.
+  const [refreshNonce, setRefreshNonce] = useState(0);
   useEffect(() => {
     if (!workpoolId || !active) return;
     let cancelled = false;
@@ -100,8 +103,9 @@ function useWorkPoolDetail(
       cancelled = true;
       clearInterval(id);
     };
-  }, [workpoolId, active]);
-  return detail;
+  }, [workpoolId, active, refreshNonce]);
+  const refetch = () => setRefreshNonce((n) => n + 1);
+  return [detail, refetch];
 }
 
 function useWorkPoolSummaryHistory(
@@ -420,10 +424,226 @@ const TD_STYLE: React.CSSProperties = {
 
 // ── Overview tab ──────────────────────────────────────────────────────────────
 
-function WorkPoolPropertiesPanel({
+// Fields editable via PATCH /api/v1/workpool/{workpool_id}. `label` is the
+// display name used both in the read-only DetailRow and as the edit-form
+// field label.
+const PROVISIONING_FIELDS: {
+  key:
+    | "max_worker_count"
+    | "max_preemptible_worker_attempts"
+    | "max_workers_per_request"
+    | "max_zombies_before_abort"
+    | "max_consecutive_failed_batches";
+  label: string;
+}[] = [
+  { key: "max_worker_count", label: "max worker count" },
+  {
+    key: "max_preemptible_worker_attempts",
+    label: "max preemptible worker attempts",
+  },
+  { key: "max_workers_per_request", label: "max workers per request" },
+  { key: "max_zombies_before_abort", label: "max zombies before abort" },
+  {
+    key: "max_consecutive_failed_batches",
+    label: "max consecutive failed batches",
+  },
+];
+
+function EditIconButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      title="Edit"
+      style={{
+        all: "unset",
+        cursor: "pointer",
+        color: "#1565c0",
+        fontSize: "0.7rem",
+        fontFamily: MONO,
+        letterSpacing: 1,
+        textTransform: "uppercase",
+      }}
+    >
+      edit
+    </button>
+  );
+}
+
+function ProvisioningSection({
+  workpoolId,
   detail,
+  onWorkpoolUpdated,
 }: {
+  workpoolId: string;
+  detail: WorkPoolDetail;
+  onWorkpoolUpdated: () => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const startEditing = () => {
+    const initial: Record<string, string> = {};
+    for (const f of PROVISIONING_FIELDS) {
+      initial[f.key] = String(detail[f.key] ?? 0);
+    }
+    setValues(initial);
+    setError(null);
+    setEditing(true);
+  };
+
+  const cancelEditing = () => {
+    setEditing(false);
+    setError(null);
+  };
+
+  const save = async () => {
+    const body: Record<string, number> = {};
+    for (const f of PROVISIONING_FIELDS) {
+      const raw = (values[f.key] ?? "").trim();
+      const n = Number(raw);
+      if (raw === "" || !Number.isInteger(n) || n < 0) {
+        setError(`"${f.label}" must be a non-negative whole number`);
+        return;
+      }
+      body[f.key] = n;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      const r = await apiFetch(`/api/v1/workpool/${workpoolId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) {
+        const errBody = await r.json().catch(() => null);
+        setError(errBody?.error || `Save failed (status ${r.status})`);
+        return;
+      }
+      setEditing(false);
+      onWorkpoolUpdated();
+    } catch (_) {
+      setError("Save failed: could not reach the server");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "baseline",
+        }}
+      >
+        <SectionHeader>Provisioning &amp; Watchdog</SectionHeader>
+        {!editing && <EditIconButton onClick={startEditing} />}
+      </div>
+
+      {!editing ? (
+        PROVISIONING_FIELDS.map((f) => (
+          <DetailRow key={f.key} label={f.label} value={detail[f.key] ?? 0} />
+        ))
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {PROVISIONING_FIELDS.map((f) => (
+            <div
+              key={f.key}
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                gap: "0.75rem",
+                fontSize: "0.8rem",
+                fontFamily: MONO,
+              }}
+            >
+              <label style={{ color: "#999", flexShrink: 0 }}>{f.label}</label>
+              <input
+                type="number"
+                min={0}
+                step={1}
+                value={values[f.key] ?? ""}
+                onChange={(e) =>
+                  setValues((v) => ({ ...v, [f.key]: e.target.value }))
+                }
+                style={{
+                  width: 90,
+                  padding: "3px 6px",
+                  fontFamily: MONO,
+                  fontSize: "0.8rem",
+                  border: "1px solid #ccc",
+                  borderRadius: 4,
+                  textAlign: "right",
+                }}
+              />
+            </div>
+          ))}
+
+          {error && (
+            <div
+              style={{
+                color: "#b71c1c",
+                fontSize: "0.75rem",
+                fontFamily: MONO,
+              }}
+            >
+              {error}
+            </div>
+          )}
+
+          <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+            <button
+              onClick={save}
+              disabled={saving}
+              style={{
+                padding: "4px 10px",
+                fontFamily: MONO,
+                fontSize: "0.75rem",
+                color: "#fff",
+                background: saving ? "#90caf9" : "#1565c0",
+                border: "none",
+                borderRadius: 4,
+                cursor: saving ? "default" : "pointer",
+              }}
+            >
+              {saving ? "saving…" : "save"}
+            </button>
+            <button
+              onClick={cancelEditing}
+              disabled={saving}
+              style={{
+                padding: "4px 10px",
+                fontFamily: MONO,
+                fontSize: "0.75rem",
+                color: "#555",
+                background: "#fff",
+                border: "1px solid #ccc",
+                borderRadius: 4,
+                cursor: saving ? "default" : "pointer",
+              }}
+            >
+              cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+function WorkPoolPropertiesPanel({
+  workpoolId,
+  detail,
+  onWorkpoolUpdated,
+}: {
+  workpoolId: string;
   detail: WorkPoolDetail | undefined;
+  onWorkpoolUpdated: () => void;
 }) {
   const dash = <span style={{ color: "#ccc" }}>—</span>;
   if (!detail) {
@@ -500,10 +720,11 @@ function WorkPoolPropertiesPanel({
         value={detail.zones?.length ? detail.zones.join(", ") : dash}
       />
       <DetailRow label="root dir" value={detail.root_dir || dash} />
-      <DetailRow label="max workers" value={detail.max_worker_count ?? dash} />
-      <DetailRow
-        label="max preemptible attempts"
-        value={detail.max_preemptible_worker_attempts ?? dash}
+
+      <ProvisioningSection
+        workpoolId={workpoolId}
+        detail={detail}
+        onWorkpoolUpdated={onWorkpoolUpdated}
       />
 
       {detail.resources?.length > 0 && (
@@ -543,7 +764,10 @@ function WorkPoolPropertiesPanel({
 function OverviewTab({ workpoolId }: { workpoolId: string }) {
   const [range, setRange] = useState<RangeChange | null>(null);
 
-  const detail = useWorkPoolDetail(workpoolId, range?.live ?? true);
+  const [detail, refetchDetail] = useWorkPoolDetail(
+    workpoolId,
+    range?.live ?? true
+  );
   const { history: fullHistory, lastUpdatedAt } = useWorkPoolSummaryHistory(
     workpoolId,
     range?.live ?? true
@@ -612,7 +836,11 @@ function OverviewTab({ workpoolId }: { workpoolId: string }) {
       />
 
       <div style={{ display: "flex", gap: "1.5rem", alignItems: "flex-start" }}>
-        <WorkPoolPropertiesPanel detail={detail} />
+        <WorkPoolPropertiesPanel
+          workpoolId={workpoolId}
+          detail={detail}
+          onWorkpoolUpdated={refetchDetail}
+        />
 
         <div style={{ flex: 1, minWidth: 0 }}>
           {hasCharts ? (

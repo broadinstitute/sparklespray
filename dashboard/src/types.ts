@@ -150,6 +150,9 @@ export interface WorkPoolDetail {
   labels: { name: string; value: string }[];
   max_worker_count: number;
   max_preemptible_worker_attempts: number;
+  max_workers_per_request: number;
+  max_zombies_before_abort: number;
+  max_consecutive_failed_batches: number;
   state: string;
   state_message: string;
   last_incident_at: string | null;
