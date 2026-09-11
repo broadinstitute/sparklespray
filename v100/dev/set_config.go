@@ -35,10 +35,16 @@ func setConfig(configFile, project, db string) error {
 	}
 	defer fsClient.Close()
 
+	return writeSparklesConfig(ctx, fsClient, config)
+}
+
+// writeSparklesConfig writes config to SparklesConfig/default. Exported for
+// reuse by both "dev set-config" (which reads config from a JSON file) and
+// "dev bootstrap-project" (which builds config directly from flags).
+func writeSparklesConfig(ctx context.Context, fsClient *firestore.Client, config *SparklesConfig) error {
 	if _, err := fsClient.Collection(sparklesConfigCollection).Doc(sparklesConfigDocID).Set(ctx, *config); err != nil {
 		return fmt.Errorf("writing %s/%s to firestore: %w", sparklesConfigCollection, sparklesConfigDocID, err)
 	}
 	fmt.Printf("%s/%s written\n", sparklesConfigCollection, sparklesConfigDocID)
-
 	return nil
 }

@@ -48,6 +48,13 @@ func runDevCreateTopics(c *cli.Context) error {
 	}
 	defer psClient.Close()
 
+	return createTopics(ctx, psClient, project)
+}
+
+// createTopics creates every Pub/Sub topic/subscription in sparklesTopics,
+// tolerating ones that already exist. Exported for reuse by both "dev
+// create-topics" and "dev bootstrap-project".
+func createTopics(ctx context.Context, psClient *pubsub.Client, project string) error {
 	for _, spec := range sparklesTopics {
 		topicName := fmt.Sprintf("projects/%s/topics/%s", project, spec.topic)
 		if _, err := psClient.TopicAdminClient.CreateTopic(ctx, &pubsubpb.Topic{Name: topicName}); err != nil {

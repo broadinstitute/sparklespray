@@ -114,6 +114,20 @@ func Command() cli.Command {
 				Action: runDevCreateTopics,
 			},
 			{
+				Name:  "bootstrap-project",
+				Usage: "Set up everything sparklespray needs in a GCP project that already has APIs enabled and a service account with the required IAM roles (see v100/setup-gcp-project.sh): Firestore database + composite indexes, GCS bucket, Pub/Sub topics, SparklesConfig, and an initial API key",
+				Flags: []cli.Flag{
+					cli.StringFlag{Name: "project"},
+					cli.StringFlag{Name: "db", Value: defaultDB},
+					cli.StringFlag{Name: "region", Usage: "GCP region for the Firestore database, GCS bucket, and default workpool region"},
+					cli.StringSliceFlag{Name: "zones", Usage: "GCP zones eligible for worker VM placement (repeatable), e.g. --zones us-central1-a --zones us-central1-b"},
+					cli.StringFlag{Name: "bucket", Usage: "GCS bucket to create for results/logs/worker-binary staging"},
+					cli.StringFlag{Name: "service-account", Usage: "email of the service account created by setup-gcp-project.sh"},
+					cli.StringFlag{Name: "admin-user", Usage: "name/email to label the initial API key with"},
+				},
+				Action: runDevBootstrapProject,
+			},
+			{
 				Name:  "clean-expired",
 				Usage: "Delete all documents whose expiry timestamp has passed",
 				Flags: []cli.Flag{

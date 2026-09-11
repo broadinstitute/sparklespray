@@ -1,0 +1,155 @@
+[
+  {
+    "collection": "BatchAPIRequest",
+    "fields": [
+      { "field": "workpool_id", "order": "ASCENDING" },
+      { "field": "status", "order": "ASCENDING" },
+      { "field": "submitted_at", "order": "DESCENDING" }
+    ]
+  },
+  {
+    "collection": "Workers",
+    "fields": [
+      { "field": "status", "order": "ASCENDING" },
+      { "field": "heartbeat_expiry", "order": "ASCENDING" }
+    ]
+  },
+  {
+    "collection": "Workers",
+    "fields": [
+      { "field": "workpool_id", "order": "ASCENDING" },
+      { "field": "heartbeat_expiry", "order": "ASCENDING" }
+    ]
+  },
+  {
+    "collection": "Workers",
+    "fields": [
+      { "field": "workpool_id", "order": "ASCENDING" },
+      { "field": "status", "order": "ASCENDING" }
+    ]
+  },
+  {
+    "collection": "Tasks",
+    "fields": [
+      { "field": "owning_worker_id", "order": "ASCENDING" },
+      { "field": "status", "order": "ASCENDING" }
+    ]
+  },
+  {
+    "collection": "Tasks",
+    "fields": [
+      { "field": "workpool_id", "order": "ASCENDING" },
+      { "field": "status", "order": "ASCENDING" }
+    ]
+  },
+  {
+    "collection": "Tasks",
+    "fields": [
+      { "field": "job_id", "order": "ASCENDING" },
+      { "field": "status", "order": "ASCENDING" }
+    ]
+  },
+  {
+    "collection": "Tasks",
+    "fields": [
+      { "field": "job_id", "order": "ASCENDING" },
+      { "field": "last_updated", "order": "ASCENDING" }
+    ]
+  },
+  {
+    "collection": "Tasks",
+    "fields": [
+      { "field": "job_id", "order": "ASCENDING" },
+      { "field": "status", "order": "ASCENDING" },
+      { "field": "last_updated", "order": "ASCENDING" }
+    ]
+  },
+  {
+    "collection": "JobSummary",
+    "fields": [
+      { "field": "workpool_id", "order": "ASCENDING" },
+      { "field": "created_at", "order": "ASCENDING" }
+    ]
+  },
+  {
+    "collection": "TaskLog",
+    "fields": [
+      { "field": "task_id", "order": "ASCENDING" },
+      { "field": "timestamp", "order": "ASCENDING" }
+    ]
+  },
+  {
+    "collection": "TaskLog",
+    "fields": [
+      { "field": "task_id", "order": "ASCENDING" },
+      { "field": "type", "order": "ASCENDING" },
+      { "field": "timestamp", "order": "ASCENDING" }
+    ]
+  },
+  {
+    "collection": "Events",
+    "fields": [
+      { "field": "type", "order": "ASCENDING" },
+      { "field": "timestamp", "order": "ASCENDING" }
+    ]
+  },
+  {
+    "collection": "Events",
+    "fields": [
+      { "field": "workpool_id", "order": "ASCENDING" },
+      { "field": "type", "order": "ASCENDING" },
+      { "field": "timestamp", "order": "DESCENDING" }
+    ]
+  },
+  {
+    "collection": "Events",
+    "fields": [
+      { "field": "workpool_id", "order": "ASCENDING" },
+      { "field": "type", "order": "ASCENDING" },
+      { "field": "incident_type", "order": "ASCENDING" },
+      { "field": "timestamp", "order": "DESCENDING" }
+    ]
+  },
+  {
+    "collection": "Events",
+    "fields": [
+      { "field": "job_id", "order": "ASCENDING" },
+      { "field": "timestamp", "order": "ASCENDING" }
+    ]
+  },
+  {
+    "collection": "Events",
+    "fields": [
+      { "field": "job_id", "order": "ASCENDING" },
+      { "field": "timestamp", "order": "DESCENDING" }
+    ]
+  },
+  {
+    "collection": "Events",
+    "fields": [
+      { "field": "workpool_id", "order": "ASCENDING" },
+      { "field": "timestamp", "order": "ASCENDING" }
+    ]
+  },
+  {
+    "collection": "Events",
+    "fields": [
+      { "field": "workpool_id", "order": "ASCENDING" },
+      { "field": "timestamp", "order": "DESCENDING" }
+    ]
+  },
+  {
+    "collection": "Events",
+    "fields": [
+      { "field": "task_id", "order": "ASCENDING" },
+      { "field": "timestamp", "order": "ASCENDING" }
+    ]
+  },
+  {
+    "collection": "Events",
+    "fields": [
+      { "field": "task_id", "order": "ASCENDING" },
+      { "field": "timestamp", "order": "DESCENDING" }
+    ]
+  }
+]

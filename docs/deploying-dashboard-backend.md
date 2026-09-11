@@ -25,17 +25,25 @@ deployments should use `serve`.
   plus `GOOGLE_APPLICATION_CREDENTIALS`, or a service account attached to the
   host (e.g. a GCE instance), i.e. standard Application Default Credentials.
   There is no sparkles-specific credentials flag or env var.
-- The one-time cluster setup already done for the target project:
+- The one-time cluster setup already done for the target project. For a brand
+  new project, `v100/setup-gcp-project.sh --project <project>` (run once with
+  broad/admin access) enables every required API, creates a service account,
+  grants it every IAM role the rest of setup and the running app need, and
+  mints a key for it; then `sparkles dev bootstrap-project --project <project> --region <region> --zones <zone> --bucket <bucket> --service-account <sa-email> --admin-user <you>` (run as that service account) creates the
+  Firestore database and composite indexes (from `v100/dev/firestore.indexes.json`),
+  the GCS bucket, the Pub/Sub topics, `SparklesConfig/default`, and an initial
+  API key, in one step. That subcommand's individual pieces remain available
+  on their own for an already-set-up project:
   - `sparkles dev create-topics --project <project>` — creates the Pub/Sub
     topics/subscriptions the monitor and workers depend on.
   - `sparkles dev set-config --project <project> <config.json>` — writes the
     `SparklesConfig/default` Firestore document dashboard-backend reads at
     startup (GCS prefix, service account, region/zones, etc. — see
     `sample-config.json`).
-- At least one API key for dashboard/CLI auth:
-  `sparkles dev add-api-key --project <project> <user>`. Users of the
-  dashboard UI paste this key in on first load (stored in the browser's
-  `localStorage`); `sparkles submit` reads it from `SPARKLES_API_KEY`.
+  - `sparkles dev add-api-key --project <project> <user>` — at least one API
+    key is required for dashboard/CLI auth. Users of the dashboard UI paste
+    this key in on first load (stored in the browser's `localStorage`);
+    `sparkles submit` reads it from `SPARKLES_API_KEY`.
 - An open inbound port (default `:8080`, or whatever `--addr` is set to) if
   the dashboard needs to be reachable from outside the host. TLS termination
   and access control in front of that port (e.g. nginx, Caddy, or a GCP HTTPS
