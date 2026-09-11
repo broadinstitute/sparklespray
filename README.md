@@ -701,6 +701,12 @@ still take priority and behave exactly as before whenever their conditions
 are met. This setting also governs the same decision for jobs submitted
 internally by each step of `sparkles workflow run`.
 
+### Sparkles v100 Backend Settings
+
+| Parameter           | Default | Description                                                                                                                                                                                                       |
+| -------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sparkles_v100_url` | None    | Base URL of a "sparkles v100" job execution service. When set, `sparkles sub` and `sparkles watch` submit/monitor jobs against this service instead of the normal GCP Batch API / Datastore pipeline. See [Submitting to the sparkles v100 backend](#submitting-to-the-sparkles-v100-backend) below. |
+
 ### Authentication Settings
 
 | Parameter             | Default                                         | Description                      |
@@ -1286,6 +1292,44 @@ Example verification:
 Verified 85 out of 100 completed tasks successfully wrote output
 task task_123 missing gs://bucket/results/output.txt, resetting
 ```
+
+## Submitting to the sparkles v100 backend
+
+Sparkles can optionally submit and monitor jobs against a separate "sparkles v100" job execution service instead of using GCP Batch API/Datastore directly. This is enabled by setting `sparkles_v100_url` in your `.sparkles` config (see [Sparkles v100 Backend Settings](#sparkles-v100-backend-settings)):
+
+```ini
+[config]
+...
+sparkles_v100_url=https://your-sparkles-v100-service.example.com
+```
+
+When `sparkles_v100_url` is set, you must also set the `SPARKLES_V100_KEY` environment variable to a valid API bearer token for that service before running `sparkles sub` or `sparkles watch`:
+
+```bash
+export SPARKLES_V100_KEY=your-api-key
+sparkles sub -n my-job python train.py
+sparkles watch my-job
+```
+
+### Supported commands
+
+Only `sparkles sub`, `sparkles watch`, and `sparkles workflow run` know how to talk to the v100 service. Every other command (`list`, `show`, `logs`, `status`, `kill`, `delete`, `reset`, `validate`, `setup`, `prep-image`, `summarize-job-metrics`) has no idea how to inspect v100-managed jobs, and will immediately raise an error if `sparkles_v100_url` is set in your config, rather than silently operating on the (empty/irrelevant) normal Datastore-backed job state.
+
+### Behavior differences from the normal backend
+
+- `sparkles sub` submits directly to the v100 service. If a job with the same name already exists there, submission is silently skipped and the existing job is reused, regardless of whether it previously succeeded or failed — there is no equivalent of a "clean and resubmit" step.
+- Because of the above, the following flags/settings are not supported and will cause `sparkles sub` to abort with an error rather than being silently ignored:
+  - `--retry` (no way to selectively retry only the failed tasks of an existing v100 job)
+  - `--rerun` (no support for localizing a previous run's output before starting)
+  - `--skip-if-complete` (the v100 service's "reuse if it exists" behavior doesn't distinguish a successfully completed job from a failed one)
+  - `--add-gpu` (the v100 job submission API has no field for GPU accelerators yet)
+  - `when_sub_job_exists` set to anything other than the default `overwrite` (v100 has no "abort"/"confirm" equivalent)
+  - `provision_mode` set to anything other than `preemptible` (the only mode the v100 service currently supports)
+- `sparkles watch` doesn't manage a local cluster or stream logs when talking to the v100 service — it just polls the named job until it reaches a terminal state, and prints a message when it starts up letting you know it's running in this mode. `--verify` and `--nodes` are not supported and will cause an error, since there's no local cluster/task state for `watch` to verify or resize.
+- Disk mounts (`mount_N_*` settings) are translated for the v100 service as follows:
+  - Persistent disk mounts (the default `mount_N_type`) are submitted as new empty volumes.
+  - GCS bucket mounts (`mount_N_type=gcs`) are submitted as GCS FUSE mounts.
+  - Existing disk mounts (`mount_N_name` pointing at a disk, not a `gs://` path) have no v100 equivalent and will cause `sparkles sub` to abort with an error.
 
 # Developing sparklespray
 
