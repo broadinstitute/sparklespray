@@ -7,7 +7,7 @@ from ..io_helper import IO
 from ..cluster_service import Cluster
 from ..job_store import JobStore, Job, JOB_STATUS_KILLED
 import time
-from ..config import Config
+from ..config import Config, assert_not_v100
 from ..batch_api import ClusterAPI
 
 
@@ -32,6 +32,7 @@ def _test_datastore_api(job_store: JobStore, job_id: str):
 
 
 def validate_cmd(jq: JobQueue, io: IO, config: Config, cluster_api: ClusterAPI):
+    assert_not_v100("validate", config)
     print(f"Validating config, using sparklespray {sparklespray.__version__}")
 
     service_acct = config.credentials.service_account_email  # pyright: ignore

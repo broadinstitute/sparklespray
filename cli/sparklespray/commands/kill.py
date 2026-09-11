@@ -4,6 +4,7 @@ from ..task_store import STATUS_PENDING, STATUS_KILLED, STATUS_CLAIMED
 from .. import txtui
 from .shared import _get_jobids_from_pattern
 from ..cluster_service import Cluster, create_cluster
+from ..config import assert_not_v100
 
 
 def kill(jq: JobQueue, config, datastore_client, cluster_api, job_id, keepcluster):
@@ -43,6 +44,7 @@ def kill_cmd(jq: JobQueue, args, config, datastore_client, cluster_api):
     Returns:
         None
     """
+    assert_not_v100("kill", config)
     job_ids = _get_jobids_from_pattern(jq, args.jobid_pattern)
     if len(job_ids) == 0:
         log.warning("No jobs found matching pattern")

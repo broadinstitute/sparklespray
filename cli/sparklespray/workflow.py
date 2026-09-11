@@ -5,8 +5,7 @@ import subprocess
 from .errors import UserError
 from typing import Dict, Any, List, Optional, Tuple
 from pydantic import BaseModel, Field, validator, root_validator
-from .v100_client import V100Client
-import time
+from .v100_client import V100Client, wait_for_v100_job
 
 from .job_queue import JobQueue
 from .io_helper import IO
@@ -89,14 +88,7 @@ class SparklesV100Impl(SparklesInterface):
     def wait_for_completion(self, name: str):
         job = self.client.get_job_by_name(name)
         assert job is not None
-        job_id = job.id
-        while True:
-            job = self.client.get_job_by_id(job_id)
-            if job.is_terminal_state:
-                if job.status != "success":
-                    raise UserError("Job did not complete successfully")
-                break
-            time.sleep(5)
+        wait_for_v100_job(self.client, job.id)
 
 
     def start(

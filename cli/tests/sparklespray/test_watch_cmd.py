@@ -64,6 +64,7 @@ def config():
     config.zones = ["us-central1-a"]
     config.max_preemptable_attempts_scale = 2
     config.debug_log_prefix = "gs://mock-logs"
+    config.sparkles_v100_url = None
     return config
 
 

@@ -183,6 +183,17 @@ class V100Client:
         print("Created job submission", result["id"])
         return V100Job(id=result["id"], name=name, status="pending")
 
+
+def wait_for_v100_job(client: "V100Client", job_id: str) -> None:
+    "Poll a v100 job until it reaches a terminal state, raising UserError if it did not succeed."
+    while True:
+        job = client.get_job_by_id(job_id)
+        if job.is_terminal_state:
+            if job.status != "success":
+                raise UserError("Job did not complete successfully")
+            return
+        time.sleep(5)
+
 # mounts: List[DiskMountT] — the API only supports workpool.emptyVolumes: [{mountPoint, type, sizeInGB}], 
 # which corresponds to brand-new empty disks. That's a partial match for PersistentDiskMount only 
 # (path→mountPoint, type→type, size_in_gb→sizeInGB), but even then mount_options has no equivalent field. ExistingDiskMount (attach a named pre-existing disk) and GCSBucketMount (fuse-mount a GCS path) have no equivalent at all — emptyVolumes can only create new empty disks, not attach existing disks or mount GCS buckets.

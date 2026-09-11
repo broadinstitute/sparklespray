@@ -42,6 +42,14 @@ class UnknownParameters(BadConfig):
     pass
 
 
+def assert_not_v100(command_name: str, config: "Config") -> None:
+    if config.sparkles_v100_url is not None:
+        raise UserError(
+            f"{command_name} is not supported with using sparkles v100 "
+            f"(as determined by sparkles_v100_url={config.sparkles_v100_url} in config)"
+        )
+
+
 SCOPES = [
     "https://www.googleapis.com/auth/genomics",
     "https://www.googleapis.com/auth/cloud-platform",

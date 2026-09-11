@@ -1,3 +1,4 @@
+import os
 import time
 from ..task_store import STATUS_COMPLETE
 from ..config import Config
@@ -6,10 +7,12 @@ from ..job_queue import JobQueue
 from ..cluster_service import Cluster
 from ..batch_api import JobSpec
 from ..log import log
+from .. import txtui
 from ..watch import run_tasks, PrintStatus, CompletionMonitor, StreamLogs, ResizeCluster
 from .shared import _resolve_jobid
 from ..errors import NoWorkersRunning, UserError
 from ..watch import ResetOrphans
+from ..v100_client import V100Client, wait_for_v100_job
 
 class TimeoutException(Exception):
     """Exception raised when an operation times out."""
@@ -46,6 +49,38 @@ from ..batch_api import ClusterAPI
 from ..cluster_service import create_cluster
 
 
+def _watch_v100(io: IO, config: Config, args) -> int:
+    "In v100 mode there is no local cluster/task state to inspect -- just wait for the job to finish."
+    if args.verify:
+        raise UserError("--verify is not supported for 'watch' when using sparkles v100")
+    if args.nodes is not None:
+        raise UserError("--nodes is not supported for 'watch' when using sparkles v100")
+
+    api_key = os.environ.get("SPARKLES_V100_KEY")
+    if api_key is None:
+        raise UserError(
+            "If using sparkles v100 url, you must set environment variable SPARKLES_V100_KEY"
+        )
+
+    txtui.user_print(
+        f"sparkles_v100_url is set; waiting for job {args.jobid} to complete "
+        f"(v100 mode does not manage workers/clusters directly)"
+    )
+
+    client = V100Client(
+        config.sparkles_v100_url, api_key, io, config.cache_db_path, config.cas_url_prefix, 0
+    )
+    job = client.get_job_by_name(args.jobid)
+    if job is None:
+        raise UserError(f"No v100 job found with name {args.jobid!r}")
+
+    try:
+        wait_for_v100_job(client, job.id)
+    except UserError:
+        return 1
+    return 0
+
+
 def watch_cmd(
     jq: JobQueue,
     io: IO,
@@ -54,6 +89,9 @@ def watch_cmd(
     cluster_api: ClusterAPI,
     datastore_client,
 ):
+    if config.sparkles_v100_url is not None:
+        return _watch_v100(io, config, args)
+
     job_id = _resolve_jobid(jq, args.jobid)
     if args.verify:
         check_completion(jq, io, job_id)

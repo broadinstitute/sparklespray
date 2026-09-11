@@ -12,6 +12,7 @@ from ..log import log
 from .shared import _get_jobids_from_pattern
 from ..cluster_service import create_cluster
 from ..reset import reset_orphaned_tasks
+from ..config import assert_not_v100
 
 def add_reset_cmd(subparser):
     parser = subparser.add_parser(
@@ -29,6 +30,7 @@ def add_reset_cmd(subparser):
 
 
 def reset_cmd(jq: JobQueue, args, config, datastore_client, cluster_api):
+    assert_not_v100("reset", config)
     jobid_pattern = args.jobid_pattern
     if "." in jobid_pattern:
         task = jq.task_storage.get_task(jobid_pattern)

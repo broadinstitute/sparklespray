@@ -24,6 +24,7 @@ from .. import txtui
 from .delete import delete
 from .watch import watch
 from ..config import Config
+from ..v100_client import V100Client, wait_for_v100_job
 from ..csv_utils import read_csv_as_dicts
 from ..hasher import CachingHashFunction
 from ..io_helper import IO
@@ -546,6 +547,91 @@ def _confirm_overwrite(job_id: str) -> bool:
     return response.strip().lower() in ("y", "yes")
 
 
+def _validate_v100_submit_args(args: argparse.Namespace, config: Config) -> None:
+    "Check that flags/config which the v100 submission path can't honor were not requested."
+    if config.provision_mode != "preemptible":
+        raise UserError(
+            f"sparkles v100 only supports provision_mode=preemptible, but config has "
+            f"provision_mode={config.provision_mode!r}"
+        )
+    if args.retry:
+        raise UserError(
+            "--retry is not supported when using sparkles v100 (there is no way to selectively retry failed tasks)"
+        )
+    if args.rerun:
+        raise UserError(
+            "--rerun is not supported when using sparkles v100 (there is no way to localize a previous run's output before starting)"
+        )
+    if args.skip_if_complete:
+        raise UserError(
+            "--skip-if-complete is not supported when using sparkles v100 "
+            "(a job with the same name is always reused, regardless of whether it succeeded or failed)"
+        )
+    if config.when_sub_job_exists != "overwrite":
+        raise UserError(
+            f"when_sub_job_exists={config.when_sub_job_exists!r} is not supported when using sparkles v100 "
+            f"(only the default 'overwrite' is supported; an existing job with the same name is always reused)"
+        )
+    if args.accelerators:
+        raise UserError(
+            "--add-gpu is not supported when using sparkles v100"
+        )
+
+
+def _submit_via_v100(
+    io: IO,
+    config: Config,
+    args: argparse.Namespace,
+    job_id: str,
+    image: str,
+    machine_type: str,
+    target_node_count: int,
+    parameters: List[Dict[str, str]],
+):
+    _validate_v100_submit_args(args, config)
+
+    api_key = os.environ.get("SPARKLES_V100_KEY")
+    if api_key is None:
+        raise UserError(
+            "If using sparkles v100 url, you must set environment variable SPARKLES_V100_KEY"
+        )
+
+    uploads = expand_files_to_upload(io, list(args.push))
+
+    client = V100Client(
+        config.sparkles_v100_url,
+        api_key,
+        io,
+        config.cache_db_path,
+        config.cas_url_prefix,
+        target_node_count,
+    )
+
+    job = client.submit(
+        job_id,
+        args.command,
+        parameters,
+        image,
+        uploads,
+        machine_type,
+        config.project,
+        config.region,
+        config.boot_volume,
+        config.max_preemptable_attempts_scale,
+        config.mounts,
+        config.provision_mode,
+        config.worker_linger,
+    )
+
+    if args.wait_for_completion:
+        try:
+            wait_for_v100_job(client, job.id)
+        except UserError:
+            return 1
+
+    return 0
+
+
 def submit_cmd(
     jq: JobQueue,
     io: IO,
@@ -596,6 +682,11 @@ def submit_cmd(
         parameters = [{}]
 
     assert len(args.command) != 0
+
+    if config.sparkles_v100_url is not None:
+        return _submit_via_v100(
+            io, config, args, job_id, image, machine_type, target_node_count, parameters
+        )
 
     dest_url = url_join(default_url_prefix, job_id)
     files_to_push = list(args.push)

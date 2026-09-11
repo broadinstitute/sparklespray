@@ -4,10 +4,12 @@ from ..log import log
 from ..job_queue import JobQueue
 from ..io_helper import IO
 from ..log import log
+from ..config import Config, assert_not_v100
 from .shared import _resolve_jobid
 
 
-def fetch_cmd(jq: JobQueue, io: IO, args):
+def fetch_cmd(jq: JobQueue, io: IO, args, config: Config):
+    assert_not_v100("fetch", config)
     jobid = _resolve_jobid(jq, args.jobid)
     if args.dest is None:
         dest = jobid

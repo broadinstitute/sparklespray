@@ -1,5 +1,5 @@
 import re
-from ..config import Config
+from ..config import Config, assert_not_v100
 from ..gcp_setup import setup_project
 import shutil
 import tempfile
@@ -30,6 +30,7 @@ import sparklespray
 from sparklespray.errors import UserError
 
 def prep_image_cmd(args, config: Config):
+    assert_not_v100("prep-image", config)
     # sanity check the target tag to make sure
     # we're not clobbering a docker image for a different
     # version of sparkles
