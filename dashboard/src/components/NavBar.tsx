@@ -2,6 +2,26 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useEvents } from "../data/EventProvider";
 import { getJobs, getClusters } from "../data/events";
+import { apiFetch } from "../api/client";
+
+// The backend's version doesn't change while it's running, so this is a
+// one-shot fetch on mount rather than a poll.
+function useVersion(): string | undefined {
+  const [version, setVersion] = useState<string | undefined>();
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch("/api/v1/version")
+      .then((r) => (r.ok ? r.json() : undefined))
+      .then((data) => {
+        if (!cancelled && data?.version) setVersion(data.version);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  return version;
+}
 
 interface BreadcrumbSegment {
   label: string;
@@ -262,6 +282,7 @@ export default function NavBar() {
   const location = useLocation();
   const { jobs, jobCache } = useEvents();
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const version = useVersion();
 
   const entries = useMemo<PaletteEntry[]>(() => {
     // jobCache (populated lazily per job, see EventProvider) is the only
@@ -376,6 +397,17 @@ export default function NavBar() {
                     }}
                   >
                     {seg.label}
+                  </span>
+                )}
+                {i === 0 && version && (
+                  <span
+                    style={{
+                      color: "#bbb",
+                      fontSize: "0.62rem",
+                      flexShrink: 0,
+                    }}
+                  >
+                    {version}
                   </span>
                 )}
               </span>

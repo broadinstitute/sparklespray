@@ -1557,6 +1557,13 @@ func (s *dashboardServer) handleGetJobTasks(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusOK, result)
 }
 
+// ----- GET /api/v1/version -----
+
+// handleGetVersion returns the running binary's version (see dev.Version).
+func (s *dashboardServer) handleGetVersion(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]string{"version": Version})
+}
+
 // ----- GET /api/v1/metrics -----
 
 // handleGetMetrics serves the static metric metadata table, so the dashboard
@@ -2100,6 +2107,7 @@ func NewDashboardHandler(
 	handle("GET /api/v1/job/{job_id}/tasks", srv.handleGetJobTasks)
 	handle("GET /api/v1/task/{task_id}", srv.handleGetTask)
 	handle("GET /api/v1/task/{task_id}/log", srv.handleGetTaskLog)
+	handle("GET /api/v1/version", srv.handleGetVersion)
 	handle("GET /api/v1/metrics", srv.handleGetMetrics)
 	handle("POST /api/v1/task/{task_id}/stream", srv.handleStreamTask)
 	handle("GET /api/v1/events", srv.handleListEvents)

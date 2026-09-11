@@ -67,7 +67,7 @@ fi
 echo "Building ${OUTPUT}..."
 ( cd "${REPO_ROOT}/v100" && \
   CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
-    -ldflags "-X main.Version=${VERSION}" \
+    -ldflags "-X github.com/broadinstitute/sparklespray/v100/dev.Version=${VERSION}" \
     -o "${OUTPUT}" \
     ./cmd/sparkles )
 
