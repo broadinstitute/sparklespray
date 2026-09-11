@@ -8,6 +8,7 @@ import JobsTable, {
 } from "../components/JobsTable";
 import type { BackendJobSummary } from "../types";
 import { apiFetch } from "../api/client";
+import { useVersion } from "../data/useVersion";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -714,6 +715,7 @@ export default function JobList() {
   const [timePreset, setTimePreset] = useState(0);
   const [facets, setFacets] = useState<Record<string, Set<string>>>({});
   const [showHidden, setShowHidden] = useState(false);
+  const version = useVersion();
 
   const toggleHidden = useCallback(
     (jobId: string, currentlyHidden: boolean) => {
@@ -874,7 +876,10 @@ export default function JobList() {
         <div className="jl-layout">
           {/* ── Main content ── */}
           <div className="jl-main">
-            <h1 className="jl-page-title">sparkles</h1>
+            <h1 className="jl-page-title">
+              sparkles
+              {version && <span className="jl-page-version">{version}</span>}
+            </h1>
 
             {/* Filter bar */}
             <div className="jl-filter-bar">
@@ -1027,6 +1032,15 @@ const styles = `
     color: #111;
     margin: 0 0 1.5rem 0;
     letter-spacing: -0.03em;
+  }
+
+  .jl-page-version {
+    font-size: 0.85rem;
+    font-weight: 400;
+    color: #bbb;
+    letter-spacing: normal;
+    margin-left: 0.6rem;
+    vertical-align: middle;
   }
 
   /* ── Filter bar ─────────────────────────────────── */
