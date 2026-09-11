@@ -261,8 +261,8 @@ function computeWorkPoolTimeSeries(
 
   for (const h of history) {
     for (const tc of h.tasks ?? []) {
-      if (TERMINAL_TASK.has(tc.status)) terminalTaskStatusSet.add(tc.status);
-      else taskStatusSet.add(tc.status);
+      if (TERMINAL_TASK.has(tc.state)) terminalTaskStatusSet.add(tc.state);
+      else taskStatusSet.add(tc.state);
     }
   }
 
@@ -274,10 +274,10 @@ function computeWorkPoolTimeSeries(
   const workerCounts: ChartPoint[] = history.map((h) => {
     const t = new Date(h.timestamp).getTime();
     const startedP =
-      (h.preemptible_workers ?? []).find((w) => w.status === "started")
-        ?.count ?? 0;
+      (h.preemptible_workers ?? []).find((w) => w.state === "started")?.count ??
+      0;
     const startedNP =
-      (h.nonpreemptible_workers ?? []).find((w) => w.status === "started")
+      (h.nonpreemptible_workers ?? []).find((w) => w.state === "started")
         ?.count ?? 0;
     const pendingP = Math.max(0, h.expected_preemptible_workers - startedP);
     const pendingNP = Math.max(
@@ -299,7 +299,7 @@ function computeWorkPoolTimeSeries(
     const pt: ChartPoint = { time: t, label: formatTime(t) };
     for (const s of taskStatuses) pt[s] = 0;
     for (const tc of h.tasks ?? [])
-      if (!TERMINAL_TASK.has(tc.status)) pt[tc.status] = tc.count;
+      if (!TERMINAL_TASK.has(tc.state)) pt[tc.state] = tc.count;
     return pt;
   });
 
@@ -312,9 +312,9 @@ function computeWorkPoolTimeSeries(
     const pt: ChartPoint = { time: t, label: formatTime(t) };
     for (const s of terminalTaskStatuses) {
       const prevCount =
-        (prev.tasks ?? []).find((tc) => tc.status === s)?.count ?? 0;
+        (prev.tasks ?? []).find((tc) => tc.state === s)?.count ?? 0;
       const currCount =
-        (curr.tasks ?? []).find((tc) => tc.status === s)?.count ?? 0;
+        (curr.tasks ?? []).find((tc) => tc.state === s)?.count ?? 0;
       pt[s] = Math.max(0, currCount - prevCount);
     }
     taskTerminalDeltas.push(pt);
