@@ -29,7 +29,7 @@ deployments should use `serve`.
   new project, `v100/setup-gcp-project.sh --project <project>` (run once with
   broad/admin access) enables every required API, creates a service account,
   grants it every IAM role the rest of setup and the running app need, and
-  mints a key for it; then `sparkles dev bootstrap-project --project <project> --region <region> --zones <zone> --bucket <bucket> --service-account <sa-email> --admin-user <you>` (run as that service account) creates the
+  mints a key for it; then `sparkles dev bootstrap-project --project <project> --region <region> --bucket <bucket> --service-account <sa-email> --admin-user <you>` (run as that service account; zones are looked up automatically for `--region`) creates the
   Firestore database and composite indexes (from `v100/dev/firestore.indexes.json`),
   the GCS bucket, the Pub/Sub topics, `SparklesConfig/default`, and an initial
   API key, in one step. That subcommand's individual pieces remain available

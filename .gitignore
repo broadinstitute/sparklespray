@@ -59,3 +59,8 @@ v100/dev/webui/dist/*
 !v100/dev/webui/dist/index.html
 # build.sh's breadcrumb for skipping an unchanged frontend rebuild.
 v100/dev/webui/.frontend-build-marker
+
+# Service account keys minted by v100/setup-gcp-project.sh (default output
+# path) -- these are live GCP credentials and must never be committed.
+v100/sparkles-sa-key.json
+*-sa-key.json

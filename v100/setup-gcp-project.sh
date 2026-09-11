@@ -31,6 +31,23 @@ fi
 
 SA_EMAIL="${SERVICE_ACCOUNT_NAME}@${PROJECT}.iam.gserviceaccount.com"
 
+# Retries a command a few times with backoff, tolerating the propagation lag
+# between a service account being created and it being usable in IAM policy
+# bindings (describe can succeed before that propagation finishes).
+retry() {
+  local tries=8 count=0 wait=2
+  until "$@"; do
+    count=$((count + 1))
+    if [[ "${count}" -ge "${tries}" ]]; then
+      echo "    giving up after ${tries} attempts: $*" >&2
+      return 1
+    fi
+    echo "    retrying in ${wait}s..."
+    sleep "${wait}"
+    wait=$((wait * 2))
+  done
+}
+
 echo "==> Enabling required APIs on ${PROJECT}..."
 gcloud services enable \
   firestore.googleapis.com \
@@ -43,6 +60,39 @@ gcloud services enable \
   iamcredentials.googleapis.com \
   --project="${PROJECT}"
 
+# A brand-new GCP project in the Broad Institute org has no "default" VPC network (unlike a
+# project created elsewhere with the legacy default-network behavior), and
+# worker VMs need one to get network connectivity.
+echo "==> Ensuring a default VPC network exists..."
+if gcloud compute networks describe default --project="${PROJECT}" >/dev/null 2>&1; then
+  echo "    already exists"
+else
+  gcloud compute networks create default \
+    --project="${PROJECT}" \
+    --subnet-mode=auto \
+    --bgp-routing-mode=regional
+fi
+
+# No inbound traffic is allowed to worker VMs except SSH via IAP tunneling
+# (e.g. "SSH" in the Cloud Console, or `gcloud compute ssh --tunnel-through-iap`).
+# Not required for batch jobs themselves to run -- outbound traffic (to
+# Firestore/Pub/Sub/GCS/docker registries) is allowed by default regardless
+# of firewall rules, and sparklespray's jobs are single-VM with no
+# internal/inter-instance traffic -- this rule exists purely for debugging
+# access. 35.235.240.0/20 is Google's fixed IAP TCP-forwarding source range.
+echo "==> Ensuring IAP-tunneled SSH firewall rule exists..."
+if gcloud compute firewall-rules describe allow-ssh-from-iap --project="${PROJECT}" >/dev/null 2>&1; then
+  echo "    already exists"
+else
+  gcloud compute firewall-rules create allow-ssh-from-iap \
+    --project="${PROJECT}" \
+    --network=default \
+    --direction=INGRESS \
+    --action=ALLOW \
+    --rules=tcp:22 \
+    --source-ranges=35.235.240.0/20
+fi
+
 echo "==> Creating service account ${SA_EMAIL}..."
 if gcloud iam service-accounts describe "${SA_EMAIL}" --project="${PROJECT}" >/dev/null 2>&1; then
   echo "    already exists"
@@ -51,6 +101,22 @@ else
     --project="${PROJECT}" \
     --display-name="sparklespray"
 fi
+
+# A freshly created service account isn't always immediately usable in
+# IAM policy bindings elsewhere (eventual consistency) -- poll until it
+# resolves before granting it anything.
+echo "==> Waiting for ${SA_EMAIL} to become usable..."
+for i in $(seq 1 30); do
+  if gcloud iam service-accounts describe "${SA_EMAIL}" --project="${PROJECT}" >/dev/null 2>&1; then
+    echo "    ready"
+    break
+  fi
+  if [[ "${i}" -eq 30 ]]; then
+    echo "    timed out waiting for ${SA_EMAIL} to become usable" >&2
+    exit 1
+  fi
+  sleep 2
+done
 
 # Union of every runtime permission traced across the codebase (Firestore,
 # Pub/Sub, GCP Batch, Compute, Cloud Logging, GCS) plus what "dev
@@ -66,7 +132,7 @@ ROLES=(
   roles/storage.admin
 )
 for ROLE in "${ROLES[@]}"; do
-  gcloud projects add-iam-policy-binding "${PROJECT}" \
+  retry gcloud projects add-iam-policy-binding "${PROJECT}" \
     --member="serviceAccount:${SA_EMAIL}" \
     --role="${ROLE}" \
     --condition=None \
@@ -79,7 +145,7 @@ done
 # single-SA setup that's this same service account, so it needs
 # serviceAccountTokenCreator on itself.
 echo "==> Granting roles/iam.serviceAccountTokenCreator on ${SA_EMAIL} to itself..."
-gcloud iam service-accounts add-iam-policy-binding "${SA_EMAIL}" \
+retry gcloud iam service-accounts add-iam-policy-binding "${SA_EMAIL}" \
   --project="${PROJECT}" \
   --member="serviceAccount:${SA_EMAIL}" \
   --role="roles/iam.serviceAccountTokenCreator" \
@@ -98,7 +164,6 @@ Done. Next steps:
   sparkles dev bootstrap-project \\
     --project ${PROJECT} \\
     --region <gcp-region> \\
-    --zones <zone-a> --zones <zone-b> \\
     --bucket <bucket-name> \\
     --service-account ${SA_EMAIL} \\
     --admin-user <you>

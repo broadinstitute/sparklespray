@@ -7,12 +7,14 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"path"
 
 	admin "cloud.google.com/go/firestore/apiv1/admin"
 	"cloud.google.com/go/firestore/apiv1/admin/adminpb"
 	"cloud.google.com/go/pubsub/v2"
 	"cloud.google.com/go/storage"
 	"github.com/urfave/cli"
+	"google.golang.org/api/compute/v1"
 	"google.golang.org/api/googleapi"
 	"google.golang.org/grpc/codes"
 	grpcstatus "google.golang.org/grpc/status"
@@ -48,10 +50,6 @@ func runDevBootstrapProject(c *cli.Context) error {
 	if region == "" {
 		return fmt.Errorf("--region is required")
 	}
-	zones := c.StringSlice("zones")
-	if len(zones) == 0 {
-		return fmt.Errorf("--zones is required")
-	}
 	bucket := c.String("bucket")
 	if bucket == "" {
 		return fmt.Errorf("--bucket is required")
@@ -66,6 +64,12 @@ func runDevBootstrapProject(c *cli.Context) error {
 	}
 
 	ctx := context.Background()
+
+	zones, err := zonesInRegion(ctx, project, region)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("zones in %s:        %v\n", region, zones)
 
 	if err := createFirestoreDatabase(ctx, project, db, region); err != nil {
 		return err
@@ -128,6 +132,27 @@ func runDevBootstrapProject(c *cli.Context) error {
 	fmt.Println("check status with: gcloud firestore indexes composite list --project=" + project)
 
 	return nil
+}
+
+// zonesInRegion returns the names of every zone in region (e.g.
+// "us-central1-a", not the full resource URL), used as the default set of
+// zones eligible for worker VM placement.
+func zonesInRegion(ctx context.Context, project, region string) ([]string, error) {
+	computeSvc, err := compute.NewService(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("creating compute client: %w", err)
+	}
+
+	r, err := computeSvc.Regions.Get(project, region).Context(ctx).Do()
+	if err != nil {
+		return nil, fmt.Errorf("looking up zones for region %s: %w", region, err)
+	}
+
+	zones := make([]string, len(r.Zones))
+	for i, zoneURL := range r.Zones {
+		zones[i] = path.Base(zoneURL)
+	}
+	return zones, nil
 }
 
 // createFirestoreDatabase creates the named Firestore (Native mode) database,
