@@ -1,0 +1,90 @@
+[
+  {
+    "collection": "JobSummaryHistory",
+    "fields": [
+      { "field": "job_id", "order": "ASCENDING" },
+      { "field": "timestamp", "order": "ASCENDING" }
+    ]
+  },
+  {
+    "collection": "Workers",
+    "fields": [
+      { "field": "workpool_id", "order": "ASCENDING" },
+      { "field": "heartbeat_expiry", "order": "ASCENDING" }
+    ]
+  },
+  {
+    "collection": "Workers",
+    "fields": [
+      { "field": "status", "order": "ASCENDING" },
+      { "field": "heartbeat_expiry", "order": "ASCENDING" }
+    ]
+  },
+  {
+    "collection": "Events",
+    "fields": [
+      { "field": "job_id", "order": "ASCENDING" },
+      { "field": "timestamp", "order": "ASCENDING" }
+    ]
+  },
+  {
+    "collection": "Events",
+    "fields": [
+      { "field": "workpool_id", "order": "ASCENDING" },
+      { "field": "timestamp", "order": "ASCENDING" }
+    ]
+  },
+  {
+    "collection": "Events",
+    "fields": [
+      { "field": "workpool_id", "order": "ASCENDING" },
+      { "field": "timestamp", "order": "DESCENDING" }
+    ]
+  },
+  {
+    "collection": "TaskLog",
+    "fields": [
+      { "field": "task_id", "order": "ASCENDING" },
+      { "field": "timestamp", "order": "ASCENDING" }
+    ]
+  },
+  {
+    "collection": "BatchAPIRequests",
+    "fields": [
+      { "field": "status", "order": "ASCENDING" },
+      { "field": "workpool_id", "order": "ASCENDING" },
+      { "field": "submitted_at", "order": "DESCENDING" }
+    ]
+  },
+  {
+    "collection": "Events",
+    "fields": [
+      { "field": "type", "order": "ASCENDING" },
+      { "field": "workpool_id", "order": "ASCENDING" },
+      { "field": "timestamp", "order": "DESCENDING" }
+    ]
+  },
+  {
+    "collection": "Events",
+    "fields": [
+      { "field": "type", "order": "ASCENDING" },
+      { "field": "timestamp", "order": "ASCENDING" }
+    ]
+  },
+  {
+    "collection": "Events",
+    "fields": [
+      { "field": "incident_type", "order": "ASCENDING" },
+      { "field": "type", "order": "ASCENDING" },
+      { "field": "workpool_id", "order": "ASCENDING" },
+      { "field": "timestamp", "order": "DESCENDING" }
+    ]
+  },
+  {
+    "collection": "WorkPoolSummaryHistory",
+    "fields": [
+      { "field": "workpool_id", "order": "ASCENDING" },
+      { "field": "timestamp", "order": "ASCENDING" }
+    ]
+  }
+]
