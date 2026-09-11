@@ -97,6 +97,55 @@ func validSafePath(s string) bool {
 	return safePathRe.MatchString(s)
 }
 
+// gcsPathRe matches a "gs://bucket" or "gs://bucket/prefix" URL. GCSPath
+// isn't interpolated into a shell command (it only becomes batch.GCS.
+// RemotePath, part of the Batch API's JSON request body), but it's still
+// validated up front as defense in depth, consistent with validSafePath.
+var gcsPathRe = regexp.MustCompile(`^gs://[A-Za-z0-9][A-Za-z0-9_.-]*(/[A-Za-z0-9_.-]*)*$`)
+
+// validGCSPath reports whether s is a well-formed gs:// bucket (optionally
+// with a slash-separated prefix) URL.
+func validGCSPath(s string) bool {
+	return gcsPathRe.MatchString(s)
+}
+
+// gcsMountVolumeNameCharsRe matches runs of characters that aren't safe to
+// use in a GCE-side volume/device name; gcsMountVolumeName replaces each run
+// with a single '-'.
+var gcsMountVolumeNameCharsRe = regexp.MustCompile(`[^a-z0-9]+`)
+
+// gcsMountVolumeName derives a short, unique, shell-safe volume name for the
+// index'th GCSMount from its gcsPath, for use both as the host mount point
+// (/mnt/disks/<name>) and as a label for the underlying batch.Volume. It's
+// built from the bucket name (for readability) plus index (guaranteeing
+// uniqueness across a single CreateJob call's GCSMounts, the same role
+// EmptyVolume's "empty-vol-%d" naming plays for disks), capped at 20
+// characters total. E.g. gcsMountVolumeName("gs://bucket20/key/path", 1) ==
+// "gcs-bucket20-1".
+func gcsMountVolumeName(gcsPath string, index int) string {
+	const prefix = "gcs-"
+	const maxLen = 20
+
+	bucket := strings.TrimPrefix(gcsPath, "gs://")
+	if i := strings.IndexByte(bucket, '/'); i >= 0 {
+		bucket = bucket[:i]
+	}
+	sanitized := gcsMountVolumeNameCharsRe.ReplaceAllString(strings.ToLower(bucket), "-")
+	sanitized = strings.Trim(sanitized, "-")
+	if sanitized == "" {
+		sanitized = "b"
+	}
+
+	suffix := fmt.Sprintf("-%d", index)
+	maxBaseLen := max(1, maxLen-len(prefix)-len(suffix))
+	if len(sanitized) > maxBaseLen {
+		sanitized = sanitized[:maxBaseLen]
+	}
+	sanitized = strings.Trim(sanitized, "-")
+
+	return prefix + sanitized + suffix
+}
+
 func formatResources(resources []ResourceEntry) string {
 	parts := make([]string, len(resources))
 	for i, r := range resources {
@@ -105,13 +154,42 @@ func formatResources(resources []ResourceEntry) string {
 	return strings.Join(parts, ",")
 }
 
-// formatBindMountArgs derives a --bind-mount flag for each empty volume's mount point,
-// so task containers can see the extra disks that GCP Batch mounts onto the VM host.
-func formatBindMountArgs(rootDir string, volumes []EmptyVolume) string {
+// resolvedGCSMount pairs a GCSMount with the host-side path GCP Batch will
+// mount its bucket at (/mnt/disks/<volumeName>), computed once by
+// resolveGCSMounts and shared between the batch.Volume list and the
+// --bind-mount args so the two stay in sync.
+type resolvedGCSMount struct {
+	GCSMount
+	volumeName    string
+	hostMountPath string
+}
+
+// resolveGCSMounts computes a unique volume name and host mount path for
+// each of spec's GCSMounts (see gcsMountVolumeName).
+func resolveGCSMounts(mounts []GCSMount) []resolvedGCSMount {
+	out := make([]resolvedGCSMount, len(mounts))
+	for i, gm := range mounts {
+		volumeName := gcsMountVolumeName(gm.GCSPath, i)
+		out[i] = resolvedGCSMount{
+			GCSMount:      gm,
+			volumeName:    volumeName,
+			hostMountPath: "/mnt/disks/" + volumeName,
+		}
+	}
+	return out
+}
+
+// formatBindMountArgs derives a --bind-mount flag for each empty volume's mount
+// point and each GCS mount's host/container path pair, so task containers can see
+// the extra disks/buckets that GCP Batch mounts onto the VM host.
+func formatBindMountArgs(rootDir string, volumes []EmptyVolume, gcsMounts []resolvedGCSMount) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, " --bind-mount '%s:%s'", rootDir, rootDir)
 	for _, v := range volumes {
 		fmt.Fprintf(&b, " --bind-mount '%s:%s'", v.MountPoint, v.MountPoint)
+	}
+	for _, gm := range gcsMounts {
+		fmt.Fprintf(&b, " --bind-mount '%s:%s'", gm.hostMountPath, gm.MountPath)
 	}
 	return b.String()
 }
@@ -163,6 +241,19 @@ func (c *GCPBatchAPIClient) CreateJob(ctx context.Context, spec *WorkerJobSpec) 
 			return "", fmt.Errorf("workpool %s has an invalid empty volume mount point %q: must be an absolute path containing only letters, digits, '.', '_', '-', and '/'", spec.WorkpoolID, ev.MountPoint)
 		}
 	}
+	// GCSMount.MountPath is likewise interpolated unquoted into the same shell
+	// script (via the --bind-mount args below), so it needs the identical
+	// safety check. GCSPath isn't shell-interpolated (it only becomes
+	// batch.GCS.RemotePath, part of the Batch API request body), but is still
+	// validated as defense in depth.
+	for _, gm := range spec.GCSMounts {
+		if !validSafePath(gm.MountPath) {
+			return "", fmt.Errorf("workpool %s has an invalid gcs mount path %q: must be an absolute path containing only letters, digits, '.', '_', '-', and '/'", spec.WorkpoolID, gm.MountPath)
+		}
+		if !validGCSPath(gm.GCSPath) {
+			return "", fmt.Errorf("workpool %s has an invalid gcs mount gcsPath %q: must be a gs:// URL", spec.WorkpoolID, gm.GCSPath)
+		}
+	}
 
 	provisioningModel := "STANDARD"
 	if spec.Preemptible {
@@ -170,7 +261,7 @@ func (c *GCPBatchAPIClient) CreateJob(ctx context.Context, spec *WorkerJobSpec) 
 	}
 
 	disks := make([]*batch.AttachedDisk, 0, len(spec.EmptyVolumes))
-	volumes := make([]*batch.Volume, 0, len(spec.EmptyVolumes))
+	volumes := make([]*batch.Volume, 0, len(spec.EmptyVolumes)+len(spec.GCSMounts))
 	for i, ev := range spec.EmptyVolumes {
 		deviceName := fmt.Sprintf("empty-vol-%d", i)
 		disks = append(disks, &batch.AttachedDisk{
@@ -186,12 +277,23 @@ func (c *GCPBatchAPIClient) CreateJob(ctx context.Context, spec *WorkerJobSpec) 
 		})
 	}
 
+	// GCS mounts need no AttachedDisk/Policy.Disks entry (unlike EmptyVolume) --
+	// just a Volume backed by a GCS bucket, gcsfuse-mounted directly by Batch.
+	gcsMounts := resolveGCSMounts(spec.GCSMounts)
+	for _, gm := range gcsMounts {
+		volumes = append(volumes, &batch.Volume{
+			Gcs:          &batch.GCS{RemotePath: strings.TrimPrefix(gm.GCSPath, "gs://")},
+			MountPath:    gm.hostMountPath,
+			MountOptions: gm.MountOptions,
+		})
+	}
+
 	// --project is deliberately c.project, not spec.ProjectID: it's the project
 	// the worker uses for Firestore and Pub/Sub to claim tasks and report
 	// state, which stays in the control plane even when the VM itself runs
 	// in another project.
 	workerArgs := fmt.Sprintf("--stream --batch %s --project %s --db %s --workpool %s --work-dir %s --resources %s --linger %d", spec.BatchID, c.project, spec.DBName, spec.WorkpoolID, spec.RootDir, formatResources(spec.Resources), spec.LingerTime/time.Second) +
-		formatBindMountArgs(spec.RootDir, spec.EmptyVolumes)
+		formatBindMountArgs(spec.RootDir, spec.EmptyVolumes, gcsMounts)
 	log.Printf("worker args: %s", workerArgs)
 
 	job := &batch.Job{

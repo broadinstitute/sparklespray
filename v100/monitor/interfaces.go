@@ -77,6 +77,7 @@ type WorkPool struct {
 	RootDir               string
 	SparklesWorkerGCSPath string
 	EmptyVolumes          []EmptyVolume
+	GCSMounts             []GCSMount
 	BootDiskSizeGb        int
 	BootDiskType          string
 	Resources             []ResourceEntry
@@ -183,6 +184,15 @@ type EmptyVolume struct {
 	SizeInGB   int    `firestore:"size_in_gb"  json:"sizeInGB"`
 }
 
+// GCSMount describes a GCS bucket (or subdirectory) to mount on each worker
+// VM via GCP Batch's native GCS volume support. Field names and tags match
+// v100.GCSMount so Firestore documents round-trip correctly.
+type GCSMount struct {
+	MountPath    string   `firestore:"mount_path"    json:"mountPath"`
+	GCSPath      string   `firestore:"gcs_path"      json:"gcsPath"`
+	MountOptions []string `firestore:"mount_options" json:"mountOptions"`
+}
+
 // WorkerJobSpec holds all parameters needed to create a GCP Batch job for workers.
 type WorkerJobSpec struct {
 	WorkpoolID string
@@ -198,6 +208,7 @@ type WorkerJobSpec struct {
 	Command               string
 	RootDir               string
 	EmptyVolumes          []EmptyVolume
+	GCSMounts             []GCSMount
 	ServiceAccount        string
 	DBName                string
 	Resources             []ResourceEntry

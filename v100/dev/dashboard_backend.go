@@ -229,6 +229,7 @@ type workpoolDetailResponse struct {
 	SparklesWorkerGCSPath        string               `json:"sparkles_worker_gcs_path"`
 	Resources                    []v100.ResourceEntry `json:"resources"`
 	EmptyVolumes                 []v100.EmptyVolume   `json:"empty_volumes"`
+	GCSMounts                    []v100.GCSMount      `json:"gcs_mounts"`
 	Labels                       []labelResponse      `json:"labels"`
 	MaxWorkerCount               int                  `json:"max_worker_count"`
 	MaxPreemptibleWorkerAttempts int                  `json:"max_preemptible_worker_attempts"`
@@ -282,6 +283,7 @@ func (s *dashboardServer) handleGetWorkpool(w http.ResponseWriter, r *http.Reque
 		SparklesWorkerGCSPath:        wp.SparklesWorkerGCSPath,
 		Resources:                    wp.Resources,
 		EmptyVolumes:                 wp.EmptyVolumes,
+		GCSMounts:                    wp.GCSMounts,
 		Labels:                       detailLabels,
 		MaxWorkerCount:               wp.MaxWorkerCount,
 		MaxPreemptibleWorkerAttempts: wp.MaxPreemptibleWorkerAttempts,
@@ -775,6 +777,9 @@ func applyWorkpoolDefaults(spec *WorkpoolSpec, config *SparklesConfig) {
 	if spec.EmptyVolumes == nil {
 		spec.EmptyVolumes = []v100.EmptyVolume{}
 	}
+	if spec.GCSMounts == nil {
+		spec.GCSMounts = []v100.GCSMount{}
+	}
 	if spec.Region == "" {
 		spec.Region = config.Region
 	}
@@ -894,6 +899,7 @@ func (s *dashboardServer) handleSubmitJob(w http.ResponseWriter, r *http.Request
 		ServiceAccount:        req.Workpool.ServiceAccount,
 		Resources:             req.Workpool.Resources,
 		EmptyVolumes:          req.Workpool.EmptyVolumes,
+		GCSMounts:             req.Workpool.GCSMounts,
 		Labels:                req.Workpool.Labels,
 		WorkpoolSpecHash:      workpoolSpecHash,
 		Expiry:                now.Add(7 * 24 * time.Hour),

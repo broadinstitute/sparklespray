@@ -52,6 +52,7 @@ func runDevAddWorker(c *cli.Context) error {
 		RootDir:               workpoolSpec.RootDir,
 		SparklesWorkerGCSPath: workpoolSpec.SparklesWorkerGCSPath,
 		EmptyVolumes:          toMonitorEmptyVolumes(workpoolSpec.EmptyVolumes),
+		GCSMounts:             toMonitorGCSMounts(workpoolSpec.GCSMounts),
 		Resources:             toMonitorResources(workpoolSpec.Resources),
 		ServiceAccount:        workpoolSpec.ServiceAccount,
 		DBName:                db,
@@ -117,6 +118,20 @@ func toMonitorEmptyVolumes(vs []v100.EmptyVolume) []monitor.EmptyVolume {
 			MountPoint: v.MountPoint,
 			Type:       v.Type,
 			SizeInGB:   v.SizeInGB,
+		}
+	}
+	return out
+}
+
+// toMonitorGCSMounts converts v100.GCSMount to monitor.GCSMount.
+// The two types have identical field names and Firestore tags by design.
+func toMonitorGCSMounts(ms []v100.GCSMount) []monitor.GCSMount {
+	out := make([]monitor.GCSMount, len(ms))
+	for i, m := range ms {
+		out[i] = monitor.GCSMount{
+			MountPath:    m.MountPath,
+			GCSPath:      m.GCSPath,
+			MountOptions: m.MountOptions,
 		}
 	}
 	return out

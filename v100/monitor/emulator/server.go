@@ -39,6 +39,7 @@ type createJobRequest struct {
 	SparklesWorkerGCSPath string `json:"sparklesWorkerGCSPath"`
 	Command      string   `json:"command"`
 	EmptyVolumes []monitor.EmptyVolume `json:"emptyVolumes"`
+	GCSMounts    []monitor.GCSMount    `json:"gcsMounts"`
 	Labels       []label  `json:"labels"`
 }
 

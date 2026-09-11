@@ -162,6 +162,7 @@ One document per workpool. The document ID is the `workpool_id`. `WorkPool` is w
 | `service_account`                 | string          | GCP service account email assigned to worker VMs; governs what GCP resources each worker can access                                                                                                                                                                                                           |
 | `resources`                       | []ResourceEntry | Resource capacity advertised by workers created from this workpool                                                                                                                                                                                                                                            |
 | `empty_volumes`                   | []EmptyVolume   | Ephemeral volumes to attach to each VM                                                                                                                                                                                                                                                                        |
+| `gcs_mounts`                      | []GCSMount      | GCS buckets (or bucket subdirectories) to mount into each task container via GCP Batch's native `gcsfuse`-backed volume support                                                                                                                                                                               |
 | `labels`                          | []Label         | User-defined key/value tags attached at creation time (e.g. `team=ml`, `env=prod`)                                                                                                                                                                                                                            |
 | `expiry`                          | timestamp       | When this document may be garbage-collected                                                                                                                                                                                                                                                                   |
 | `max_worker_count`                | int             | Maximum number of VMs the monitor may have running concurrently for this workpool                                                                                                                                                                                                                             |
@@ -189,6 +190,26 @@ One document per workpool. The document ID is the `workpool_id`. `WorkPool` is w
 | `mount_point` | string | Filesystem path where the volume is mounted (e.g. `/scratch`) |
 | `type`        | string | Volume type (e.g. `pd-ssd`, `local-ssd`)                      |
 | `size_in_gb`  | int    | Volume size in gibibytes                                      |
+
+**GCSMount** (embedded object) — a GCS bucket (or subdirectory) mounted into every task container:
+
+| Field           | Type     | Description                                                                                        |
+| --------------- | -------- | -------------------------------------------------------------------------------------------------- |
+| `mount_path`    | string   | Path inside the task container where the bucket is mounted (e.g. `/data`)                          |
+| `gcs_path`      | string   | `gs://` URL of the bucket or bucket subdirectory to mount (e.g. `gs://my-bucket/some/prefix`)      |
+| `mount_options` | []string | `gcsfuse` mount options (e.g. `["ro", "implicit-dirs"]`), passed through to GCP Batch's GCS volume |
+
+Unlike `EmptyVolume`, a `GCSMount` doesn't get an `AttachedDisk` — GCP Batch mounts the
+bucket directly via its `gcsfuse`-backed GCS volume support
+(`batch.Volume.Gcs`/`batch.GCS.RemotePath`, `v100/monitor/batch_api.go`). Each mount is
+given a host-side path `/mnt/disks/<volumeName>` where GCP Batch mounts the bucket on
+the VM; `volumeName` is derived from the bucket name plus the mount's index in
+`gcs_mounts` (`gcsMountVolumeName` in `batch_api.go`, capped at 20 characters, e.g.
+`gs://bucket20/key/path` at index 1 → `gcs-bucket20-1`) rather than using `mount_path`
+literally, since GCE volume/device names have their own restricted charset. The worker
+process is then started with a `--bind-mount /mnt/disks/<volumeName>:<mount_path>` flag
+per `GCSMount` (alongside the ones already used for `EmptyVolumes` and `root_dir`), so
+each task's Docker container sees the bucket at the user-specified `mount_path`.
 
 ---
 

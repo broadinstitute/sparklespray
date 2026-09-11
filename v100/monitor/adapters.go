@@ -46,6 +46,7 @@ type firestoreWorkPool struct {
 	RootDir               string          `firestore:"root_dir"`
 	SparklesWorkerGCSPath string          `firestore:"sparkles_worker_gcs_path"`
 	EmptyVolumes          []EmptyVolume   `firestore:"empty_volumes"`
+	GCSMounts             []GCSMount      `firestore:"gcs_mounts"`
 	Resources             []ResourceEntry `firestore:"resources"`
 	ServiceAccount        string          `firestore:"service_account"`
 	Labels                []Label         `firestore:"labels"`
@@ -80,6 +81,7 @@ func toWorkPool(f *firestoreWorkPool) *WorkPool {
 		RootDir:                      f.RootDir,
 		SparklesWorkerGCSPath:        f.SparklesWorkerGCSPath,
 		EmptyVolumes:                 f.EmptyVolumes,
+		GCSMounts:                    f.GCSMounts,
 		Resources:                    f.Resources,
 		ServiceAccount:               f.ServiceAccount,
 		Labels:                       f.Labels,

@@ -68,6 +68,15 @@ type EmptyVolume struct {
 	SizeInGB   int    `firestore:"size_in_gb"  json:"sizeInGB"`
 }
 
+// GCSMount describes a GCS bucket (or subdirectory) to mount, via GCP Batch's
+// native gcsfuse-backed volume support, at MountPath inside each task
+// container. GCSPath is a gs:// URL, e.g. "gs://my-bucket/some/prefix".
+type GCSMount struct {
+	MountPath    string   `firestore:"mount_path"    json:"mountPath"`
+	GCSPath      string   `firestore:"gcs_path"      json:"gcsPath"`
+	MountOptions []string `firestore:"mount_options" json:"mountOptions"`
+}
+
 type WorkPool struct {
 	WorkpoolID string `firestore:"workpool_id"`
 	// ProjectID, if set, is the GCP project the Batch jobs (and therefore the
@@ -84,6 +93,7 @@ type WorkPool struct {
 	ServiceAccount        string          `firestore:"service_account"`
 	Resources             []ResourceEntry `firestore:"resources"`
 	EmptyVolumes          []EmptyVolume   `firestore:"empty_volumes"`
+	GCSMounts             []GCSMount      `firestore:"gcs_mounts"`
 	Labels                []Label         `firestore:"labels"`
 	Expiry       time.Time       `firestore:"expiry"`
 	Region       string          `firestore:"region"`

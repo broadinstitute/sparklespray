@@ -73,6 +73,7 @@ type remoteCreateJobBody struct {
 	SparklesWorkerGCSPath string        `json:"sparklesWorkerGCSPath"`
 	Command               string        `json:"command"`
 	EmptyVolumes          []EmptyVolume `json:"emptyVolumes"`
+	GCSMounts             []GCSMount    `json:"gcsMounts"`
 	Labels                []remoteLabel `json:"labels"`
 }
 
@@ -85,6 +86,7 @@ func (c *RemoteBatchAPIClient) CreateJob(ctx context.Context, spec *WorkerJobSpe
 		SparklesWorkerGCSPath: spec.SparklesWorkerGCSPath,
 		Command:               spec.Command,
 		EmptyVolumes:          spec.EmptyVolumes,
+		GCSMounts:             spec.GCSMounts,
 		Labels: []remoteLabel{
 			{Name: labelWorkpool, Value: spec.WorkpoolID},
 		},

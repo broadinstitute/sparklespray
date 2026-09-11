@@ -89,6 +89,13 @@ Get a single workpool's configuration and current status.
   "empty_volumes": [
     { "mount_point": "string", "type": "string", "size_in_gb": "integer" }
   ],
+  "gcs_mounts": [
+    {
+      "mount_path": "string",
+      "gcs_path": "string",
+      "mount_options": ["string"]
+    }
+  ],
   "labels": [{ "name": "string", "value": "string" }],
   "max_worker_count": "integer",
   "max_preemptible_worker_attempts": "integer",
@@ -311,6 +318,13 @@ Submit a new job. Creates the `WorkPool` (if it doesn't already exist), the `Job
     "resources": [{ "name": "string", "value": "float64" }],
     "emptyVolumes": [
       { "mountPoint": "string", "type": "string", "sizeInGB": "integer" }
+    ],
+    "gcsMounts": [
+      {
+        "mountPath": "string",
+        "gcsPath": "string (gs:// URL)",
+        "mountOptions": ["string"]
+      }
     ],
     "region": "string (default: SparklesConfig.region)",
     "zones": ["string"],

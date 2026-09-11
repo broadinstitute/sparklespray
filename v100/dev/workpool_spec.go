@@ -23,6 +23,7 @@ type WorkpoolSpec struct {
 	SparklesWorkerGCSPath string               `json:"sparklesWorkerGCSPath"`
 	Resources             []v100.ResourceEntry `json:"resources"`
 	EmptyVolumes          []v100.EmptyVolume   `json:"emptyVolumes"`
+	GCSMounts             []v100.GCSMount      `json:"gcsMounts"`
 	Region                string               `json:"region"`
 	Zones                 []string             `json:"zones"`
 	ServiceAccount        string               `json:"serviceAccount"`
