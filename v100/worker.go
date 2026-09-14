@@ -175,6 +175,7 @@ func executeDockerCommand(ctx context.Context, imageName string, command []strin
 	log.Printf("Executing docker: %s %s", dockerExecutable, strings.Join(args, " "))
 
 	cmd := exec.CommandContext(ctx, dockerExecutable, args...)
+	cmd.Env = dockerRunEnv()
 
 	pr, pw := io.Pipe()
 	cmd.Stdout = pw

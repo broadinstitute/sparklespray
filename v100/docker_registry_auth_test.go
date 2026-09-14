@@ -2,6 +2,7 @@ package v100
 
 import (
 	"errors"
+	"os"
 	"strings"
 	"testing"
 
@@ -120,6 +121,57 @@ func TestRegistryHostFromImage(t *testing.T) {
 	for _, c := range cases {
 		assert.Equal(t, c.want, registryHostFromImage(c.image), "image=%s", c.image)
 	}
+}
+
+func findPathEnv(env []string) (string, bool) {
+	for _, kv := range env {
+		if rest, ok := strings.CutPrefix(kv, "PATH="); ok {
+			return rest, true
+		}
+	}
+	return "", false
+}
+
+func TestDockerRunEnv_AddsDockerBinDirWhenMissing(t *testing.T) {
+	t.Setenv("PATH", "/usr/local/bin")
+
+	env := dockerRunEnv()
+
+	path, ok := findPathEnv(env)
+	require.True(t, ok)
+	assert.True(t, pathListContains(path, "/usr/local/bin"))
+	assert.True(t, pathListContains(path, "/usr/bin"))
+}
+
+func TestDockerRunEnv_NoOpWhenAlreadyPresent(t *testing.T) {
+	t.Setenv("PATH", "/usr/local/bin:/usr/bin")
+
+	env := dockerRunEnv()
+
+	var paths []string
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "PATH=") {
+			paths = append(paths, kv)
+		}
+	}
+	require.Len(t, paths, 1, "exactly one PATH entry")
+	assert.Equal(t, "PATH=/usr/local/bin:/usr/bin", paths[0])
+}
+
+func TestDockerRunEnv_SetsPathWhenUnset(t *testing.T) {
+	old, hadPath := os.LookupEnv("PATH")
+	require.NoError(t, os.Unsetenv("PATH"))
+	t.Cleanup(func() {
+		if hadPath {
+			os.Setenv("PATH", old)
+		}
+	})
+
+	env := dockerRunEnv()
+
+	path, ok := findPathEnv(env)
+	require.True(t, ok)
+	assert.Equal(t, "/usr/bin", path)
 }
 
 func TestIsGoogleContainerRegistryHost(t *testing.T) {

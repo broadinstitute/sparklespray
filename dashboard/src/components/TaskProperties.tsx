@@ -186,11 +186,27 @@ function LinkRow({
   );
 }
 
-function GcsPathRow({ label, path }: { label: string; path: string }) {
-  const href = path.replace(
-    /^gs:\/\/([^/]+)\/(.+)$/,
-    "https://storage.cloud.google.com/$1/$2"
-  );
+// GcsPathRow links a gs:// path to its Cloud Console equivalent. "object"
+// paths (e.g. the log file) point at a single, real GCS object, so they use
+// storage.cloud.google.com, which serves the object's contents directly.
+// "folder" paths (e.g. the task's output directory) are just a common
+// prefix rather than an object of their own -- storage.cloud.google.com
+// 404s on them -- so those use the Storage browser UI instead, which lists
+// everything under the prefix.
+function GcsPathRow({
+  label,
+  path,
+  kind = "object",
+}: {
+  label: string;
+  path: string;
+  kind?: "object" | "folder";
+}) {
+  const template =
+    kind === "folder"
+      ? "https://console.cloud.google.com/storage/browser/$1/$2"
+      : "https://storage.cloud.google.com/$1/$2";
+  const href = path.replace(/^gs:\/\/([^/]+)\/(.+)$/, template);
   return <LinkRow label={label} href={href} display={path} />;
 }
 
@@ -665,7 +681,7 @@ export default function TaskProperties({
               <GcsPathRow label="log" path={logPath} />
             )}
             {resultPath && TERMINAL_STATUSES.has(status) && (
-              <GcsPathRow label="output path" path={resultPath} />
+              <GcsPathRow label="output path" path={resultPath} kind="folder" />
             )}
             {vmConsoleUrl && (
               <LinkRow

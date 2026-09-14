@@ -774,6 +774,7 @@ type submitTaskRequest struct {
 	FilesToLocalize []submitFileToLocalizeRequest `json:"filesToLocalize"`
 	Image           string                        `json:"image"`
 	Command         []string                      `json:"command"`
+	Destination     string                        `json:"destination"`
 }
 
 // submitJobRequest mirrors openapi's SubmitJobBody schema.
@@ -791,6 +792,19 @@ type submitJobResponse struct {
 	ID string `json:"id"`
 }
 
+// ensureSlotsResource returns resources with a "slots" entry added, defaulting
+// to 1, if one isn't already present. Every job and workpool must define a
+// slots requirement so worker capacity accounting always has a value to work
+// with.
+func ensureSlotsResource(resources []v100.ResourceEntry) []v100.ResourceEntry {
+	for _, r := range resources {
+		if r.Name == "slots" {
+			return resources
+		}
+	}
+	return append(resources, v100.ResourceEntry{Name: "slots", Value: 1})
+}
+
 // applyWorkpoolDefaults fills in fields of spec that were omitted from the
 // submission with defaults, either fixed values or ones supplied by config
 // (for settings not yet exposed by the openapi.yaml request schema).
@@ -804,9 +818,7 @@ func applyWorkpoolDefaults(spec *WorkpoolSpec, config *SparklesConfig) {
 	if spec.ServiceAccount == "" {
 		spec.ServiceAccount = config.ServiceAccount
 	}
-	if len(spec.Resources) == 0 {
-		spec.Resources = []v100.ResourceEntry{{Name: "slots", Value: 1}}
-	}
+	spec.Resources = ensureSlotsResource(spec.Resources)
 	if spec.EmptyVolumes == nil {
 		spec.EmptyVolumes = []v100.EmptyVolume{}
 	}
@@ -963,7 +975,7 @@ func (s *dashboardServer) handleSubmitJob(w http.ResponseWriter, r *http.Request
 		CreatedAt:  now,
 		Expiry:     now.Add(7 * 24 * time.Hour),
 		TaskCount:  len(req.Tasks),
-		Resources:  req.Resources,
+		Resources:  ensureSlotsResource(req.Resources),
 		Labels:     req.Labels,
 	}
 
@@ -979,6 +991,10 @@ func (s *dashboardServer) handleSubmitJob(w http.ResponseWriter, r *http.Request
 		}
 		for i, t := range req.Tasks {
 			taskPrefix := fmt.Sprintf("%s/%s/%d", s.config.GCSPrefix, req.Name, i)
+			resultPath := taskPrefix
+			if t.Destination != "" {
+				resultPath = t.Destination
+			}
 			// Per-task files are localized in addition to job-level files.
 			filesToLocalize := append([]v100.FileToLocalize{}, req.FilesToLocalize...)
 			filesToLocalize = append(filesToLocalize, t.FilesToLocalize...)
@@ -992,8 +1008,8 @@ func (s *dashboardServer) handleSubmitJob(w http.ResponseWriter, r *http.Request
 				DockerImage:     t.Image,
 				FilesToLocalize: filesToLocalize,
 				Labels:          req.Labels,
-				ResultPath:      taskPrefix,
-				LogPath:         taskPrefix + "/stdout.txt",
+				ResultPath:      resultPath,
+				LogPath:         resultPath + "/stdout.txt",
 				Expiry:          now.Add(7 * 24 * time.Hour),
 			}
 			if err := tx.Set(s.fs.Collection(v100.TaskCollection).Doc(taskIDs[i]), task); err != nil {

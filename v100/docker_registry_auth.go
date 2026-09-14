@@ -3,7 +3,10 @@ package v100
 import (
 	"fmt"
 	"log"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -114,4 +117,34 @@ func isGoogleContainerRegistryHost(host string) bool {
 	return host == defaultDockerRegistryHost ||
 		strings.HasSuffix(host, ".gcr.io") ||
 		strings.HasSuffix(host, "-docker.pkg.dev")
+}
+
+// dockerRunEnv returns the environment `docker run` should be spawned with:
+// the current process's environment, with the docker binary's own directory
+// (see dockerExecutable) guaranteed to be on PATH. When docker implicitly
+// pulls a missing image, it looks up the docker-credential-gcr helper (set
+// up by ensure, above) via PATH -- which isn't necessarily inherited from
+// whatever minimal environment launched the worker process -- so without
+// this, the credential helper can't be found and the pull fails.
+func dockerRunEnv() []string {
+	dir := filepath.Dir(dockerExecutable)
+	env := os.Environ()
+	for i, kv := range env {
+		rest, ok := strings.CutPrefix(kv, "PATH=")
+		if !ok {
+			continue
+		}
+		if pathListContains(rest, dir) {
+			return env
+		}
+		env[i] = "PATH=" + rest + string(os.PathListSeparator) + dir
+		return env
+	}
+	return append(env, "PATH="+dir)
+}
+
+// pathListContains reports whether dir is one of the entries of path (a
+// PATH-style, os.PathListSeparator-joined list).
+func pathListContains(path, dir string) bool {
+	return slices.Contains(filepath.SplitList(path), dir)
 }

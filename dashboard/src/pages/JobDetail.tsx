@@ -44,6 +44,9 @@ const TERMINAL_JOB_STATES = new Set(["success", "error", "failed", "killed"]);
 
 const MONO = "'IBM Plex Mono', monospace";
 
+// Max number of example failed tasks linked from the failure banner.
+const MAX_FAILURE_EXAMPLES = 5;
+
 function DetailRow({
   label,
   value,
@@ -228,6 +231,58 @@ function StatusBadge({ status }: { status: TaskStatus }) {
   );
 }
 
+// Banner shown when at least one task completed with an error (task state
+// "error" specifically -- distinct from "failed"/"killed"), linking to the
+// log tab for up to MAX_FAILURE_EXAMPLES of them so the failure output can be
+// inspected quickly without hunting through the Tasks tab.
+function FailureBanner({
+  jobId,
+  failedTasks,
+  failedCount,
+}: {
+  jobId: string;
+  failedTasks: { taskId: string; taskIndex: number }[];
+  failedCount: number;
+}) {
+  if (failedCount === 0) return null;
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "baseline",
+        flexWrap: "wrap",
+        gap: 6,
+        padding: "9px 14px",
+        marginBottom: "1rem",
+        background: STATUS_COLORS.error.bg,
+        border: "1.5px solid #f4b8a4",
+        borderRadius: 6,
+        fontSize: "0.8rem",
+        fontFamily: MONO,
+        color: STATUS_COLORS.error.text,
+      }}
+    >
+      <span style={{ fontWeight: 700 }}>
+        ⚠ {failedCount} failed task{failedCount !== 1 ? "s" : ""}.
+      </span>
+      <span style={{ color: "#555" }}>Examples of failures:</span>
+      {failedTasks.map((t, i) => (
+        <span key={t.taskId}>
+          <Link
+            to={`/jobs/${jobId}/tasks/${t.taskId}/log`}
+            style={{ color: "#1565c0", textDecoration: "none" }}
+          >
+            Task {t.taskIndex}
+          </Link>
+          {i < failedTasks.length - 1 && (
+            <span style={{ color: "#aaa" }}>, </span>
+          )}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 function useJobSummary(
   jobId: string | undefined,
   active: boolean
@@ -366,6 +421,11 @@ export default function JobDetail() {
       .sort((a, b) => a.taskIndex - b.taskIndex);
   }, [taskRecords, eventTasks]);
 
+  const erroredTasks = useMemo(
+    () => tasks.filter((t) => t.status === "error"),
+    [tasks]
+  );
+
   const jobSummary = useJobSummary(jobId, overviewActive);
   const { history: fullSummaryHistory, lastUpdatedAt } = useJobSummaryHistory(
     jobId,
@@ -469,6 +529,12 @@ export default function JobDetail() {
           {jobId}
         </div>
       </div>
+
+      <FailureBanner
+        jobId={jobId}
+        failedTasks={erroredTasks.slice(0, MAX_FAILURE_EXAMPLES)}
+        failedCount={erroredTasks.length}
+      />
 
       <TabBar tabs={jobTabs} />
 
