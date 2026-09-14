@@ -642,7 +642,7 @@ def workflow_run_cmd(
         api_key = os.environ.get("SPARKLES_V100_KEY")
         if api_key is None:
             raise Exception("If using sparkles v100 url, you must set environment variable SPARKLES_V100_KEY")
-        client = V100Client(config.sparkles_v100_url, api_key, io, config.cache_db_path, config.cas_url_prefix, args.nodes)
+        client = V100Client(config.sparkles_v100_url, api_key, io, config.cache_db_path, config.cas_url_prefix, args.nodes, config.default_url_prefix)
         sparkles_iface = SparklesV100Impl(io, config, client)
     else:
         sparkles_iface = SparklesImpl(args.nodes)

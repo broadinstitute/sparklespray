@@ -68,7 +68,8 @@ def _watch_v100(io: IO, config: Config, args) -> int:
     )
 
     client = V100Client(
-        config.sparkles_v100_url, api_key, io, config.cache_db_path, config.cas_url_prefix, 0
+        config.sparkles_v100_url, api_key, io, config.cache_db_path, config.cas_url_prefix, 0,
+        config.default_url_prefix,
     )
     job = client.get_job_by_name(args.jobid)
     if job is None:

@@ -605,6 +605,7 @@ def _submit_via_v100(
         config.cache_db_path,
         config.cas_url_prefix,
         target_node_count,
+        config.default_url_prefix,
     )
 
     job = client.submit(

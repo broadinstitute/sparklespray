@@ -27,13 +27,14 @@ class V100Job:
         return self.status in ["success", "error", "failed", "killed"]
 
 class V100Client:
-    def __init__(self, base_url, api_key, io:IO, cache_db_path: str, cas_url_prefix:str, target_node_count:int):
+    def __init__(self, base_url, api_key, io:IO, cache_db_path: str, cas_url_prefix:str, target_node_count:int, default_url_prefix:str):
         self.base_url = base_url
         self.api_key = api_key
         self.io = io
         self.hash_db = CachingHashFunction(cache_db_path)
         self.cas_url_prefix = cas_url_prefix
         self.target_node_count = target_node_count
+        self.default_url_prefix = default_url_prefix
 
 
     def get_job_by_name(self, name) -> Optional[V100Job]:
@@ -177,8 +178,12 @@ class V100Client:
         body = dict(
             name=name,
             tasks=[
-                dict(image=image, command=task_command)
-                for task_command in list_of_commands
+                dict(
+                    image=image,
+                    command=task_command,
+                    destination=url_join(self.default_url_prefix, name, str(task_index)),
+                )
+                for task_index, task_command in enumerate(list_of_commands, start=1)
             ],
             workpool=dict(machineType=machine_type, projectID=project, region=region,
                           bootDiskSizeGb=boot_volume.size_in_gb,
