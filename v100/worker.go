@@ -155,6 +155,10 @@ func executeTask(task *Task, resources Resources, completions chan<- taskComplet
 }
 
 func executeDockerCommand(ctx context.Context, imageName string, command []string, workDir string, extraDockerArgs []string, tel *TaskEventLog) (*ResourceUsage, error) {
+	if err := defaultDockerRegistryAuth.ensure(registryHostFromImage(imageName)); err != nil {
+		return nil, fmt.Errorf("configuring docker registry auth for %s: %w", imageName, err)
+	}
+
 	containerName := "sparkles-" + uuid.New().String()[:8]
 
 	// Register the container before starting it. The metrics poller is already
