@@ -74,8 +74,10 @@ func (a *Monitor) reconcileBatch(ctx context.Context, ws *WorkPoolWithState, bat
 	}
 
 	if apiStatus == BatchJobStatusFailed {
-		if err := a.batchAPI.PrintBatchDebuggingInfo(ctx, batch.ProjectID, batch.JobID); err != nil {
-			log.Printf("cluster reconciler: print batch debugging info for %s: %v", batch.JobID, err)
+		if info, err := a.batchAPI.GetBatchDebuggingInfo(ctx, batch.ProjectID, batch.JobID); err != nil {
+			a.errorLog.Add("cluster reconciler: get batch debugging info for %s: %v", batch.JobID, err)
+		} else if info != "" {
+			a.errorLog.Add("cluster reconciler: workpool %s batch %s (job %s) failed:\n%s", ws.Pool.WorkpoolID, batch.BatchID, batch.JobID, info)
 		}
 		if err := a.batchAPI.TerminateJob(ctx, batch.JobID); err != nil {
 			log.Printf("cluster reconciler: terminate job %s: %v", batch.JobID, err)

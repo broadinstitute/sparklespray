@@ -43,6 +43,31 @@ func TestClusterReconciler_FailedBatch_MarksFailedAndUnhealthy(t *testing.T) {
 	assert.Equal(t, WorkPoolStatusUnhealthy, w.Pools.MustGetState("pool-1").State)
 }
 
+func TestClusterReconciler_FailedBatch_AppendsDebuggingInfoToErrorLog(t *testing.T) {
+	w := newWorld()
+	pool := defaultPool("pool-1")
+	w.Pools.Add(pool)
+	w.Workers.Add(&Worker{WorkerID: "w1", WorkpoolID: "pool-1", Status: "started"})
+
+	w.Batches.Add(&BatchAPIRequest{
+		BatchID:    "b1",
+		JobID:      "job-1",
+		WorkpoolID: "pool-1",
+		Status:     BatchStatusStarted,
+	})
+	w.BatchAPI.AddJob("job-1", "b1", "pool-1", 2, BatchJobStatusFailed)
+	w.BatchAPI.DebugInfo = "jobID: job-1\nuid: abc\n\n1 log entries found\n\nboom, it broke"
+
+	require.NoError(t, w.A.runClusterReconciler(context.Background()))
+
+	entries := w.A.errorLog.Entries()
+	require.NotEmpty(t, entries)
+	last := entries[len(entries)-1]
+	assert.Contains(t, last.Message, "pool-1")
+	assert.Contains(t, last.Message, "b1")
+	assert.Contains(t, last.Message, "boom, it broke")
+}
+
 func TestClusterReconciler_SucceededBatch_MarksCompleted(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")

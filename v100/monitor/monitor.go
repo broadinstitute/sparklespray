@@ -94,7 +94,12 @@ type Monitor struct {
 	dbName                 string
 	lingerDuration         time.Duration
 	lastActivity           time.Time
+	errorLog               *ErrorLog
 }
+
+// ErrorLog returns the monitor's in-memory log of recent background-poller
+// errors (see RunMonitorLoop).
+func (a *Monitor) ErrorLog() *ErrorLog { return a.errorLog }
 
 // SetVerbose enables or disables verbose poll logging.
 func (a *Monitor) SetVerbose(v bool) { a.verbose = v }
@@ -168,6 +173,7 @@ func New(
 		tasks:    tasks,
 		pubsub:   pubsub,
 		dbName:   dbName,
+		errorLog: NewErrorLog(DefaultErrorLogCapacity),
 	}
 }
 
@@ -201,7 +207,7 @@ func (a *Monitor) RunMonitorLoop(ctx context.Context) {
 	notifyClusterReconciler := sched.Add(defaultMinTimeBetweenPolls, defaultMaxTimeBetweenPolls, func() {
 		a.vlogf("Started: Reconciling our records against google's")
 		if err := a.runClusterReconciler(ctx); err != nil {
-			log.Printf("cluster reconciler: %v", err)
+			a.errorLog.Add("cluster reconciler: %v", err)
 		}
 		a.vlogf("Completed: Reconciling our records against google's")
 	})
@@ -210,7 +216,7 @@ func (a *Monitor) RunMonitorLoop(ctx context.Context) {
 	notifyProvisioning := sched.Add(defaultMinTimeBetweenPolls, defaultMaxTimeBetweenPolls, func() {
 		a.vlogf("Started: Checking for workpools which need new workers")
 		if err := a.runProvisioningPoll(ctx); err != nil {
-			log.Printf("provisioning poll: %v", err)
+			a.errorLog.Add("provisioning poll: %v", err)
 		}
 		a.vlogf("Completed: Checking for workpools which need new workers")
 	})
@@ -219,7 +225,7 @@ func (a *Monitor) RunMonitorLoop(ctx context.Context) {
 	sched.Add(defaultMinTimeBetweenPolls, defaultMaxTimeBetweenPolls, func() {
 		a.vlogf("Started: Checking for ophaned jobs")
 		if err := a.runRequeueOrphanedTasks(ctx); err != nil {
-			log.Printf("task recovery: %v", err)
+			a.errorLog.Add("task recovery: %v", err)
 		}
 		a.vlogf("Completed: Checking for ophaned jobs")
 	})
@@ -228,7 +234,7 @@ func (a *Monitor) RunMonitorLoop(ctx context.Context) {
 	notifyBatchStartupMonitor := sched.Add(defaultMinTimeBetweenPolls, defaultMaxTimeBetweenPolls, func() {
 		a.vlogf("Started: Checking to see if workers successfully starting")
 		if err := a.runBatchStartupMonitor(ctx); err != nil {
-			log.Printf("batch startup monitor: %v", err)
+			a.errorLog.Add("batch startup monitor: %v", err)
 		}
 		a.vlogf("Completed: Checking to see if workers successfully starting")
 	})
@@ -238,7 +244,7 @@ func (a *Monitor) RunMonitorLoop(ctx context.Context) {
 		sched.Add(expiryCleanerInterval, expiryCleanerInterval, func() {
 			a.vlogf("Deleting expired objects from firestore...")
 			if err := a.runExpiryCleaner(ctx); err != nil {
-				log.Printf("expiry cleaner: %v", err)
+				a.errorLog.Add("expiry cleaner: %v", err)
 			}
 			a.vlogf("Deleting expired objects from firestore complete")
 		})
@@ -250,7 +256,7 @@ func (a *Monitor) RunMonitorLoop(ctx context.Context) {
 	notifyJobSummary = sched.Add(defaultMinTimeBetweenPolls, defaultMaxTimeBetweenPolls, func() {
 		a.vlogf("Starting: Computing job summaries")
 		if err := a.runJobSummaryPoll(ctx); err != nil {
-			log.Printf("job summary poll: %v", err)
+			a.errorLog.Add("job summary poll: %v", err)
 		}
 		a.vlogf("Completed: Computing job summaries")
 	})
@@ -261,7 +267,7 @@ func (a *Monitor) RunMonitorLoop(ctx context.Context) {
 	notifyWorkPoolSummary = sched.Add(defaultMinTimeBetweenPolls, defaultMaxTimeBetweenPolls, func() {
 		a.vlogf("Starting: Compute workpool summaries")
 		if err := a.runWorkPoolSummaryPoll(ctx); err != nil {
-			log.Printf("workpool summary poll: %v", err)
+			a.errorLog.Add("workpool summary poll: %v", err)
 		}
 		a.vlogf("Completed: Compute workpool summaries")
 	})
@@ -278,7 +284,7 @@ func (a *Monitor) RunMonitorLoop(ctx context.Context) {
 					return
 				case n := <-a.jobEvents.JobEvents():
 					if n.Err != nil {
-						log.Printf("job events: fatal error: %v", n.Err)
+						a.errorLog.Add("job events: fatal error: %v", n.Err)
 						fatalErrCh <- n.Err
 						return
 					}
@@ -306,7 +312,7 @@ func (a *Monitor) RunMonitorLoop(ctx context.Context) {
 				return
 			case n := <-a.pubsub.Notifications():
 				if n.Err != nil {
-					log.Printf("pubsub: fatal error: %v", n.Err)
+					a.errorLog.Add("pubsub: fatal error: %v", n.Err)
 					fatalErrCh <- n.Err
 					return
 				}
@@ -347,7 +353,7 @@ func (a *Monitor) RunMonitorLoop(ctx context.Context) {
 func (a *Monitor) routeNotification(ctx context.Context, batchID string, notifyClusterReconciler, notifyBatchStartupMonitor func()) {
 	batch, err := a.batches.Get(ctx, batchID)
 	if err != nil {
-		log.Printf("notification: failed to look up batch %s: %v — notifying both the cluster reconciler and the batch startup monitor", batchID, err)
+		a.errorLog.Add("notification: failed to look up batch %s: %v — notifying both the cluster reconciler and the batch startup monitor", batchID, err)
 		notifyClusterReconciler()
 		notifyBatchStartupMonitor()
 		return
@@ -371,7 +377,7 @@ func (a *Monitor) saveState(ctx context.Context, state *WorkPoolState, message s
 	}
 	if a.workpoolStatePublisher != nil {
 		if err := a.workpoolStatePublisher.PublishWorkpoolStateChange(ctx, state.WorkpoolID, string(state.State), message); err != nil {
-			log.Printf("saveState: publish workpool_state_change for %s: %v", state.WorkpoolID, err)
+			a.errorLog.Add("saveState: publish workpool_state_change for %s: %v", state.WorkpoolID, err)
 		}
 	}
 	return nil
@@ -386,7 +392,7 @@ func (a *Monitor) saveState(ctx context.Context, state *WorkPoolState, message s
 func (a *Monitor) recordIncident(ctx context.Context, workpoolID, incidentType, message string) {
 	if a.workpoolIncidents != nil {
 		if err := a.workpoolIncidents.PublishWorkpoolIncident(ctx, workpoolID, incidentType, message); err != nil {
-			log.Printf("recordIncident: publish workpool_incident for %s: %v", workpoolID, err)
+			a.errorLog.Add("recordIncident: publish workpool_incident for %s: %v", workpoolID, err)
 		}
 	}
 }
@@ -423,7 +429,7 @@ func (a *Monitor) markBatchDone(ctx context.Context, ws *WorkPoolWithState, batc
 	}
 	if a.batchOutcomes != nil {
 		if err := a.batchOutcomes.PublishBatchFailed(ctx, ws.Pool.WorkpoolID, reason); err != nil {
-			log.Printf("markBatchDone: publish batch_failed for workpool %s: %v", ws.Pool.WorkpoolID, err)
+			a.errorLog.Add("markBatchDone: publish batch_failed for workpool %s: %v", ws.Pool.WorkpoolID, err)
 		}
 	}
 	return a.checkHaltThreshold(ctx, ws.Pool, ws.State)
@@ -442,6 +448,12 @@ func (a *Monitor) checkHaltThreshold(ctx context.Context, pool *WorkPool, state 
 	}
 
 	since := a.clock.Now().Add(-defaultHaltCheckWindow)
+	if state.HaltResetAt.After(since) {
+		// A manual reset (see ResetHaltedWorkPool) happened more recently than
+		// the normal lookback window would reach; ignore anything before it so
+		// stale pre-reset failures can't immediately re-trigger a halt.
+		since = state.HaltResetAt
+	}
 	recent, err := a.events.ListRecentBatchOutcomes(ctx, pool.WorkpoolID, since)
 	if err != nil {
 		return fmt.Errorf("list recent batch outcomes for workpool %s: %w", pool.WorkpoolID, err)
@@ -470,6 +482,30 @@ func (a *Monitor) checkHaltThreshold(ctx context.Context, pool *WorkPool, state 
 		}
 	}
 	return nil
+}
+
+// ResetHaltedWorkPool clears a workpool out of WorkPoolStatusHalted so
+// provisioning can resume, recording the reset time so that batch failures
+// from before it are ignored by the next checkHaltThreshold decision (see
+// WorkPoolState.HaltResetAt). No-op (returns the current state, unchanged)
+// if the workpool isn't currently halted. Exported so callers without a live
+// *Monitor (e.g. the dashboard-backend, which talks to Firestore directly)
+// can trigger a reset.
+func ResetHaltedWorkPool(ctx context.Context, pools WorkPoolStore, workpoolID string, now time.Time) (previous WorkPoolStatus, err error) {
+	ws, err := pools.Get(ctx, workpoolID)
+	if err != nil {
+		return "", err
+	}
+	previous = ws.State.State
+	if previous != WorkPoolStatusHalted {
+		return previous, nil
+	}
+	ws.State.State = WorkPoolStatusOK
+	ws.State.HaltResetAt = now
+	if err := pools.SaveState(ctx, ws.State); err != nil {
+		return previous, fmt.Errorf("save workpool %s: %w", workpoolID, err)
+	}
+	return previous, nil
 }
 
 // RunRequeueOrphanedTasks runs one task-recovery pass: any tasks owned by workers

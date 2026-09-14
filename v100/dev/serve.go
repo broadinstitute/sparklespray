@@ -72,7 +72,7 @@ func runServe(c *cli.Context) error {
 	}
 	defer stopMonitor()
 
-	handler, err := NewDashboardHandler(ctx, project, fsClient, psClient, prefix)
+	handler, err := NewDashboardHandler(ctx, project, fsClient, psClient, prefix, m.ErrorLog())
 	if err != nil {
 		return err
 	}

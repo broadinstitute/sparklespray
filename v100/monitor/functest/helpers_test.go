@@ -94,7 +94,9 @@ func (n *noopBatchAPIClient) ListRunningVMs(_ context.Context, _, _, _ string, _
 }
 func (n *noopBatchAPIClient) TerminateVM(_ context.Context, _, _, _ string) error            { return nil }
 func (n *noopBatchAPIClient) TerminateJob(_ context.Context, _ string) error                 { return nil }
-func (n *noopBatchAPIClient) PrintBatchDebuggingInfo(_ context.Context, _, _ string) error   { return nil }
+func (n *noopBatchAPIClient) GetBatchDebuggingInfo(_ context.Context, _, _ string) (string, error) {
+	return "", nil
+}
 
 // noopPubSubReceiver returns a channel that never fires.
 type noopPubSubReceiver struct {

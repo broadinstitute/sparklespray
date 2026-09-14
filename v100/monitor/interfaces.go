@@ -112,6 +112,12 @@ type WorkPool struct {
 type WorkPoolState struct {
 	WorkpoolID string
 	State      WorkPoolStatus
+	// HaltResetAt is the last time an operator manually reset this workpool
+	// out of WorkPoolStatusHalted (see ResetHaltedWorkPool). checkHaltThreshold
+	// ignores any batch outcome recorded before this time, so stale failures
+	// from before the reset can't immediately re-trigger a halt. Zero means
+	// never reset.
+	HaltResetAt time.Time
 }
 
 // WorkPoolWithState pairs an immutable WorkPool config with its current mutable state.
@@ -223,7 +229,7 @@ type WorkerJobSpec struct {
 // BatchAPIClient wraps the GCP Batch API. All methods receive a context for cancellation.
 //
 // The methods that address a project directly (CreateJob via spec.ProjectID,
-// and ListRunningVMs/TerminateVM/PrintBatchDebuggingInfo via a projectID
+// and ListRunningVMs/TerminateVM/GetBatchDebuggingInfo via a projectID
 // argument) treat an empty project as "the client's own project", so callers
 // with no per-workpool override keep the previous behavior. GetJobStatus and
 // TerminateJob need no project: they take a fully-qualified job resource name,
@@ -237,7 +243,10 @@ type BatchAPIClient interface {
 	ListRunningVMs(ctx context.Context, projectID, filterLabelName, filterLabelValue string, zones []string) (map[string]VMInfo, error)
 	TerminateVM(ctx context.Context, projectID, zone, instanceName string) error
 	TerminateJob(ctx context.Context, jobID string) error
-	PrintBatchDebuggingInfo(ctx context.Context, projectID, jobID string) error
+	// GetBatchDebuggingInfo returns diagnostic text for a batch job (status,
+	// status events, and relevant Cloud Logging entries), for the caller to
+	// surface however it likes (e.g. appending it to the monitor's ErrorLog).
+	GetBatchDebuggingInfo(ctx context.Context, projectID, jobID string) (string, error)
 }
 
 // WorkPoolStore reads WorkPool config and reads/writes WorkPoolState.
@@ -320,6 +329,8 @@ type WorkPoolSummary struct {
 	StateMessage                  string         `firestore:"state_message"`
 	LastIncidentAt                time.Time      `firestore:"last_incident_at"`
 	IncidentCount                 int            `firestore:"incident_count"`
+	// HaltResetAt mirrors WorkPoolState.HaltResetAt (see its doc comment).
+	HaltResetAt                   time.Time      `firestore:"halt_reset_at"`
 	ExpectedPreemptibleWorkers    int            `firestore:"expected_preemptible_workers"`
 	ExpectedNonpreemptibleWorkers int            `firestore:"expected_nonpreemptible_workers"`
 	UnhealthyBatchCount           int            `firestore:"unhealthy_batch_count"`

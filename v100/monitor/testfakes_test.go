@@ -50,6 +50,9 @@ type FakeBatchAPIClient struct {
 	CreatedJobs    []FakeCreatedJob
 	TerminatedVMs  []FakeTerminatedVM
 	TerminatedJobs []string
+
+	// DebugInfo, if set, is returned by GetBatchDebuggingInfo for every call.
+	DebugInfo string
 }
 
 func newFakeBatchAPIClient() *FakeBatchAPIClient {
@@ -207,8 +210,10 @@ func (f *FakeBatchAPIClient) TerminateJob(ctx context.Context, jobID string) err
 	return nil
 }
 
-func (f *FakeBatchAPIClient) PrintBatchDebuggingInfo(ctx context.Context, projectID, jobID string) error {
-	return nil
+func (f *FakeBatchAPIClient) GetBatchDebuggingInfo(ctx context.Context, projectID, jobID string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.DebugInfo, nil
 }
 
 // ActiveVMCount returns the number of VMs currently tracked for a job.

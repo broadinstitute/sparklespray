@@ -33,10 +33,11 @@ import (
 // ----- handler context -----
 
 type dashboardServer struct {
-	project string
-	fs      *firestore.Client
-	ps      *pubsub.Client
-	config  *SparklesConfig
+	project  string
+	fs       *firestore.Client
+	ps       *pubsub.Client
+	config   *SparklesConfig
+	errorLog *monitor.ErrorLog
 }
 
 // sparklesConfigCollection is the Firestore collection holding SparklesConfig
@@ -411,6 +412,38 @@ func (s *dashboardServer) handleUpdateWorkpool(w http.ResponseWriter, r *http.Re
 		MaxWorkersPerRequest:         wp.MaxWorkersPerRequest,
 		MaxZombiesBeforeAbort:        wp.MaxZombiesBeforeAbort,
 		MaxConsecutiveFailedBatches:  wp.MaxConsecutiveFailedBatches,
+	})
+}
+
+// ----- POST /api/v1/workpool/{workpool_id}/reset -----
+
+// handleResetWorkpool clears a halted workpool back to a working state so
+// provisioning can resume (see monitor.ResetHaltedWorkPool). No-op if the
+// workpool isn't currently halted.
+func (s *dashboardServer) handleResetWorkpool(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	workpoolID := r.PathValue("workpool_id")
+
+	pools := monitor.NewFirestoreWorkPoolStore(s.fs)
+	previous, err := monitor.ResetHaltedWorkPool(ctx, pools, workpoolID, time.Now())
+	if err != nil {
+		if grpcstatus.Code(err) == codes.NotFound {
+			writeError(w, http.StatusNotFound, "NOT_FOUND", "workpool not found")
+			return
+		}
+		log.Printf("dashboard: ResetWorkpool %s: %v", workpoolID, err)
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to reset workpool")
+		return
+	}
+
+	newState := previous
+	if previous == monitor.WorkPoolStatusHalted {
+		newState = monitor.WorkPoolStatusOK
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"workpool_id":    workpoolID,
+		"previous_state": previous,
+		"new_state":      newState,
 	})
 }
 
@@ -1574,6 +1607,26 @@ func (s *dashboardServer) handleGetMetrics(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, map[string]any{"metrics": v100.MetricMetadataTable})
 }
 
+// ----- GET /api/v1/errors -----
+
+// monitorErrorEntry is the JSON shape for one monitor.ErrorLogEntry.
+type monitorErrorEntry struct {
+	Timestamp time.Time `json:"timestamp"`
+	Message   string    `json:"message"`
+}
+
+// handleListErrors returns recent background-poller errors recorded by the
+// monitor's in-memory ErrorLog (see monitor.ErrorLog), so failures can be
+// inspected from the dashboard without process log access.
+func (s *dashboardServer) handleListErrors(w http.ResponseWriter, r *http.Request) {
+	entries := s.errorLog.Entries()
+	out := make([]monitorErrorEntry, len(entries))
+	for i, e := range entries {
+		out[i] = monitorErrorEntry{Timestamp: e.Timestamp, Message: e.Message}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"errors": out})
+}
+
 // ----- GET /api/v1/task/{task_id}/log -----
 
 // taskLogEntry is the unified JSON shape for both log_update and
@@ -2026,7 +2079,7 @@ func runDevDashboardBackend(c *cli.Context) error {
 	}
 	defer psClient.Close()
 
-	handler, err := NewDashboardHandler(ctx, project, fsClient, psClient, prefix)
+	handler, err := NewDashboardHandler(ctx, project, fsClient, psClient, prefix, nil)
 	if err != nil {
 		return err
 	}
@@ -2059,17 +2112,26 @@ func NewDashboardHandler(
 	fsClient *firestore.Client,
 	psClient *pubsub.Client,
 	prefix string,
+	errorLog *monitor.ErrorLog,
 ) (http.Handler, error) {
 	config, err := loadSparklesConfig(ctx, fsClient)
 	if err != nil {
 		return nil, fmt.Errorf("loading sparkles config: %w", err)
 	}
 
+	// errorLog is nil for standalone dashboard-only runs, which have no
+	// monitor process to ever populate it — an empty log is correct there,
+	// not a workaround.
+	if errorLog == nil {
+		errorLog = monitor.NewErrorLog(monitor.DefaultErrorLogCapacity)
+	}
+
 	srv := &dashboardServer{
-		project: project,
-		fs:      fsClient,
-		ps:      psClient,
-		config:  config,
+		project:  project,
+		fs:       fsClient,
+		ps:       psClient,
+		config:   config,
+		errorLog: errorLog,
 	}
 
 	mux := http.NewServeMux()
@@ -2091,6 +2153,7 @@ func NewDashboardHandler(
 	handle("GET /api/v1/workpools", srv.handleListWorkpools)
 	handle("GET /api/v1/workpool/{workpool_id}", srv.handleGetWorkpool)
 	handle("PATCH /api/v1/workpool/{workpool_id}", srv.handleUpdateWorkpool)
+	handle("POST /api/v1/workpool/{workpool_id}/reset", srv.handleResetWorkpool)
 	handle("GET /api/v1/workpool/{workpool_id}/batches", srv.handleListBatches)
 	handle("GET /api/v1/workpool/{workpool_id}/workers", srv.handleListWorkers)
 	handle("GET /api/v1/worker/{worker_id}", srv.handleGetWorker)
@@ -2109,6 +2172,7 @@ func NewDashboardHandler(
 	handle("GET /api/v1/task/{task_id}/log", srv.handleGetTaskLog)
 	handle("GET /api/v1/version", srv.handleGetVersion)
 	handle("GET /api/v1/metrics", srv.handleGetMetrics)
+	handle("GET /api/v1/errors", srv.handleListErrors)
 	handle("POST /api/v1/task/{task_id}/stream", srv.handleStreamTask)
 	handle("GET /api/v1/events", srv.handleListEvents)
 	handle("POST /api/v1/subscriptions", srv.handleCreateSubscription)

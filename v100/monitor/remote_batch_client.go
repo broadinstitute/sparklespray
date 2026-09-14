@@ -170,6 +170,6 @@ func (c *RemoteBatchAPIClient) TerminateJob(ctx context.Context, jobID string) e
 	return nil
 }
 
-func (c *RemoteBatchAPIClient) PrintBatchDebuggingInfo(ctx context.Context, projectID, jobID string) error {
-	return nil
+func (c *RemoteBatchAPIClient) GetBatchDebuggingInfo(ctx context.Context, projectID, jobID string) (string, error) {
+	return "", nil
 }

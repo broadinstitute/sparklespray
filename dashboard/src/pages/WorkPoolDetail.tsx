@@ -636,6 +636,80 @@ function ProvisioningSection({
   );
 }
 
+function ResetHaltedButton({
+  workpoolId,
+  onWorkpoolUpdated,
+}: {
+  workpoolId: string;
+  onWorkpoolUpdated: () => void;
+}) {
+  const [resetting, setResetting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const reset = async () => {
+    setResetting(true);
+    setError(null);
+    try {
+      const r = await apiFetch(`/api/v1/workpool/${workpoolId}/reset`, {
+        method: "POST",
+      });
+      if (!r.ok) {
+        const errBody = await r.json().catch(() => null);
+        setError(errBody?.error || `Reset failed (status ${r.status})`);
+        return;
+      }
+      onWorkpoolUpdated();
+    } catch (_) {
+      setError("Reset failed: could not reach the server");
+    } finally {
+      setResetting(false);
+    }
+  };
+
+  return (
+    <div style={{ marginTop: 4, marginBottom: 8 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <button
+          onClick={reset}
+          disabled={resetting}
+          title="Resume a halted workpool: clears the halted state so provisioning can resume submitting new batches. Only batch failures after this point count toward triggering another halt."
+          style={{
+            padding: "4px 10px",
+            fontFamily: MONO,
+            fontSize: "0.75rem",
+            color: "#fff",
+            background: resetting ? "#ef9a9a" : "#b71c1c",
+            border: "none",
+            borderRadius: 4,
+            cursor: resetting ? "default" : "pointer",
+          }}
+        >
+          {resetting ? "resetting…" : "reset"}
+        </button>
+        <Link
+          to="/errors"
+          title="View the monitor's error log to see why this workpool halted"
+          style={{ fontSize: "0.75rem", fontFamily: MONO, color: "#1565c0" }}
+        >
+          view error log
+        </Link>
+      </div>
+      {error && (
+        <div
+          style={{
+            color: "#b71c1c",
+            fontSize: "0.75rem",
+            fontFamily: MONO,
+            marginTop: 4,
+          }}
+        >
+          {error}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function WorkPoolPropertiesPanel({
   workpoolId,
   detail,
@@ -691,6 +765,12 @@ function WorkPoolPropertiesPanel({
           <StatusBadge status={detail.state || "—"} colorMap={statusColorMap} />
         }
       />
+      {detail.state === "halted" && (
+        <ResetHaltedButton
+          workpoolId={workpoolId}
+          onWorkpoolUpdated={onWorkpoolUpdated}
+        />
+      )}
       {detail.state_message && (
         <DetailRow label="message" value={detail.state_message} />
       )}

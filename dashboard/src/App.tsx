@@ -12,6 +12,7 @@ import WorkerDetail from "./pages/WorkerDetail";
 import BatchDetail from "./pages/BatchDetail";
 import NotImplemented from "./pages/NotImplemented";
 import InvalidApiKey from "./pages/InvalidApiKey";
+import ErrorLog from "./pages/ErrorLog";
 
 function AppRoutes() {
   return (
@@ -60,6 +61,7 @@ function AppRoutes() {
           />
           <Route path="/clusters/:clusterId" element={<ClusterDetail />} />
           <Route path="/clusters/:clusterId/logs" element={<ClusterLogs />} />
+          <Route path="/errors" element={<ErrorLog />} />
           <Route path="/invalid-api-key" element={<InvalidApiKey />} />
           <Route path="*" element={<NotImplemented />} />
         </Routes>

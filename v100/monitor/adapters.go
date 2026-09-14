@@ -97,8 +97,9 @@ func toWorkPool(f *firestoreWorkPool) *WorkPool {
 
 func toWorkPoolState(workpoolID string, summary *WorkPoolSummary) *WorkPoolState {
 	return &WorkPoolState{
-		WorkpoolID: workpoolID,
-		State:      summary.State,
+		WorkpoolID:  workpoolID,
+		State:       summary.State,
+		HaltResetAt: summary.HaltResetAt,
 	}
 }
 
@@ -179,7 +180,8 @@ func (s *FirestoreWorkPoolStore) Get(ctx context.Context, workpoolID string) (*W
 // poll derives from the Events log) are not overwritten.
 func (s *FirestoreWorkPoolStore) SaveState(ctx context.Context, state *WorkPoolState) error {
 	data := map[string]any{
-		"state": string(state.State),
+		"state":         string(state.State),
+		"halt_reset_at": state.HaltResetAt,
 	}
 	_, err := s.fs.Collection(workPoolSummaryCollection).Doc(state.WorkpoolID).Set(ctx, data, firestore.MergeAll)
 	return err

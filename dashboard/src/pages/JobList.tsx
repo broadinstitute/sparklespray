@@ -879,6 +879,9 @@ export default function JobList() {
             <h1 className="jl-page-title">
               sparkles
               {version && <span className="jl-page-version">{version}</span>}
+              <Link to="/errors" className="jl-error-log-link">
+                Error Log
+              </Link>
             </h1>
 
             {/* Filter bar */}
@@ -1041,6 +1044,20 @@ const styles = `
     letter-spacing: normal;
     margin-left: 0.6rem;
     vertical-align: middle;
+  }
+
+  .jl-error-log-link {
+    font-size: 0.8rem;
+    font-weight: 400;
+    color: #1565c0;
+    letter-spacing: normal;
+    margin-left: 1rem;
+    vertical-align: middle;
+    text-decoration: none;
+  }
+
+  .jl-error-log-link:hover {
+    text-decoration: underline;
   }
 
   /* ── Filter bar ─────────────────────────────────── */

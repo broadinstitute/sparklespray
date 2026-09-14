@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -456,10 +455,15 @@ func (c *GCPBatchAPIClient) TerminateJob(ctx context.Context, jobID string) erro
 	return nil
 }
 
-func (c *GCPBatchAPIClient) PrintBatchDebuggingInfo(ctx context.Context, projectID, jobID string) error {
+// GetBatchDebuggingInfo fetches diagnostic detail for a Batch job: its
+// status/status-events plus any batch_task_logs/batch_agent_logs Cloud
+// Logging entries from around the job's lifetime. The caller (see
+// reconcileBatch) appends the returned text to the monitor's ErrorLog so
+// it's visible from the dashboard instead of only in Cloud Logging.
+func (c *GCPBatchAPIClient) GetBatchDebuggingInfo(ctx context.Context, projectID, jobID string) (string, error) {
 	job, err := c.batchSvc.Projects.Locations.Jobs.Get(jobID).Context(ctx).Do()
 	if err != nil {
-		return fmt.Errorf("getting batch job %s: %w", jobID, err)
+		return "", fmt.Errorf("getting batch job %s: %w", jobID, err)
 	}
 
 	// Derive time bounds from status events; fall back to CreateTime for the start.
@@ -514,39 +518,21 @@ func (c *GCPBatchAPIClient) PrintBatchDebuggingInfo(ctx context.Context, project
 		OrderBy:       "timestamp asc",
 	}).Context(ctx).Do()
 	if err != nil {
-		return fmt.Errorf("listing log entries for batch job %s: %w", jobID, err)
+		return "", fmt.Errorf("listing log entries for batch job %s: %w", jobID, err)
 	}
 
-	if err := os.MkdirAll("batch-api-errors", 0o755); err != nil {
-		return fmt.Errorf("creating batch-api-errors dir: %w", err)
-	}
-	base := fmt.Sprintf("batch-api-errors/%s", time.Now().UTC().Format("20060102-150405"))
-	var f *os.File
-	filename := base
-	for i := 1; ; i++ {
-		f, err = os.OpenFile(filename, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
-		if err == nil {
-			break
-		}
-		if !os.IsExist(err) {
-			return fmt.Errorf("creating debug file: %w", err)
-		}
-		filename = fmt.Sprintf("%s-%d", base, i)
-	}
-	defer f.Close()
-
-	fmt.Fprintf(f, "jobID: %s\n", jobID)
-	fmt.Fprintf(f, "uid: %s\n\n", job.Uid)
+	var b strings.Builder
+	fmt.Fprintf(&b, "jobID: %s\n", jobID)
+	fmt.Fprintf(&b, "uid: %s\n\n", job.Uid)
 	if job.Status != nil {
 		for _, ev := range job.Status.StatusEvents {
-			fmt.Fprintf(f, "  status event [%s]: %s\n", ev.EventTime, ev.Description)
+			fmt.Fprintf(&b, "  status event [%s]: %s\n", ev.EventTime, ev.Description)
 		}
 	}
-	fmt.Fprintf(f, "\n%d log entries found\n\n", len(resp.Entries))
+	fmt.Fprintf(&b, "\n%d log entries found\n\n", len(resp.Entries))
 	for _, entry := range resp.Entries {
-		fmt.Fprintf(f, "[%s] [%s] %s: %s\n", entry.Timestamp, entry.Severity, entry.LogName, entry.TextPayload)
+		fmt.Fprintf(&b, "[%s] [%s] %s: %s\n", entry.Timestamp, entry.Severity, entry.LogName, entry.TextPayload)
 	}
 
-	log.Printf("batch job %s: full debug info written to %s", jobID, filename)
-	return nil
+	return b.String(), nil
 }

@@ -267,3 +267,11 @@ export interface TaskSummaryRecord {
   exit_code: number | null;
   resource_usage?: ResourceUsageSummary;
 }
+
+// ErrorLogEntry mirrors monitorErrorEntry (GET /api/v1/errors): one error
+// message recorded by the monitor's in-memory ErrorLog (see
+// monitor.ErrorLog), e.g. a failed background poll.
+export interface ErrorLogEntry {
+  timestamp: string;
+  message: string;
+}
