@@ -12,12 +12,6 @@ import (
 	"sync"
 )
 
-// dockerCredentialGCRExecutable is looked up on PATH -- unlike
-// dockerExecutable (an absolute path baked into the worker VM image), no
-// fixed location for docker-credential-gcr is established elsewhere in this
-// codebase.
-const dockerCredentialGCRExecutable = "docker-credential-gcr"
-
 // defaultDockerRegistryHost is always included in every configure-docker
 // call, even the very first one. GCP Batch configures Docker's GCR/Artifact
 // Registry auth automatically when it runs a container natively; this
