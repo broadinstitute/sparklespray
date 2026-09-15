@@ -107,14 +107,31 @@ class V100Client:
                     result.append(os.path.join(rel_root, filename))
         return result
 
-    def _expand_directories(self, uploads):
+    def _expand_directories(self, uploads: List[Tuple[str, str]]) -> List[Tuple[str, str]]:
         import os
         result = []
         for source, destination in uploads:
-            if os.path.isdir(source):
+            if source.startswith("gs://"):
+                if self.io.exists(source):
+                    # a single GCS file
+                    result.append((source, destination))
+                else:
+                    # not a file -- see if it's actually a "directory" (a prefix
+                    # with at least one object under it) and expand it
+                    prefix = source.rstrip("/") + "/"
+                    child_urls = self.io.get_child_keys(source)
+                    assert len(child_urls) > 0, f"GCS path does not exist: {source}"
+                    for child_url in child_urls:
+                        assert child_url.startswith(prefix)
+                        rel_path = child_url[len(prefix):]
+                        result.append((child_url, os.path.join(destination, rel_path)))
+            elif os.path.isdir(source):
+                # a local directory
                 for filename in self._get_files_in_dir(source):
                     result.append((os.path.join(source, filename), os.path.join(destination, filename)))
             else:
+                # a single local file
+                assert os.path.isfile(source), f"Local path does not exist: {source}"
                 result.append((source, destination))
         return result
 
@@ -177,6 +194,7 @@ class V100Client:
 
         body = dict(
             name=name,
+            resultPath=url_join(self.default_url_prefix, name),
             tasks=[
                 dict(
                     image=image,
