@@ -121,20 +121,28 @@ func isGoogleContainerRegistryHost(host string) bool {
 // whatever minimal environment launched the worker process -- so without
 // this, the credential helper can't be found and the pull fails.
 func dockerRunEnv() []string {
-	dir := filepath.Dir(dockerExecutable)
+	dirs := []string{filepath.Dir(dockerExecutable), filepath.Dir(dockerCredentialGCRExecutable)}
+
 	env := os.Environ()
+	foundPath := false
 	for i, kv := range env {
 		rest, ok := strings.CutPrefix(kv, "PATH=")
 		if !ok {
 			continue
 		}
-		if pathListContains(rest, dir) {
-			return env
+		foundPath = true
+		for _, dir := range dirs {
+			if pathListContains(rest, dir) {
+				continue
+			}
+			rest = rest + string(os.PathListSeparator) + dir
 		}
-		env[i] = "PATH=" + rest + string(os.PathListSeparator) + dir
-		return env
+		env[i] = "PATH=" + rest
 	}
-	return append(env, "PATH="+dir)
+	if !foundPath {
+		env = append(env, "PATH="+strings.Join(dirs, string(os.PathListSeparator)))
+	}
+	return env
 }
 
 // pathListContains reports whether dir is one of the entries of path (a

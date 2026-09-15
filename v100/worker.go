@@ -33,7 +33,7 @@ const workerOutTopic = "sparkles-events"
 const workerInTopic = "sparkles-worker-in"
 const workerCollection = "Workers"
 const dockerExecutable = "/usr/bin/docker"
-const dockerCredentialGCRExecutable = "/usr/bin/docker-credential-gcr"
+const dockerCredentialGCRExecutable = "/usr/local/bin/docker-credential-gcr"
 
 // DockerExecutable is exported so callers outside this package (e.g.
 // "sparkles dev test-profile-command") exec the same docker binary

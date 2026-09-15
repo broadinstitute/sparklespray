@@ -171,7 +171,7 @@ func TestDockerRunEnv_SetsPathWhenUnset(t *testing.T) {
 
 	path, ok := findPathEnv(env)
 	require.True(t, ok)
-	assert.Equal(t, "/usr/bin", path)
+	assert.Equal(t, "/usr/bin:/usr/local/bin", path)
 }
 
 func TestIsGoogleContainerRegistryHost(t *testing.T) {
