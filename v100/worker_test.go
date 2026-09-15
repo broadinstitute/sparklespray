@@ -58,6 +58,20 @@ func (q *mockTaskQueue) GetJob(_ context.Context, jobID string) (*Job, error) {
 	return job, nil
 }
 
+func (q *mockTaskQueue) ListTasksForJob(_ context.Context, jobID string) ([]*Task, error) {
+	var tasks []*Task
+	for _, t := range q.tasks {
+		if t.JobID == jobID {
+			tasks = append(tasks, copyTask(t))
+		}
+	}
+	return tasks, nil
+}
+
+func (q *mockTaskQueue) GetWorkPool(_ context.Context, workpoolID string) (*WorkPool, error) {
+	return nil, fmt.Errorf("workpool %s not found", workpoolID)
+}
+
 func (q *mockTaskQueue) ClaimTask(_ context.Context, jobID string, workerID string) (*Task, error) {
 	for _, t := range q.tasks {
 		if t.JobID == jobID && t.Status == StatusPending {
@@ -113,7 +127,7 @@ func (q *mockTaskQueue) RecordResourceUsage(_ context.Context, _ string, _ *Reso
 // recordingDockerCommand writes the invocation as "image extraArgs... command" to
 // logPath so tests can verify execution by reading the uploaded log via mockTransferClient.
 type recordingDockerCommand struct {
-	err    error        // returned after writing to logPath; nil means success
+	err    error         // returned after writing to logPath; nil means success
 	blockC chan struct{} // if non-nil, blocks until closed
 }
 

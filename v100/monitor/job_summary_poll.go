@@ -61,6 +61,12 @@ func (a *Monitor) updateJobSummary(ctx context.Context, summary *JobSummary) err
 			log.Printf("job summary poll: publish job_terminated for job %s: %v", summary.JobID, err)
 		}
 	}
+
+	if IsTerminalJobStatus(newState) && a.jobResultWriter != nil {
+		if err := a.jobResultWriter.WriteJobSummary(ctx, summary.JobID); err != nil {
+			log.Printf("job summary poll: writing job summary for job %s: %v", summary.JobID, err)
+		}
+	}
 	return nil
 }
 

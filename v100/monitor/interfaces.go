@@ -451,6 +451,13 @@ type JobTerminatedPublisher interface {
 	PublishJobTerminated(ctx context.Context, jobID, workpoolID string) error
 }
 
+// JobResultWriter writes a job completion summary to external storage when a
+// job reaches a terminal state. Defined here (not in v100) to avoid an import
+// cycle.
+type JobResultWriter interface {
+	WriteJobSummary(ctx context.Context, jobID string) error
+}
+
 // WorkpoolStatePublisher emits a workpool_state_change event whenever workpool
 // state is persisted. Defined here (not in v100) to avoid an import cycle.
 type WorkpoolStatePublisher interface {

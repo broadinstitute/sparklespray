@@ -785,6 +785,7 @@ type submitJobRequest struct {
 	Labels          []v100.Label                  `json:"labels"`
 	Tasks           []submitTaskRequest           `json:"tasks"`
 	Workpool        WorkpoolSpec                  `json:"workpool"`
+	ResultPath      string                        `json:"resultPath,omitempty"`
 }
 
 // submitJobResponse mirrors openapi's SubmitJobResponse schema.
@@ -977,6 +978,7 @@ func (s *dashboardServer) handleSubmitJob(w http.ResponseWriter, r *http.Request
 		TaskCount:  len(req.Tasks),
 		Resources:  ensureSlotsResource(req.Resources),
 		Labels:     req.Labels,
+		ResultPath: req.ResultPath,
 	}
 
 	// Pre-generate task IDs outside the transaction so retries are idempotent.

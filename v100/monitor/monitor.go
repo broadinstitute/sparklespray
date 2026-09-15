@@ -82,6 +82,7 @@ type Monitor struct {
 	jobEvents              JobEventReceiver
 	jobSummaries           JobSummaryStore
 	jobTerminated          JobTerminatedPublisher
+	jobResultWriter        JobResultWriter
 	workpoolStatePublisher WorkpoolStatePublisher
 	batchOutcomes          BatchOutcomePublisher
 	workpoolIncidents      WorkpoolIncidentPublisher
@@ -119,6 +120,10 @@ func (a *Monitor) SetEventStore(s EventStore) { a.events = s }
 
 // SetJobTerminatedPublisher sets the publisher used to emit job_terminated events.
 func (a *Monitor) SetJobTerminatedPublisher(p JobTerminatedPublisher) { a.jobTerminated = p }
+
+// SetJobResultWriter sets the writer used to persist a job completion summary
+// when a job reaches a terminal state.
+func (a *Monitor) SetJobResultWriter(w JobResultWriter) { a.jobResultWriter = w }
 
 // SetWorkpoolStatePublisher sets the publisher used to emit workpool_state_change events.
 func (a *Monitor) SetWorkpoolStatePublisher(p WorkpoolStatePublisher) {

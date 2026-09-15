@@ -12,10 +12,12 @@ import (
 	"cloud.google.com/go/firestore"
 	"cloud.google.com/go/pubsub/v2"
 	pubsubpb "cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
+	"cloud.google.com/go/storage"
 	v100 "github.com/broadinstitute/sparklespray/v100"
 	"github.com/broadinstitute/sparklespray/v100/monitor"
 	"github.com/broadinstitute/sparklespray/v100/scheduler"
 	"github.com/urfave/cli"
+	"google.golang.org/api/option"
 	"google.golang.org/grpc/codes"
 	grpcstatus "google.golang.org/grpc/status"
 )
@@ -71,6 +73,16 @@ func newMonitor(
 	ep := v100.NewEventPublisher(psClient.Publisher("sparkles-events"), fsClient)
 	tasks.SetPublisher(ep)
 
+	var gcsOpts []option.ClientOption
+	if endpoint := os.Getenv("GCS_EMULATOR_ENDPOINT"); endpoint != "" {
+		gcsOpts = append(gcsOpts, option.WithEndpoint(endpoint), option.WithoutAuthentication())
+	}
+	gcsClient, err := storage.NewClient(ctx, gcsOpts...)
+	if err != nil {
+		return nil, nil, fmt.Errorf("creating GCS client: %w", err)
+	}
+	resultWriter := v100.NewJobResultWriter(v100.NewFirestoreTaskQueue(fsClient, nil), gcsClient)
+
 	jobSummaries := monitor.NewFirestoreJobSummaryStore(fsClient)
 	workPoolSummaries := monitor.NewFirestoreWorkPoolSummaryStore(fsClient)
 	eventStore := monitor.NewFirestoreEventStore(fsClient)
@@ -82,6 +94,7 @@ func newMonitor(
 	m.SetWorkPoolSummaryStore(workPoolSummaries)
 	m.SetEventStore(eventStore)
 	m.SetJobTerminatedPublisher(ep)
+	m.SetJobResultWriter(resultWriter)
 	m.SetWorkpoolStatePublisher(ep)
 	m.SetBatchOutcomePublisher(ep)
 	m.SetWorkpoolIncidentPublisher(ep)
@@ -90,7 +103,11 @@ func newMonitor(
 		m.SetLingerDuration(linger)
 	}
 
-	return m, ep.Stop, nil
+	stop := func() {
+		ep.Stop()
+		gcsClient.Close()
+	}
+	return m, stop, nil
 }
 
 func runDevMonitor(c *cli.Context) error {

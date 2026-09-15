@@ -95,6 +95,15 @@ components:
         workpool:
           $ref: "#/components/schemas/WorkpoolSpec"
 
+        resultPath:
+          type: string
+          description: |-
+            Optional GCS "directory" prefix (a gs:// URL). If set, once every task in
+            the job reaches a terminal state, the monitor writes a job_summary.json
+            file under it containing the job, its tasks, and its workpool. Stored as
+            `Job.ResultPath` (firestore field `result_path`). If omitted, no summary
+            is written.
+
     Label:
       type: object
       description: A single key/value label. Corresponds to Go's `Label` struct (v100/task_queue.go).

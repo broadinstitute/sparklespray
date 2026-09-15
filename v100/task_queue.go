@@ -78,65 +78,70 @@ type GCSMount struct {
 }
 
 type WorkPool struct {
-	WorkpoolID string `firestore:"workpool_id"`
+	WorkpoolID string `firestore:"workpool_id" json:"workpool_id"`
 	// ProjectID, if set, is the GCP project the Batch jobs (and therefore the
 	// worker VMs) for this workpool are created in. Empty means the project
 	// the monitor was started with. The control plane (Firestore, Pub/Sub)
 	// always stays in the monitor's own project.
-	ProjectID   string `firestore:"project_id"`
-	MachineType string `firestore:"machine_type"`
+	ProjectID   string `firestore:"project_id" json:"project_id"`
+	MachineType string `firestore:"machine_type" json:"machine_type"`
 	// BootDiskSizeGb/BootDiskType configure the boot disk of worker VMs.
-	BootDiskSizeGb        int             `firestore:"boot_disk_size_gb"`
-	BootDiskType          string          `firestore:"boot_disk_type"`
-	RootDir               string          `firestore:"root_dir"`
-	SparklesWorkerGCSPath string          `firestore:"sparkles_worker_gcs_path"`
-	ServiceAccount        string          `firestore:"service_account"`
-	Resources             []ResourceEntry `firestore:"resources"`
-	EmptyVolumes          []EmptyVolume   `firestore:"empty_volumes"`
-	GCSMounts             []GCSMount      `firestore:"gcs_mounts"`
-	Labels                []Label         `firestore:"labels"`
-	Expiry       time.Time       `firestore:"expiry"`
-	Region       string          `firestore:"region"`
-	Zones        []string        `firestore:"zones"`
+	BootDiskSizeGb        int             `firestore:"boot_disk_size_gb" json:"boot_disk_size_gb"`
+	BootDiskType          string          `firestore:"boot_disk_type" json:"boot_disk_type"`
+	RootDir               string          `firestore:"root_dir" json:"root_dir"`
+	SparklesWorkerGCSPath string          `firestore:"sparkles_worker_gcs_path" json:"sparkles_worker_gcs_path"`
+	ServiceAccount        string          `firestore:"service_account" json:"service_account"`
+	Resources             []ResourceEntry `firestore:"resources" json:"resources"`
+	EmptyVolumes          []EmptyVolume   `firestore:"empty_volumes" json:"empty_volumes"`
+	GCSMounts             []GCSMount      `firestore:"gcs_mounts" json:"gcs_mounts"`
+	Labels                []Label         `firestore:"labels" json:"labels"`
+	Expiry                time.Time       `firestore:"expiry" json:"expiry"`
+	Region                string          `firestore:"region" json:"region"`
+	Zones                 []string        `firestore:"zones" json:"zones"`
 
 	// WorkpoolSpecHash is the sha256 (hex-encoded) of the canonical JSON of
 	// the WorkpoolSpec this record was created from, including Labels.
 	// Computed by computeWorkpoolSpecHash (v100/dev/workpool_spec.go) at submission
 	// time; the same hash (truncated) is used to derive the workpool ID
 	// itself when one isn't explicitly given (see resolveWorkpoolID).
-	WorkpoolSpecHash string `firestore:"workpool_spec_hash"`
+	WorkpoolSpecHash string `firestore:"workpool_spec_hash" json:"workpool_spec_hash"`
 
 	// Provisioning parameters
-	MaxWorkerCount               int `firestore:"max_worker_count"`
-	MaxPreemptibleWorkerAttempts int `firestore:"max_preemptible_worker_attempts"`
-	MaxWorkersPerRequest         int `firestore:"max_workers_per_request"`
+	MaxWorkerCount               int `firestore:"max_worker_count" json:"max_worker_count"`
+	MaxPreemptibleWorkerAttempts int `firestore:"max_preemptible_worker_attempts" json:"max_preemptible_worker_attempts"`
+	MaxWorkersPerRequest         int `firestore:"max_workers_per_request" json:"max_workers_per_request"`
 
 	// Watchdog parameters (zero value → monitor uses its own defaults)
-	VMShutdownGracePeriodSec    int `firestore:"vm_shutdown_grace_period_sec"`
-	MaxZombiesBeforeAbort       int `firestore:"max_zombies_before_abort"`
-	MaxConsecutiveFailedBatches int `firestore:"max_consecutive_failed_batches"`
+	VMShutdownGracePeriodSec    int `firestore:"vm_shutdown_grace_period_sec" json:"vm_shutdown_grace_period_sec"`
+	MaxZombiesBeforeAbort       int `firestore:"max_zombies_before_abort" json:"max_zombies_before_abort"`
+	MaxConsecutiveFailedBatches int `firestore:"max_consecutive_failed_batches" json:"max_consecutive_failed_batches"`
 
 	// LingerTimeSec is how long a leader worker keeps polling for new tasks
 	// after its queue empties before exiting (0 = exit immediately). Passed
 	// to newly provisioned workers as --linger.
-	LingerTimeSec int `firestore:"linger_time_sec"`
+	LingerTimeSec int `firestore:"linger_time_sec" json:"linger_time_sec"`
 
 	// State fields (written by the monitor; stored in WorkPoolSummary collection)
-	State         string    `firestore:"state"`
-	StateMessage  string    `firestore:"state_message"`
-	LastIncidentAt time.Time `firestore:"last_incident_at"`
-	IncidentCount  int       `firestore:"incident_count"`
+	State          string    `firestore:"state" json:"state"`
+	StateMessage   string    `firestore:"state_message" json:"state_message"`
+	LastIncidentAt time.Time `firestore:"last_incident_at" json:"last_incident_at"`
+	IncidentCount  int       `firestore:"incident_count" json:"incident_count"`
 }
 
 type Job struct {
-	JobID      string          `firestore:"job_id"`
-	Name       string          `firestore:"name"`
-	WorkpoolID string          `firestore:"workpool_id"`
-	CreatedAt  time.Time       `firestore:"created_at"`
-	Expiry     time.Time       `firestore:"expiry"`
-	TaskCount  int             `firestore:"task_count"`
-	Resources  []ResourceEntry `firestore:"resources"`
-	Labels     []Label         `firestore:"labels"`
+	JobID      string          `firestore:"job_id" json:"job_id"`
+	Name       string          `firestore:"name" json:"name"`
+	WorkpoolID string          `firestore:"workpool_id" json:"workpool_id"`
+	CreatedAt  time.Time       `firestore:"created_at" json:"created_at"`
+	Expiry     time.Time       `firestore:"expiry" json:"expiry"`
+	TaskCount  int             `firestore:"task_count" json:"task_count"`
+	Resources  []ResourceEntry `firestore:"resources" json:"resources"`
+	Labels     []Label         `firestore:"labels" json:"labels"`
+	// ResultPath, if set, is the GCS "directory" prefix the monitor writes a
+	// job_summary.json file to once every task in the job reaches a terminal
+	// state. Mirrors Task.ResultPath's convention. Empty means no summary is
+	// written.
+	ResultPath string `firestore:"result_path" json:"result_path,omitempty"`
 }
 
 type FileToLocalize struct {
@@ -202,32 +207,34 @@ type ResourceUsage struct {
 }
 
 type Task struct {
-	JobID       string   `firestore:"job_id"`
-	TaskID      string   `firestore:"task_id"`
-	TaskIndex   int      `firestore:"task_index"`
-	WorkpoolID  string   `firestore:"workpool_id"`
-	Status      string   `firestore:"status"`
-	Command     []string `firestore:"command"`
-	DockerImage string   `firestore:"docker_image"`
-	ResultPath  string   `firestore:"result_path"`
-	LogPath     string   `firestore:"log_path"`
+	JobID       string   `firestore:"job_id" json:"job_id"`
+	TaskID      string   `firestore:"task_id" json:"task_id"`
+	TaskIndex   int      `firestore:"task_index" json:"task_index"`
+	WorkpoolID  string   `firestore:"workpool_id" json:"workpool_id"`
+	Status      string   `firestore:"status" json:"status"`
+	Command     []string `firestore:"command" json:"command"`
+	DockerImage string   `firestore:"docker_image" json:"docker_image"`
+	ResultPath  string   `firestore:"result_path" json:"result_path"`
+	LogPath     string   `firestore:"log_path" json:"log_path"`
 	// either FilesToLocalizeManifest or FilesToLocalize will be populated. If there's a small
 	// number of files, we can just store them in the task, but if we have a large number of files
 	// write them to cloud storage as a manifest and read them from there instead.
-	FilesToLocalizeManifest string           `firestore:"files_to_localize_manifest"`
-	FilesToLocalize         []FileToLocalize `firestore:"files_to_localize"`
-	Labels                  []Label          `firestore:"labels"`
-	OwningWorkerID          string           `firestore:"owning_worker_id"`
-	FailureReason           string           `firestore:"failure_reason"`
-	ExitCode                int              `firestore:"exit_code"`
-	ResourceUsage           *ResourceUsage   `firestore:"resource_usage"`
-	LastUpdated             time.Time        `firestore:"last_updated"`
-	Expiry                  time.Time        `firestore:"expiry"`
+	FilesToLocalizeManifest string           `firestore:"files_to_localize_manifest" json:"files_to_localize_manifest,omitempty"`
+	FilesToLocalize         []FileToLocalize `firestore:"files_to_localize" json:"files_to_localize,omitempty"`
+	Labels                  []Label          `firestore:"labels" json:"labels"`
+	OwningWorkerID          string           `firestore:"owning_worker_id" json:"owning_worker_id"`
+	FailureReason           string           `firestore:"failure_reason" json:"failure_reason,omitempty"`
+	ExitCode                int              `firestore:"exit_code" json:"exit_code"`
+	ResourceUsage           *ResourceUsage   `firestore:"resource_usage" json:"resource_usage,omitempty"`
+	LastUpdated             time.Time        `firestore:"last_updated" json:"last_updated"`
+	Expiry                  time.Time        `firestore:"expiry" json:"expiry"`
 }
 
 type TaskQueue interface {
 	GetFirstPendingTask(ctx context.Context, workpoolID string) (*Task, error)
 	GetJob(ctx context.Context, jobID string) (*Job, error)
+	ListTasksForJob(ctx context.Context, jobID string) ([]*Task, error)
+	GetWorkPool(ctx context.Context, workpoolID string) (*WorkPool, error)
 	ClaimTask(ctx context.Context, jobID string, workerID string) (*Task, error)
 	UpdateState(ctx context.Context, taskID string, oldState string, newState string) error
 	RecordError(ctx context.Context, taskID string, exitCode int) error
@@ -290,6 +297,53 @@ func (q *FirestoreTaskQueue) GetJob(ctx context.Context, jobID string) (*Job, er
 		return nil, err
 	}
 	return &job, nil
+}
+
+// ListTasksForJob returns every task belonging to the given job.
+func (q *FirestoreTaskQueue) ListTasksForJob(ctx context.Context, jobID string) ([]*Task, error) {
+	iter := q.fs.Collection(taskCollection).
+		Where("job_id", "==", jobID).
+		Documents(ctx)
+	defer iter.Stop()
+
+	var tasks []*Task
+	for {
+		doc, err := iter.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		var task Task
+		if err := doc.DataTo(&task); err != nil {
+			return nil, err
+		}
+		tasks = append(tasks, &task)
+	}
+	return tasks, nil
+}
+
+// GetWorkPool fetches a workpool by ID.
+func (q *FirestoreTaskQueue) GetWorkPool(ctx context.Context, workpoolID string) (*WorkPool, error) {
+	doc, err := q.fs.Collection(workpoolCollection).Doc(workpoolID).Get(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var wp WorkPool
+	if err := doc.DataTo(&wp); err != nil {
+		return nil, err
+	}
+	return &wp, nil
+}
+
+// JobSummaryOutput is the JSON document written to Job.ResultPath once a job
+// reaches a terminal state: the job record plus its full task list and
+// workpool config.
+type JobSummaryOutput struct {
+	Job
+	Tasks    []*Task   `json:"tasks"`
+	Workpool *WorkPool `json:"workpool"`
 }
 
 // ClaimTask atomically claims a pending task from the given job for the given worker.
