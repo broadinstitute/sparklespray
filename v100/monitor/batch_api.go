@@ -400,8 +400,10 @@ func (c *GCPBatchAPIClient) GetJobStatus(ctx context.Context, jobID string) (Bat
 		return BatchJobStatusSucceeded, nil
 	case "FAILED", "DELETION_IN_PROGRESS":
 		return BatchJobStatusFailed, nil
+	case "CANCELLED", "CANCELLATION_IN_PROGRESS":
+		return BatchJobStatusCancelled, nil
 	default:
-		return BatchJobStatusQueued, nil
+		return BatchJobStatusUnknown, nil
 	}
 }
 

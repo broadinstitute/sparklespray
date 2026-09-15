@@ -68,6 +68,52 @@ func TestClusterReconciler_FailedBatch_AppendsDebuggingInfoToErrorLog(t *testing
 	assert.Contains(t, last.Message, "boom, it broke")
 }
 
+func TestClusterReconciler_CancelledBatch_MarksFailedWithoutTerminating(t *testing.T) {
+	w := newWorld()
+	pool := defaultPool("pool-1")
+	w.Pools.Add(pool)
+	w.Workers.Add(&Worker{WorkerID: "w1", WorkpoolID: "pool-1", Status: "started"})
+
+	w.Batches.Add(&BatchAPIRequest{
+		BatchID:    "b1",
+		JobID:      "job-1",
+		WorkpoolID: "pool-1",
+		Status:     BatchStatusStarted,
+	})
+	w.BatchAPI.AddJob("job-1", "b1", "pool-1", 2, BatchJobStatusCancelled)
+
+	err := w.A.runClusterReconciler(context.Background())
+	require.NoError(t, err)
+
+	b := w.Batches.MustGet("b1")
+	assert.Equal(t, BatchStatusFailed, b.Status)
+	assert.True(t, b.Unhealthy)
+	// GCP already stopped and cleaned up the job itself — no need to call TerminateJob.
+	assert.NotContains(t, w.BatchAPI.TerminatedJobs, "job-1")
+}
+
+func TestClusterReconciler_UnknownStatus_LeavesBatchUnchanged(t *testing.T) {
+	w := newWorld()
+	pool := defaultPool("pool-1")
+	w.Pools.Add(pool)
+	w.Workers.Add(&Worker{WorkerID: "w1", WorkpoolID: "pool-1", Status: "started"})
+
+	w.Batches.Add(&BatchAPIRequest{
+		BatchID:    "b1",
+		JobID:      "job-1",
+		WorkpoolID: "pool-1",
+		Status:     BatchStatusStarted,
+	})
+	w.BatchAPI.AddJob("job-1", "b1", "pool-1", 2, BatchJobStatusUnknown)
+
+	err := w.A.runClusterReconciler(context.Background())
+	require.NoError(t, err)
+
+	b := w.Batches.MustGet("b1")
+	assert.Equal(t, BatchStatusStarted, b.Status)
+	assert.False(t, b.Unhealthy)
+}
+
 func TestClusterReconciler_SucceededBatch_MarksCompleted(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")

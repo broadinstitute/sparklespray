@@ -90,6 +90,21 @@ func (a *Monitor) reconcileBatch(ctx context.Context, ws *WorkPoolWithState, bat
 		return true, a.batches.Save(ctx, batch)
 	}
 
+	if apiStatus == BatchJobStatusCancelled {
+		// Already cancelled — no TerminateJob call needed, unlike the FAILED
+		// case, since GCP itself has already stopped the job and cleaned up
+		// its resources.
+		return true, a.markBatchFailed(ctx, ws, batch, fmt.Sprintf("Batch job %s was cancelled", batch.JobID), now)
+	}
+
+	if apiStatus == BatchJobStatusUnknown {
+		// An unrecognized raw state (e.g. one GCP added after this code was
+		// written). Log and leave the batch as-is rather than guessing —
+		// it'll be retried on the next poll.
+		log.Printf("cluster reconciler: batch %s: unrecognized Batch API job status for job %s", batch.BatchID, batch.JobID)
+		return false, nil
+	}
+
 	// Job is QUEUED/SCHEDULED/RUNNING — reconcile VMs against Firestore.
 	return false, a.reconcileVMs(ctx, ws, batch, apiStatus, now)
 }

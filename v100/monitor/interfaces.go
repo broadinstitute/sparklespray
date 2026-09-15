@@ -44,9 +44,17 @@ const (
 	BatchJobStatusRunning   BatchJobStatus = "RUNNING"
 	BatchJobStatusSucceeded BatchJobStatus = "SUCCEEDED"
 	BatchJobStatusFailed    BatchJobStatus = "FAILED"
+	// BatchJobStatusCancelled covers both of GCP's CANCELLATION_IN_PROGRESS and
+	// CANCELLED job states — e.g. the job was cancelled out-of-band in the GCP
+	// console rather than through sparkles.
+	BatchJobStatusCancelled BatchJobStatus = "CANCELLED"
 	// BatchJobStatusDeleted is a synthetic status returned when the GCP Batch API responds
 	// with 404 — the job no longer exists (e.g. it was manually deleted or expired).
 	BatchJobStatusDeleted BatchJobStatus = "DELETED"
+	// BatchJobStatusUnknown is returned for any raw GCP job state not explicitly
+	// handled above, so an unrecognized state (e.g. a new one GCP adds later)
+	// is never silently mistaken for an active state like QUEUED.
+	BatchJobStatusUnknown BatchJobStatus = "UNKNOWN"
 )
 
 // TaskStatus mirrors the active task states from docs/design/datamodel.md.
