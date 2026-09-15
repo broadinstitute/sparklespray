@@ -321,7 +321,6 @@ function WorkerPoolSection({
 
 function WorkerPoolsSidebar({ workerPools }: { workerPools: WorkerPool[] }) {
   const activePools = workerPools.filter((p) => p.info.state !== "idle");
-  const idlePools = workerPools.filter((p) => p.info.state === "idle");
   return (
     <div>
       <div style={{ marginBottom: 8 }}>
@@ -336,7 +335,7 @@ function WorkerPoolsSidebar({ workerPools }: { workerPools: WorkerPool[] }) {
           WORKER POOLS
         </span>
       </div>
-      {workerPools.length === 0 ? (
+      {activePools.length === 0 ? (
         <div
           style={{
             padding: "16px 12px",
@@ -356,7 +355,6 @@ function WorkerPoolsSidebar({ workerPools }: { workerPools: WorkerPool[] }) {
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
           <WorkerPoolSection title="ACTIVE" pools={activePools} />
-          <WorkerPoolSection title="IDLE" pools={idlePools} />
         </div>
       )}
     </div>
