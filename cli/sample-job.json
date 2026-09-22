@@ -1,0 +1,31 @@
+{
+  "gcs_staging_prefix": "gs://sprinkles-test-0625/staging",
+  "filesToLocalize": [
+    { "source": "simulate_load.py", "destination": "simulate_load.py" }
+  ],
+  "tasks": [
+    {
+      "image": "python",
+      "command": ["python", "simulate_load.py", "--max_mem", "400M"]
+    },
+    {
+      "image": "python",
+      "command": [
+        "python",
+        "simulate_load.py",
+        "--max_mem",
+        "128M",
+        "--max_cpu",
+        "30"
+      ]
+    },
+    {
+      "image": "python",
+      "command": ["python", "simulate_load.py", "--run_time", "90"]
+    }
+  ],
+  "workpool": {
+    "machineType": "n2-standard-2",
+    "sprinklesWorkerGCSPath": "gs://sprinkles-test-0625/bin/sprinkles-linux-amd64-v100.0.0-9-ge20f658-dirty"
+  }
+}

@@ -9,7 +9,7 @@ sample). The Go side is complete; the items below are not.
 **Resolved**: the periodic-metrics tab (`GET /api/v1/task/{id}/log`'s
 `metric_update` entries). `useTaskLog.ts` now decodes the real nested
 `entry.metric` shape via a new metadata-driven pipeline: `GET /api/v1/metrics`
-(`v100/metric_metadata.go`, `MetricMetadataTable`) describes every metric
+(`cli/metric_metadata.go`, `MetricMetadataTable`) describes every metric
 (`name`/`description`/`units`/`type`/`default_position`); `useMetricMetadata.ts`
 fetches it; `metricSeries.ts` turns a metric's raw samples into a display
 series (a `"counter"`-typed metric becomes a rate, a `"gauge"` is plotted
@@ -49,7 +49,7 @@ was out of scope for that pass:
 
 `build.sh` skips the frontend build when `dashboard/` is unchanged (commit
 7f26b41), and `dashboard/dist` is `//go:embed`ed by
-`v100/dev/webui/webui.go:16-17` — remember to rebuild before deploying so
+`cli/dev/webui/webui.go:16-17` — remember to rebuild before deploying so
 this fix (and any future one covering the items above) actually ships.
 
 ## 2. Firestore single-field index exemptions (ops)
@@ -73,7 +73,7 @@ container metrics is acceptable; failing a task over it is not.
 If final metrics turn out to be missing often in practice, the fix is
 `--cgroup-parent` with a pre-created parent cgroup, whose hierarchical
 counters retain a dead child's CPU / peak memory / I/O / PSI. That is a
-producer-side change confined to `v100/cgroup.go` plus two lines of
+producer-side change confined to `cli/cgroup.go` plus two lines of
 `executeDockerCommand`, with no schema impact. Caveat: a stock GCE image
 likely uses the systemd cgroup driver, which rejects any `--cgroup-parent`
 that is not a systemd-managed `*.slice`, so this needs a pre-created slice.
@@ -103,11 +103,11 @@ Support was dropped rather than maintained: v1 exposes no PSI at all, and
 PSI totals are the centerpiece of the new metric set, so a v1 path would
 report `-1` for much of the schema anyway. On a v1 host every container
 metric is `-1` and one warning is logged per process
-(`cgroupV2Enabled`, `v100/cgroup.go`).
+(`cgroupV2Enabled`, `cli/cgroup.go`).
 
 ## 6. Pre-existing test-harness data race (unrelated, found in passing)
 
-`v100/functest/helpers_test.go:73-79` races on `cmd.ProcessState`: a
+`cli/functest/helpers_test.go:73-79` races on `cmd.ProcessState`: a
 goroutine calls `cmd.Wait()` (which writes it) while `t.Cleanup` reads
 `cmd.ProcessState == nil` without synchronisation. This makes
 `go test -race ./functest/` fail (`TestKillJob`, `TestSubmitAndComplete`,

@@ -13,7 +13,7 @@ Three deliverables:
    by container lifecycle, not manual control.
 2. **`RemoteBatchAPIClient`** — a Go struct implementing `BatchAPIClient` that proxies calls to
    the emulator over HTTP.
-3. **Wiring** — check `SPARKLES_BATCH_API_EMULATOR` in `runMonitor`; if set, use the remote
+3. **Wiring** — check `SPRINKLES_BATCH_API_EMULATOR` in `runMonitor`; if set, use the remote
    client instead of the real GCP one.
 
 ---
@@ -22,16 +22,16 @@ Three deliverables:
 
 ### Delivery
 
-Add a new subcommand to the existing `sparkles` binary:
+Add a new subcommand to the existing `sprinkles` binary:
 
 ```
-sparkles dev batchapi-emulator --addr :8742 --queueTime 0s
+sprinkles dev batchapi-emulator --addr :8742 --queueTime 0s
 ```
 
 This keeps everything in one binary, avoids separate build targets, and groups it with the
-existing `sparkles dev submit` subcommand under `dev`.  
-Source: `v100/monitor/emulator/server.go` (package `emulator`), wired into
-`v100/cli_main.go`.
+existing `sprinkles dev submit` subcommand under `dev`.  
+Source: `cli/monitor/emulator/server.go` (package `emulator`), wired into
+`cli/cli_main.go`.
 
 ### In-memory state
 
@@ -99,14 +99,14 @@ All request and response bodies are JSON.
 
 #### BatchAPIClient operations
 
-| Method                              | Path                                                                                                                                                                                                                                                                     | Maps to                                                                                                                                |
-| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `POST /jobs`                        | body: `WorkerJobSpec` (`region` must be `"emulator"`, plus `machineType, vmCount, preemptible, dockerImage, command, emptyVolumes`); `batchID` and `workpoolID` are passed as `labels: [{name, value}]` with keys `sparkles-worker-batch` and `sparkles-worker-workpool` | `CreateJob` → responds `{jobID}`; returns 400 if region ≠ `"emulator"`                                                                 |
-| `GET /jobs/{jobID}/status`          | —                                                                                                                                                                                                                                                                        | `GetJobStatus` → responds `{status}`                                                                                                   |
-| `GET /region/{region}/zones`        | —                                                                                                                                                                                                                                                                        | Returns `{zones: ["emulator-zone-a","emulator-zone-b","emulator-zone-c"]}`; 404 if region ≠ `"emulator"`                               |
-| `GET /vms/{zone}`                   | query: `filterLabelName`, `filterLabelValue`                                                                                                                                                                                                                             | `ListRunningVMs` → only returns VMs in the given zone whose container is still running; responds `{vms: {name: {instanceName, zone}}}` |
-| `DELETE /vms/{zone}/{instanceName}` | —                                                                                                                                                                                                                                                                        | `TerminateVM` → `docker stop <instanceName>`                                                                                           |
-| `POST /jobs/{jobID}/cancel`         | —                                                                                                                                                                                                                                                                        | `TerminateJob` → stops all containers, marks job FAILED                                                                                |
+| Method                              | Path                                                                                                                                                                                                                                                                       | Maps to                                                                                                                                |
+| ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /jobs`                        | body: `WorkerJobSpec` (`region` must be `"emulator"`, plus `machineType, vmCount, preemptible, dockerImage, command, emptyVolumes`); `batchID` and `workpoolID` are passed as `labels: [{name, value}]` with keys `sprinkles-worker-batch` and `sprinkles-worker-workpool` | `CreateJob` → responds `{jobID}`; returns 400 if region ≠ `"emulator"`                                                                 |
+| `GET /jobs/{jobID}/status`          | —                                                                                                                                                                                                                                                                          | `GetJobStatus` → responds `{status}`                                                                                                   |
+| `GET /region/{region}/zones`        | —                                                                                                                                                                                                                                                                          | Returns `{zones: ["emulator-zone-a","emulator-zone-b","emulator-zone-c"]}`; 404 if region ≠ `"emulator"`                               |
+| `GET /vms/{zone}`                   | query: `filterLabelName`, `filterLabelValue`                                                                                                                                                                                                                               | `ListRunningVMs` → only returns VMs in the given zone whose container is still running; responds `{vms: {name: {instanceName, zone}}}` |
+| `DELETE /vms/{zone}/{instanceName}` | —                                                                                                                                                                                                                                                                          | `TerminateVM` → `docker stop <instanceName>`                                                                                           |
+| `POST /jobs/{jobID}/cancel`         | —                                                                                                                                                                                                                                                                          | `TerminateJob` → stops all containers, marks job FAILED                                                                                |
 
 #### Control endpoints (debugging only)
 
@@ -131,7 +131,7 @@ emulator is killed.
 
 ## 2. `RemoteBatchAPIClient`
 
-**File:** `v100/monitor/remote_batch_client.go`  
+**File:** `cli/monitor/remote_batch_client.go`  
 **Package:** `autoscaler`
 
 ```go
@@ -154,7 +154,7 @@ required by the real GCP Compute API.
 
 `CreateJob` receives `WorkerJobSpec`, which keeps `BatchID` and `WorkpoolID` as named Go
 fields. Before sending to the emulator, `RemoteBatchAPIClient` packs them into the `labels`
-list (`sparkles-worker-batch` → `BatchID`, `sparkles-worker-workpool` → `WorkpoolID`), matching
+list (`sprinkles-worker-batch` → `BatchID`, `sprinkles-worker-workpool` → `WorkpoolID`), matching
 how `GCPBatchAPIClient` attaches them as GCP job labels. The emulator's `ListRunningVMs` then
 filters on those labels, so the autoscaler's label-based queries work identically against both
 backends.
@@ -163,12 +163,12 @@ backends.
 
 ## 3. Wiring into `runMonitor`
 
-In `v100/cli_main.go`, `runMonitor` currently unconditionally creates a `GCPBatchAPIClient`.
+In `cli/cli_main.go`, `runMonitor` currently unconditionally creates a `GCPBatchAPIClient`.
 Change it to:
 
 ```go
 var batchAPI autoscaler.BatchAPIClient
-if emulatorURL := os.Getenv("SPARKLES_BATCH_API_EMULATOR"); emulatorURL != "" {
+if emulatorURL := os.Getenv("SPRINKLES_BATCH_API_EMULATOR"); emulatorURL != "" {
     batchAPI = autoscaler.NewRemoteBatchAPIClient(emulatorURL)
 } else {
     batchAPI, err = autoscaler.NewGCPBatchAPIClient(ctx, project, pools)
@@ -184,11 +184,11 @@ No other changes to the autoscaler core.
 
 ## File summary
 
-| File                                  | Role                                                                |
-| ------------------------------------- | ------------------------------------------------------------------- |
-| `v100/monitor/emulator/server.go`     | HTTP emulator server (new)                                          |
-| `v100/monitor/remote_batch_client.go` | `RemoteBatchAPIClient` impl (new)                                   |
-| `v100/cli_main.go`                    | Wire env-var switch + add `dev batchapi-emulator` subcommand (edit) |
+| File                                 | Role                                                                |
+| ------------------------------------ | ------------------------------------------------------------------- |
+| `cli/monitor/emulator/server.go`     | HTTP emulator server (new)                                          |
+| `cli/monitor/remote_batch_client.go` | `RemoteBatchAPIClient` impl (new)                                   |
+| `cli/cli_main.go`                    | Wire env-var switch + add `dev batchapi-emulator` subcommand (edit) |
 
 ---
 
@@ -207,8 +207,8 @@ No other changes to the autoscaler core.
   GCP Batch semantics.
 - `RemoteBatchAPIClient` has no dependency on the emulator's internals. Any server that speaks
   the same HTTP protocol (e.g. a future recording proxy) could be used instead.
-- The emulator lives under `sparkles dev batchapi-emulator`, consistent with the existing
-  `sparkles dev submit` subcommand. The same binary used in production can spin up the emulator
+- The emulator lives under `sprinkles dev batchapi-emulator`, consistent with the existing
+  `sprinkles dev submit` subcommand. The same binary used in production can spin up the emulator
   in CI, reducing build complexity.
-- `SPARKLES_BATCH_API_EMULATOR` intentionally does not require `--project` to be a real GCP
+- `SPRINKLES_BATCH_API_EMULATOR` intentionally does not require `--project` to be a real GCP
   project when the env var is set, since no GCP calls are made.

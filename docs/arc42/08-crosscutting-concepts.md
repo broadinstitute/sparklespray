@@ -2,8 +2,8 @@
 
 ## 8.1 Data model
 
-Full field-level reference: `v100/datamodel.md` (kept up to date with the
-implementation) and `v100/cluster-health.md` (state machines, with
+Full field-level reference: `cli/datamodel.md` (kept up to date with the
+implementation) and `cli/cluster-health.md` (state machines, with
 file:line references into `monitor/*.go`).
 
 Firestore collections and their single owner/writer:
@@ -17,10 +17,10 @@ Firestore collections and their single owner/writer:
 | `BatchAPIRequests`               | internal `batch_id` | monitor                                                      | primary, `status` |
 | `WorkPoolSummary` / `...History` | `workpool_id`       | `workpool_summary_poll.go` only                              | derived, `state`  |
 | `JobSummary` / `...History`      | `job_id`            | `job_summary_poll.go` only                                   | derived, `state`  |
-| `Events`                         | `event_id`          | `EventPublisher` (mirrors `sparkles-events`)                 | append-only       |
+| `Events`                         | `event_id`          | `EventPublisher` (mirrors `sprinkles-events`)                | append-only       |
 | `TaskLog`                        | —                   | worker (opt-in streaming)                                    | append-only       |
 | `APIKeys`                        | —                   | `dev add-api-key`                                            | auth              |
-| `SparklesConfig`                 | `default`           | `dev set-config`                                             | config            |
+| `SprinklesConfig`                | `default`           | `dev set-config`                                             | config            |
 
 Relationships: `Jobs` 1—N `Tasks` (`job_id`); `Jobs`/`Tasks` N—1
 `WorkPools` (`workpool_id`); `WorkPools` 1—N `BatchAPIRequests`
@@ -41,7 +41,7 @@ by convention/naming, not by the type system.
 
 No process writes into a collection it doesn't own. A process that needs
 to influence another collection's derived state publishes a document to
-the append-only `Events` collection (and the `sparkles-events` Pub/Sub
+the append-only `Events` collection (and the `sprinkles-events` Pub/Sub
 topic) instead — e.g. job submission doesn't flip `WorkPoolSummary.state`
 directly; it publishes `job_created`, and the next
 `workpool_summary_poll` run reads that history to decide `idle → ok`.
@@ -79,7 +79,7 @@ capacity, rather than claiming and failing them one at a time.
 
 Every lifecycle transition (worker start/stop, task state change, job
 created/terminated, workpool state change, batch failed/succeeded,
-workpool incident) is published to `sparkles-events` and mirrored into
+workpool incident) is published to `sprinkles-events` and mirrored into
 the append-only `Events` Firestore collection by `EventPublisher`
 (`events.go`). This is the sole audit trail used both by
 `checkHaltThreshold` (§6.4) and by the dashboard for history views.
@@ -91,9 +91,9 @@ a worker.
 
 The dashboard-backend uses a bearer-token scheme: API keys are generated
 via `dev add-api-key` and stored in the `APIKeys` Firestore collection;
-`sparkles submit` requires `SPARKLES_API_KEY` in the environment.
+`sprinkles submit` requires `SPRINKLES_API_KEY` in the environment.
 A separate, short-lived-token flow (via IAM Credentials API, minted for a
-"subscriber" service account configured in `SparklesConfig`) supports a
+"subscriber" service account configured in `SprinklesConfig`) supports a
 browser-facing Pub/Sub subscription endpoint for the dashboard frontend.
 
 ## 8.9 Testability

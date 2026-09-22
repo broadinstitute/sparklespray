@@ -1,6 +1,6 @@
-# Sparklespray Dashboard API
+# Sprinkles Dashboard API
 
-This document specifies the REST API for the Sparklespray v100 dashboard backend. It is adapted from the original `dashboard-backend` implementation, with names and structure updated to match the v100 data model described in `docs/design/datamodel.md`.
+This document specifies the REST API for the Sprinkles v100 dashboard backend. It is adapted from the original `dashboard-backend` implementation, with names and structure updated to match the v100 data model described in `docs/design/datamodel.md`.
 
 ---
 
@@ -9,7 +9,7 @@ This document specifies the REST API for the Sparklespray v100 dashboard backend
 - **Base URL prefix**: `/api/v1`
 - **Default port**: `8080`
 - **CORS**: All origins permitted for `GET`, `POST`, and `OPTIONS`
-- **Auth**: Every request under `/api/v1/*` requires `Authorization: Bearer <api-key>`, validated by `apiKeyAuthMiddleware` against the `APIKeys` Firestore collection (see [`APIKeys`](datamodel.md#apikeys) in `datamodel.md`), with a 10-minute in-memory cache so Firestore isn't hit on every request. A missing or invalid key gets `403 FORBIDDEN`. Keys are issued out-of-band via the `sparkles add-api-key` CLI command, not through this API. The authenticated user is recorded and auto-attached as a `user=<name>` label on jobs submitted via `POST /api/v1/job`.
+- **Auth**: Every request under `/api/v1/*` requires `Authorization: Bearer <api-key>`, validated by `apiKeyAuthMiddleware` against the `APIKeys` Firestore collection (see [`APIKeys`](datamodel.md#apikeys) in `datamodel.md`), with a 10-minute in-memory cache so Firestore isn't hit on every request. A missing or invalid key gets `403 FORBIDDEN`. Keys are issued out-of-band via the `sprinkles add-api-key` CLI command, not through this API. The authenticated user is recorded and auto-attached as a `user=<name>` label on jobs submitted via `POST /api/v1/job`.
 
   This is unrelated to the separate GCP-service-account mechanism used only by `POST /api/v1/subscriptions`, which impersonates a configured service account to mint a short-lived token scoped to Pub/Sub for client-side event streaming.
 
@@ -84,7 +84,7 @@ Get a single workpool's configuration and current status.
   "region": "string",
   "zones": ["string"],
   "root_dir": "string",
-  "sparkles_worker_gcs_path": "string",
+  "sprinkles_worker_gcs_path": "string",
   "resources": [{ "name": "string", "value": "float64" }],
   "empty_volumes": [
     { "mount_point": "string", "type": "string", "size_in_gb": "integer" }
@@ -122,7 +122,7 @@ Get a single workpool's configuration and current status.
 
 Update one or more of a workpool's provisioning/watchdog parameters on an existing workpool, without resubmitting a job (which would mint a new workpool ID, since these fields are part of `computeWorkpoolSpecHash`). Every field in the request body is optional; only fields present in the JSON are changed — an omitted field is left untouched. An empty body is accepted as a no-op.
 
-Because the monitor reads `WorkPools` fresh from Firestore on every provisioning/watchdog poll (no in-memory cache, unlike `SparklesConfig`), a change here takes effect on the monitor's very next poll — no dashboard-backend or monitor restart required.
+Because the monitor reads `WorkPools` fresh from Firestore on every provisioning/watchdog poll (no in-memory cache, unlike `SprinklesConfig`), a change here takes effect on the monitor's very next poll — no dashboard-backend or monitor restart required.
 
 **Path parameters**:
 
@@ -198,7 +198,7 @@ List all GCP Batch submissions associated with this workpool.
 
 **Firestore**: `BatchAPIRequests` — query `workpool_id == {workpool_id}` filtered to `status in [pending, started, completed, failed, terminated]` (`deleted` batches are excluded), ordered by `submitted_at` descending.
 
-> **Note**: The old API exposed a `log-summary` endpoint that fetched GCP Cloud Logging entries filtered by a `sparkles-cluster` label on the Batch job. The v100 data model does not attach that label. Re-enabling log aggregation requires labelling batch jobs with `workpool_id` at creation time and updating this endpoint to query Cloud Logging accordingly.
+> **Note**: The old API exposed a `log-summary` endpoint that fetched GCP Cloud Logging entries filtered by a `sprinkles-cluster` label on the Batch job. The v100 data model does not attach that label. Re-enabling log aggregation requires labelling batch jobs with `workpool_id` at creation time and updating this endpoint to query Cloud Logging accordingly.
 
 ---
 
@@ -313,8 +313,8 @@ Submit a new job. Creates the `WorkPool` (if it doesn't already exist), the `Job
     "machineType": "string (required)",
     "bootDiskSizeGb": "integer (default: 50)",
     "bootDiskType": "string (default: pd-balanced)",
-    "rootDir": "string (default: /mnt/sparkles)",
-    "sparklesWorkerGCSPath": "string (default: SparklesConfig.sparkles_worker_gcs_path)",
+    "rootDir": "string (default: /mnt/sprinkles)",
+    "sprinklesWorkerGCSPath": "string (default: SprinklesConfig.sprinkles_worker_gcs_path)",
     "resources": [{ "name": "string", "value": "float64" }],
     "emptyVolumes": [
       { "mountPoint": "string", "type": "string", "sizeInGB": "integer" }
@@ -326,9 +326,9 @@ Submit a new job. Creates the `WorkPool` (if it doesn't already exist), the `Job
         "mountOptions": ["string"]
       }
     ],
-    "region": "string (default: SparklesConfig.region)",
+    "region": "string (default: SprinklesConfig.region)",
     "zones": ["string"],
-    "serviceAccount": "string (default: SparklesConfig.service_account)",
+    "serviceAccount": "string (default: SprinklesConfig.service_account)",
     "labels": [{ "name": "string", "value": "string" }],
     "maxWorkerCount": "integer (default: 1)",
     "maxPreemptibleWorkerAttempts": "integer (default: 1)",
@@ -347,7 +347,7 @@ If `workpool.id` is omitted, it's derived deterministically as `"wp-" + sha256(c
 
 The authenticated caller's user (from the API-key auth middleware) is auto-appended as a `user=<name>` label — not something the client sends explicitly.
 
-Task `result_path`/`log_path` are derived as `{SparklesConfig.gcs_prefix}/{name}/{task_index}` and `.../{task_index}/stdout.txt`.
+Task `result_path`/`log_path` are derived as `{SprinklesConfig.gcs_prefix}/{name}/{task_index}` and `.../{task_index}/stdout.txt`.
 
 **Response** `200 OK`:
 
@@ -359,7 +359,7 @@ Task `result_path`/`log_path` are derived as `{SparklesConfig.gcs_prefix}/{name}
 
 **Firestore**: `Set` on `WorkPools/{workpool_id}`; then, in one transaction, `Set` on `Jobs/{job_id}` and one `Set` per task on `Tasks/{task_id}`; then `Create` on `JobSummary/{job_id}`.
 
-**Pub/Sub**: publishes `job_created` to `sparkles-events`.
+**Pub/Sub**: publishes `job_created` to `sprinkles-events`.
 
 ---
 
@@ -458,7 +458,7 @@ Semantics: starting from the job's existing labels, any label whose name is in `
 
 ### `POST /api/v1/job/{job_id}/cancel`
 
-Cancel a job. Uses the same mechanism as the `sparkles kill` CLI command (`v100.KillJobWithClients`): tasks still `pending` are killed immediately and synchronously; tasks already `claimed`/`running`/`writing` are killed best-effort via a `kill_job` broadcast to workers, and converge to `killed` asynchronously as the owning worker observes the broadcast, cancels the task, and records it. This endpoint does not block waiting for that convergence — poll `GET /api/v1/job/{job_id}/summary` or watch `GET /api/v1/events`/subscriptions for the eventual `job_terminated` event to observe the job reach a terminal state.
+Cancel a job. Uses the same mechanism as the `sprinkles kill` CLI command (`v100.KillJobWithClients`): tasks still `pending` are killed immediately and synchronously; tasks already `claimed`/`running`/`writing` are killed best-effort via a `kill_job` broadcast to workers, and converge to `killed` asynchronously as the owning worker observes the broadcast, cancels the task, and records it. This endpoint does not block waiting for that convergence — poll `GET /api/v1/job/{job_id}/summary` or watch `GET /api/v1/events`/subscriptions for the eventual `job_terminated` event to observe the job reach a terminal state.
 
 Calling this on a job with no pending tasks (e.g. already fully running, or already terminal) is safe and idempotent.
 
@@ -483,7 +483,7 @@ Calling this on a job with no pending tasks (e.g. already fully running, or alre
 
 **Firestore**: `Jobs/{job_id}` — key lookup, to check existence. `Tasks` — queried for `job_id == {job_id} && status == pending`; each matching task is transitioned to `killed` (guarded against a concurrent claim).
 
-**Pub/Sub**: publishes `{"type": "kill_job", "job_id": "string"}` to the shared `sparkles-worker-in` topic (not a per-worker destination, since a job's tasks may be spread across many workers) — every worker with a task belonging to this job cancels it.
+**Pub/Sub**: publishes `{"type": "kill_job", "job_id": "string"}` to the shared `sprinkles-worker-in` topic (not a per-worker destination, since a job's tasks may be spread across many workers) — every worker with a task belonging to this job cancels it.
 
 ---
 
@@ -828,7 +828,7 @@ Request that the worker running this task begin streaming its log and metric ent
 
 **Firestore**: `Tasks/{task_id}` — key lookup, to read `owning_worker_id`.
 
-**Pub/Sub**: Publishes a `stream_task_updates` control message. The backend publishes directly to a topic/publisher ID literally named `sparkles-worker-in-{owning_worker_id}` (not a shared `sparkles-worker-in` topic with a subscription filter) — i.e. the routing target is the per-worker string itself, resolved from the task's `owning_worker_id`.
+**Pub/Sub**: Publishes a `stream_task_updates` control message. The backend publishes directly to a topic/publisher ID literally named `sprinkles-worker-in-{owning_worker_id}` (not a shared `sprinkles-worker-in` topic with a subscription filter) — i.e. the routing target is the per-worker string itself, resolved from the task's `owning_worker_id`.
 
 Message payload:
 
@@ -836,13 +836,13 @@ Message payload:
 { "type": "stream_task_updates", "task_id": "string" }
 ```
 
-> **Change from old API**: The old endpoint published to `sparkles-v6-task-in` with type `start_publishing`. The v100 equivalent is this endpoint, publishing message type `stream_task_updates` to the per-worker-named destination above. The routing changed: messages go to a destination keyed by the specific worker, not a global task topic. The backend must look up `owning_worker_id` from the Task document before publishing, so it can route to the right worker.
+> **Change from old API**: The old endpoint published to `sprinkles-v6-task-in` with type `start_publishing`. The v100 equivalent is this endpoint, publishing message type `stream_task_updates` to the per-worker-named destination above. The routing changed: messages go to a destination keyed by the specific worker, not a global task topic. The backend must look up `owning_worker_id` from the Task document before publishing, so it can route to the right worker.
 
 ---
 
 ## Events
 
-Events correspond to the `Events` Firestore collection, which is the durable audit log for everything published to the `sparkles-events` Pub/Sub topic.
+Events correspond to the `Events` Firestore collection, which is the durable audit log for everything published to the `sprinkles-events` Pub/Sub topic.
 
 ### `GET /api/v1/events`
 
@@ -902,7 +902,7 @@ For real-time event delivery, clients can create a short-lived Pub/Sub subscript
 
 ### `POST /api/v1/subscriptions`
 
-Create a new subscription to the `sparkles-events` Pub/Sub topic.
+Create a new subscription to the `sprinkles-events` Pub/Sub topic.
 
 **Query parameters**:
 
@@ -921,7 +921,7 @@ Create a new subscription to the `sparkles-events` Pub/Sub topic.
 
 The subscription auto-expires after 24 hours. The `authorization_token` is a short-lived credential scoped to `https://www.googleapis.com/auth/pubsub`, generated by impersonating a dashboard service account.
 
-**Pub/Sub**: Creates subscription under `sparkles-events` topic with a 24-hour TTL and 10-second ack deadline. If `types` is provided, applies a server-side filter: `attributes.type = "t1" OR attributes.type = "t2" ...`.
+**Pub/Sub**: Creates subscription under `sprinkles-events` topic with a 24-hour TTL and 10-second ack deadline. If `types` is provided, applies a server-side filter: `attributes.type = "t1" OR attributes.type = "t2" ...`.
 
 ---
 
@@ -1011,11 +1011,11 @@ The old `Task.log_url` was a full HTTP URL. The v100 `Task.log_path` is a GCS pa
 
 ### Changed: task metrics collection
 
-The old backend had a separate `/task/{id}/metrics` endpoint backed by a `SparklesV6TaskMetric` collection with periodic samples. In v100, periodic metric samples are stored as `metric_update` entries inside the `TaskLog` collection, and a final summary is stored as `Task.resource_usage`. `GET /api/v1/task/{task_id}/log` unifies both. Clients that previously polled `/metrics` should now poll `/task/{task_id}/log?types=metric_update`.
+The old backend had a separate `/task/{id}/metrics` endpoint backed by a `SprinklesV6TaskMetric` collection with periodic samples. In v100, periodic metric samples are stored as `metric_update` entries inside the `TaskLog` collection, and a final summary is stored as `Task.resource_usage`. `GET /api/v1/task/{task_id}/log` unifies both. Clients that previously polled `/metrics` should now poll `/task/{task_id}/log?types=metric_update`.
 
 ### Changed: stream task updates routing
 
-The old `POST /task/{id}/subscription` published to a global `sparkles-v6-task-in` topic. The v100 equivalent, `POST /api/v1/task/{task_id}/stream`, publishes a `stream_task_updates` message to a destination keyed by the specific worker (see that endpoint above for the exact routing). The backend must look up the task's `owning_worker_id` to find the correct worker.
+The old `POST /task/{id}/subscription` published to a global `sprinkles-v6-task-in` topic. The v100 equivalent, `POST /api/v1/task/{task_id}/stream`, publishes a `stream_task_updates` message to a destination keyed by the specific worker (see that endpoint above for the exact routing). The backend must look up the task's `owning_worker_id` to find the correct worker.
 
 ### New: BatchAPIRequests
 

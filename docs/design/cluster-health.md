@@ -1,6 +1,6 @@
 # Cluster health: workpool states and transitions
 
-This document describes how the monitor (`v100/monitor/*.go`) currently
+This document describes how the monitor (`cli/monitor/*.go`) currently
 tracks and reports the health of a workpool's cluster of worker VMs. It
 reflects the implementation as it exists today, not an aspirational design.
 
@@ -17,7 +17,7 @@ and interacts with — the others.
 | Worker status    | `started`, `stopped`, `zombie`                                                                     | The worker process itself (`started`/`stopped`), or task recovery on heartbeat expiry (`zombie`) |
 | Task status      | `pending`, `claimed`, `running`, `writing`, plus terminal (`success`, `error`, `failed`, `killed`) | Workers, as tasks execute                                                                        |
 
-`WorkPoolStatus` is the one surfaced most prominently (dashboard, `sparkles dev submit`'s polling loop) and the one this document focuses on.
+`WorkPoolStatus` is the one surfaced most prominently (dashboard, `sprinkles dev submit`'s polling loop) and the one this document focuses on.
 
 ### `WorkPoolStatus`
 
@@ -117,7 +117,7 @@ worker's heartbeat expires, so another worker can pick the task back up.
 ## The pollers that drive all of this
 
 The monitor runs several independent, debounced pollers
-(`RunMonitorLoop`, `v100/monitor/monitor.go:127`), each on its own
+(`RunMonitorLoop`, `cli/monitor/monitor.go:127`), each on its own
 notification-or-timer schedule (2s minimum, 30s fallback, except where
 noted):
 
@@ -276,7 +276,7 @@ In practice, getting out of `halted` today means either manual Firestore
 intervention or submitting a corrected workpool config under a new
 workpool ID (workpool IDs are content-hashed from the spec by default, so a
 genuinely fixed config naturally gets a fresh ID and a fresh `WorkPoolState`
-— see `resolveWorkpoolID` in `v100/dev/submit.go`).
+— see `resolveWorkpoolID` in `cli/dev/submit.go`).
 
 ## `BatchStatus` lifecycle
 

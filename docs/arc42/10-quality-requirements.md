@@ -23,7 +23,7 @@
   - Idle workpools (`nonTerminal == 0`) provision zero workers.
 - **Observability**
   - Every state transition of every entity is recorded as an `Events`
-    document / `sparkles-events` message, independent of the entity's own
+    document / `sprinkles-events` message, independent of the entity's own
     current-state fields — history is never solely inferable from current
     state.
 - **Operational simplicity**

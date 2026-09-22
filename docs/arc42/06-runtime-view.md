@@ -2,14 +2,14 @@
 
 ## 6.1 Job submission and execution (happy path)
 
-1. User runs `sparkles submit job.json --params tasks.csv` (`submit_cmd.go`).
+1. User runs `sprinkles submit job.json --params tasks.csv` (`submit_cmd.go`).
    If the job has a Mustache `task_template`, it's expanded once per CSV
    row into concrete per-task entries.
 2. The CLI POSTs the job to the dashboard-backend
-   (`POST /api/v1/job`, bearer-token auth via `SPARKLES_API_KEY`).
+   (`POST /api/v1/job`, bearer-token auth via `SPRINKLES_API_KEY`).
 3. `dev/dashboard_backend.go` (`handleSubmitJob`) writes `Jobs`, `Tasks`,
    and an initial `JobSummary` document to Firestore, publishes a
-   `job_created` event to `sparkles-events` (mirrored into `Events`), and
+   `job_created` event to `sprinkles-events` (mirrored into `Events`), and
    — per the "influence via events" rule — this flips an `idle`/`halted`
    workpool back toward `ok` on the next summary poll.
 4. **Provisioning** (`monitor/provision.go`, on its next poll or on the
@@ -17,10 +17,10 @@
    worker count for the workpool, creates one or more `BatchAPIRequest`s
    (preemptible first, subject to `MaxPreemptibleWorkerAttempts`), and
    calls the GCP Batch API to create the underlying VM job.
-5. GCP Batch provisions a VM. Its first runnable pulls the `sparkles`
-   binary from GCS (`SparklesWorkerGCSPath`) via a throwaway
+5. GCP Batch provisions a VM. Its first runnable pulls the `sprinkles`
+   binary from GCS (`SprinklesWorkerGCSPath`) via a throwaway
    `cloud-sdk:slim` container; its second runnable `chmod +x`s it and execs
-   `sparkles worker ...` directly on the VM host.
+   `sprinkles worker ...` directly on the VM host.
 6. The **worker** (`worker.go`) registers a `Workers` document, starts a
    1-minute heartbeat goroutine, then loops:
    - find a job with pending tasks in its workpool,
@@ -54,7 +54,7 @@ sequenceDiagram
     participant Batch as GCP Batch/GCE
     participant W as worker VM
 
-    User->>DB: POST /job (sparkles submit)
+    User->>DB: POST /job (sprinkles submit)
     DB->>FS: write Job/Tasks
     DB->>FS: publish job_created
     FS->>Mon: notify
@@ -62,7 +62,7 @@ sequenceDiagram
     Mon->>FS: write BatchAPIRequest
     Mon->>Batch: CreateJob
     Batch->>W: create VM
-    Note over W: binary bootstraps,<br/>runs `sparkles worker`
+    Note over W: binary bootstraps,<br/>runs `sprinkles worker`
     W->>FS: register Worker, claim Task
     W->>FS: task_state_update events
     W->>FS: upload results (GCS)
@@ -70,10 +70,10 @@ sequenceDiagram
 
 ## 6.2 Kill
 
-`sparkles kill <job-id>` (`kill.go`) marks all pending/running `Tasks` for
+`sprinkles kill <job-id>` (`kill.go`) marks all pending/running `Tasks` for
 the job as `killed` directly in Firestore, then best-effort broadcasts a
 `kill_job` message on each active worker's per-worker Pub/Sub subscription
-(`sparkles-worker-in-<worker_id>`) so any worker currently executing a task
+(`sprinkles-worker-in-<worker_id>`) so any worker currently executing a task
 for that job aborts it promptly (`--no-wait` skips waiting for
 confirmation).
 

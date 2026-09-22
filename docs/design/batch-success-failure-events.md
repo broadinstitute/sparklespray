@@ -2,10 +2,10 @@
 
 ## Problem
 
-`checkHaltThreshold` (v100/monitor/monitor.go) decides whether to halt a
+`checkHaltThreshold` (cli/monitor/monitor.go) decides whether to halt a
 workpool by listing recent `BatchAPIRequest` documents and checking if the
 last N are all `BatchStatusFailed`. This has a gap: when `CreateJob` itself
-fails synchronously in `submitBatch` (v100/monitor/provision.go) — e.g.
+fails synchronously in `submitBatch` (cli/monitor/provision.go) — e.g.
 because the workpool ID produced an invalid GCP job name — no
 `BatchAPIRequest` document is ever written. The failure is only logged
 (`provision.go:48-50`) and retried every poll cycle, forever, with nothing
@@ -130,13 +130,13 @@ if batch.RegisteredWorkerCount >= 1 {
 
 ### 5. Publisher plumbing (follows the existing `EventPublisher` pattern)
 
-- `v100/events.go`: add `BatchOutcomeEvent` types and
+- `cli/events.go`: add `BatchOutcomeEvent` types and
   `PublishBatchFailed(ctx, workpoolID, reason string) error` /
   `PublishBatchSucceeded(ctx, workpoolID string) error` methods on
   `EventPublisher`, following `PublishWorkpoolStateChange`'s shape (writes an
   `EventRecord` with `Type: "batch_failed"`/`"batch_succeeded"`, `WorkpoolID`,
   and — for the failed case — `StateMessage: reason`).
-- `v100/monitor/interfaces.go`: add a narrow interface
+- `cli/monitor/interfaces.go`: add a narrow interface
 
   ```go
   // BatchOutcomePublisher publishes one event per batch attempt outcome
@@ -147,16 +147,16 @@ if batch.RegisteredWorkerCount >= 1 {
   }
   ```
 
-- `v100/monitor/monitor.go`: add `batchOutcomes BatchOutcomePublisher` field
+- `cli/monitor/monitor.go`: add `batchOutcomes BatchOutcomePublisher` field
   and `SetBatchOutcomePublisher(p BatchOutcomePublisher)` setter, matching
   `SetWorkpoolStatePublisher`/`SetJobTerminatedPublisher`.
-- `v100/cli_main.go` (`runMonitor`): wire `m.SetBatchOutcomePublisher(ep)`
+- `cli/cli_main.go` (`runMonitor`): wire `m.SetBatchOutcomePublisher(ep)`
   alongside the existing `SetJobTerminatedPublisher`/`SetWorkpoolStatePublisher`
   calls, since `EventPublisher` (`ep`) implements all of them.
 
 ### 6. Reading it back: `EventStore` and `checkHaltThreshold`
 
-Add one narrow query method to `EventStore` (`v100/monitor/interfaces.go`),
+Add one narrow query method to `EventStore` (`cli/monitor/interfaces.go`),
 matching the existing single-purpose style of `ListJobCreatedSince`:
 
 ```go
@@ -175,7 +175,7 @@ type EventStore interface {
 }
 ```
 
-Firestore implementation (`v100/monitor/adapters.go`, alongside
+Firestore implementation (`cli/monitor/adapters.go`, alongside
 `FirestoreEventStore.ListJobCreatedSince`):
 
 ```go

@@ -96,7 +96,7 @@ used by the two functional tests.
 
 ## New Package: `functest/`
 
-Create `v100/functest/` (separate package so it can use `_test` build constraints and
+Create `cli/functest/` (separate package so it can use `_test` build constraints and
 import the emulator binaries without polluting the main module).
 
 ### `helpers.go` — infrastructure helpers
@@ -176,7 +176,7 @@ func TestSubmitAndComplete(t *testing.T) {
     startPubSubEmulator(t)
     startGCSEmulator(t)
 
-    const project, db = "test-project", "sparkles"
+    const project, db = "test-project", "sprinkles"
     workpoolID := "pool-" + uuid.New().String()
 
     startWorker(t, ctx, project, db, workpoolID, true /*noDocker*/)
@@ -211,7 +211,7 @@ func TestKillJob(t *testing.T) {
     startPubSubEmulator(t)
     startGCSEmulator(t)
 
-    const project, db = "test-project", "sparkles"
+    const project, db = "test-project", "sprinkles"
     workpoolID := "pool-" + uuid.New().String()
 
     startWorker(t, ctx, project, db, workpoolID, true)
@@ -254,7 +254,7 @@ func TestKillJob(t *testing.T) {
 
 ## Notes
 
-- The PubSub emulator requires the `sparkles-worker-in` and `sparkles-events` topics to exist
+- The PubSub emulator requires the `sprinkles-worker-in` and `sprinkles-events` topics to exist
   before workers subscribe. `submitJob` (or a separate `ensureTopics` helper) should create
   them idempotently via the PubSub admin API before writing to Firestore.
 - Workers started in goroutines share the test's `ctx`; cancelling it tears them down cleanly.

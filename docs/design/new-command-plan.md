@@ -28,21 +28,21 @@ After this change, field-by-field conversion between the two is a mechanical one
 
 ## Files and changes
 
-### 1. `v100/task_queue.go` — add `SparklesWorkerGCSPath` to `v100.WorkPool`
+### 1. `cli/task_queue.go` — add `SprinklesWorkerGCSPath` to `v100.WorkPool`
 
 ```go
 type WorkPool struct {
     ...
-    SparklesWorkerGCSPath string `firestore:"sparkles_worker_gcs_path"`
+    SprinklesWorkerGCSPath string `firestore:"sprinkles_worker_gcs_path"`
 }
 ```
 
-### 2. `v100/dev/submit.go` — add `SparklesWorkerGCSPath` to `WorkpoolSpec`; copy it in `devSubmit`
+### 2. `cli/dev/submit.go` — add `SprinklesWorkerGCSPath` to `WorkpoolSpec`; copy it in `devSubmit`
 
 ```go
 type WorkpoolSpec struct {
     ...
-    SparklesWorkerGCSPath string `json:"sparklesWorkerGCSPath"`
+    SprinklesWorkerGCSPath string `json:"sprinklesWorkerGCSPath"`
 }
 ```
 
@@ -51,11 +51,11 @@ type WorkpoolSpec struct {
 ```go
 workpool := v100.WorkPool{
     ...
-    SparklesWorkerGCSPath: workpoolSpec.SparklesWorkerGCSPath,
+    SprinklesWorkerGCSPath: workpoolSpec.SprinklesWorkerGCSPath,
 }
 ```
 
-### 3. `v100/monitor/interfaces.go` — three changes
+### 3. `cli/monitor/interfaces.go` — three changes
 
 **a) Align `monitor.EmptyVolume` field names to `v100.EmptyVolume`:**
 
@@ -67,13 +67,13 @@ type EmptyVolume struct {
 }
 ```
 
-**b) Add `RootDir`, `EmptyVolumes`, `SparklesWorkerGCSPath` to `monitor.WorkPool`:**
+**b) Add `RootDir`, `EmptyVolumes`, `SprinklesWorkerGCSPath` to `monitor.WorkPool`:**
 
 ```go
 type WorkPool struct {
     ...
     RootDir               string
-    SparklesWorkerGCSPath string
+    SprinklesWorkerGCSPath string
     EmptyVolumes          []EmptyVolume
 }
 ```
@@ -81,7 +81,7 @@ type WorkPool struct {
 **c) Update `WorkerJobSpec` field access** — no signature change needed; callers
 that set `EmptyVolumes` will now use the renamed fields.
 
-### 4. `v100/monitor/adapters.go` — add fields to `firestoreWorkPool` and `toWorkPool`
+### 4. `cli/monitor/adapters.go` — add fields to `firestoreWorkPool` and `toWorkPool`
 
 Add to `firestoreWorkPool`:
 
@@ -89,7 +89,7 @@ Add to `firestoreWorkPool`:
 type firestoreWorkPool struct {
     ...
     RootDir               string        `firestore:"root_dir"`
-    SparklesWorkerGCSPath string        `firestore:"sparkles_worker_gcs_path"`
+    SprinklesWorkerGCSPath string        `firestore:"sprinkles_worker_gcs_path"`
     EmptyVolumes          []EmptyVolume `firestore:"empty_volumes"`
 }
 ```
@@ -104,34 +104,34 @@ Update `toWorkPool` to copy the new fields:
 return &WorkPool{
     ...
     RootDir:               f.RootDir,
-    SparklesWorkerGCSPath: f.SparklesWorkerGCSPath,
+    SprinklesWorkerGCSPath: f.SprinklesWorkerGCSPath,
     EmptyVolumes:          f.EmptyVolumes,
 }
 ```
 
-### 5. `v100/monitor/batch_api.go` — update field names after rename
+### 5. `cli/monitor/batch_api.go` — update field names after rename
 
 `ev.MountPath` → `ev.MountPoint`, `ev.SizeGB` → `ev.SizeInGB`.
 
-### 6. `v100/monitor/remote_batch_client.go` and `emulator/server.go`
+### 6. `cli/monitor/remote_batch_client.go` and `emulator/server.go`
 
 Update any struct literals or field accesses that used `MountPath` / `SizeGB`.
 
-### 7. `v100/monitor/provision.go` — fix `submitBatch` (pre-existing bug)
+### 7. `cli/monitor/provision.go` — fix `submitBatch` (pre-existing bug)
 
-`submitBatch` currently leaves `RootDir`, `SparklesWorkerGCSPath`, and `EmptyVolumes`
+`submitBatch` currently leaves `RootDir`, `SprinklesWorkerGCSPath`, and `EmptyVolumes`
 empty. Fix:
 
 ```go
 jobID, err := a.batchAPI.CreateJob(ctx, &WorkerJobSpec{
     ...
     RootDir:               pool.RootDir,
-    SparklesWorkerGCSPath: pool.SparklesWorkerGCSPath,
+    SprinklesWorkerGCSPath: pool.SprinklesWorkerGCSPath,
     EmptyVolumes:          pool.EmptyVolumes,
 })
 ```
 
-### 8. `v100/dev/addworker.go` — new file
+### 8. `cli/dev/addworker.go` — new file
 
 ```go
 func runDevAddWorker(c *cli.Context) error {
@@ -155,7 +155,7 @@ func runDevAddWorker(c *cli.Context) error {
         VMCount:               vmCount,
         Preemptible:           preemptible,
         RootDir:               workpoolSpec.RootDir,
-        SparklesWorkerGCSPath: workpoolSpec.SparklesWorkerGCSPath,
+        SprinklesWorkerGCSPath: workpoolSpec.SprinklesWorkerGCSPath,
         EmptyVolumes:          toMonitorEmptyVolumes(workpoolSpec.EmptyVolumes),
     })
 
@@ -186,7 +186,7 @@ func toMonitorEmptyVolumes(vs []v100.EmptyVolume) []monitor.EmptyVolume {
 }
 ```
 
-### 9. `v100/dev/commands.go` — register `add-worker`
+### 9. `cli/dev/commands.go` — register `add-worker`
 
 ```go
 {
@@ -208,7 +208,7 @@ func toMonitorEmptyVolumes(vs []v100.EmptyVolume) []monitor.EmptyVolume {
 
 1. Align `monitor.EmptyVolume` fields (step 3a) + add firestore tags — compile-fix
    `batch_api.go`, `remote_batch_client.go`, `emulator/server.go` (step 5, 6).
-2. Add `SparklesWorkerGCSPath` to `v100.WorkPool` and `WorkpoolSpec` (steps 1–2).
+2. Add `SprinklesWorkerGCSPath` to `v100.WorkPool` and `WorkpoolSpec` (steps 1–2).
 3. Add fields to `monitor.WorkPool`, `firestoreWorkPool`, `toWorkPool` (steps 3b, 4).
 4. Fix `provision.go` (step 7).
 5. Implement `add-worker` command (steps 8–9).

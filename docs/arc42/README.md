@@ -1,11 +1,11 @@
-# Sparkles (v100) — Architecture Documentation
+# Sprinkles — Architecture Documentation
 
-This is [arc42](https://arc42.org)-based architecture documentation for **v100**,
-the Go rewrite of the `sparkles` CLI/control-plane for running ad-hoc batch jobs
+This is [arc42](https://arc42.org)-based architecture documentation for Sprinkles,
+the Go rewrite of the `sprinkles` CLI/control-plane for running ad-hoc batch jobs
 on Google Compute Engine via GCP Batch. It documents the code under
-[`v100/`](../../v100) — the sole active implementation in this repository; the
+[`cli/`](../../cli) — the sole active implementation in this repository; the
 older Python CLI and Go `dashboard-backend`/`simulator` implementations these
-docs used to distinguish v100 from have since been deleted.
+docs used to distinguish Sprinkles from have since been deleted.
 
 ## Sections
 
@@ -24,11 +24,11 @@ docs used to distinguish v100 from have since been deleted.
 
 ## Sources
 
-This documentation was derived from the code and design docs in `v100/` as of
+This documentation was derived from the code and design docs in `cli/` as of
 2026-08-31 (commit `6fd277d`), specifically: the design docs now under
 [`docs/design/`](../design) (`datamodel.md`, `cluster-health.md`, `autoscaler.md`,
 `autoscaler_testing.md`, `func-test-plan.md`, `new-command-plan.md`), plus
-`go.mod`, `cli_main.go`, `cmd/sparkles/main.go`, `worker.go`, `task_queue.go`,
+`go.mod`, `cli_main.go`, `cmd/sprinkles/main.go`, `worker.go`, `task_queue.go`,
 `events.go`, `submit_cmd.go`, `kill.go`, `resources.go`, `transfer_client.go`,
 `scheduler/`, `dev/`, and `monitor/`. Where a design doc and the implementation
 disagreed (e.g. a design doc referring to a since-renamed `autoscaler` package,

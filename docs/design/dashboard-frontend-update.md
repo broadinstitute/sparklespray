@@ -1,7 +1,7 @@
 # Dashboard Frontend Update — Gap Analysis
 
 This document compares the React frontend in `dashboard/` against the new Go backend in
-`v100/dev/dashboard_backend.go` (API spec: `dashboard-api.md`). The goal is to determine
+`cli/dev/dashboard_backend.go` (API spec: `dashboard-api.md`). The goal is to determine
 what changes are required to make the frontend work again, and to flag anything
 non-trivial enough that dropping the feature is preferable to carrying the complexity.
 

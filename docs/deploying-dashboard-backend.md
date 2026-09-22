@@ -2,18 +2,18 @@
 
 ## Overview
 
-`sparkles` is a single self-contained binary bundling the `worker`, `submit`,
+`sprinkles` is a single self-contained binary bundling the `worker`, `submit`,
 and `kill` commands, the `serve` command, and a `dev` subcommand tree
 (`dev set-config`, `dev create-topics`, `dev add-api-key`, ...).
 
-`sparkles serve` is the deployment entry point: it runs the entire control
+`sprinkles serve` is the deployment entry point: it runs the entire control
 plane in **one process** — the monitor (autoscaling and watchdog polls) plus
 the dashboard-backend, which serves both the REST API at `/api/v1/...` and the
 embedded dashboard UI at `/` on the same port. So one binary, one process, one
 port on one host; there is nothing separate to install or keep in sync.
 
 The two halves can still be run on their own for debugging —
-`sparkles dev monitor` and `sparkles dev dashboard-backend` — but production
+`sprinkles dev monitor` and `sprinkles dev dashboard-backend` — but production
 deployments should use `serve`.
 
 ## Prerequisites
@@ -24,26 +24,26 @@ deployments should use `serve`.
   Pub/Sub, and GCS in the target project — either a service account key file
   plus `GOOGLE_APPLICATION_CREDENTIALS`, or a service account attached to the
   host (e.g. a GCE instance), i.e. standard Application Default Credentials.
-  There is no sparkles-specific credentials flag or env var.
+  There is no sprinkles-specific credentials flag or env var.
 - The one-time cluster setup already done for the target project. For a brand
-  new project, `v100/setup-gcp-project.sh --project <project>` (run once with
+  new project, `cli/setup-gcp-project.sh --project <project>` (run once with
   broad/admin access) enables every required API, creates a service account,
   grants it every IAM role the rest of setup and the running app need, and
-  mints a key for it; then `sparkles dev bootstrap-project --project <project> --region <region> --bucket <bucket> --service-account <sa-email> --admin-user <you>` (run as that service account; zones are looked up automatically for `--region`) creates the
-  Firestore database and composite indexes (from `v100/dev/firestore.indexes.json`),
-  the GCS bucket, the Pub/Sub topics, `SparklesConfig/default`, and an initial
+  mints a key for it; then `sprinkles dev bootstrap-project --project <project> --region <region> --bucket <bucket> --service-account <sa-email> --admin-user <you>` (run as that service account; zones are looked up automatically for `--region`) creates the
+  Firestore database and composite indexes (from `cli/dev/firestore.indexes.json`),
+  the GCS bucket, the Pub/Sub topics, `SprinklesConfig/default`, and an initial
   API key, in one step. That subcommand's individual pieces remain available
   on their own for an already-set-up project:
-  - `sparkles dev create-topics --project <project>` — creates the Pub/Sub
+  - `sprinkles dev create-topics --project <project>` — creates the Pub/Sub
     topics/subscriptions the monitor and workers depend on.
-  - `sparkles dev set-config --project <project> <config.json>` — writes the
-    `SparklesConfig/default` Firestore document dashboard-backend reads at
+  - `sprinkles dev set-config --project <project> <config.json>` — writes the
+    `SprinklesConfig/default` Firestore document dashboard-backend reads at
     startup (GCS prefix, service account, region/zones, etc. — see
     `sample-config.json`).
-  - `sparkles dev add-api-key --project <project> <user>` — at least one API
+  - `sprinkles dev add-api-key --project <project> <user>` — at least one API
     key is required for dashboard/CLI auth. Users of the dashboard UI paste
     this key in on first load (stored in the browser's `localStorage`);
-    `sparkles submit` reads it from `SPARKLES_API_KEY`.
+    `sprinkles submit` reads it from `SPRINKLES_API_KEY`.
 - An open inbound port (default `:8080`, or whatever `--addr` is set to) if
   the dashboard needs to be reachable from outside the host. TLS termination
   and access control in front of that port (e.g. nginx, Caddy, or a GCP HTTPS
@@ -56,7 +56,7 @@ From a machine with Node/npm and Go installed (it does not need to be the
 target server):
 
 ```
-./v100/build.sh [version]
+./cli/build.sh [version]
 ```
 
 This builds the frontend (`npm ci && npm run build` in `dashboard/` —
@@ -65,27 +65,27 @@ skipped if nothing under `dashboard/` has changed since the last build; pass
 embedded assets, and cross-compiles a single static binary at:
 
 ```
-v100/bin/sparkles-linux-amd64-<version>
+cli/bin/sprinkles-linux-amd64-<version>
 ```
 
 `version` defaults to `git describe --tags --always --dirty` if omitted. This
 is the same binary used to bootstrap worker VMs (see
-`v100/upload-worker-binary.sh`) — there's no separate "server" build; the
+`cli/upload-worker-binary.sh`) — there's no separate "server" build; the
 frontend build is cheap enough that a worker VM downloading it costs nothing
 extra at boot.
 
 ## Copying the binary to the server
 
 ```
-gcloud compute scp v100/bin/sparkles-linux-amd64-<version> \
-  my-host:/opt/sparkles/sparkles-<version>
+gcloud compute scp cli/bin/sprinkles-linux-amd64-<version> \
+  my-host:/opt/sprinkles/sprinkles-<version>
 ```
 
 (or plain `scp` if not using GCE). A suggested layout on the server:
 
 ```
-/opt/sparkles/sparkles-<version>   # versioned binaries, one per release
-/opt/sparkles/sparkles -> sparkles-<version>  # symlink to the active one
+/opt/sprinkles/sprinkles-<version>   # versioned binaries, one per release
+/opt/sprinkles/sprinkles -> sprinkles-<version>  # symlink to the active one
 ```
 
 so upgrades are: copy the new binary in, repoint the symlink, restart.
@@ -93,9 +93,9 @@ so upgrades are: copy the new binary in, repoint the symlink, restart.
 ## Running it
 
 ```
-/opt/sparkles/sparkles serve \
+/opt/sprinkles/sprinkles serve \
   --project <gcp-project> \
-  --db <firestore-db, default "sparkles"> \
+  --db <firestore-db, default "sprinkles"> \
   --addr :8080
 ```
 
@@ -140,21 +140,21 @@ alternative is an SA in `W` granted the roles above on `C`.
 
 ## systemd unit example
 
-`/etc/systemd/system/sparkles-dashboard.service`:
+`/etc/systemd/system/sprinkles-dashboard.service`:
 
 ```ini
 [Unit]
-Description=Sparkles control plane (monitor + dashboard-backend)
+Description=Sprinkles control plane (monitor + dashboard-backend)
 After=network-online.target
 Wants=network-online.target
 
 [Service]
-ExecStart=/opt/sparkles/sparkles serve --project my-gcp-project --db sparkles --addr :8080
-Environment=GOOGLE_APPLICATION_CREDENTIALS=/opt/sparkles/gcp-sa-key.json
+ExecStart=/opt/sprinkles/sprinkles serve --project my-gcp-project --db sprinkles --addr :8080
+Environment=GOOGLE_APPLICATION_CREDENTIALS=/opt/sprinkles/gcp-sa-key.json
 Restart=on-failure
 RestartSec=5
-User=sparkles
-WorkingDirectory=/opt/sparkles
+User=sprinkles
+WorkingDirectory=/opt/sprinkles
 
 [Install]
 WantedBy=multi-user.target
@@ -162,13 +162,13 @@ WantedBy=multi-user.target
 
 ```
 sudo systemctl daemon-reload
-sudo systemctl enable --now sparkles-dashboard
+sudo systemctl enable --now sprinkles-dashboard
 ```
 
 ## Upgrading / redeploying
 
 Copy the new versioned binary alongside the old one, repoint the
-`/opt/sparkles/sparkles` symlink, then `systemctl restart sparkles-dashboard`. There's no migration step: the Firestore schema is
+`/opt/sprinkles/sprinkles` symlink, then `systemctl restart sprinkles-dashboard`. There's no migration step: the Firestore schema is
 additive, and dashboard-backend itself is stateless apart from an in-memory
 API-key cache that just repopulates on restart.
 

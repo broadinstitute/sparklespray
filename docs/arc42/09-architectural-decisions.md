@@ -8,9 +8,9 @@ noted.
 
 **Decision**: the worker and the control plane are subcommands of one binary,
 replacing the Python implementation's installable package + virtualenv setup.
-`sparkles serve` runs the monitor and the dashboard-backend together in one
+`sprinkles serve` runs the monitor and the dashboard-backend together in one
 process against shared Firestore/Pub-Sub clients; each can still be run alone
-under `sparkles dev` for debugging.
+under `sprinkles dev` for debugging.
 **Consequence**: worker VM bootstrap is "download one file from GCS,
 `chmod +x`, run" — no runtime install step on the VM at all — and a
 control-plane host supervises one unit instead of two that must be started,
@@ -63,13 +63,13 @@ instant a batch is marked fully failed. The `idle`/`ok`/`unhealthy`
 poll interval; the cosmetic banner can tolerate that staleness
 (`cluster-health.md`).
 
-## AD-6: Duplicate `WorkPool`/`EmptyVolume` types in `v100` and `monitor`
+## AD-6: Duplicate `WorkPool`/`EmptyVolume` types in `sprinkles` and `monitor`
 
-**Decision**: rather than share one type across packages, `v100` and
+**Decision**: rather than share one type across packages, `sprinkles` and
 `monitor` each define their own equivalent `WorkPool`/`EmptyVolume`
 structs, kept aligned by convention (matching field names/Firestore tags).
-**Rationale**: `monitor` cannot import `v100` without an import cycle
-(`v100/dev` imports `monitor`; `v100`'s own `monitor` CLI subcommand would
+**Rationale**: `monitor` cannot import `sprinkles` without an import cycle
+(`cli/dev` imports `monitor`; `sprinkles`'s own `monitor` CLI subcommand would
 need to import `monitor` too), and introducing a third shared-types
 package was judged not worth it at this scale (`new-command-plan.md`).
 **Tradeoff**: the two type definitions can drift; there is no compiler

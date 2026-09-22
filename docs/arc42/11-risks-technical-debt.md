@@ -20,8 +20,8 @@ current code before acting on any of them.
   drove a workpool to `halted`.
 - **VM reconciliation is inert: all three anomaly checks never fire.**
   `reconcileVMs` filters running VMs by the GCE label
-  `sparkles-worker-batch` (`monitor/cluster_reconciler.go`), but the only
-  label ever set on a worker VM is `sparkles-workpool`
+  `sprinkles-worker-batch` (`monitor/cluster_reconciler.go`), but the only
+  label ever set on a worker VM is `sprinkles-workpool`
   (`labelWorkpool`/`gcpJobLabels` in `monitor/batch_api.go`). So
   `ListRunningVMs` always returns an empty map, and over-provisioning
   detection, per-VM startup-failure termination, and zombie-VM
@@ -43,12 +43,12 @@ current code before acting on any of them.
   field addition/rename in one without the other would silently
   desynchronize Firestore reads/writes between the two packages.
 - **Design docs vs. implementation drift.** An earlier planning doc
-  (`autoscale-imp.md`) referred to a `v100/autoscaler/` package that was
-  renamed to `v100/monitor/` (`484ff16 Rename autoscaler → monitor`) and
+  (`autoscale-imp.md`) referred to a `cli/autoscaler/` package that was
+  renamed to `cli/monitor/` (`484ff16 Rename autoscaler → monitor`) and
   was deleted outright once superseded, rather than kept around to mislead
   readers about file locations. Treat `docs/design/cluster-health.md` and
   `docs/design/datamodel.md` as the implementation-accurate docs; watch for
-  the same kind of drift in the remaining design docs as `v100/` evolves.
+  the same kind of drift in the remaining design docs as `cli/` evolves.
 - **"Shuffle up to 100 and race" task claiming (AD-2)** may become a
   contention/throughput bottleneck as worker-count-per-job scales up;
   no load-test data is cited in the design docs establishing where this
@@ -63,7 +63,7 @@ current code before acting on any of them.
   implemented as literal test functions."
 - No Dockerfile / container image exists for `monitor` or
   `dashboard-backend`; whoever operates these processes today does so
-  via an undocumented (outside `v100/`) deployment mechanism. This
+  via an undocumented (outside `cli/`) deployment mechanism. This
   architecture doc cannot describe production deployment topology because
   nothing in the repo specifies it — worth confirming with whoever
   currently runs it operationally.

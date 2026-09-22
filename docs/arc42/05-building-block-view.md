@@ -3,8 +3,8 @@
 ## 5.1 Level 1: Top-level modules
 
 ```
-v100/
-├── cmd/sparkles/main.go     entrypoint: assembles v100.NewApp() + dev.Command()
+cli/
+├── cmd/sprinkles/main.go     entrypoint: assembles sprinkles.NewApp() + dev.Command()
 ├── cli_main.go              top-level CLI: worker | submit | kill | monitor
 ├── worker.go                worker process: claim/stage/run/report loop
 ├── task_queue.go            Firestore Job/Task/WorkPool structs + FirestoreTaskQueue
@@ -14,9 +14,9 @@ v100/
 ├── resource_usage.go        post-task ResourceUsage from `docker inspect` + final sample
 ├── resources.go             Resources: named float64 capacity map
 ├── transfer_client.go       GCSTransferClient: GCS upload/download
-├── events.go                EventRecord + EventPublisher (sparkles-events topic + Events collection)
-├── submit_cmd.go            `sparkles submit`
-├── kill.go                  `sparkles kill`
+├── events.go                EventRecord + EventPublisher (sprinkles-events topic + Events collection)
+├── submit_cmd.go            `sprinkles submit`
+├── kill.go                  `sprinkles kill`
 ├── scheduler/               generic leading-edge-throttle + trailing-coalescing poll scheduler
 ├── monitor/                 control-plane / autoscaler / watchdog (see 5.2)
 ├── dev/                     operational tooling + dashboard-backend (see 5.3)
@@ -25,8 +25,8 @@ v100/
 
 ## 5.2 Level 2: `monitor/`
 
-The autoscaling/watchdog half of the control plane, run by `sparkles serve`
-(or `sparkles dev monitor` on its own). Owns everything under "autoscaling"
+The autoscaling/watchdog half of the control plane, run by `sprinkles serve`
+(or `sprinkles dev monitor` on its own). Owns everything under "autoscaling"
 and "cluster health."
 
 | File                                            | Responsibility                                                                                                                                                                         |
@@ -49,10 +49,10 @@ and "cluster health."
 
 ## 5.3 Level 2: `dev/`
 
-`sparkles dev ...` subcommands — operational and test tooling, plus the
-dashboard-backend REST API. Kept as a separate package from `v100` and
+`sprinkles dev ...` subcommands — operational and test tooling, plus the
+dashboard-backend REST API. Kept as a separate package from `sprinkles` and
 `monitor` specifically to avoid an import cycle (`dev` imports both
-`v100` and `monitor`; neither of those may import `dev`).
+`sprinkles` and `monitor`; neither of those may import `dev`).
 
 | File                      | Responsibility                                                                                                                                      |
 | ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -65,7 +65,7 @@ dashboard-backend REST API. Kept as a separate package from `v100` and
 | `create_topics.go`        | `dev create-topics`: idempotently creates required Pub/Sub topics/subscriptions.                                                                    |
 | `dumpdb.go`               | `dev dumpdb`: debugging dump of tasks/workpools.                                                                                                    |
 | `export.go`               | `dev export`: dump any Firestore collection as JSON.                                                                                                |
-| `set_config.go`           | `dev set-config`: load `SparklesConfig` into Firestore.                                                                                             |
+| `set_config.go`           | `dev set-config`: load `SprinklesConfig` into Firestore.                                                                                            |
 | `simulate.go`             | `dev simulate`: synthetic load generator against the monitor without real GCP Batch/Compute.                                                        |
 | `test_profile_command.go` | `dev test-profile-command`: run a Docker command with the worker's metric sampler attached, for debugging.                                          |
 | `workpool_spec.go`        | `WorkpoolSpec` JSON struct + content-hash-based ID resolution.                                                                                      |

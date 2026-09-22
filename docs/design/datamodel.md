@@ -1,6 +1,6 @@
-# Sparklespray v100 Data Model
+# Sprinkles v100 Data Model
 
-This document describes the Firestore collections, Pub/Sub topics, and task lifecycle for the v100 rewrite of Sparklespray.
+This document describes the Firestore collections, Pub/Sub topics, and task lifecycle for the v100 rewrite of Sprinkles.
 
 **Naming convention:** primary collection documents (`Tasks`, `Workers`, `BatchAPIRequests`) use a field named **`status`** for their lifecycle field. Rolled-up views and events (`JobSummary`, `WorkPoolSummary`, `StateCount`, `task_state_update`) use **`state`** / `old_state` / `new_state`. The split is intentional: `status` = raw per-document state; `state` = derived or aggregated state.
 
@@ -23,7 +23,7 @@ One document per submitted job. The document ID is the `job_id`.
 | `resources`   | []ResourceEntry | Per-task resource requirements (e.g. `slots=1,mem=8`). Workers verify they can satisfy these before claiming any task. |
 | `labels`      | []Label         | User-defined key/value tags. Set at submission time, but mutable afterward — see below.                                |
 
-**Labels are mutable after submission.** `POST /api/v1/job/{job_id}/labels` (`handleUpdateJobLabels` in `v100/dev/dashboard_backend.go`) lets a caller add/overwrite (`set`) or delete (`remove`) labels on an existing job, inside a single Firestore transaction that updates both `Jobs.labels` and, if it exists, `JobSummary.labels` (see below) to match. This is the one exception to `Jobs` being otherwise write-once at submission, and to `JobSummary` being written only by submit-at-creation and the monitor thereafter. A label edit does **not** produce a `JobSummaryHistory` snapshot.
+**Labels are mutable after submission.** `POST /api/v1/job/{job_id}/labels` (`handleUpdateJobLabels` in `cli/dev/dashboard_backend.go`) lets a caller add/overwrite (`set`) or delete (`remove`) labels on an existing job, inside a single Firestore transaction that updates both `Jobs.labels` and, if it exists, `JobSummary.labels` (see below) to match. This is the one exception to `Jobs` being otherwise write-once at submission, and to `JobSummary` being written only by submit-at-creation and the monitor thereafter. A label edit does **not** produce a `JobSummaryHistory` snapshot.
 
 Two label names are reserved by convention (not first-class fields):
 
@@ -79,7 +79,7 @@ One document per task. The document ID is the `task_id`.
 | `destination`   | string | Relative path under the working directory where the file is written (e.g. `inputs/file.txt`) |
 | `is_executable` | bool   | If true, the file is made executable after download. Defaults to false if omitted.           |
 
-Files staged into `files_to_localize`/`files_to_localize_manifest` at submission time are deduplicated and uploaded to GCS via the `tempspace` package (`v100/tempspace/`), a self-expiring content-addressed store built on top of an `ObjStore`; see [`self-expiring-CAS.md`](../../self-expiring-CAS.md) for the mechanism. This is a GCS-side concern only — it introduces no Firestore collection or Pub/Sub topic.
+Files staged into `files_to_localize`/`files_to_localize_manifest` at submission time are deduplicated and uploaded to GCS via the `tempspace` package (`cli/tempspace/`), a self-expiring content-addressed store built on top of an `ObjStore`; see [`self-expiring-CAS.md`](../../self-expiring-CAS.md) for the mechanism. This is a GCS-side concern only — it introduces no Firestore collection or Pub/Sub topic.
 
 **ResourceUsage** (embedded object) — written by the worker once per task. It is assembled from `docker inspect` (timing and exit) plus the metrics poller's **final sample**, taken after the container exits but before `docker rm` is called, while its cgroup still exists.
 
@@ -157,8 +157,8 @@ One document per workpool. The document ID is the `workpool_id`. `WorkPool` is w
 | `boot_disk_type`                  | string          | GCE boot disk type for worker VMs (e.g. `pd-balanced`, `pd-ssd`); defaults to `pd-balanced` if omitted at submission                                                                                                                                                                                          |
 | `region`                          | string          | GCP region for Batch jobs (e.g. `us-central1`)                                                                                                                                                                                                                                                                |
 | `zones`                           | []string        | GCP zones to query for running VMs (e.g. `["us-central1-a"]`)                                                                                                                                                                                                                                                 |
-| `root_dir`                        | string          | Directory on the VM that the worker uses as its working root; also where the `sparkles` binary is staged                                                                                                                                                                                                      |
-| `sparkles_worker_gcs_path`        | string          | GCS path (e.g. `gs://bucket/sparkles`) of the worker binary; downloaded to `{root_dir}/sparkles` at VM startup                                                                                                                                                                                                |
+| `root_dir`                        | string          | Directory on the VM that the worker uses as its working root; also where the `sprinkles` binary is staged                                                                                                                                                                                                     |
+| `sprinkles_worker_gcs_path`       | string          | GCS path (e.g. `gs://bucket/sprinkles`) of the worker binary; downloaded to `{root_dir}/sprinkles` at VM startup                                                                                                                                                                                              |
 | `service_account`                 | string          | GCP service account email assigned to worker VMs; governs what GCP resources each worker can access                                                                                                                                                                                                           |
 | `resources`                       | []ResourceEntry | Resource capacity advertised by workers created from this workpool                                                                                                                                                                                                                                            |
 | `empty_volumes`                   | []EmptyVolume   | Ephemeral volumes to attach to each VM                                                                                                                                                                                                                                                                        |
@@ -171,10 +171,10 @@ One document per workpool. The document ID is the `workpool_id`. `WorkPool` is w
 | `vm_shutdown_grace_period_sec`    | int             | Seconds the monitor waits after asking a VM to shut down before treating it as gone                                                                                                                                                                                                                           |
 | `max_zombies_before_abort`        | int             | Number of zombie VMs tolerated in one batch before the monitor marks the batch failed                                                                                                                                                                                                                         |
 | `max_consecutive_failed_batches`  | int             | Number of consecutive failed batches before the monitor halts the workpool                                                                                                                                                                                                                                    |
-| `workpool_spec_hash`              | string          | Hash of the workpool's provisioning-relevant fields (`computeWorkpoolSpecHash` in `v100/dev/workpool_spec.go`), recomputed and written on every job submission                                                                                                                                                |
+| `workpool_spec_hash`              | string          | Hash of the workpool's provisioning-relevant fields (`computeWorkpoolSpecHash` in `cli/dev/workpool_spec.go`), recomputed and written on every job submission                                                                                                                                                 |
 | `linger_time_sec`                 | int             | Seconds an idle worker VM waits before shutting down, hoping for another task; defaults to 600                                                                                                                                                                                                                |
 
-**Known inconsistency:** the Go struct backing this collection (`v100.WorkPool` in `v100/task_queue.go`) also declares `state`, `state_message`, `last_incident_at`, and `incident_count` fields with real Firestore tags, and a comment claiming they're "stored in `WorkPoolSummary`." In practice `handleSubmitJob` never sets them before writing the `WorkPools` document, so every such document actually carries these four fields zero-valued, redundant with (and out of sync with) the real values in `WorkPoolSummary`. Despite this, no code reads `state`/`state_message`/`last_incident_at`/`incident_count` off the `WorkPools` document — `WorkPoolSummary` remains the sole source of truth in practice; treat the fields on `WorkPools` as dead weight rather than a second copy to keep in sync.
+**Known inconsistency:** the Go struct backing this collection (`v100.WorkPool` in `cli/task_queue.go`) also declares `state`, `state_message`, `last_incident_at`, and `incident_count` fields with real Firestore tags, and a comment claiming they're "stored in `WorkPoolSummary`." In practice `handleSubmitJob` never sets them before writing the `WorkPools` document, so every such document actually carries these four fields zero-valued, redundant with (and out of sync with) the real values in `WorkPoolSummary`. Despite this, no code reads `state`/`state_message`/`last_incident_at`/`incident_count` off the `WorkPools` document — `WorkPoolSummary` remains the sole source of truth in practice; treat the fields on `WorkPools` as dead weight rather than a second copy to keep in sync.
 
 **ResourceEntry** (embedded object) — same type as `ResourceEntry` on `Jobs`; workers created from this workpool will advertise this capacity:
 
@@ -201,7 +201,7 @@ One document per workpool. The document ID is the `workpool_id`. `WorkPool` is w
 
 Unlike `EmptyVolume`, a `GCSMount` doesn't get an `AttachedDisk` — GCP Batch mounts the
 bucket directly via its `gcsfuse`-backed GCS volume support
-(`batch.Volume.Gcs`/`batch.GCS.RemotePath`, `v100/monitor/batch_api.go`). Each mount is
+(`batch.Volume.Gcs`/`batch.GCS.RemotePath`, `cli/monitor/batch_api.go`). Each mount is
 given a host-side path `/mnt/disks/<volumeName>` where GCP Batch mounts the bucket on
 the VM; `volumeName` is derived from the bucket name plus the mount's index in
 `gcs_mounts` (`gcsMountVolumeName` in `batch_api.go`, capped at 20 characters, e.g.
@@ -302,7 +302,7 @@ An append-only log of `WorkPoolSummary` snapshots. Each document is a point-in-t
 
 ### `Events`
 
-An append-only log of every event published to `sparkles-events`. The document ID is a UUID assigned at write time.
+An append-only log of every event published to `sprinkles-events`. The document ID is a UUID assigned at write time.
 
 Each event document contains the same fields as the corresponding Pub/Sub message, plus an `expiry` field for TTL-based garbage collection:
 
@@ -357,17 +357,17 @@ outcome**, not per worker — a batch that registers several workers still
 counts as a single success. `batch_failed` is published both when an
 already-created batch is later judged to have failed (no workers ever
 registered, GCP reported a job failure, too many zombie workers, etc. — see
-`markBatchFailed` in `v100/monitor/monitor.go`) and when the initial
+`markBatchFailed` in `cli/monitor/monitor.go`) and when the initial
 `CreateJob` call to the GCP Batch API itself fails synchronously, before any
 `BatchAPIRequest` document exists (`submitBatch` in
-`v100/monitor/provision.go`) — the latter case has no corresponding
+`cli/monitor/provision.go`) — the latter case has no corresponding
 `BatchAPIRequest` at all, since no batch was ever created.
 
 `batch_succeeded` is published once per batch, the first time it's confirmed
 to have at least one worker registered (`checkBatchStartup` in
-`v100/monitor/batch_startup_monitor.go`).
+`cli/monitor/batch_startup_monitor.go`).
 
-The monitor's `checkHaltThreshold` (`v100/monitor/monitor.go`) queries this
+The monitor's `checkHaltThreshold` (`cli/monitor/monitor.go`) queries this
 collection — filtered to `type in [batch_failed, batch_succeeded]` for a
 workpool, within the last hour — to decide whether to halt a workpool: if the
 most recent `MaxConsecutiveFailedBatches` outcomes in that window are all
@@ -385,7 +385,7 @@ Additional fields present on **workpool incident events** (`workpool_incident`):
 | `incident_type` | string | Machine-readable category of the anomaly (see below) |
 
 `incident_type` is one of the `IncidentType*` constants defined in
-`v100/monitor/monitor.go`:
+`cli/monitor/monitor.go`:
 
 | `incident_type`         | Recorded when...                                                                                                                                                                                                                                             |
 | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -397,7 +397,7 @@ Additional fields present on **workpool incident events** (`workpool_incident`):
 | `too_many_zombies`      | The number of zombie workers in a batch exceeded `max_zombies_before_abort`; the batch was aborted.                                                                                                                                                          |
 | `batch_api_failure`     | GCP's Batch API itself reported the job as failed.                                                                                                                                                                                                           |
 
-`workpool_incident` is published by `recordIncident` (`v100/monitor/monitor.go`)
+`workpool_incident` is published by `recordIncident` (`cli/monitor/monitor.go`)
 every time the watchdog (task recovery/cluster reconciler/batch startup
 monitor) detects a batch/worker anomaly — a batch failing outright, a subset
 of VMs failing to register within the grace period, a zombie VM being
@@ -410,7 +410,7 @@ log-to-Events operation; it does not mutate `WorkPoolState` itself. Unlike
 `batch_failed`/`batch_succeeded`, halting itself is **not** published as a
 `workpool_incident` — it's reported only via `workpool_state_change`.
 
-The monitor's `runProvisioningPollForWorkpool` (`v100/monitor/provision.go`)
+The monitor's `runProvisioningPollForWorkpool` (`cli/monitor/provision.go`)
 queries this collection — filtered to `incident_type == "zombie"` for a
 workpool, within the last hour (`defaultPreemptionLookbackWindow`) — to
 enforce `max_preemptible_worker_attempts`: the remaining preemptible budget
@@ -428,7 +428,7 @@ precise signal for this today.)
 fields, _and_ the `ok`↔`unhealthy` portion of `WorkPoolState.State` itself,
 are all derived together by querying this collection for `workpool_incident`
 events within the last hour each time the WorkPool summary poll runs
-(`updateWorkPoolSummary` in `v100/monitor/workpool_summary_poll.go`) — a
+(`updateWorkPoolSummary` in `cli/monitor/workpool_summary_poll.go`) — a
 workpool with one or more recent incidents is `unhealthy`; with none, it's
 `ok`. None of this is carried as persisted mutable state between polls; it's
 a **windowed** view recomputed fresh each time, so it self-heals as old
@@ -436,13 +436,13 @@ incidents age out of the one-hour window rather than accumulating as an
 all-time count. (`idle`/`halted`, the other two `WorkPoolState.State` values,
 are decided independently — see `cluster-health.md`.)
 
-Every write to `sparkles-events` is mirrored to this collection atomically before (or as part of) the publish, so the `Events` collection is the durable record and Pub/Sub is the real-time delivery mechanism.
+Every write to `sprinkles-events` is mirrored to this collection atomically before (or as part of) the publish, so the `Events` collection is the durable record and Pub/Sub is the real-time delivery mechanism.
 
 ---
 
 ### `TaskLog`
 
-An append-only collection of entries written by workers for in-flight tasks. It holds two entry types: `log_update` (stdout/stderr output chunks) and `metric_update` (periodic resource usage samples). By default tasks buffer entries locally; streaming to this collection is activated per-task by sending a `stream_task_updates` control message to the worker (see [`sparkles-worker-in`](#sparkles-worker-in-control-plane--worker)). Once activated, the worker replays any buffered entries accumulated since the task started, then writes each subsequent entry directly to this collection until the task completes.
+An append-only collection of entries written by workers for in-flight tasks. It holds two entry types: `log_update` (stdout/stderr output chunks) and `metric_update` (periodic resource usage samples). By default tasks buffer entries locally; streaming to this collection is activated per-task by sending a `stream_task_updates` control message to the worker (see [`sprinkles-worker-in`](#sprinkles-worker-in-control-plane--worker)). Once activated, the worker replays any buffered entries accumulated since the task started, then writes each subsequent entry directly to this collection until the task completes.
 
 The document ID is auto-assigned by Firestore. The TTL is 7 days from the time the entry is written.
 
@@ -593,24 +593,24 @@ One document per GCP Batch job submitted by the monitor. The document ID is the 
 
 ---
 
-### `SparklesConfig`
+### `SprinklesConfig`
 
-A single document, `SparklesConfig/default`, holding dashboard-backend operational defaults that aren't part of the public API surface (`openapi.yaml`) and so can't be supplied by a caller. Read once at dashboard-backend startup (`loadSparklesConfig` in `v100/dev/dashboard_backend.go`); startup fails if the document doesn't exist.
+A single document, `SprinklesConfig/default`, holding dashboard-backend operational defaults that aren't part of the public API surface (`openapi.yaml`) and so can't be supplied by a caller. Read once at dashboard-backend startup (`loadSprinklesConfig` in `cli/dev/dashboard_backend.go`); startup fails if the document doesn't exist.
 
-| Field                      | Type     | Description                                                                                                                           |
-| -------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `gcs_prefix`               | string   | GCS prefix under which task result and log paths are written, e.g. `gs://my-bucket/results`                                           |
-| `subscriber_sa`            | string   | Service account email used to mint short-lived Pub/Sub tokens for the subscription endpoint; if empty, that endpoint returns an error |
-| `sparkles_worker_gcs_path` | string   | Default GCS path to the worker binary, used when a submitted workpool omits `sparklesWorkerGcsPath`                                   |
-| `service_account`          | string   | Default GCP service account email for worker VMs, used when a submitted workpool omits `serviceAccount`                               |
-| `region`                   | string   | Default GCP region for worker VMs, used when a submitted workpool omits `region`                                                      |
-| `zones`                    | []string | Default GCP zones eligible for worker VM placement, used when a submitted workpool omits `zones`                                      |
+| Field                       | Type     | Description                                                                                                                           |
+| --------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `gcs_prefix`                | string   | GCS prefix under which task result and log paths are written, e.g. `gs://my-bucket/results`                                           |
+| `subscriber_sa`             | string   | Service account email used to mint short-lived Pub/Sub tokens for the subscription endpoint; if empty, that endpoint returns an error |
+| `sprinkles_worker_gcs_path` | string   | Default GCS path to the worker binary, used when a submitted workpool omits `sprinklesWorkerGcsPath`                                  |
+| `service_account`           | string   | Default GCP service account email for worker VMs, used when a submitted workpool omits `serviceAccount`                               |
+| `region`                    | string   | Default GCP region for worker VMs, used when a submitted workpool omits `region`                                                      |
+| `zones`                     | []string | Default GCP zones eligible for worker VM placement, used when a submitted workpool omits `zones`                                      |
 
 ---
 
 ### `APIKeys`
 
-One document per issued API key. The document ID is the API key itself (a UUID); the body holds only the user it was issued to. Used by the dashboard's `apiKeyAuthMiddleware` to authenticate every `/api/*` request, and to auto-attach a `user=<name>` label to jobs at submission time (see the `Jobs` label-mutation note above). Managed out-of-band via the `sparkles add-api-key` CLI command, not through the dashboard API.
+One document per issued API key. The document ID is the API key itself (a UUID); the body holds only the user it was issued to. Used by the dashboard's `apiKeyAuthMiddleware` to authenticate every `/api/*` request, and to auto-attach a `user=<name>` label to jobs at submission time (see the `Jobs` label-mutation note above). Managed out-of-band via the `sprinkles add-api-key` CLI command, not through the dashboard API.
 
 | Field  | Type   | Description                             |
 | ------ | ------ | --------------------------------------- |
@@ -620,7 +620,7 @@ One document per issued API key. The document ID is the API key itself (a UUID);
 
 ## Pub/Sub Topics
 
-### `sparkles-events` _(Worker → Control plane)_
+### `sprinkles-events` _(Worker → Control plane)_
 
 Published by workers to report lifecycle events. Messages are JSON-encoded. Every message published here is also written to the `Events` Firestore collection.
 
@@ -754,9 +754,9 @@ The topic is configured as the Pub/Sub notification target when the monitor crea
 
 ---
 
-### `sparkles-worker-in` _(Control plane → Worker)_
+### `sprinkles-worker-in` _(Control plane → Worker)_
 
-Used to send control messages to a specific worker. Each worker creates a **per-worker subscription** named `sparkles-worker-in-<worker_id>` at startup and deletes it on clean shutdown.
+Used to send control messages to a specific worker. Each worker creates a **per-worker subscription** named `sprinkles-worker-in-<worker_id>` at startup and deletes it on clean shutdown.
 
 All messages share a common JSON envelope:
 
@@ -865,7 +865,7 @@ While tasks are running the worker tracks available capacity and waits for a run
 
 ### Transitions
 
-Every state transition publishes a `task_state_update` event to `sparkles-events` and appends a corresponding document to the `Events` collection.
+Every state transition publishes a `task_state_update` event to `sprinkles-events` and appends a corresponding document to the `Events` collection.
 
 1. **`pending` → `claimed`**  
    A worker atomically claims the task via a Firestore transaction. The transaction re-reads the document and only commits if the task is still `pending`, so only one worker can succeed under concurrent competition. Staging begins immediately after.
@@ -889,7 +889,7 @@ Every state transition publishes a `task_state_update` event to `sparkles-events
    The monitor's task recovery loop runs periodically and scans for worker records whose `heartbeat_expiry` has passed. For each crashed or preempted worker, the worker's `status` is flipped to `zombie` (recording a `workpool_incident` event), and any task in an active state (`claimed`, `running`, or `writing`) is reset to `pending` so it can be picked up by a healthy worker.
 
 8. **Any state → `killed`**  
-   An external administrative action via the `sparkles kill` command, or the dashboard API's `POST /api/v1/job/{job_id}/cancel` — both go through the same `v100.KillJobWithClients`. `owning_worker_id` is cleared. A best-effort `kill_job` control message is sent to all workers via `sparkles-worker-in` so any in-flight task for that job is aborted promptly.
+   An external administrative action via the `sprinkles kill` command, or the dashboard API's `POST /api/v1/job/{job_id}/cancel` — both go through the same `v100.KillJobWithClients`. `owning_worker_id` is cleared. A best-effort `kill_job` control message is sent to all workers via `sprinkles-worker-in` so any in-flight task for that job is aborted promptly.
 
 ### Worker perspective
 

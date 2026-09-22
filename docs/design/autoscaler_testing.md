@@ -105,7 +105,7 @@ interface PubSubReceiver:
 ### `scheduler.Scheduler`
 
 The leading-edge throttle with trailing coalescing is implemented in the `scheduler` package
-(`v100/scheduler/`). Each poller registers with `scheduler.Add(minDelay, maxDelay, callback)` and
+(`cli/scheduler/`). Each poller registers with `scheduler.Add(minDelay, maxDelay, callback)` and
 receives a `notify` func to call on incoming PubSub notifications.
 
 In tests, construct the scheduler with `scheduler.New(fakeClock)` where `fakeClock` is a

@@ -1,6 +1,6 @@
-# Sparklespray Documentation
+# Sprinkles Documentation
 
-All current documentation for this repository lives here. `v100/` is the
+All current documentation for this repository lives here. `cli/` is the
 only active implementation (a Go rewrite of an earlier Python CLI, which has
 been deleted from the repo along with its docs).
 

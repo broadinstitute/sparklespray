@@ -2,12 +2,12 @@
 
 ## 1.1 Requirements Overview
 
-`sparkles` lets a user submit an "ad-hoc batch job" — run the same (or
+`sprinkles` lets a user submit an "ad-hoc batch job" — run the same (or
 parametrized) command across many tasks, packaged as a Docker image — on a
 pool of Google Compute Engine VMs, without hand-managing VM lifecycle,
 retries, or preemption. A user should be able to:
 
-- Submit a job (`sparkles submit`) consisting of N tasks, each a shell
+- Submit a job (`sprinkles submit`) consisting of N tasks, each a shell
   command plus input files to localize from GCS and a result/log path to
   upload to.
 - Have a pool of worker VMs ("workpool") scale up automatically to meet
@@ -15,7 +15,7 @@ retries, or preemption. A user should be able to:
   on-demand ones.
 - Get the job's results back in Google Cloud Storage, with per-task status,
   resource usage, and logs visible through a dashboard.
-- Kill a running job (`sparkles kill`) and have in-flight tasks stop
+- Kill a running job (`sprinkles kill`) and have in-flight tasks stop
   promptly.
 - Not have to think about GCP Batch, Compute Engine, or VM failure modes —
   the system should recover from preemption, VM startup failures, and
@@ -23,7 +23,7 @@ retries, or preemption. A user should be able to:
   workpool that is systematically broken (misconfigured image, bad service
   account, etc.) rather than retrying forever.
 
-v100 is a ground-up Go rewrite of an existing Python implementation (the
+Sprinkles is a ground-up Go rewrite of an existing Python implementation (the
 rest of this repository) with the same job model, motivated primarily by
 operational simplicity (see [Solution Strategy](04-solution-strategy.md)).
 
@@ -44,5 +44,5 @@ Ranked, most important first:
 | Role                                                                                                 | Concern                                                                                                                                 |
 | ---------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
 | End users (researchers/engineers submitting jobs)                                                    | Simple CLI to submit/kill jobs and see progress; jobs complete correctly and cheaply.                                                   |
-| Sparkles operators/maintainers                                                                       | Keep the control-plane (monitor, dashboard-backend) running reliably; diagnose incidents from Firestore/Events; keep GCP spend bounded. |
-| Dashboard frontend (`dashboard/`, source outside `v100/`, build embedded into the `sparkles` binary) | Stable REST API (`openapi.yaml`) to show job/task/workpool/worker status and logs.                                                      |
+| Sprinkles operators/maintainers                                                                      | Keep the control-plane (monitor, dashboard-backend) running reliably; diagnose incidents from Firestore/Events; keep GCP spend bounded. |
+| Dashboard frontend (`dashboard/`, source outside `cli/`, build embedded into the `sprinkles` binary) | Stable REST API (`openapi.yaml`) to show job/task/workpool/worker status and logs.                                                      |

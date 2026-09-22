@@ -1,0 +1,421 @@
+package sprinkles
+
+import (
+	"bufio"
+	"context"
+	"encoding/json"
+	"fmt"
+	"log"
+	"os"
+	"sync"
+	"time"
+
+	"cloud.google.com/go/firestore"
+)
+
+const taskLogCollection = "TaskLog"
+const taskEventLogTTL = 7 * 24 * time.Hour
+
+// Metric sampling is adaptive: the first sample is taken shortly after the
+// task starts and the delay then doubles up to a ceiling. A fixed one-minute
+// interval meant any task shorter than a minute produced no samples at all,
+// while sampling every second for the whole life of a multi-hour task would
+// be wasteful. Doubling gives short tasks real resolution and long tasks a
+// cheap steady state.
+const (
+	MetricsFirstDelay = 1 * time.Second
+	MetricsMaxDelay   = 60 * time.Second
+)
+
+// nextMetricsDelay doubles the sampling delay, up to MetricsMaxDelay.
+func nextMetricsDelay(cur time.Duration) time.Duration {
+	next := cur * 2
+	if next > MetricsMaxDelay {
+		return MetricsMaxDelay
+	}
+	return next
+}
+
+// registeredTask holds the state for a task currently running on this worker.
+type registeredTask struct {
+	tel    *TaskEventLog
+	jobID  string
+	cancel context.CancelFunc
+	killed bool
+}
+
+// taskRegistry maps live task IDs to their running state, enabling the
+// subscription handler to stream logs, cancel tasks by job, and detect kills.
+type taskRegistry struct {
+	mu      sync.Mutex
+	entries map[string]*registeredTask
+}
+
+func (r *taskRegistry) register(taskID, jobID string, tel *TaskEventLog, cancel context.CancelFunc) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.entries[taskID] = &registeredTask{tel: tel, jobID: jobID, cancel: cancel}
+}
+
+func (r *taskRegistry) unregister(taskID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.entries, taskID)
+}
+
+// getLog returns the TaskEventLog for a running task, or nil if not found.
+func (r *taskRegistry) getLog(taskID string) *TaskEventLog {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if e := r.entries[taskID]; e != nil {
+		return e.tel
+	}
+	return nil
+}
+
+// killJob cancels all running tasks belonging to jobID and marks them killed.
+func (r *taskRegistry) killJob(jobID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, e := range r.entries {
+		if e.jobID == jobID {
+			e.killed = true
+			e.cancel()
+		}
+	}
+}
+
+// wasKilled reports whether the task was cancelled via killJob.
+func (r *taskRegistry) wasKilled(taskID string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if e := r.entries[taskID]; e != nil {
+		return e.killed
+	}
+	return false
+}
+
+// workerControlMessage is the JSON shape of messages received on workerInTopic.
+type workerControlMessage struct {
+	Type   string `json:"type"`
+	TaskID string `json:"task_id"`
+	JobID  string `json:"job_id"`
+}
+
+// OutputTaskEvent is one entry in the events file and in the TaskLog collection.
+type OutputTaskEvent struct {
+	TaskID    string    `firestore:"task_id" json:"task_id"`
+	Type      string    `firestore:"type" json:"type"`
+	Timestamp time.Time `firestore:"timestamp" json:"timestamp"`
+	Expiry    time.Time `firestore:"expiry" json:"expiry"`
+	Content   string    `firestore:"content" json:"content"`
+}
+
+// TaskEventLog captures docker output for a single task. It writes structured
+// JSON events to an events file and raw text to a plain log file.
+// When streaming is activated via StartStreaming, new events are written
+// directly to the Firestore TaskLog collection instead of the events file.
+type TaskEventLog struct {
+	taskID         string
+	workDir        string
+	eventsFilename string
+	file           *os.File
+	logFile        *os.File
+	streaming      bool
+	mu             sync.Mutex
+	fsClient       *firestore.Client
+	cancelPoll     context.CancelFunc
+	pollDone       chan struct{}
+
+	// cgroup is set by SetContainer once the task's container name is known,
+	// and read by the poll goroutine. Guarded by mu.
+	cgroup *containerCgroup
+
+	// finalize asks the poll goroutine to take one last sample and stop.
+	// finalSample is written by that goroutine before it closes pollDone, so
+	// receiving on pollDone is the happens-before edge that makes it safe to
+	// read without holding mu.
+	finalize     chan struct{}
+	finalizeOnce sync.Once
+	finalSample  *MetricSample
+}
+
+// OpenTaskEventLog creates a TaskEventLog that writes to filename (raw log)
+// and filename+".events.log" (structured JSON events). A background goroutine
+// polls resource metrics every minute until Close is called.
+func OpenTaskEventLog(ctx context.Context, filename string, taskID string, workDir string, fsClient *firestore.Client) (*TaskEventLog, error) {
+	logFile, err := os.Create(filename)
+	if err != nil {
+		return nil, fmt.Errorf("creating log file: %w", err)
+	}
+
+	eventsFilename := filename + ".events.log"
+	file, err := os.Create(eventsFilename)
+	if err != nil {
+		logFile.Close()
+		return nil, fmt.Errorf("creating task event log %s: %w", eventsFilename, err)
+	}
+
+	pollCtx, cancelPoll := context.WithCancel(ctx)
+	t := &TaskEventLog{
+		taskID:         taskID,
+		workDir:        workDir,
+		eventsFilename: eventsFilename,
+		file:           file,
+		logFile:        logFile,
+		fsClient:       fsClient,
+		cancelPoll:     cancelPoll,
+		pollDone:       make(chan struct{}),
+		finalize:       make(chan struct{}),
+	}
+
+	go func() {
+		defer close(t.pollDone)
+
+		// prevCPU is deliberately goroutine-local. This goroutine is the only
+		// sampler -- including for the final sample, which arrives via the
+		// finalize channel rather than being taken on the caller's goroutine.
+		// That keeps the CPU baseline and the cgroup read off any shared field
+		// and removes the data race by construction rather than by locking.
+		//
+		// Snapshotting now means the first sample covers the task's actual
+		// first interval instead of being skipped for lack of a baseline.
+		prevCPU, _ := getCPUStats()
+		var seq int32
+		var lastGoodAccumulator *MetricSample
+
+		sample := func(final bool) *MetricSample {
+			s, cur := collectMetricSample(t.taskID, t.workDir, prevCPU, t.container(), seq, final)
+			prevCPU = cur
+			seq++
+			if final {
+				// Backfill in place, before this sample is ever written or
+				// returned: there is no document to patch afterward, and this
+				// is what closes the gap when the container's cgroup was torn
+				// down (e.g. by systemd) between the final read and now.
+				mergeMetricFields(s, lastGoodAccumulator)
+			} else {
+				lastGoodAccumulator = updateLastGoodAccumulator(lastGoodAccumulator, s)
+			}
+			if err := t.WriteMetric(s); err != nil {
+				log.Printf("writing metric for task %s: %v", t.taskID, err)
+			}
+			return s
+		}
+
+		delay := MetricsFirstDelay
+		timer := time.NewTimer(delay)
+		defer timer.Stop()
+		for {
+			select {
+			case <-pollCtx.Done():
+				return
+			case <-t.finalize:
+				t.finalSample = sample(true)
+				return
+			case <-timer.C:
+				sample(false)
+				delay = nextMetricsDelay(delay)
+				timer.Reset(delay)
+			}
+		}
+	}()
+
+	return t, nil
+}
+
+// SetContainer records the docker container name for this task so the metrics
+// poller can attach to the container's cgroup. It is called before the
+// container exists; resolution is lazy and retried on each sample.
+func (t *TaskEventLog) SetContainer(name string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.cgroup = newContainerCgroup(name)
+}
+
+// container returns the cgroup handle for this task's container, or nil when
+// no container has been registered (as on the non-docker execution path).
+func (t *TaskEventLog) container() *containerCgroup {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.cgroup
+}
+
+// TriggerFinalSample asks the poller to take one last sample, flagged final,
+// and stop. It blocks until that sample has been written and returns it.
+//
+// This is what makes metrics work for very short tasks: a task that finishes
+// before the first periodic sample still gets exactly one sample, and because
+// the cgroup counters it reads are cumulative, the gap between the last
+// periodic sample and exit is captured rather than lost. It must be called
+// while the container still exists, i.e. before "docker rm".
+//
+// Safe to call more than once; only the first call takes a sample.
+func (t *TaskEventLog) TriggerFinalSample() *MetricSample {
+	t.finalizeOnce.Do(func() { close(t.finalize) })
+	<-t.pollDone
+	return t.finalSample
+}
+
+// WriteMetric records a resource usage sample. Before streaming is activated
+// it writes a JSON event to the events file; after activation it writes
+// directly to Firestore.
+func (t *TaskEventLog) WriteMetric(event *MetricSample) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if t.streaming {
+		if _, _, err := t.fsClient.Collection(taskLogCollection).Add(context.Background(), event); err != nil {
+			return fmt.Errorf("writing metric to firestore: %w", err)
+		}
+	} else {
+		data, err := json.Marshal(event)
+		if err != nil {
+			return fmt.Errorf("marshalling metric event: %w", err)
+		}
+		if _, err := t.file.Write(append(data, '\n')); err != nil {
+			return fmt.Errorf("writing metric event: %w", err)
+		}
+	}
+	return nil
+}
+
+// WriteOutput records a chunk of docker output. Before streaming is activated
+// it writes a JSON event to the events file; after activation it writes
+// directly to Firestore. Raw content is always appended to the plain log file.
+func (t *TaskEventLog) WriteOutput(content string) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	event := &OutputTaskEvent{
+		TaskID:    t.taskID,
+		Type:      "log_update",
+		Timestamp: time.Now(),
+		Expiry:    time.Now().Add(taskEventLogTTL),
+		Content:   content,
+	}
+
+	if t.streaming {
+		if _, _, err := t.fsClient.Collection(taskLogCollection).Add(context.Background(), event); err != nil {
+			return fmt.Errorf("writing task log to firestore: %w", err)
+		}
+	} else {
+		data, err := json.Marshal(event)
+		if err != nil {
+			return fmt.Errorf("marshalling task event: %w", err)
+		}
+		if _, err := t.file.Write(append(data, '\n')); err != nil {
+			return fmt.Errorf("writing task event: %w", err)
+		}
+	}
+
+	if _, err := t.logFile.WriteString(content); err != nil {
+		return fmt.Errorf("writing task log: %w", err)
+	}
+	return nil
+}
+
+// StartStreaming flushes the buffered events file to the Firestore TaskLog
+// collection, then sets the streaming flag so future WriteOutput calls write
+// directly to Firestore instead of the local file.
+func (t *TaskEventLog) StartStreaming() error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if t.streaming {
+		return nil
+	}
+
+	if err := t.file.Close(); err != nil {
+		return fmt.Errorf("closing events file: %w", err)
+	}
+	t.file = nil
+
+	f, err := os.Open(t.eventsFilename)
+	if err != nil {
+		return fmt.Errorf("reopening events file: %w", err)
+	}
+	defer f.Close()
+
+	ctx := context.Background()
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+		var base struct {
+			Type string `json:"type"`
+		}
+		if err := json.Unmarshal(line, &base); err != nil {
+			log.Printf("stream_task_updates: skipping malformed line: %v", err)
+			continue
+		}
+		var doc interface{}
+		switch base.Type {
+		case "log_update":
+			var event OutputTaskEvent
+			if err := json.Unmarshal(line, &event); err != nil {
+				log.Printf("stream_task_updates: skipping malformed log_update: %v", err)
+				continue
+			}
+			doc = &event
+		case MetricUpdateEventType:
+			var event MetricSample
+			if err := json.Unmarshal(line, &event); err != nil {
+				log.Printf("stream_task_updates: skipping malformed metric_update: %v", err)
+				continue
+			}
+			doc = &event
+		default:
+			log.Printf("stream_task_updates: unknown event type %q, skipping", base.Type)
+			continue
+		}
+		if _, _, err := t.fsClient.Collection(taskLogCollection).Add(ctx, doc); err != nil {
+			return fmt.Errorf("writing task log to firestore: %w", err)
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("reading events file: %w", err)
+	}
+
+	t.streaming = true
+	return nil
+}
+
+// Flush syncs all pending writes to disk. When streaming, only the plain log
+// file is synced (the events file is already closed).
+func (t *TaskEventLog) Flush() error {
+	t.mu.Lock()
+	streaming := t.streaming
+	defer t.mu.Unlock()
+
+	if !streaming {
+		if err := t.file.Sync(); err != nil {
+			return fmt.Errorf("flushing event file: %w", err)
+		}
+	}
+	if err := t.logFile.Sync(); err != nil {
+		return fmt.Errorf("flushing log file: %w", err)
+	}
+	return nil
+}
+
+// Close stops the metrics polling goroutine, then closes the plain log file
+// and, if not streaming, the events file.
+func (t *TaskEventLog) Close() error {
+	t.cancelPoll()
+	<-t.pollDone
+
+	t.mu.Lock()
+	streaming := t.streaming
+	defer t.mu.Unlock()
+
+	if err := t.logFile.Close(); err != nil {
+		return err
+	}
+	if !streaming {
+		return t.file.Close()
+	}
+	return nil
+}
