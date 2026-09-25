@@ -7,12 +7,12 @@ import sys
 from ..io_helper import IO
 from ..cluster_service import Cluster
 import dataclasses
-from ..config import Config, assert_not_v100
+from ..config import Config, assert_not_sprinkles
 from .shared import _resolve_jobid
 
 
 def list_cmd(jq: JobQueue, io, args, config: Config):
-    assert_not_v100("list", config)
+    assert_not_sprinkles("list", config)
     job_id = _resolve_jobid(jq, args.jobid)
     fields = None
     if args.fields is not None:

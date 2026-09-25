@@ -6,7 +6,7 @@ from ..task_store import STATUS_CLAIMED, STATUS_COMPLETE
 from ..job_queue import JobQueue
 from ..io_helper import IO
 from .. import txtui
-from ..config import Config, assert_not_v100
+from ..config import Config, assert_not_sprinkles
 from .shared import _resolve_jobid, _get_filtered_tasks
 
 TOP_N = 5
@@ -87,7 +87,7 @@ def _print_top_n(label, records, divisor, unit):
 
 
 def summarize_job_metrics_cmd(jq: JobQueue, io: IO, args, config: Config):
-    assert_not_v100("summarize-job-metrics", config)
+    assert_not_sprinkles("summarize-job-metrics", config)
     jobid = _resolve_jobid(jq, args.jobid)
 
     tasks = _get_filtered_tasks(jq, jobid, args.incomplete, args.exitcode)

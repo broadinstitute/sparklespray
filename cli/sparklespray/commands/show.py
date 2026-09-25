@@ -1,7 +1,7 @@
 from ..job_queue import JobQueue
 from ..io_helper import IO
 from ..log import log
-from ..config import Config, assert_not_v100
+from ..config import Config, assert_not_sprinkles
 from .shared import _resolve_jobid, _get_filtered_tasks
 import json
 import sys
@@ -11,7 +11,7 @@ import csv
 
 
 def show_cmd(jq: JobQueue, io: IO, args, config: Config):
-    assert_not_v100("show", config)
+    assert_not_sprinkles("show", config)
     jobid = _resolve_jobid(jq, args.jobid)
 
     tasks = _get_filtered_tasks(jq, jobid, args.incomplete, args.exitcode)

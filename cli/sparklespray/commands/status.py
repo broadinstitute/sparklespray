@@ -13,7 +13,7 @@ from ..print_failures import print_failures
 from .shared import _summarize_task_statuses
 
 from ..cluster_service import create_cluster
-from ..config import assert_not_v100
+from ..config import assert_not_sprinkles
 
 
 def status_cmd(jq: JobQueue, io: IO, args, config, datastore_client, cluster_api):
@@ -37,7 +37,7 @@ def status_cmd(jq: JobQueue, io: IO, args, config, datastore_client, cluster_api
     Returns:
         None
     """
-    assert_not_v100("status", config)
+    assert_not_sprinkles("status", config)
     jobids = _get_jobids_from_pattern(jq, args.jobid_pattern)
 
     for jobid in jobids:

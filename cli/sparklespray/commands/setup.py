@@ -1,10 +1,10 @@
 import re
-from ..config import Config, assert_not_v100
+from ..config import Config, assert_not_sprinkles
 from ..gcp_setup import setup_project
 
 
 def setup_cmd(args, config: Config):
-    assert_not_v100("setup", config)
+    assert_not_sprinkles("setup", config)
     default_url_prefix = config.default_url_prefix
     m = re.match("^gs://([^/]+)(?:/.*)?$", default_url_prefix)
     assert m is not None, "invalid remote path: {}".format(default_url_prefix)

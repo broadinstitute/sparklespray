@@ -5,7 +5,7 @@ import subprocess
 from .errors import UserError
 from typing import Dict, Any, List, Optional, Tuple
 from pydantic import BaseModel, Field, validator, root_validator
-from .v100_client import V100Client, wait_for_v100_job
+from .sprinkles_client import SprinklesClient, wait_for_sprinkles_job
 
 from .job_queue import JobQueue
 from .io_helper import IO
@@ -72,8 +72,8 @@ class SparklesInterface:
     # when_sub_job_exists: str
 
 
-class SparklesV100Impl(SparklesInterface):
-    def __init__(self, io: IO, config: Config, client: V100Client):
+class SprinklesImpl(SparklesInterface):
+    def __init__(self, io: IO, config: Config, client: SprinklesClient):
         self.io = io
         self.config = config
         self.client = client
@@ -88,7 +88,7 @@ class SparklesV100Impl(SparklesInterface):
     def wait_for_completion(self, name: str):
         job = self.client.get_job_by_name(name)
         assert job is not None
-        wait_for_v100_job(self.client, job.id)
+        wait_for_sprinkles_job(self.client, job.id)
 
 
     def start(
@@ -638,12 +638,12 @@ def workflow_run_cmd(
         ]
         job_name = f"{job_name}-{job_hash}"
 
-    if config.sparkles_v100_url is not None:
-        api_key = os.environ.get("SPARKLES_V100_KEY")
+    if config.sprinkles_url is not None:
+        api_key = os.environ.get("SPRINKLES_KEY")
         if api_key is None:
-            raise Exception("If using sparkles v100 url, you must set environment variable SPARKLES_V100_KEY")
-        client = V100Client(config.sparkles_v100_url, api_key, io, config.cache_db_path, config.cas_url_prefix, args.nodes, config.default_url_prefix)
-        sparkles_iface = SparklesV100Impl(io, config, client)
+            raise Exception("If using sprinkles url, you must set environment variable SPRINKLES_KEY")
+        client = SprinklesClient(config.sprinkles_url, api_key, io, config.cache_db_path, config.cas_url_prefix, args.nodes, config.default_url_prefix)
+        sparkles_iface = SprinklesImpl(io, config, client)
     else:
         sparkles_iface = SparklesImpl(args.nodes)
 

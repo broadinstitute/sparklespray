@@ -42,11 +42,11 @@ class UnknownParameters(BadConfig):
     pass
 
 
-def assert_not_v100(command_name: str, config: "Config") -> None:
-    if config.sparkles_v100_url is not None:
+def assert_not_sprinkles(command_name: str, config: "Config") -> None:
+    if config.sprinkles_url is not None:
         raise UserError(
-            f"{command_name} is not supported with using sparkles v100 "
-            f"(as determined by sparkles_v100_url={config.sparkles_v100_url} in config)"
+            f"{command_name} is not supported when using sprinkles "
+            f"(as determined by sprinkles_url={config.sprinkles_url} in config)"
         )
 
 
@@ -83,7 +83,7 @@ class PrepConfig:
     provision_mode: Optional[str] = None
     when_sub_job_exists: Optional[str] = None
     worker_linger: Optional[int] = None
-    sparkles_v100_url: Optional[str] = None
+    sprinkles_url: Optional[str] = None
 
 
 @dataclass
@@ -109,7 +109,7 @@ class Config:
     provision_mode: str
     when_sub_job_exists: str
     worker_linger: int
-    sparkles_v100_url: Optional[str]
+    sprinkles_url: Optional[str]
     credentials: Credentials = dataclasses.field(repr=False)
 
     @property
@@ -305,7 +305,7 @@ def load_config(
     config.when_sub_job_exists = when_sub_job_exists
 
     config.worker_linger = consume("worker_linger", 600, int)
-    config.sparkles_v100_url = consume("sparkles_v100_url", None)
+    config.sprinkles_url = consume("sprinkles_url", None)
 
     machine_type = config.machine_type
     assert machine_type is not None

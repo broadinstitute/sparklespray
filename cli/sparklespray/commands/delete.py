@@ -1,7 +1,7 @@
 from ..job_queue import JobQueue
 from ..cluster_service import Cluster, create_cluster
 from ..log import log
-from ..config import assert_not_v100
+from ..config import assert_not_sprinkles
 from .shared import _get_jobids_from_pattern
 
 
@@ -22,7 +22,7 @@ def delete(
 
 
 def delete_cmd(config, datastore_client, cluster_api, jq, args):
-    assert_not_v100("delete", config)
+    assert_not_sprinkles("delete", config)
     job_ids = _get_jobids_from_pattern(jq, args.jobid_pattern)
     for job_id in job_ids:
         log.info("Deleting %s", job_id)

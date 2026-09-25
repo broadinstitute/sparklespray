@@ -12,7 +12,7 @@ from ..watch import run_tasks, PrintStatus, CompletionMonitor, StreamLogs, Resiz
 from .shared import _resolve_jobid
 from ..errors import NoWorkersRunning, UserError
 from ..watch import ResetOrphans
-from ..v100_client import V100Client, wait_for_v100_job
+from ..sprinkles_client import SprinklesClient, wait_for_sprinkles_job
 
 class TimeoutException(Exception):
     """Exception raised when an operation times out."""
@@ -49,34 +49,34 @@ from ..batch_api import ClusterAPI
 from ..cluster_service import create_cluster
 
 
-def _watch_v100(io: IO, config: Config, args) -> int:
-    "In v100 mode there is no local cluster/task state to inspect -- just wait for the job to finish."
+def _watch_sprinkles(io: IO, config: Config, args) -> int:
+    "In sprinkles mode there is no local cluster/task state to inspect -- just wait for the job to finish."
     if args.verify:
-        raise UserError("--verify is not supported for 'watch' when using sparkles v100")
+        raise UserError("--verify is not supported for 'watch' when using sprinkles")
     if args.nodes is not None:
-        raise UserError("--nodes is not supported for 'watch' when using sparkles v100")
+        raise UserError("--nodes is not supported for 'watch' when using sprinkles")
 
-    api_key = os.environ.get("SPARKLES_V100_KEY")
+    api_key = os.environ.get("SPRINKLES_KEY")
     if api_key is None:
         raise UserError(
-            "If using sparkles v100 url, you must set environment variable SPARKLES_V100_KEY"
+            "If using sprinkles url, you must set environment variable SPRINKLES_KEY"
         )
 
     txtui.user_print(
-        f"sparkles_v100_url is set; waiting for job {args.jobid} to complete "
-        f"(v100 mode does not manage workers/clusters directly)"
+        f"sprinkles_url is set; waiting for job {args.jobid} to complete "
+        f"(sprinkles mode does not manage workers/clusters directly)"
     )
 
-    client = V100Client(
-        config.sparkles_v100_url, api_key, io, config.cache_db_path, config.cas_url_prefix, 0,
+    client = SprinklesClient(
+        config.sprinkles_url, api_key, io, config.cache_db_path, config.cas_url_prefix, 0,
         config.default_url_prefix,
     )
     job = client.get_job_by_name(args.jobid)
     if job is None:
-        raise UserError(f"No v100 job found with name {args.jobid!r}")
+        raise UserError(f"No sprinkles job found with name {args.jobid!r}")
 
     try:
-        wait_for_v100_job(client, job.id)
+        wait_for_sprinkles_job(client, job.id)
     except UserError:
         return 1
     return 0
@@ -90,8 +90,8 @@ def watch_cmd(
     cluster_api: ClusterAPI,
     datastore_client,
 ):
-    if config.sparkles_v100_url is not None:
-        return _watch_v100(io, config, args)
+    if config.sprinkles_url is not None:
+        return _watch_sprinkles(io, config, args)
 
     job_id = _resolve_jobid(jq, args.jobid)
     if args.verify:

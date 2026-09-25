@@ -2,11 +2,11 @@ from ..print_failures import print_failures
 from .shared import _resolve_jobid
 from ..job_queue import JobQueue
 from ..io_helper import IO
-from ..config import Config, assert_not_v100
+from ..config import Config, assert_not_sprinkles
 
 
 def logs_cmd(jq: JobQueue, io: IO, args, config: Config):
-    assert_not_v100("logs", config)
+    assert_not_sprinkles("logs", config)
     jobid = _resolve_jobid(jq, args.jobid)
     print_failures(jq, io, jobid, args.all)
 

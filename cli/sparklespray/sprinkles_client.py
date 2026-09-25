@@ -17,7 +17,7 @@ from .hasher import CachingHashFunction
 from .errors import UserError
 
 @dataclass
-class V100Job:
+class SprinklesJob:
     id : str
     name: str
     status : str
@@ -26,7 +26,7 @@ class V100Job:
     def is_terminal_state(self) -> bool:
         return self.status in ["success", "error", "failed", "killed"]
 
-class V100Client:
+class SprinklesClient:
     def __init__(self, base_url, api_key, io:IO, cache_db_path: str, cas_url_prefix:str, target_node_count:int, default_url_prefix:str):
         self.base_url = base_url
         self.api_key = api_key
@@ -37,7 +37,7 @@ class V100Client:
         self.default_url_prefix = default_url_prefix
 
 
-    def get_job_by_name(self, name) -> Optional[V100Job]:
+    def get_job_by_name(self, name) -> Optional[SprinklesJob]:
         response = requests.get(
             f"{self.base_url}/api/v1/jobs",
             headers={"Authorization": f"Bearer {self.api_key}"},
@@ -64,13 +64,13 @@ class V100Client:
             raise ValueError(f"Multiple jobs found with name {name!r}")
 
         job_summary = matches[0]
-        return V100Job(
+        return SprinklesJob(
             id=job_summary["job_id"],
             name=job_summary["name"],
             status=job_summary["state"],
         )
 
-    def get_job_by_id(self, id) -> V100Job:
+    def get_job_by_id(self, id) -> SprinklesJob:
         response = requests.get(
             f"{self.base_url}/api/v1/job/{id}/summary",
             headers={"Authorization": f"Bearer {self.api_key}"},
@@ -78,7 +78,7 @@ class V100Client:
         response.raise_for_status()
         job_summary = response.json()
 
-        return V100Job(
+        return SprinklesJob(
             id=job_summary["job_id"],
             name=job_summary["name"],
             status=job_summary["state"],
@@ -147,7 +147,7 @@ class V100Client:
         mounts: List[DiskMountT],
         provision_mode: str,
         worker_linger: int,
-        ) -> V100Job:
+        ) -> SprinklesJob:
 
         # first check to see if this job already exists
         job = self.get_job_by_name(name)
@@ -187,7 +187,7 @@ class V100Client:
                 gcs_mounts.append(_convert_gcs_mount(mount))
             else:
                 raise UserError(
-                    f"sparkles v100 does not support mounts of type {type(mount).__name__} "
+                    f"sprinkles does not support mounts of type {type(mount).__name__} "
                     f"(path={mount.path!r}); only persistent-disk (empty volume) and GCS bucket "
                     f"mounts are supported"
                 )
@@ -203,13 +203,16 @@ class V100Client:
                 )
                 for task_index, task_command in enumerate(list_of_commands, start=1)
             ],
-            workpool=dict(machineType=machine_type, projectID=project, region=region,
+            workpool=dict(machineType=machine_type, 
+                          projectID=project, 
+                          region=region,
                           bootDiskSizeGb=boot_volume.size_in_gb,
                           bootDiskType=boot_volume.type,
                           emptyVolumes=empty_volumes,
                           gcsMounts=gcs_mounts,
                           lingerTimeSec=worker_linger,
-                          maxPreemptibleWorkerAttempts=max_preemptable_attempts_scale*self.target_node_count),
+                          maxPreemptibleWorkerAttempts=max_preemptable_attempts_scale*self.target_node_count,
+                          maxWorkerCount=self.target_node_count),
             filesToLocalize=files_to_localize,
         )
 
@@ -222,11 +225,11 @@ class V100Client:
         response.raise_for_status()
         result = response.json()
         print("Created job submission", result["id"])
-        return V100Job(id=result["id"], name=name, status="pending")
+        return SprinklesJob(id=result["id"], name=name, status="pending")
 
 
-def wait_for_v100_job(client: "V100Client", job_id: str) -> None:
-    "Poll a v100 job until it reaches a terminal state, raising UserError if it did not succeed."
+def wait_for_sprinkles_job(client: "SprinklesClient", job_id: str) -> None:
+    "Poll a sprinkles job until it reaches a terminal state, raising UserError if it did not succeed."
     while True:
         job = client.get_job_by_id(job_id)
         if job.is_terminal_state:
