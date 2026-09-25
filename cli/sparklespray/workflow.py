@@ -487,6 +487,11 @@ def add_workflow_cmd(subparser):
         "--nodes", help="max number of nodes to power on at one time", type=int
     )
     run_parser.add_argument(
+        "--cluster",
+        help="Override the cluster ID used for all jobs submitted by this workflow run",
+        default=None,
+    )
+    run_parser.add_argument(
         "-i",
         "--image",
         help="The docker image to use for steps that don't explictly set one",
@@ -519,8 +524,9 @@ def workflow_run_cmd(
     """Command handler for 'workflow run'."""
     # Create a SparklesInterface implementation that uses the provided services
     class SparklesImpl(SparklesInterface):
-        def __init__(self, target_nodes):
+        def __init__(self, target_nodes, cluster):
             self.target_nodes = target_nodes
+            self.cluster = cluster
 
         def read_as_bytes(self, path):
             # this isn't technically right -- clean this up later
@@ -579,6 +585,9 @@ def workflow_run_cmd(
 
             if image:
                 submit_cmd_args.extend(["-i", image])
+
+            if self.cluster:
+                submit_cmd_args.extend(["--cluster", self.cluster])
 
             for src, dst in uploads:
                 submit_cmd_args.extend(["-u", f"{src}:{dst}"])
@@ -639,13 +648,17 @@ def workflow_run_cmd(
         job_name = f"{job_name}-{job_hash}"
 
     if config.sprinkles_url is not None:
+        if args.cluster:
+            raise UserError(
+                "--cluster is not supported when using sprinkles (there is no cluster concept in the sprinkles backend)"
+            )
         api_key = os.environ.get("SPRINKLES_KEY")
         if api_key is None:
             raise Exception("If using sprinkles url, you must set environment variable SPRINKLES_KEY")
         client = SprinklesClient(config.sprinkles_url, api_key, io, config.cache_db_path, config.cas_url_prefix, args.nodes, config.default_url_prefix)
         sparkles_iface = SprinklesImpl(io, config, client)
     else:
-        sparkles_iface = SparklesImpl(args.nodes)
+        sparkles_iface = SparklesImpl(args.nodes, args.cluster)
 
     try:
         return run_workflow(sparkles_iface, job_name, workflow, workflow_args)

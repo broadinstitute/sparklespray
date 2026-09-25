@@ -468,6 +468,11 @@ def _setup_parser_for_sub_command(parser):
         default=1,
     )
     parser.add_argument(
+        "--cluster",
+        help="Override the cluster ID used for this job instead of deriving one automatically. Jobs sharing a cluster ID can share worker VMs.",
+        default=None,
+    )
+    parser.add_argument(
         "--cd",
         help="The directory to change to before executing the command",
         default=".",
@@ -575,6 +580,10 @@ def _validate_sprinkles_submit_args(args: argparse.Namespace, config: Config) ->
     if args.accelerators:
         raise UserError(
             "--add-gpu is not supported when using sprinkles"
+        )
+    if args.cluster:
+        raise UserError(
+            "--cluster is not supported when using sprinkles (there is no cluster concept in the sprinkles backend)"
         )
 
 
@@ -799,7 +808,10 @@ def submit_cmd(
         work_root_dir=config.work_root_dir,
         machine_type=machine_type,
     )
-    cluster_name = _make_cluster_name(job_id, image, machine_specs, False)
+    if args.cluster:
+        cluster_name = args.cluster
+    else:
+        cluster_name = _make_cluster_name(job_id, image, machine_specs, False)
 
     # test to see if we already have such a job submitted, in which case, we don't want to do anything
     already_submitted = False

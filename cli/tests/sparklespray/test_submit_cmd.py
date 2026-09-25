@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import MagicMock, patch, mock_open
 
-from sparklespray.commands.submit import submit_cmd
+from sparklespray.commands.submit import submit_cmd, _validate_sprinkles_submit_args
 from sparklespray.job_queue import JobQueue
 from sparklespray.batch_api import ClusterAPI
 from sparklespray.config import Config
@@ -260,6 +260,23 @@ def test_submit_cmd_rebuilds_cluster_when_non_env_cluster_input_changes(mock_wat
     mock_delete.assert_called_once()
     assert mock_delete.call_args.kwargs.get("stop_cluster") is True
     mock_submit.assert_called_once()
+
+
+@patch("sparklespray.commands.submit.watch")
+def test_submit_cmd_with_cluster_override(mock_watch, job_queue, mock_io, datastore_client, cluster_api, config, task_storage):
+    mock_watch.return_value = True
+
+    args = parse_args_for_test(["sub", "--name", "cluster-override-job", "--cluster", "my-cluster", "--no-wait", "echo", "hi"])
+    assert submit_cmd(job_queue, mock_io, datastore_client, cluster_api, args, config) == 0
+
+    job = job_queue.get_job_optional("cluster-override-job")
+    assert job.cluster == "my-cluster"
+
+
+def test_validate_sprinkles_submit_args_rejects_cluster(config):
+    args = parse_args_for_test(["sub", "--name", "job", "--cluster", "my-cluster", "echo", "hi"])
+    with pytest.raises(UserError):
+        _validate_sprinkles_submit_args(args, config)
 
 
 @patch("sparklespray.commands.submit.watch")

@@ -1385,6 +1385,7 @@ sparkles workflow run JOB_NAME WORKFLOW_DEFINITION_FILE [options]
 
 - `--retry`: If a step's job already exists and has failed tasks, reset those failed tasks to pending and re-run them instead of starting fresh.
 - `--nodes N`: Maximum number of worker nodes to power on at one time (passed straight through to each step's job).
+- `--cluster NAME`: Override the cluster ID used for every job submitted by this workflow run, instead of letting each step derive its own from the job's image/machine type/etc. Jobs sharing a cluster ID can share worker VMs. Not supported when using the sprinkles backend.
 - `--parameter VAR=VALUE` or `-p VAR=VALUE`: Define a custom variable to use in variable expansion (see below). Can be repeated.
 - `--upload SRC` or `--upload SRC:DST` (`-u`): Upload a local file to make it available for a step's `files_to_localize` list. `SRC` is the local path; `DST` is the name it's referenced by in `files_to_localize` and stored as on the remote machine (defaults to `basename(SRC)` if omitted). Can be repeated.
 - `--image NAME` or `-i NAME`: Default Docker image for any step that doesn't set its own `image`.
