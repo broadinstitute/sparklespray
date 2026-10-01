@@ -554,11 +554,6 @@ def _confirm_overwrite(job_id: str) -> bool:
 
 def _validate_sprinkles_submit_args(args: argparse.Namespace, config: Config) -> None:
     "Check that flags/config which the sprinkles submission path can't honor were not requested."
-    if config.provision_mode != "preemptible":
-        raise UserError(
-            f"sprinkles only supports provision_mode=preemptible, but config has "
-            f"provision_mode={config.provision_mode!r}"
-        )
     if args.retry:
         raise UserError(
             "--retry is not supported when using sprinkles (there is no way to selectively retry failed tasks)"
@@ -576,10 +571,6 @@ def _validate_sprinkles_submit_args(args: argparse.Namespace, config: Config) ->
         raise UserError(
             f"when_sub_job_exists={config.when_sub_job_exists!r} is not supported when using sprinkles "
             f"(only the default 'overwrite' is supported; an existing job with the same name is always reused)"
-        )
-    if args.accelerators:
-        raise UserError(
-            "--add-gpu is not supported when using sprinkles"
         )
     if args.cluster:
         raise UserError(
@@ -631,6 +622,7 @@ def _submit_via_sprinkles(
         config.mounts,
         config.provision_mode,
         config.worker_linger,
+        args.accelerators,
     )
 
     if args.wait_for_completion:

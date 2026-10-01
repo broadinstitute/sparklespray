@@ -16,6 +16,14 @@ from .io_helper import IO
 from .hasher import CachingHashFunction
 from .errors import UserError
 
+# sparkles' own vocabulary for provision_mode ("preemptible"/"normal"/"flex") predates
+# sprinkles and doesn't match the sprinkles workpool.provisionMode enum (spot/normal/flex).
+_PROVISION_MODE_TO_SPRINKLES = {
+    "preemptible": "spot",
+    "normal": "normal",
+    "flex": "flex",
+}
+
 @dataclass
 class SprinklesJob:
     id : str
@@ -147,6 +155,7 @@ class SprinklesClient:
         mounts: List[DiskMountT],
         provision_mode: str,
         worker_linger: int,
+        accelerators: List[str] = [],
         ) -> SprinklesJob:
 
         # first check to see if this job already exists
@@ -155,7 +164,6 @@ class SprinklesClient:
             print("Skipping submission of new job: Found existing job with that name.")
             return job
 
-        assert provision_mode == "preemptible"
         assert len(boot_volume.mount_options) == 0
 
         list_of_commands = rewrite_argv_with_parameters(command, params)
@@ -192,6 +200,14 @@ class SprinklesClient:
                     f"mounts are supported"
                 )
 
+        accelerator_counts: Dict[str, int] = {}
+        for acc_type in accelerators:
+            accelerator_counts[acc_type] = accelerator_counts.get(acc_type, 0) + 1
+        accelerator_objects = [
+            {"type": acc_type, "count": count}
+            for acc_type, count in accelerator_counts.items()
+        ]
+
         body = dict(
             name=name,
             resultPath=url_join(self.default_url_prefix, name),
@@ -203,8 +219,8 @@ class SprinklesClient:
                 )
                 for task_index, task_command in enumerate(list_of_commands, start=1)
             ],
-            workpool=dict(machineType=machine_type, 
-                          projectID=project, 
+            workpool=dict(machineType=machine_type,
+                          projectID=project,
                           region=region,
                           bootDiskSizeGb=boot_volume.size_in_gb,
                           bootDiskType=boot_volume.type,
@@ -212,7 +228,9 @@ class SprinklesClient:
                           gcsMounts=gcs_mounts,
                           lingerTimeSec=worker_linger,
                           maxPreemptibleWorkerAttempts=max_preemptable_attempts_scale*self.target_node_count,
-                          maxWorkerCount=self.target_node_count),
+                          maxWorkerCount=self.target_node_count,
+                          accelerators=accelerator_objects,
+                          provisionMode=_PROVISION_MODE_TO_SPRINKLES[provision_mode]),
             filesToLocalize=files_to_localize,
         )
 
