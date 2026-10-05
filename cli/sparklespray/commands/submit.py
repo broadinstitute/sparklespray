@@ -623,6 +623,7 @@ def _submit_via_sprinkles(
         config.provision_mode,
         config.worker_linger,
         args.accelerators,
+        labels=dict(args.metadata or []),
     )
 
     if args.wait_for_completion:

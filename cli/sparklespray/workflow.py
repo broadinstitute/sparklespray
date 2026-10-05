@@ -57,6 +57,7 @@ class SparklesInterface:
         uploads: List[Tuple[str, str]],
         machine_type: Optional[str],
         skip_if_complete: bool = False,
+        metadata: Optional[Dict[str, str]] = None,
     ):
         raise NotImplementedError()
 
@@ -100,6 +101,7 @@ class SprinklesImpl(SparklesInterface):
         uploads: List[Tuple[str, str]],
         machine_type: Optional[str],
         skip_if_complete: bool = False,
+        metadata: Optional[Dict[str, str]] = None,
     ):
         assert not skip_if_complete
         if machine_type is None:
@@ -119,7 +121,8 @@ class SprinklesImpl(SparklesInterface):
             self.config.max_preemptable_attempts_scale,
             self.config.mounts,
             self.config.provision_mode,
-            self.config.worker_linger)
+            self.config.worker_linger,
+            labels=metadata)
 
     def get_job_path_prefix(self) -> str:
         # Return the base path for jobs
@@ -395,6 +398,7 @@ def run_workflow(
             list(uploads_for_step),
             machine_type,
             skip_completed_steps,
+            metadata=command_line_parameters,
         )
 
         try:
@@ -573,6 +577,7 @@ def workflow_run_cmd(
             uploads: List[Tuple[str, str]],
             machine_type: Optional[str],
             skip_if_complete: bool = False,
+            metadata: Optional[Dict[str, str]] = None,
         ):
             # Submit a new job with the given parameters
             submit_cmd_args = ["-n", name, "--no-wait", "--retry"]
@@ -591,6 +596,9 @@ def workflow_run_cmd(
 
             for src, dst in uploads:
                 submit_cmd_args.extend(["-u", f"{src}:{dst}"])
+
+            for key, value in (metadata or {}).items():
+                submit_cmd_args.extend(["--metadata", f"{key}={value}"])
 
             with NamedTemporaryFile(suffix=".csv", mode="wt") as tmpcsv:
                 w = csv.DictWriter(tmpcsv, params[0].keys())

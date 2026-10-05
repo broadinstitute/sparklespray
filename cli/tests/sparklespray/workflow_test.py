@@ -21,6 +21,7 @@ class MockSparkles(SparklesInterface):
         self.clear_failed_calls = []
         self.wait_for_completion_calls = []
         self.start_calls = []
+        self.start_metadata = []
         self.blobs = {}
 
     def job_exists(self, name: str) -> bool:
@@ -35,8 +36,9 @@ class MockSparkles(SparklesInterface):
 
     def start(
         self, name: str, command, params, image, uploads, machine_type,
-        skip_if_complete: bool = False,
+        skip_if_complete: bool = False, metadata=None,
     ):
+        self.start_metadata.append(metadata)
         self.start_calls.append(
             (name, command, params, image, uploads, machine_type, skip_if_complete)
         )
@@ -159,6 +161,21 @@ def test_run_workflow_with_parameters(tmpdir):
     assert image is None
     assert uploads == []
     assert machine_type is None
+
+
+def test_workflow_parameters_passed_as_metadata(tmpdir):
+    workflow_path = str(tmpdir.join("workflow.json"))
+    create_workflow_file(
+        workflow_path, {"steps": [{"command": ["echo", "{a}"], "run_local": False}]}
+    )
+
+    sparkles = MockSparkles()
+    workflow = WorkflowDefinition.from_file(workflow_path)
+    run_workflow(
+        sparkles, "test-job", workflow, WorkflowRunArgs(parameters={"a": "1", "b": "2"})
+    )
+
+    assert sparkles.start_metadata == [{"a": "1", "b": "2"}]
 
 
 

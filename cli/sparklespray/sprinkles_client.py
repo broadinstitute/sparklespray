@@ -156,6 +156,7 @@ class SprinklesClient:
         provision_mode: str,
         worker_linger: int,
         accelerators: List[str] = [],
+        labels: Optional[Dict[str, str]] = None,
         ) -> SprinklesJob:
 
         # first check to see if this job already exists
@@ -232,6 +233,7 @@ class SprinklesClient:
                           accelerators=accelerator_objects,
                           provisionMode=_PROVISION_MODE_TO_SPRINKLES[provision_mode]),
             filesToLocalize=files_to_localize,
+            labels=[dict(name=k, value=v) for k, v in (labels or {}).items()],
         )
 
         print("Submitting job:", json.dumps(body, indent=3))
