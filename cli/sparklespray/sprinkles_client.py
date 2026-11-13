@@ -57,7 +57,7 @@ class SprinklesClient:
             return any(
                 label["name"] == "hidden" and label["value"] == "true"
                 for label in job_summary.get("labels", [])
-            )
+            ) or job_summaries.get("state") == "deleted"
 
         matches = [
             job_summary
@@ -248,14 +248,21 @@ class SprinklesClient:
         return SprinklesJob(id=result["id"], name=name, status="pending")
 
 
-def wait_for_sprinkles_job(client: "SprinklesClient", job_id: str) -> None:
-    "Poll a sprinkles job until it reaches a terminal state, raising UserError if it did not succeed."
+def wait_for_sprinkles_job(
+    client: "SprinklesClient", job_id: str, timeout_sec: Optional[float] = None
+) -> None:
+    "Poll a sprinkles job until it reaches a terminal state, raising UserError if it did not succeed (or timed out)."
+    start = time.time()
     while True:
         job = client.get_job_by_id(job_id)
         if job.is_terminal_state:
             if job.status != "success":
                 raise UserError("Job did not complete successfully")
             return
+        if timeout_sec is not None and time.time() - start > timeout_sec:
+            raise UserError(
+                f"Timed out after {timeout_sec} seconds waiting for job {job_id} to complete"
+            )
         time.sleep(5)
 
 # mounts: List[DiskMountT] — PersistentDiskMount maps to workpool.emptyVolumes:

@@ -6,9 +6,14 @@ from ..job_queue import JobQueue
 from ..io_helper import IO
 from ..cluster_service import Cluster
 from ..job_store import JobStore, Job, JOB_STATUS_KILLED
+import os
 import time
-from ..config import Config, assert_not_sprinkles
-from ..batch_api import ClusterAPI
+from ..config import Config
+from ..batch_api import ClusterAPI, _machine_type_has_gpu
+from ..errors import UserError
+from ..sprinkles_client import SprinklesClient, wait_for_sprinkles_job
+
+SPRINKLES_VALIDATE_TIMEOUT_SEC = 15 * 60
 
 
 def _test_datastore_api(job_store: JobStore, job_id: str):
@@ -31,8 +36,86 @@ def _test_datastore_api(job_store: JobStore, job_id: str):
     job_store.delete(job_id)
 
 
+def _test_gcs(io: IO, config: Config):
+    service_acct = config.credentials.service_account_email  # pyright: ignore
+    print(f"Verifying we can access google cloud storage.")
+    print(
+        f"This should work as long as the buckets used are owned by the project '{config.project}'. If not you will need to explictly grant access to {service_acct}"
+    )
+
+    sample_value = random_string(20)
+    sample_url = io.write_str_to_cas(sample_value)
+    fetched_value = io.get_as_str(sample_url)
+    assert sample_value == fetched_value
+    return sample_value
+
+
+def _validate_sprinkles(io: IO, config: Config) -> int:
+    print(f"Validating config, using sparklespray {sparklespray.__version__}")
+    print("sprinkles_url is set, so validating using sprinkles")
+
+    api_key = os.environ.get("SPRINKLES_KEY")
+    if api_key is None:
+        raise UserError(
+            "If using sprinkles url, you must set environment variable SPRINKLES_KEY"
+        )
+
+    print("Printing config:")
+    pprint.pprint(config)
+
+    # same restriction as "sub": flex only works with GPUs, and validate does not request any
+    if config.provision_mode == "flex" and not _machine_type_has_gpu(config.machine_type):
+        raise UserError(
+            "provision_mode=flex only works when requesting GPUs, but we are not "
+            "provisioning a machine with GPUs. Aborting."
+        )
+
+    _test_gcs(io, config)
+
+    print("Verifying we can run a job via sprinkles by submitting a test job")
+    client = SprinklesClient(
+        config.sprinkles_url,
+        api_key,
+        io,
+        config.cache_db_path,
+        config.cas_url_prefix,
+        1,
+        config.default_url_prefix,
+    )
+    # name must be unique because submit() reuses any existing job with the same name
+    job = client.submit(
+        f"validate-{random_string(8).lower()}",
+        ["echo", "test"],
+        [{}],
+        config.default_image,
+        [],
+        config.machine_type,
+        config.project,
+        config.region,
+        config.boot_volume,
+        config.max_preemptable_attempts_scale,
+        config.mounts,
+        config.provision_mode,
+        config.worker_linger,
+        [],
+        labels={"sparkles-validate": "true"},
+    )
+
+    print(f"Waiting for job {job.id} to complete...")
+    try:
+        wait_for_sprinkles_job(client, job.id, SPRINKLES_VALIDATE_TIMEOUT_SEC)
+    except UserError as ex:
+        print(f"Validation failed: {ex.message}")
+        return 1
+    print(" success!")
+    print("Verification successful!")
+    return 0
+
+
 def validate_cmd(jq: JobQueue, io: IO, config: Config, cluster_api: ClusterAPI):
-    assert_not_sprinkles("validate", config)
+    if config.sprinkles_url is not None:
+        return _validate_sprinkles(io, config)
+
     print(f"Validating config, using sparklespray {sparklespray.__version__}")
 
     service_acct = config.credentials.service_account_email  # pyright: ignore
@@ -40,15 +123,7 @@ def validate_cmd(jq: JobQueue, io: IO, config: Config, cluster_api: ClusterAPI):
     pprint.pprint(config)
     project_id = config.project
 
-    print(f"Verifying we can access google cloud storage.")
-    print(
-        f"This should work as long as the buckets used are owned by the project '{project_id}'. If not you will need to explictly grant access to {service_acct}"
-    )
-
-    sample_value = random_string(20)
-    sample_url = io.write_str_to_cas(sample_value)
-    fetched_value = io.get_as_str(sample_url)
-    assert sample_value == fetched_value
+    sample_value = _test_gcs(io, config)
 
     print("Verifying we can read/write from the google datastore service")
     _test_datastore_api(jq.job_storage, sample_value)
