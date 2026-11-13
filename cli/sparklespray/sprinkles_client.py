@@ -55,9 +55,9 @@ class SprinklesClient:
 
         def is_hidden(job_summary):
             return any(
-                label["name"] == "hidden" and label["value"] == "true"
+                (label["name"] == "hidden" and label["value"] == "true") 
                 for label in job_summary.get("labels", [])
-            ) or job_summaries.get("state") == "deleted"
+            ) or  job_summary.get("state") == "deleted"
 
         matches = [
             job_summary

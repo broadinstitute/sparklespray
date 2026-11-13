@@ -1337,26 +1337,29 @@ The repo contains code in two languages: go and python. The go code is for
 the "consumer" process which runs on each worker and takes jobs from the
 queue. The python code is used by the "sparkles" command line tool.
 
-To build a new release need the "consumer" compiled, and the python code
-packaged up into a tar.gz file. This is automatically done by the github
-action on this repo. If you go to the action run page, there should be
-an "Artifacts" section where you can download the built tar.gz file.
+## Publishing a new release
 
-```
+Releases are published by pushing a version tag; the
+[release workflow](.github/workflows/release.yaml) builds the package and
+creates the GitHub release.
 
-# compile the go code and save the binary as ./sparklespray/bin/kubequeconsume
+1. Bump `version` in `cli/pyproject.toml` (this is the only place the version
+   is set; `sparkles.__version__` is read from the package metadata).
+2. Optionally add notes to `CHANGELOG.md`. GitHub also auto-generates release notes.
+3. Commit and push to `main`. Make sure the `build` workflow (tests) is passing,
+   as the release workflow does not run tests.
+4. Tag the commit and push the tag. The tag must be of the form `vX.Y.Z` and
+   should match the version in `pyproject.toml`:
 
-\$ sh build-consumer.sh
+   ```
+   git tag v5.18.0
+   git push origin v5.18.0
+   ```
 
-# make the installable python package which will be saved in the dist
-
-# directory with the version on the end of the name.
-
-# (Example: dist/sparklespray-3.0.2.tar.gz)
-
-\$ python setup.py sdist
-
-```
+The workflow runs `poetry build` in `cli/` and attaches
+`cli/dist/sparklespray-*.tar.gz` to a new GitHub release at
+https://github.com/broadinstitute/sparklespray/releases. Nothing is published
+to PyPI; users install from the tar.gz attached to the release.
 
 sparkles sub -u train_mlp_sm.py -u data -u benchmark_train_mlp.py --gpu n --gpu_count 0 -i tensorflow/tensorflow:latest-py3 --machine-type n1-standard-4 python benchmark_train_mlp.py --data_size small --test_description \'Machine type n1-standard-4, GPU count 0, small dataset\'
 
